@@ -30,6 +30,17 @@ that the first code is written against. No emitters exist yet; build sequencing 
 | [Design plan](plans/design-plan.md) | IR schema, pipeline stages, plugin SDK, architecture, build milestones |
 | [Testing plan](plans/testing-plan.md) | The five test tiers, the shared fixture library, CI wiring |
 | [Documentation plan](plans/documentation-plan.md) | Doc set structure, audiences, generated capability matrix |
+| [Governance & contribution model](plans/governance.md) | Plugin tiers, ownership, capability disputes, triage |
+| [Migration & adoption path](plans/migration-and-adoption.md) | Forward-compile scope decision, coexistence, pilot guidance |
+| [Observability, logging & diagnostics](plans/observability.md) | Log schema, plan output, fact provenance, telemetry, audit |
+| [Release, versioning & compatibility](plans/release-and-versioning.md) | apiVersion, SDK compatibility, run-state migration, channels |
+| [Security & secrets handling](plans/security.md) | Threat model, `secret: true` guarantees, disclosure process |
+
+## Contributing
+
+The merge bar for a target plugin, and the changes that need a second reviewer, are in
+[`CONTRIBUTING.md`](../CONTRIBUTING.md). Security reports go through
+[`SECURITY.md`](../SECURITY.md), not the issue tracker.
 
 ## Reading order
 
