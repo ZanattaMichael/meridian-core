@@ -5,8 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ZanattaMichael/meridian-core/internal/ast"
-	"github.com/ZanattaMichael/meridian-core/internal/target"
+	"github.com/ZanattaMichael/meridian-core/pkg/sdk"
 )
 
 // sortTasks establishes Ansible's ordering semantics: the dependency graph is
@@ -22,14 +21,14 @@ import (
 // violated constraint. The graph stage should have made both impossible, but a
 // target that trusts an invariant it never verifies fails silently when the
 // invariant breaks.
-func sortTasks(g *ast.ResourceGraph, tasks []task) ([]task, []target.Warning, error) {
+func sortTasks(g *sdk.ResourceGraph, tasks []task) ([]task, []sdk.Warning, error) {
 	order := g.Order()
 	pos := make(map[string]int, len(order))
 	for i, id := range order {
 		pos[id] = i
 	}
 
-	edges := g.EdgesOfKind(ast.HardOrder)
+	edges := g.EdgesOfKind(sdk.HardOrder)
 	indegree := make(map[string]int, len(order))
 	dependents := make(map[string][]string, len(order))
 	for _, id := range order {
@@ -45,7 +44,8 @@ func sortTasks(g *ast.ResourceGraph, tasks []task) ([]task, []target.Warning, er
 	warnings, placed := walkLevels(order, pos, indegree, dependents)
 	if placed != len(order) {
 		return nil, nil, &Error{
-			Rule: "cycle",
+			Target: Name,
+			Rule:   "cycle",
 			Msg: "a dependency cycle reached this target's sort stage; " +
 				"the graph stage should have rejected it first",
 		}
@@ -54,6 +54,7 @@ func sortTasks(g *ast.ResourceGraph, tasks []task) ([]task, []target.Warning, er
 	for _, e := range edges {
 		if pos[e.From] > pos[e.To] {
 			return nil, nil, &Error{
+				Target:   Name,
 				Rule:     "ordering-violated",
 				Resource: e.To,
 				Pos:      e.Pos,
@@ -72,8 +73,8 @@ func sortTasks(g *ast.ResourceGraph, tasks []task) ([]task, []target.Warning, er
 // walkLevels advances the graph one readiness level at a time. A level holding
 // more than one resource is exactly the parallelism this target is about to
 // discard, and the count of placed resources is how a cycle shows itself.
-func walkLevels(order []string, pos map[string]int, indegree map[string]int, dependents map[string][]string) ([]target.Warning, int) {
-	var warnings []target.Warning
+func walkLevels(order []string, pos map[string]int, indegree map[string]int, dependents map[string][]string) ([]sdk.Warning, int) {
+	var warnings []sdk.Warning
 	var ready []string
 	for _, id := range order {
 		if indegree[id] == 0 {
@@ -85,7 +86,7 @@ func walkLevels(order []string, pos map[string]int, indegree map[string]int, dep
 	for len(ready) > 0 {
 		sort.SliceStable(ready, func(i, j int) bool { return pos[ready[i]] < pos[ready[j]] })
 		if len(ready) > 1 {
-			warnings = append(warnings, target.Warning{
+			warnings = append(warnings, sdk.Warning{
 				Target: Name,
 				Msg: fmt.Sprintf("resources %s are independent but will run in sequence; "+
 					"this target flattens the dependency graph and cannot express parallelism",

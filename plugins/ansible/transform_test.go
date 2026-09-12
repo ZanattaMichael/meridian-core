@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/ZanattaMichael/meridian-core/internal/ir"
+	"github.com/ZanattaMichael/meridian-core/pkg/sdk"
 )
 
 // TestEverySupportedTypeIsMapped is the coverage guard the testing plan asks
@@ -313,13 +314,13 @@ func TestHandlerDropsTheNotifiersRuntimeCondition(t *testing.T) {
 }
 
 func TestErrorRendersPositionAndRule(t *testing.T) {
-	e := &Error{Resource: "r", Rule: "unsupported-param", Msg: "nope",
-		Pos: ir.Position{File: "site.yaml", Line: 12, Column: 3}}
+	e := errorf(sdk.Resource{ID: "r", Pos: sdk.Position{File: "site.yaml", Line: 12, Column: 3}},
+		"unsupported-param", "nope")
 	want := `site.yaml:12:3: ansible: resource "r" [unsupported-param]: nope`
 	if e.Error() != want {
 		t.Fatalf("error = %q, want %q", e.Error(), want)
 	}
-	bare := &Error{Msg: "nope"}
+	bare := &Error{Target: Name, Msg: "nope"}
 	if bare.Error() != "ansible: nope" {
 		t.Fatalf("bare error = %q", bare.Error())
 	}

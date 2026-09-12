@@ -335,6 +335,8 @@ meridian/
 │   └── chef/
 ├── pkg/
 │   └── sdk/                    # public plugin SDK (third parties build against this)
+│       └── pluginpb/           # generated protocol code, committed so protoc is not a build dependency
+├── proto/                      # the .proto definition of the plugin protocol
 ├── schema/                     # JSON Schema for the DSL — validation + editor tooling
 ├── go.mod
 └── go.sum
@@ -348,8 +350,14 @@ plugins/<target>/
 ├── sort.go          # target-specific dependency/ordering semantics
 ├── emit.go          # pure serialization: native AST -> target syntax (no mapping/ordering logic)
 ├── validate.go       # target-specific constraint checks (naming, uniqueness, etc.)
-└── runner.go         # invokes the real CLI, captures outputs — kept outside the compile chain
+├── runner.go         # invokes the real CLI, captures outputs — kept outside the compile chain
+└── cmd/
+    └── meridian-target-<target>/   # the plugin binary: wiring only, no target logic
 ```
+
+The binary is a separate package from the target so the emitter can be tested without a
+process boundary and the boundary can be tested without a target. A plugin binary is named
+`meridian-target-<target>`, which is how a host discovers one without executing it first.
 
 Sequencing rule: **transform → sort → validate → emit**, chained inside the plugin's `Emit()`. `Runner` is deliberately separate from `Emitter` so `meridian plan` remains a pure, side-effect-free operation.
 
@@ -360,7 +368,7 @@ type Emitter interface {
     Name() string
     SupportedResourceTypes() []string
     Capabilities() Capabilities
-    Emit(ast.ResourceGraph, ResolvedData) (Artifact, error)
+    Emit(*ResourceGraph, Data) (Artifact, []Warning, error)
 }
 
 type Capabilities struct {
@@ -373,12 +381,28 @@ type Artifact struct {
     Files map[string]string  // relative path -> file content
 }
 
+type Warning struct {
+    Target   string
+    Resource string
+    Msg      string
+}
+
 type Runner interface {
     Name() string
     Apply(ctx context.Context, artifact Artifact) (Outputs, error)
     Plan(ctx context.Context, artifact Artifact) (Diff, error)
 }
 ```
+
+Two refinements the implementation made to this sketch, both load-bearing:
+
+- The tree a target receives is `sdk.ResourceGraph`, not the compiler's `ast.ResourceGraph`.
+  The internal tree owns invariants it built and publishing it would make every later change
+  to the compiler's representation a breaking change for third-party plugins.
+- `Emit` returns warnings alongside the artifact rather than folding them into the error.
+  A warning is a successful compile that lost something (Ansible flattening parallelism, say),
+  and collapsing it into the error channel would force a target to choose between reporting
+  the loss and producing output.
 
 ### 11.5 Orchestrator responsibilities
 

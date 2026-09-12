@@ -24,10 +24,10 @@ func serialise(pb *playbook) (map[string]string, error) {
 	enc := yaml.NewEncoder(&b)
 	enc.SetIndent(2)
 	if err := enc.Encode(doc); err != nil {
-		return nil, &Error{Rule: "serialise", Msg: fmt.Sprintf("encoding the playbook failed: %v", err)}
+		return nil, &Error{Target: Name, Rule: "serialise", Msg: fmt.Sprintf("encoding the playbook failed: %v", err)}
 	}
 	if err := enc.Close(); err != nil {
-		return nil, &Error{Rule: "serialise", Msg: fmt.Sprintf("encoding the playbook failed: %v", err)}
+		return nil, &Error{Target: Name, Rule: "serialise", Msg: fmt.Sprintf("encoding the playbook failed: %v", err)}
 	}
 
 	return map[string]string{

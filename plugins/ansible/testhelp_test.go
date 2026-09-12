@@ -5,11 +5,22 @@ import (
 
 	"github.com/ZanattaMichael/meridian-core/internal/ast"
 	"github.com/ZanattaMichael/meridian-core/internal/ir"
+	"github.com/ZanattaMichael/meridian-core/pkg/sdk"
 )
+
+// These helpers build a tree the way the host does: parse IR, build the AST,
+// convert it to the SDK form a plugin receives. A third-party plugin cannot
+// import internal/, and does not need to — it never builds a tree, it is handed
+// one. Reaching for the real builder here rather than hand-assembling trees
+// means these tests exercise the same order and the same params a running host
+// would produce, which is the property the golden files are asserting.
+//
+// importguard_test.go is what holds the other half of the line: the emitter's
+// own sources depend on pkg/sdk and nothing else.
 
 // buildAST assembles a ResourceSet and compiles it to an AST, so each test can
 // start from the IR an author would actually write.
-func buildAST(t *testing.T, resources ...ir.Resource) *ast.ResourceGraph {
+func buildAST(t *testing.T, resources ...ir.Resource) *sdk.ResourceGraph {
 	t.Helper()
 	g, err := tryBuildAST(resources...)
 	if err != nil {
@@ -18,7 +29,7 @@ func buildAST(t *testing.T, resources ...ir.Resource) *ast.ResourceGraph {
 	return g
 }
 
-func tryBuildAST(resources ...ir.Resource) (*ast.ResourceGraph, error) {
+func tryBuildAST(resources ...ir.Resource) (*sdk.ResourceGraph, error) {
 	// Copy before stamping declaration order: the fixtures are shared across
 	// tests, including ones that compile the same fixture concurrently.
 	resources = append([]ir.Resource(nil), resources...)
@@ -31,7 +42,11 @@ func tryBuildAST(resources ...ir.Resource) (*ast.ResourceGraph, error) {
 		Metadata:   ir.Metadata{Name: "web"},
 		Spec:       ir.ResourceSetSpec{Target: Name, Resources: resources},
 	}
-	return ast.Build(rs, "web01.example.com")
+	g, err := ast.Build(rs, "web01.example.com")
+	if err != nil {
+		return nil, err
+	}
+	return g.ToSDK(), nil
 }
 
 // emit compiles resources all the way to an artifact.

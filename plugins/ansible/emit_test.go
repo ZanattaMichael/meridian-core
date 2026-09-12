@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ZanattaMichael/meridian-core/internal/ast"
 	"github.com/ZanattaMichael/meridian-core/internal/ir"
+	"github.com/ZanattaMichael/meridian-core/pkg/sdk"
 	"gopkg.in/yaml.v3"
 )
 
@@ -158,8 +158,16 @@ func TestArtifactPathsAreSorted(t *testing.T) {
 func TestEmitIsPureRegardlessOfHowTheTreeWasBuilt(t *testing.T) {
 	fromDocument := buildAST(t, fixtures["web_stack"]...)
 
-	byHand := ast.New(fromDocument.Name, fromDocument.Host, fromDocument.Target,
-		fromDocument.Resources(), fromDocument.Edges())
+	// Assembled field by field rather than derived, which is exactly what a
+	// tree arriving over the plugin boundary is: plain data, with no memory of
+	// how it was built.
+	byHand := &sdk.ResourceGraph{
+		Name:      fromDocument.Name,
+		Host:      fromDocument.Host,
+		Target:    fromDocument.Target,
+		Resources: append([]sdk.Resource(nil), fromDocument.Resources...),
+		Edges:     append([]sdk.Edge(nil), fromDocument.Edges...),
+	}
 
 	a, _, err := New().Emit(fromDocument, nil)
 	if err != nil {

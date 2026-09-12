@@ -10,7 +10,7 @@ import (
 // the rule it broke, so the message points at the line the author must change.
 func validate(pb *playbook) error {
 	if pb.Hosts == "" {
-		return &Error{Rule: "missing-host", Msg: "play has no target host"}
+		return &Error{Target: Name, Rule: "missing-host", Msg: "play has no target host"}
 	}
 
 	// Handler notification in Ansible is by task name, so a duplicate name makes
@@ -22,6 +22,7 @@ func validate(pb *playbook) error {
 		}
 		if prev, dup := names[t.Name]; dup {
 			return &Error{
+				Target:   Name,
 				Resource: t.ResourceID, Rule: "duplicate-task-name", Pos: t.Pos,
 				Msg: fmt.Sprintf("task name %q is already used by resource %q", t.Name, prev),
 			}
@@ -36,6 +37,7 @@ func validate(pb *playbook) error {
 		}
 		if handlerNames[h.Name] {
 			return &Error{
+				Target:   Name,
 				Resource: h.ResourceID, Rule: "duplicate-handler-name", Pos: h.Pos,
 				Msg: fmt.Sprintf("handler name %q is declared twice", h.Name),
 			}
@@ -43,6 +45,7 @@ func validate(pb *playbook) error {
 		handlerNames[h.Name] = true
 		if h.When != "" {
 			return &Error{
+				Target:   Name,
 				Resource: h.ResourceID, Rule: "conditional-handler", Pos: h.Pos,
 				Msg: fmt.Sprintf("handler %q carries a condition; a handler runs because "+
 					"something changed, not because a condition holds", h.Name),
@@ -54,6 +57,7 @@ func validate(pb *playbook) error {
 		for _, n := range t.Notify {
 			if !handlerNames[n] {
 				return &Error{
+					Target:   Name,
 					Resource: t.ResourceID, Rule: "missing-handler", Pos: t.Pos,
 					Msg: fmt.Sprintf("notifies handler %q, which no handler block defines", n),
 				}
@@ -61,12 +65,14 @@ func validate(pb *playbook) error {
 		}
 		if t.Module == "" {
 			return &Error{
+				Target:   Name,
 				Resource: t.ResourceID, Rule: "missing-module", Pos: t.Pos,
 				Msg: "task has no module",
 			}
 		}
 		if len(t.Args) == 0 {
 			return &Error{
+				Target:   Name,
 				Resource: t.ResourceID, Rule: "empty-module-args", Pos: t.Pos,
 				Msg: fmt.Sprintf("module %s was given no arguments", t.Module),
 			}
@@ -79,11 +85,13 @@ func checkName(t task, what string) error {
 	switch {
 	case strings.TrimSpace(t.Name) == "":
 		return &Error{
+			Target:   Name,
 			Resource: t.ResourceID, Rule: "empty-name", Pos: t.Pos,
 			Msg: what + " has an empty name",
 		}
 	case strings.ContainsAny(t.Name, "\n\r"):
 		return &Error{
+			Target:   Name,
 			Resource: t.ResourceID, Rule: "multiline-name", Pos: t.Pos,
 			Msg: fmt.Sprintf("%s name %q spans more than one line", what, t.Name),
 		}
