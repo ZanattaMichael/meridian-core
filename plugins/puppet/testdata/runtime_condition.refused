@@ -1,0 +1,1 @@
+puppet: resource "warm_cache" [unsupported-runtime-condition]: resource carries runtimeWhen "ansible_facts['os_family'] == 'Debian'", which this target cannot express: a Puppet catalog is compiled before it reaches the node, so there is no apply-time conditional to compile it into
