@@ -1,0 +1,29 @@
+---
+- name: web
+  hosts: web01.example.com
+  tasks:
+    - name: deploy_group
+      ansible.builtin.group:
+        gid: 1200
+        name: deploy
+        state: present
+    - name: deploy_user
+      ansible.builtin.user:
+        groups:
+          - deploy
+          - sudo
+        name: deploy
+        shell: /bin/bash
+        state: present
+        uid: 1200
+    - name: legacy_user
+      ansible.builtin.user:
+        name: old
+        state: absent
+    - name: home_dir
+      ansible.builtin.file:
+        group: deploy
+        mode: "0750"
+        owner: deploy
+        path: /srv/app
+        state: directory
