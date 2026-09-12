@@ -1,0 +1,40 @@
+---
+- name: web
+  hosts: web01.example.com
+  tasks:
+    - name: nginx_pkg
+      ansible.builtin.package:
+        name: nginx
+        state: present
+    - name: nginx_conf
+      ansible.builtin.copy:
+        content: |
+          worker_processes 4;
+        dest: /etc/nginx/nginx.conf
+        mode: "0644"
+        owner: root
+      notify:
+        - restart nginx_svc
+    - name: nginx_site
+      ansible.builtin.copy:
+        content: |
+          server {}
+        dest: /etc/nginx/sites-enabled/app
+      notify:
+        - reload nginx_svc
+    - name: nginx_svc
+      ansible.builtin.service:
+        enabled: true
+        name: nginx
+        state: started
+  handlers:
+    - name: reload nginx_svc
+      ansible.builtin.service:
+        enabled: true
+        name: nginx
+        state: reloaded
+    - name: restart nginx_svc
+      ansible.builtin.service:
+        enabled: true
+        name: nginx
+        state: restarted

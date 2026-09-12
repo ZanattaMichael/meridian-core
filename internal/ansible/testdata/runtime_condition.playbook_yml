@@ -1,0 +1,16 @@
+---
+- name: web
+  hosts: web01.example.com
+  tasks:
+    - name: stale_conf
+      ansible.builtin.file:
+        path: /etc/old-app.conf
+        state: absent
+    - name: warm_cache
+      ansible.builtin.command:
+        chdir: /srv/app
+        cmd: /usr/local/bin/warm-cache --all
+      when: ansible_facts['os_family'] == 'Debian'
+    - name: reindex
+      ansible.builtin.shell:
+        cmd: a | b
