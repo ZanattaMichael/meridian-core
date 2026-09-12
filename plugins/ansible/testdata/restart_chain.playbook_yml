@@ -1,0 +1,35 @@
+---
+- name: web
+  hosts: web01.example.com
+  tasks:
+    - name: app_pkg
+      ansible.builtin.package:
+        name: app
+        state: present
+    - name: app_conf
+      ansible.builtin.copy:
+        content: |
+          mode = fast
+          workers = 8
+        dest: /etc/app/app.conf
+        mode: "0640"
+      notify:
+        - restart app_svc
+        - run warm_cache
+    - name: app_svc
+      ansible.builtin.service:
+        enabled: true
+        name: app
+        state: started
+    - name: warm_cache
+      ansible.builtin.command:
+        cmd: /usr/local/bin/warm-cache --all
+  handlers:
+    - name: restart app_svc
+      ansible.builtin.service:
+        enabled: true
+        name: app
+        state: restarted
+    - name: run warm_cache
+      ansible.builtin.command:
+        cmd: /usr/local/bin/warm-cache --all
