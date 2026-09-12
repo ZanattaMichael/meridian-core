@@ -5,40 +5,27 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ZanattaMichael/meridian-core/internal/ast"
-	"github.com/ZanattaMichael/meridian-core/internal/ir"
+	"github.com/ZanattaMichael/meridian-core/pkg/sdk"
 )
 
-// Error is a compile failure for this target. It always names the offending
-// resource, because "ansible: unsupported type" without an id is useless in a
-// document with two hundred resources.
-type Error struct {
-	Resource string
-	Rule     string
-	Msg      string
-	Pos      ir.Position
-}
+// Error is a compile failure for this target.
+//
+// It is sdk.CompileError rather than a type of this package's own because the
+// error has to survive a process boundary. A plugin that flattened its failures
+// to strings would strip the resource id, the rule name and the source position
+// on the way out, and the host would have nothing to report against the line the
+// author actually wrote.
+type Error = sdk.CompileError
 
-func (e *Error) Error() string {
-	var b strings.Builder
-	if e.Pos.Line > 0 || e.Pos.File != "" {
-		b.WriteString(e.Pos.String())
-		b.WriteString(": ")
+// errorf builds a failure against one resource, stamped with this target.
+func errorf(r sdk.Resource, rule, format string, args ...any) *Error {
+	return &Error{
+		Target:   Name,
+		Resource: r.ID,
+		Rule:     rule,
+		Msg:      fmt.Sprintf(format, args...),
+		Pos:      r.Pos,
 	}
-	b.WriteString(Name)
-	if e.Resource != "" {
-		fmt.Fprintf(&b, ": resource %q", e.Resource)
-	}
-	if e.Rule != "" {
-		fmt.Fprintf(&b, " [%s]", e.Rule)
-	}
-	b.WriteString(": ")
-	b.WriteString(e.Msg)
-	return b.String()
-}
-
-func errorf(r ast.Resource, rule, format string, args ...any) *Error {
-	return &Error{Resource: r.ID, Rule: rule, Msg: fmt.Sprintf(format, args...), Pos: r.Pos}
 }
 
 // typeMapping describes how one IR resource type becomes a native module call.
@@ -50,7 +37,7 @@ type typeMapping struct {
 	// module is the native module name. A type whose module depends on its
 	// params leaves this empty and sets moduleFor.
 	module    string
-	moduleFor func(r ast.Resource) string
+	moduleFor func(r sdk.Resource) string
 
 	// stateArg is the module argument the IR `state` maps onto; empty means the
 	// type accepts no state at all.
@@ -114,7 +101,7 @@ var mappings = map[string]typeMapping{
 		// A file with literal content is a copy, not a file stat change; the two
 		// take different native argument names, which is why this type needs
 		// both moduleFor and paramsFor.
-		moduleFor: func(r ast.Resource) string {
+		moduleFor: func(r sdk.Resource) string {
 			if _, ok := r.Params["content"]; ok {
 				return "ansible.builtin.copy"
 			}
@@ -172,7 +159,7 @@ var mappings = map[string]typeMapping{
 	"exec": {
 		// exec is the documented escape hatch, so it takes no state: there is no
 		// desired state to converge on, only a command to run.
-		moduleFor: func(r ast.Resource) string {
+		moduleFor: func(r sdk.Resource) string {
 			if shell, ok := r.Params["shell"]; ok && shell == true {
 				return "ansible.builtin.shell"
 			}
@@ -200,7 +187,7 @@ func SupportedResourceTypes() []string {
 // transform maps the target-agnostic tree onto native tasks and the handlers
 // its notify edges require. It does no ordering work: the resources arrive in
 // apply order and leave in the same order.
-func transform(g *ast.ResourceGraph) (*playbook, error) {
+func transform(g *sdk.ResourceGraph) (*playbook, error) {
 	pb := &playbook{Name: g.Name, Hosts: g.Host}
 
 	notify, err := handlerNames(g)
@@ -208,7 +195,7 @@ func transform(g *ast.ResourceGraph) (*playbook, error) {
 		return nil, err
 	}
 
-	for _, r := range g.Resources() {
+	for _, r := range g.Resources {
 		t, err := taskFor(r)
 		if err != nil {
 			return nil, err
@@ -225,7 +212,7 @@ func transform(g *ast.ResourceGraph) (*playbook, error) {
 }
 
 // taskFor maps one resource onto its native module call.
-func taskFor(r ast.Resource) (task, error) {
+func taskFor(r sdk.Resource) (task, error) {
 	m, ok := mappings[r.Type]
 	if !ok {
 		return task{}, errorf(r, "unsupported-resource-type",
@@ -287,7 +274,7 @@ func taskFor(r ast.Resource) (task, error) {
 // applyState maps the IR state vocabulary onto the module's own. Every accepted
 // value is listed in the mapping table, so an unrecognised one names the values
 // that would have worked rather than failing generically.
-func applyState(r ast.Resource, m typeMapping, module string, args map[string]any) error {
+func applyState(r sdk.Resource, m typeMapping, module string, args map[string]any) error {
 	if m.stateArg == "" && m.stateArgFor == nil {
 		if r.State != "" {
 			return errorf(r, "unsupported-state",
@@ -331,10 +318,10 @@ func handlerName(action, resource string) string {
 
 // handlerNames returns, per notifying resource, the sorted handler names its
 // task must list under `notify:`.
-func handlerNames(g *ast.ResourceGraph) (map[string][]string, error) {
+func handlerNames(g *sdk.ResourceGraph) (map[string][]string, error) {
 	out := make(map[string][]string)
 	seen := make(map[string]map[string]bool)
-	for _, e := range g.EdgesOfKind(ast.Notify) {
+	for _, e := range g.EdgesOfKind(sdk.Notify) {
 		to, ok := g.Resource(e.To)
 		if !ok {
 			// Build already rejects an edge to an unknown resource; this guards
@@ -364,10 +351,10 @@ func handlerNames(g *ast.ResourceGraph) (map[string][]string, error) {
 
 // handlers builds the deduped handler block for every distinct notify target
 // and action in the tree.
-func handlers(g *ast.ResourceGraph) ([]task, error) {
+func handlers(g *sdk.ResourceGraph) ([]task, error) {
 	seen := make(map[string]bool)
 	var out []task
-	for _, e := range g.EdgesOfKind(ast.Notify) {
+	for _, e := range g.EdgesOfKind(sdk.Notify) {
 		name := handlerName(e.Action, e.To)
 		if seen[name] {
 			continue
@@ -390,7 +377,7 @@ func handlers(g *ast.ResourceGraph) ([]task, error) {
 // handlerFor synthesises the handler that performs one action on one resource.
 // The handler is the resource's own module call with the action's state applied,
 // rather than a shell-out, so the notified change stays idempotent.
-func handlerFor(r ast.Resource, action string) (task, error) {
+func handlerFor(r sdk.Resource, action string) (task, error) {
 	m, ok := mappings[r.Type]
 	if !ok {
 		return task{}, errorf(r, "unsupported-resource-type",

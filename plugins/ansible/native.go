@@ -1,9 +1,12 @@
-// Package ansible is the Ansible emitter, compiled directly into the binary.
+// Package ansible compiles a Meridian resource tree into an Ansible playbook
+// and inventory.
 //
-// It is deliberately not a plugin yet. Milestone 2 of the design plan builds one
-// emitter with no plugin boundary so the AST shape is validated end-to-end
-// before a gRPC protocol freezes it; milestone 3 extracts this package across
-// the public SDK unchanged.
+// It is a target plugin: it depends on pkg/sdk and nothing else of Meridian's,
+// which is the whole point of milestone 3. If this package can be written
+// against the public SDK alone, so can a target Meridian's authors never
+// anticipated. The binary that serves it over the plugin protocol is under
+// cmd/; the package itself is an ordinary library, so the same emitter can be
+// compiled in directly and tested without a process boundary.
 //
 // The four compile stages run in the order design plan §11.3 mandates:
 // transform → sort → validate → emit. Each is a separate file, and emit does no
@@ -11,7 +14,7 @@
 package ansible
 
 import (
-	"github.com/ZanattaMichael/meridian-core/internal/ir"
+	"github.com/ZanattaMichael/meridian-core/pkg/sdk"
 )
 
 // Name is the target name a document selects with spec.target.
@@ -38,7 +41,7 @@ type task struct {
 	// ResourceID and Pos are provenance, kept so a validation failure can name
 	// the resource the author wrote rather than the task it became.
 	ResourceID string
-	Pos        ir.Position
+	Pos        sdk.Position
 }
 
 // playbook is a whole Ansible play.

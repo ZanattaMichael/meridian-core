@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ZanattaMichael/meridian-core/internal/ast"
 	"github.com/ZanattaMichael/meridian-core/internal/ir"
+	"github.com/ZanattaMichael/meridian-core/pkg/sdk"
 )
 
 // TestSortFlattensToAStrictSequence asserts the semantics the design plan's
@@ -92,13 +92,16 @@ func TestNotifyEdgesDoNotAffectTheFlattenedOrder(t *testing.T) {
 // fails quietly when the assumption breaks.
 func TestSortRejectsAnOrderItCannotFlatten(t *testing.T) {
 	// "b" depends on "a" but is listed first, an order Build would never emit.
-	g := ast.New("web", "web01.example.com", Name,
-		[]ast.Resource{
+	g := &sdk.ResourceGraph{
+		Name:   "web",
+		Host:   "web01.example.com",
+		Target: Name,
+		Resources: []sdk.Resource{
 			{ID: "b", Type: "package", Params: map[string]any{"name": "b"}, Index: 0},
 			{ID: "a", Type: "package", Params: map[string]any{"name": "a"}, Index: 1},
 		},
-		[]ast.Edge{{From: "a", To: "b", Kind: ast.HardOrder}},
-	)
+		Edges: []sdk.Edge{{From: "a", To: "b", Kind: sdk.HardOrder}},
+	}
 	_, _, err := sortTasks(g, []task{{Name: "b"}, {Name: "a"}})
 	var e *Error
 	if !errors.As(err, &e) || e.Rule != "ordering-violated" {
@@ -112,16 +115,19 @@ func TestSortRejectsAnOrderItCannotFlatten(t *testing.T) {
 // TestSortRejectsACycleReachingIt covers the same defence for a cycle, which
 // leaves resources that never become ready.
 func TestSortRejectsACycleReachingIt(t *testing.T) {
-	g := ast.New("web", "web01.example.com", Name,
-		[]ast.Resource{
+	g := &sdk.ResourceGraph{
+		Name:   "web",
+		Host:   "web01.example.com",
+		Target: Name,
+		Resources: []sdk.Resource{
 			{ID: "a", Type: "package", Params: map[string]any{"name": "a"}, Index: 0},
 			{ID: "b", Type: "package", Params: map[string]any{"name": "b"}, Index: 1},
 		},
-		[]ast.Edge{
-			{From: "a", To: "b", Kind: ast.HardOrder},
-			{From: "b", To: "a", Kind: ast.HardOrder},
+		Edges: []sdk.Edge{
+			{From: "a", To: "b", Kind: sdk.HardOrder},
+			{From: "b", To: "a", Kind: sdk.HardOrder},
 		},
-	)
+	}
 	_, _, err := sortTasks(g, []task{{Name: "a"}, {Name: "b"}})
 	var e *Error
 	if !errors.As(err, &e) || e.Rule != "cycle" {

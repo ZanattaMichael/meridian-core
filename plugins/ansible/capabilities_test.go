@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/ZanattaMichael/meridian-core/internal/ir"
-	"github.com/ZanattaMichael/meridian-core/internal/target"
+	"github.com/ZanattaMichael/meridian-core/pkg/sdk"
 )
 
 // TestCapabilitiesAreSelfConsistent is the meta-test the testing plan requires
@@ -87,5 +87,5 @@ func TestEmitterIdentity(t *testing.T) {
 	if len(types) == 0 {
 		t.Fatal("a target that supports no resource type is not a target")
 	}
-	var _ target.Emitter = e
+	var _ sdk.Emitter = e
 }

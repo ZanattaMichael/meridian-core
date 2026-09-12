@@ -1,0 +1,153 @@
+// Meridian's plugin protocol: the wire form of the design plan's §11.4 Emitter
+// interface.
+//
+// The protocol carries a compiled resource tree to a target plugin and carries
+// back the artifact that tree compiles to. It deliberately does not model
+// running anything: Runner is a separate concern kept outside the compile
+// chain, so `meridian plan` stays a pure function over this service alone.
+syntax = "proto3";
+
+package meridian.plugin.v1;
+
+option go_package = "github.com/ZanattaMichael/meridian-core/pkg/sdk/pluginpb";
+
+// Position is a point in a source document, carried so a failure raised inside
+// a plugin can still be reported against the line the author wrote.
+message Position {
+  string file = 1;
+  int32 doc_idx = 2;
+  int32 line = 3;
+  int32 column = 4;
+}
+
+// Resource is one unconditional unit of desired state. Every compile-time
+// `when` has already been evaluated before a tree reaches this protocol, so a
+// plugin never has to reason about whether a resource will really be applied.
+message Resource {
+  string id = 1;
+  string type = 2;
+  string state = 3;
+
+  // params_json is the resource's parameters as a JSON object.
+  //
+  // It is JSON bytes rather than google.protobuf.Struct because Struct models
+  // every number as a double: a port of 8080 would arrive as 8080.0 and change
+  // the emitted artifact. Deterministic, byte-identical compilation is a
+  // guiding principle, so the wire format preserves integers.
+  bytes params_json = 4;
+
+  // runtime_when is a condition evaluated on the node at apply time. Only a
+  // target whose capabilities include runtime_condition may accept one.
+  string runtime_when = 5;
+
+  // index is the resource's declaration order in the source document, kept so a
+  // target that reorders resources still has the original tiebreak.
+  int32 index = 6;
+
+  Position pos = 7;
+}
+
+// EdgeKind keeps an ordering constraint and a deferred trigger structurally
+// distinct, because they are not the same concept and targets compile them
+// differently.
+enum EdgeKind {
+  EDGE_KIND_UNSPECIFIED = 0;
+  // dependsOn: `from` must be applied before `to`.
+  EDGE_KIND_HARD_ORDER = 1;
+  // notifies: `to` is triggered if `from` reports a change. It constrains
+  // nothing about apply order.
+  EDGE_KIND_NOTIFY = 2;
+}
+
+message Edge {
+  string from = 1;
+  string to = 2;
+  EdgeKind kind = 3;
+  // action is the notify action, for example "restart"; empty for an ordering
+  // edge.
+  string action = 4;
+  Position pos = 5;
+}
+
+// ResourceGraph is a whole compiled document: its resources in deterministic
+// apply order, the edges between them, and the host they configure.
+message ResourceGraph {
+  string name = 1;
+  string host = 2;
+  string target = 3;
+  repeated Resource resources = 4;
+  repeated Edge edges = 5;
+}
+
+// Capabilities is a target's honest declaration of what it can express. It is
+// the mechanism behind the no-silent-capability-loss principle.
+message Capabilities {
+  bool native_notify = 1;
+  bool synthetic_notify = 2;
+  bool runtime_condition = 3;
+}
+
+// Artifact is the complete output of a compile: relative path to file content.
+// It is data rather than files on disk, which is what lets a plan be pure.
+message Artifact {
+  map<string, string> files = 1;
+}
+
+// Warning is a compile-time notice that does not fail the build but changes
+// what an operator should expect from the artifact.
+message Warning {
+  string target = 1;
+  string resource = 2;
+  string msg = 3;
+}
+
+// CompileError is a target refusing to compile something.
+//
+// It travels as a field of a successful response rather than as a gRPC status
+// error on purpose: a target rejecting a resource type it cannot express is the
+// capability contract working as designed, not a fault. Status errors stay
+// reserved for genuine transport and plugin failures, so a host can tell the
+// two apart.
+message CompileError {
+  string resource = 1;
+  string rule = 2;
+  string msg = 3;
+  Position pos = 4;
+}
+
+message DescribeRequest {}
+
+message DescribeResponse {
+  // protocol_version is the wire protocol the plugin speaks. A host refuses a
+  // version it does not implement rather than guessing.
+  uint32 protocol_version = 1;
+  // sdk_version is the SDK the plugin was compiled against, reported rather
+  // than inferred, per the release policy.
+  string sdk_version = 2;
+  string name = 3;
+  // resource_types lists every IR resource type this target maps, sorted.
+  repeated string resource_types = 4;
+  Capabilities capabilities = 5;
+}
+
+message EmitRequest {
+  ResourceGraph graph = 1;
+  // data_json is the resolved hierarchy data as a JSON object, carried for the
+  // same reason params are: to preserve the value types the author wrote.
+  bytes data_json = 2;
+}
+
+message EmitResponse {
+  Artifact artifact = 1;
+  repeated Warning warnings = 2;
+  // error is set when the target could not compile the tree. When it is set,
+  // artifact and warnings are meaningless.
+  CompileError error = 3;
+}
+
+// Emitter compiles a target-agnostic resource tree into one target's native
+// syntax. It has no side effects.
+service Emitter {
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+  rpc Emit(EmitRequest) returns (EmitResponse);
+}
