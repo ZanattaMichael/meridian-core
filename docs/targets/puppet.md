@@ -241,7 +241,7 @@ empty, so a run never says "nothing to do" on no evidence.
 | `MERIDIAN_PUPPET` | the `puppet` program, when it is not on `PATH` |
 | `MERIDIAN_BOLT` | the `bolt` program, when it is not on `PATH` |
 | `MERIDIAN_PUPPET_TRANSPORT` | `local` or `bolt`, to override the choice made from the host |
-| `MERIDIAN_PUPPET_ARGS` | arguments added to every run, split on spaces: `--confdir /tmp/p --vardir /tmp/v` for an isolated run, or Bolt's `--inventoryfile inventory.yaml` |
+| `MERIDIAN_PUPPET_ARGS` | arguments added to every run, split on spaces: `--confdir /tmp/p --vardir /tmp/v --codedir /tmp/c` for an isolated run, or Bolt's `--inventoryfile inventory.yaml` |
 
 ## What is refused
 
@@ -277,7 +277,7 @@ target can raise, and what to do:
 | the plan is unknown | Bolt's JSON report could not be read | run the `bolt apply` command the stage printed by hand and read its output |
 | `puppet apply reported a failed resource` with status `4` or `6` | a resource failed on the node; the ones before it were applied | read the output above the message; `apply --resume` continues after the fix |
 | `Could not find class meridian_web` | `site.pp` was run without `manifests/init.pp` beside it | run through Meridian, which joins them into `apply.pp` |
-| a warning about `/etc/puppetlabs` or the home directory | Puppet writes settings and a cache under its confdir and vardir | point them at a scratch directory with `MERIDIAN_PUPPET_ARGS="--confdir ... --vardir ..."` |
+| a warning about `/etc/puppetlabs` or the home directory | Puppet writes settings and a cache under its confdir and vardir | point them at a scratch directory with `MERIDIAN_PUPPET_ARGS="--confdir ... --vardir ... --codedir ..."` |
 | Bolt asks for a host key or a password | Bolt's own inventory and transport settings apply | put them in `MERIDIAN_PUPPET_ARGS` or Bolt's inventory file |
 
 ## How it is tested

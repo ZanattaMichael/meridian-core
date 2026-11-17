@@ -45,6 +45,12 @@ fn isolated(dir: &Path) -> Vec<String> {
     vec![
         format!("--confdir={}", dir.join("puppet/conf").display()),
         format!("--vardir={}", dir.join("puppet/var").display()),
+        // The code and log directories are not under confdir by default
+        // (they are ~/.puppetlabs/etc/code and ~/.puppetlabs/var/log), and
+        // two tests creating them at once trip over each other.
+        format!("--codedir={}", dir.join("puppet/code").display()),
+        format!("--logdir={}", dir.join("puppet/log").display()),
+        format!("--rundir={}", dir.join("puppet/run").display()),
     ]
 }
 
