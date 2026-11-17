@@ -9,6 +9,7 @@ use meridian_value::{canonical_map, decode_map, decode_value};
 use crate::import::*;
 use crate::pb;
 use crate::run::*;
+use crate::schema::{ParamKind, ParamSchema, ResourceSchema};
 use crate::types::*;
 
 fn to_i32(n: usize) -> i32 {
@@ -258,6 +259,54 @@ pub fn category_from_wire(c: i32) -> Category {
         Ok(pb::Category::Containerization) => Category::Containerization,
         Ok(pb::Category::ContainerOrchestration) => Category::ContainerOrchestration,
         _ => Category::Unspecified,
+    }
+}
+
+pub fn resource_schema_to_wire(s: &ResourceSchema) -> pb::ResourceSchema {
+    pb::ResourceSchema {
+        r#type: s.r#type.clone(),
+        description: s.description.clone(),
+        states: s.states.clone(),
+        default_state: s.default_state.clone(),
+        params: s
+            .params
+            .iter()
+            .map(|p| pb::ParamSchema {
+                name: p.name.clone(),
+                description: p.description.clone(),
+                // Any travels as the empty string, the proto3 default.
+                kind: match p.kind {
+                    ParamKind::Any => String::new(),
+                    kind => kind.as_str().to_owned(),
+                },
+                required: p.required,
+                values: p.values.clone(),
+            })
+            .collect(),
+        open: s.open,
+        actions: s.actions.clone(),
+    }
+}
+
+pub fn resource_schema_from_wire(s: pb::ResourceSchema) -> ResourceSchema {
+    ResourceSchema {
+        r#type: s.r#type,
+        description: s.description,
+        states: s.states,
+        default_state: s.default_state,
+        params: s
+            .params
+            .into_iter()
+            .map(|p| ParamSchema {
+                name: p.name,
+                description: p.description,
+                kind: ParamKind::from_name(&p.kind),
+                required: p.required,
+                values: p.values,
+            })
+            .collect(),
+        open: s.open,
+        actions: s.actions,
     }
 }
 

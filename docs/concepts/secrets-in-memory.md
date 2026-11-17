@@ -10,8 +10,9 @@ the bytes of a secret.
 
 > **Where this stands.** A document can declare secrets and read them: see
 > [the secrets reference](../reference/dsl/secrets.md). A secret can decide a
-> `when` today. Handing one to a tool, the operating system's stores as
-> providers and the `meridian secret` command come next.
+> `when` today, `meridian secret check` says whether each would be found, and
+> a credential can be resolved outside a run. Handing a secret to a tool, the
+> operating system's stores as providers and `meridian secret set` come next.
 
 ## The promise, and its limit
 
@@ -41,7 +42,9 @@ left behind in freed memory.
 `SecretValue::protection()` reports which of these were achieved for a value,
 so a run can say so once instead of assuming. Locking can fail when the limit
 on locked memory (`RLIMIT_MEMLOCK`) is small; the value is still created, and
-`protection().locked` is false.
+`protection().locked` is false. A run that holds such a secret
+[warns once](../reference/cli.md#secrets), naming it, and with
+`--strict-secrets` stops the stage instead.
 
 A `SecretValue` cannot be printed, copied or compared by accident:
 
@@ -74,6 +77,13 @@ the same user from attaching a debugger or reading `/proc/<pid>/mem`. It
 returns what it achieved, and `hardening()` reads the same facts back from the
 system.
 
+Being undumpable is a setting of the whole process, and it has a side effect
+worth knowing: the kernel gives the files under `/proc/<pid>` to `root`, so
+the same user can no longer read them. A tool that inspects a running
+`meridian` (reading `/proc/<pid>/environ` or `/proc/<pid>/fd`, attaching
+`strace` or `gdb`) has to be run as `root`. Programs Meridian starts are not
+affected: the setting is reset when a program is executed.
+
 ## Everywhere else: a reference, not the value
 
 The rest of Meridian never holds a secret's bytes. A value that is a secret
@@ -101,9 +111,33 @@ puts a value into an error.
 
 | Provider | What it does | What it refuses |
 |---|---|---|
-| `from_env(key)` | reads the variable, **removes it from the environment** so a program started later does not inherit it, and wipes the copy it read | an unset variable is `Missing`; an empty one is an empty secret, not a missing one |
+| `from_env(key)` | reads the variable, **removes it from the environment** so a program started later does not inherit it, wipes the copy it read, and keeps one copy in locked memory so a later read of the same variable in the same process still answers | an unset variable is `Missing`; an empty one is an empty secret, not a missing one |
 | `from_file(path, options)` | reads the file, without its last line ending unless `keep_trailing_newline` | a file that anyone but its owner can read or write, unless `allow_wide_mode`; a file longer than 256 KiB; a directory |
 | `from_exec(command)` | runs the command **without a shell**, reads what it prints, discards its standard error | a command that fails, is not found, is stopped by a signal, or prints nothing. The error names the program and never its arguments or output |
+
+Where a secret comes from is a `Source`: the provider and what it needs. A
+document's declaration and a project's credential are both made of them, so
+both are checked by the same rules (`Source::problems()`) and fetched the same
+way (`Source::fetch()`). `Source::probe()` says whether the place would
+answer without reading it, which is what `meridian secret check` prints.
+
+## A credential outside a run
+
+Some work needs an identity when no document is being run: fetching a module
+from a private registry, for one. `resolve_credential(declared, name)` answers
+it with the same model.
+
+- A `CredentialDeclaration` is a name, a type and fields. A field that is not
+  secret holds its text. A field that is secret holds a `Source`, never a
+  value: a secret written out is refused, and the refusal does not repeat it.
+- Three types can be resolved today: `registry` (`server`, `user`,
+  `password`), `usernamePassword` (`user`, `domain`, `password`) and `token`
+  (`token`, `scheme`). The rest of [the plan's list](../plans/language-expansion.md#12-credentials)
+  arrive with credentials in documents.
+- Resolving fetches the secret fields of that one credential and no other,
+  into locked memory. The `Credential` that comes back prints as its name and
+  type, lends a secret field as a `SecretValue`, and wipes them when dropped.
+- An error names the field and the provider, and nothing a provider read.
 
 ## Handing a secret to a tool
 
@@ -154,9 +188,10 @@ In `crates/meridian-secret/tests`:
 | `value.rs` | a value prints as `(sensitive)` everywhere, is locked and guarded, is compared and copied only by name |
 | `wiped.rs` | after a secret is dropped its bytes are nowhere in the process: the test searches every writable mapping of its own memory |
 | `process.rs` | hardening is what the system reports; a secret read from the environment is not inherited by the next program; five kinds of panic do not print a held secret |
-| `provider.rs` | each provider's refusals, and that no error holds a value or an argument |
+| `provider.rs` | each provider's refusals, and that no error holds a value or an argument; a probe reads nothing and runs nothing |
 | `deliver.rs` | the file's modes, content, removal, and the sweep after a killed run |
 | `mask.rs` | every form is masked, in text and in bytes |
+| `credential.rs` | a credential resolves with its secret fields in protected memory; only the one asked for is fetched; a secret written out is refused; no error or debug form holds a value |
 | `expose_is_rare.rs` | `expose` and `unsafe` appear only where expected |
 
 Across the other crates:
@@ -166,4 +201,4 @@ Across the other crates:
 | `meridian-secret/tests/table.rs` | secrets are joined, encoded and compared without leaving protected memory; one that is not fetched is described and never guessed; a wiped one is gone |
 | `meridian-expr/tests/secrets.rs` | an expression holds a reference; joins and placements stay secret; a comparison is a plain answer; every other function and operator refuses; no error holds a value |
 | `meridian-ir/tests/secrets.rs` | every rule of a declaration; every place a secret is refused; a resolved document, its debug form and its encoding hold only `(sensitive)`; the secrets are wiped when their holder is dropped |
-| `meridian-cli/tests/secrets.rs` | through the real command: the value is in nothing `plan` and `apply` print and in no file of the state directory or of `compile --out`; a failed fetch repeats neither the value, a command's output nor its arguments; a secret read from the environment is not inherited by a program started afterwards |
+| `meridian-cli/tests/secrets.rs` | through the real command: the value is in nothing `plan` and `apply` print and in no file of the state directory or of `compile --out`; a failed fetch repeats neither the value, a command's output nor its arguments; a secret read from the environment is not inherited by a program started afterwards; a secret that cannot be locked is warned about once, or refused with `--strict-secrets`; `secret check` reads no value and runs no command |

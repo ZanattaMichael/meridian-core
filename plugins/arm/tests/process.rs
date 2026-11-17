@@ -2,8 +2,6 @@
 //! binary, compiles the examples through it, and plans and applies with a
 //! stand-in for `az`. Nothing may be lost or reworded on the way.
 
-#![cfg(unix)]
-
 mod common;
 
 use std::fs;

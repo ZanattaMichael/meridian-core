@@ -49,24 +49,24 @@ spec:
     # A fixed address only where there is something public to keep.
     - id: web_ip
       type: aws_eip
+      when: "data.env == 'prod'"
       params:
         instance: ${web_vm.id}
-      when: "data.env == 'prod'"
 
     # A bastion everywhere but production, where access goes another way.
     - id: bastion
       type: aws_instance
+      when: "data.env != 'prod'"
       params:
         ami: ami-0abcdef1234567890
         instance_type: t3.nano
-      when: "data.env != 'prod'"
 
     # Present when its key is, whatever the environment.
     - id: audit_bucket
       type: aws_s3_bucket
+      when: "defined(data.audit) && data.audit.enabled"
       params:
         bucket: shop-audit-logs
-      when: "defined(data.audit) && data.audit.enabled"
 
     - id: ready
       type: terraform_data
@@ -116,11 +116,11 @@ spec:
     # TLS is a feature flag, and only makes sense with a certificate to use.
     - id: tls_conf
       type: file
+      when: "data.features.tls && defined(data.certificate)"
       params:
         path: /etc/nginx/conf.d/tls.conf
         content: "ssl_protocols TLSv1.3;\n"
         mode: "0644"
-      when: "data.features.tls && defined(data.certificate)"
       dependsOn:
         - resource: nginx_pkg
       notifies:
@@ -130,10 +130,10 @@ spec:
     # The same condition as the bastion above, and the same answer.
     - id: debug_log
       type: file
+      when: "data.env != 'prod'"
       params:
         path: /etc/nginx/conf.d/debug.conf
         content: "error_log /var/log/nginx/debug.log debug;\n"
-      when: "data.env != 'prod'"
       dependsOn:
         - resource: nginx_pkg
 
@@ -152,9 +152,9 @@ spec:
     # checked on the machine while the playbook runs.
     - id: apt_cache
       type: exec
+      runtimeWhen: "ansible_facts['os_family'] == 'Debian'"
       params:
         command: apt-get update
-      runtimeWhen: "ansible_facts['os_family'] == 'Debian'"
 ---
 apiVersion: meridian/v1
 kind: Infrastructure
@@ -201,17 +201,18 @@ spec:
     # compares and does not count.
     - id: budget
       type: policy/v1/PodDisruptionBudget
+      when: "data.replicas == 3 || data.high_availability"
       params:
         spec:
           minAvailable: 2
           selector:
             matchLabels:
               app: shop
-      when: "data.replicas == 3 || data.high_availability"
 
     # Load generation, never in production, and only when asked for.
     - id: load_test
       type: batch/v1/Job
+      when: "data.env != 'prod' && (data.load_test == true)"
       params:
         spec:
           template:
@@ -220,6 +221,5 @@ spec:
               containers:
                 - name: load
                   image: ghcr.io/example/load:0.4.0
-      when: "data.env != 'prod' && (data.load_test == true)"
       dependsOn:
         - resource: settings

@@ -16,15 +16,16 @@ that nothing has changed since.
 - Lets a command name a file inside a module: `@acme/nginx:documents/proxy.yaml`.
 - Publishes a module to a registry, and refuses to replace a version that is
   already published with different content.
+- Signs a module, and can refuse a fetched module that no key you trust has
+  [signed](#signatures).
 
 **What it does not do**
 
 - There is no central index and no hosted registry. A requirement says where
   the module comes from: your git server or your container registry.
-- It does not sign modules or verify signatures yet. A pin proves the content
-  has not changed since you pinned it, not who wrote it. Signing is planned
-  with the same mechanism as signed plugins
-  ([issue 68](https://github.com/ZanattaMichael/meridian-core/issues/68)).
+- It does not check signatures unless you ask. A pin proves the content has
+  not changed since you pinned it, not who wrote it; `--module-signatures`
+  adds that, and is off by default.
 - `compile`, `plan` and `apply` never fetch. Only `meridian module install`,
   `update` and `push` use the network.
 - Installing a module runs nothing from it: no hooks, no scripts.
@@ -294,6 +295,10 @@ is a hash of the files and not of an archive, so the same module has the same
 hash whether it came from git or from a registry, and you can move a module to
 a mirror without its pin changing.
 
+One file is left out of the listing: `meridian.sig`, the module's
+[signature](#signatures), which is made over this hash and so cannot be part
+of it.
+
 The hash is checked:
 
 - **when a module is fetched**, against the lockfile, if the module was already
@@ -314,6 +319,67 @@ What each kind of change looks like:
 An archive from a registry is unpacked with care: an entry that is not a plain
 file, a path that would land outside the module, a duplicate path, and an
 archive that unpacks to more than 256 MiB are all refused.
+
+## Signatures
+
+The pin answers "is this what I pinned?". A signature answers "who published
+it?". A signed module holds one more file in its top directory,
+`meridian.sig`, made by [`meridian module sign`](#sign) with the publisher's
+secret key. You decide which public keys you trust and whether a signature is
+needed.
+
+It is the mechanism [plugins are signed with](plugin-signatures.md): the same
+key files, the same `--trusted-key` option, the same three policies. One key
+can sign a team's plugins and its modules.
+
+| Option | Environment | Default | Meaning |
+|---|---|---|---|
+| `--module-signatures POLICY` | `MERIDIAN_MODULE_SIGNATURES` | `off` | `off` does not look. `warn` uses a module that is unsigned or whose signature does not pass, and says so on standard error. `require` uses only modules signed by a trusted key |
+| `--trusted-key FILE` | `MERIDIAN_TRUSTED_KEYS` (separated by `:`, or `;` on Windows) | the key a released `meridian` was built with | a public key to trust, or a directory of `*.pub` files; may be repeated |
+
+Both can be given to any command. Set them in the environment of the machines
+that run Meridian, so that every command agrees:
+
+```
+export MERIDIAN_MODULE_SIGNATURES=require
+export MERIDIAN_TRUSTED_KEYS=/etc/meridian/trusted-keys
+```
+
+**What is checked, and when.** Every module fetched from git or a registry,
+including the ones other modules require:
+
+- by `meridian module install` and `update`, before `meridian.lock` is
+  written, so a module that may not be used is not pinned either;
+- every time a module is used by `validate`, `compile`, `plan`, `apply` or
+  `rules check`, after its hash;
+- by `meridian module verify`, which also says which key signed each module.
+
+A `path` module is your own working copy and is never checked.
+
+**What a signature covers.** The signature is over a short statement: the
+module's name, its version and its [content hash](#integrity). So it vouches
+for exactly one content of one version of one module, and a signature lifted
+from another module, or from another version with the same files, does not
+pass. Nor does a module's signature pass as a plugin's, or a plugin's as a
+module's, although the same key can make both: each names its own kind in what
+is signed. `meridian.sig` itself is the one file the content hash leaves out, which
+has two useful consequences: signing a module does not change what it is pinned
+as, and the signature travels with the module unchanged through git, a
+registry or a mirror.
+
+| What you see | What it means |
+|---|---|
+| `acme/nginx 1.4.2 is not signed: it holds no meridian.sig` | The publisher did not sign this version. Under `require` it is refused |
+| `its signature does not pass: it was signed by key 3fa9…, which is not a trusted key` | It is signed, by a key you have not named. If you trust that publisher, get their public key from them and add it with `--trusted-key` |
+| `its signature does not pass: the module is not the module that was signed: its contents have changed` | The signature belongs to other content, another version or another module |
+| `warning: acme/nginx 1.4.2 is not signed` | The same findings under `warn`: the module was used anyway |
+
+What a signature does not do: it does not say the module is good, only who
+published it. It is checked against keys held on the machine, with no network
+and no revocation list, so retiring a key means removing its `.pub` file from
+where your machines look. And whoever can change the trusted keys or the
+environment of the machine can switch the check off; protect those as you
+protect `meridian` itself.
 
 ## Using a module's files
 
@@ -350,6 +416,7 @@ meridian module install [--locked]
 meridian module update [NAME]...
 meridian module verify
 meridian module list
+meridian module sign --key FILE
 meridian module pack [--out FILE]
 meridian module push REPOSITORY [--insecure]
 ```
@@ -357,6 +424,8 @@ meridian module push REPOSITORY [--insecure]
 | Option | Environment | Default | Meaning |
 |---|---|---|---|
 | `--state-dir DIR` | `MERIDIAN_STATE_DIR` | `.meridian` | Fetched modules are kept in `DIR/modules` |
+| `--module-signatures POLICY` | `MERIDIAN_MODULE_SIGNATURES` | `off` | Whether fetched modules must be [signed](#signatures): `off`, `warn` or `require` |
+| `--trusted-key FILE` | `MERIDIAN_TRUSTED_KEYS` | | A public key whose signatures are trusted; may be repeated |
 
 ### `install`
 
@@ -408,7 +477,17 @@ To go past what a requirement allows, change the requirement in
 ### `verify`
 
 Checks every pinned module against its hash and reports on each. It exits `1`
-if any failed.
+if any failed. With `--module-signatures warn` or `require` it also checks each
+fetched module's [signature](#signatures) and says who signed it:
+
+```
+$ meridian module verify --module-signatures require --trusted-key keys/acme.pub
+ok      acme/base 2.2.1  signed by key 3fa91c0e5d7b2a48
+ok      local
+```
+
+Under `warn` a module that is unsigned shows as `ok … not signed`; under
+`require` it is `FAILED`.
 
 ```
 $ meridian module verify
@@ -429,6 +508,24 @@ acme/base   2.2.1  git+https://git.example.com/acme/meridian-base.git
 acme/nginx  1.4.2  git+https://git.example.com/acme/meridian-nginx.git
 local       -      path+../local
 ```
+
+### `sign`
+
+Signs the module in the current directory as it is now, and writes
+`meridian.sig` in it.
+
+```
+$ meridian module sign --key ~/keys/acme.key
+signed acme/nginx 1.4.2 with key 3fa91c0e5d7b2a48
+  integrity: h1:9b1f…
+  wrote:     meridian.sig
+```
+
+The key is a secret key made by
+[`meridian signing keygen`](cli.md#signing); those who use the module trust
+the public half. Sign last: any change to the module's files afterwards,
+including to `metadata.version`, makes the signature stale, and `sign` must be
+run again. Then commit `meridian.sig` with the release, or push.
 
 ### `pack`
 
@@ -486,6 +583,15 @@ git tag v1.4.2
 git push origin v1.4.2
 ```
 
+To publish it signed, sign before the commit that is tagged, and commit
+`meridian.sig` with it:
+
+```
+meridian module sign --key ~/keys/acme.key
+git add meridian.sig && git commit -m "Release 1.4.2"
+git tag v1.4.2
+```
+
 The tag and `metadata.version` must agree. Never move a tag once it is pushed:
 consumers who pinned it keep the old commit, and new consumers get the new one.
 Release a new version instead.
@@ -503,6 +609,11 @@ A module is stored as an OCI artifact with one layer.
 ```
 meridian module push registry.example.com/acme/meridian-nginx
 ```
+
+To publish it signed, run `meridian module sign --key FILE` first: the
+signature is a file of the module, so it is in what is pushed. A version is
+published once, so a version that went out unsigned cannot be signed
+afterwards; release the next version signed.
 
 That is all a module needs. A module can also be published with any tool that
 pushes OCI artifacts, as long as it uses the two types above. With
@@ -546,13 +657,17 @@ committed. Do not edit files in it: the next command will refuse the module.
 | `the registry … did not allow reading …` or `writing to …` | No login, or a refused one | `docker login` for that registry |
 | `… is already published in … with different content` | A push of a version that exists, with other files | Raise `metadata.version` and push again |
 | `… is not a Meridian module: it has no layer of type …` | The registry tag holds something else, such as a container image | Check the repository; see [publishing to a registry](#to-a-registry) |
+| `… is not signed: it holds no meridian.sig` | Signatures are required and this version was published without one | Ask the publisher to sign a release, pin a signed version, or use `--module-signatures warn` |
+| `… its signature does not pass: it was signed by key …, which is not a trusted key` | It is signed by a key you have not named | Add the publisher's public key with `--trusted-key` |
 | `… is not a module of this project` | `@name:path` names a module that is not pinned | Add it to `spec.modules` and install |
 | `the git program was not found` | A git module needs `git` | Install git, or set `MERIDIAN_GIT` |
 
 ## For plugin and tool authors
 
 The crate `meridian-module` is the library behind all of this.
-`Modules::load` opens a project's pinned modules, checking each;
+`Modules::load` opens a project's pinned modules, checking each (its hash, and
+its signature when the `Project` it is given carries a policy);
+`meridian_module::sign` signs one;
 `Modules::resolve` turns `@<module>:<path>` into a file; and `Modules::roots`
 gives each module's directory, for code that confines file access to a set of
 directory trees. The design, and what is still to come, is in

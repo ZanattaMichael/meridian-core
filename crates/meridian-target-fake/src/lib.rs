@@ -443,7 +443,7 @@ pub fn plugin_dir() -> PathBuf {
             .lines()
             .filter(|line| line.contains("\"reason\":\"compiler-artifact\""))
             .filter_map(executable_in)
-            .rfind(|path| path.file_name().is_some_and(|n| n == name))
+            .rfind(|path| path.file_stem().is_some_and(|n| n == name))
             .unwrap_or_else(|| panic!("cargo did not report where it built {name}:\n{messages}"));
 
         // Discovery loads everything named like a plugin, so the binary gets
@@ -457,7 +457,13 @@ pub fn plugin_dir() -> PathBuf {
         // parallel never executes a half-written file.
         let staged = dir.join(format!("{name}.{}", std::process::id()));
         std::fs::copy(&built, &staged).expect("copying the plugin binary");
-        std::fs::rename(&staged, dir.join(name)).expect("placing the plugin binary");
+        let placed = dir.join(built.file_name().expect("the binary has a name"));
+        if let Err(err) = std::fs::rename(&staged, &placed) {
+            // Windows will not replace a program that is running. One that is
+            // already in place was built from the same sources moments ago.
+            let _ = std::fs::remove_file(&staged);
+            assert!(placed.is_file(), "placing {}: {err}", placed.display());
+        }
         dir
     })
     .clone()
@@ -483,5 +489,8 @@ fn executable_in(message: &str) -> Option<PathBuf> {
 
 /// The plugin binary itself.
 pub fn plugin_path() -> PathBuf {
-    plugin_dir().join("meridian-target-fake")
+    plugin_dir().join(format!(
+        "meridian-target-fake{}",
+        std::env::consts::EXE_SUFFIX
+    ))
 }

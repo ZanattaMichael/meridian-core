@@ -1,7 +1,5 @@
 //! The running half, against a stand-in for `terraform`.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::Path;
 

@@ -312,6 +312,152 @@ fn pack_writes_the_same_archive_every_time() {
 }
 
 #[test]
+fn a_signed_module_is_checked_on_install_and_on_every_run() {
+    let (root, site) = project("signed");
+    let repo = root.join("motd.git");
+    let keys = root.join("keys");
+    fs::create_dir_all(&keys).unwrap();
+    // Paths to the two key files, not the keys.
+    let (signer, public) = (keys.join("acme.key"), keys.join("acme.pub"));
+    let (signer, public) = (signer.to_str().unwrap(), public.to_str().unwrap());
+    ok(
+        &root,
+        &["signing", "keygen", "--secret", signer, "--public", public],
+    );
+    ok(
+        &root,
+        &[
+            "signing",
+            "keygen",
+            "--secret",
+            "keys/other.key",
+            "--public",
+            "keys/other.pub",
+        ],
+    );
+
+    // 1.1.0 is published unsigned. Where signatures are required it is not
+    // installed, and nothing is pinned.
+    let (_, err) = fails(
+        &site,
+        &[
+            "module",
+            "install",
+            "--module-signatures",
+            "require",
+            "--trusted-key",
+            public,
+        ],
+    );
+    assert_eq!(
+        err,
+        "error: acme/motd 1.1.0 is not signed: it holds no meridian.sig. Module signatures \
+         are required; relax the check with --module-signatures warn, or ask its publisher to \
+         sign it with `meridian module sign`\n"
+    );
+    assert!(!site.join("meridian.lock").exists());
+
+    // The publisher signs the next release: sign last, then commit and tag.
+    write(
+        &repo.join("meridian.yaml"),
+        "apiVersion: meridian/v1\nkind: Module\nmetadata:\n  name: acme/motd\n  version: 1.2.0\n",
+    );
+    let out = ok(&repo, &["module", "sign", "--key", signer]);
+    assert!(out.starts_with("signed acme/motd 1.2.0 with key "), "{out}");
+    assert!(out.ends_with("  wrote:     meridian.sig\n"), "{out}");
+    let key_id = out
+        .lines()
+        .next()
+        .unwrap()
+        .rsplit(' ')
+        .next()
+        .unwrap()
+        .to_owned();
+    git(&repo, &["add", "--all"]);
+    git(&repo, &["commit", "--quiet", "-m", "1.2.0"]);
+    git(&repo, &["tag", "v1.2.0"]);
+
+    let trusting = ["--module-signatures", "require", "--trusted-key", public];
+    let with =
+        |args: &[&'static str]| -> Vec<&str> { args.iter().copied().chain(trusting).collect() };
+    let out = ok(&site, &with(&["module", "install"]));
+    assert!(out.starts_with("+ acme/motd 1.2.0 ("), "{out}");
+    assert_eq!(
+        ok(&site, &with(&["module", "verify"])),
+        format!("ok      acme/motd 1.2.0  signed by key {key_id}\nok      local\n")
+    );
+    assert_eq!(
+        ok(
+            &site,
+            &with(&["validate", "@acme/motd:documents/motd.yaml"])
+        ),
+        "1 document valid\n"
+    );
+    // Signatures off is the default, and then nothing is said about them.
+    assert_eq!(
+        ok(&site, &["module", "verify"]),
+        "ok      acme/motd 1.2.0\nok      local\n"
+    );
+
+    // Someone who trusts another key does not get to use it...
+    let other = root.join("keys/other.pub");
+    let other = other.to_str().unwrap();
+    let (_, err) = fails(
+        &site,
+        &[
+            "validate",
+            "@acme/motd:documents/motd.yaml",
+            "--module-signatures",
+            "require",
+            "--trusted-key",
+            other,
+        ],
+    );
+    assert_eq!(
+        err,
+        format!(
+            "error: acme/motd 1.2.0: its signature does not pass: it was signed by key \
+             {key_id}, which is not a trusted key. Module signatures are required, so it was \
+             not used; trust its signer's key with --trusted-key\n"
+        )
+    );
+    // ...unless they asked only to be told.
+    let out = meridian(
+        &site,
+        &[
+            "validate",
+            "@acme/motd:documents/motd.yaml",
+            "--module-signatures",
+            "warn",
+            "--trusted-key",
+            other,
+        ],
+    );
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        format!(
+            "warning: acme/motd 1.2.0: its signature does not pass: it was signed by key \
+             {key_id}, which is not a trusted key\n"
+        )
+    );
+
+    // A file changed after signing is caught by the pin, as before; a
+    // signature swapped for another is caught by the signature.
+    let stored = site.join(".meridian/modules/acme/motd/1.2.0");
+    ok(&root.join("local"), &["module", "sign", "--key", signer]);
+    fs::copy(root.join("local/meridian.sig"), stored.join("meridian.sig")).unwrap();
+    let (out, _) = fails(&site, &with(&["module", "verify"]));
+    assert!(
+        out.starts_with(
+            "FAILED  acme/motd 1.2.0\n    acme/motd 1.2.0: its signature does not pass: the \
+             module is not the module that was signed"
+        ),
+        "{out}"
+    );
+}
+
+#[test]
 fn the_modules_example_runs_as_its_readme_says() {
     use meridian_plugin_testkit::{plugin_binary, repo_root};
     let site = repo_root().join("examples/modules/site");

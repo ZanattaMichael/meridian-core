@@ -51,6 +51,7 @@ on [its own page](../../concepts/secrets-in-memory.md).
 - [What an expression can do with one](#what-an-expression-can-do-with-one)
 - [Where a secret cannot be used](#where-a-secret-cannot-be-used)
 - [When a secret is fetched](#when-a-secret-is-fetched)
+- [Checking before a run](#checking-before-a-run)
 - [What each command does](#what-each-command-does)
 - [Errors](#errors)
 - [Examples](#examples)
@@ -84,7 +85,7 @@ for example), so a declaration never silently ignores part of what was written.
 
 | `from` | Reads | Refuses | Notes |
 |---|---|---|---|
-| `env` | the environment variable `key` | a variable that is not set (an empty one is an empty secret, not a missing one) | the variable is **removed from Meridian's environment** as soon as it is read, so no plugin or tool started afterwards inherits it. It is the weakest provider: the environment a process started with can be read by the same user while the process lives |
+| `env` | the environment variable `key` | a variable that is not set (an empty one is an empty secret, not a missing one) | the variable is **removed from Meridian's environment** as soon as it is read, so no plugin or tool started afterwards inherits it. The value is kept in protected memory until the command ends, so a second document of the run that declares the same variable still reads it. It is the weakest provider: the environment a process started with can be read by the same user while the process lives |
 | `file` | the file at `path`, without its last line ending | a file that does not exist; a file its group or others can read or write, unless `allowWideMode: true`; a file larger than 256 KiB; a directory | a relative `path` is relative to where `meridian` is run |
 | `exec` | what `command` prints, without its last line ending | a command that is not found, exits with a failure, is stopped by a signal, or prints nothing | the command is run **without a shell**: `command: [pass, show, site/db]` runs `pass` with two arguments, and nothing in them is expanded. What the command writes to its standard error is discarded. This is how a password manager or a cloud CLI is used |
 
@@ -203,6 +204,24 @@ same message.
   fetches nothing: it puts back artifacts that were kept.
 - **Never cached.** Nothing is written to save a second fetch. The next run
   fetches again.
+- **Locked in memory, or the run says so.** A secret is kept out of swap.
+  Where the machine's limit on locked memory does not allow it, the run warns
+  once, naming the secrets; with
+  [`--strict-secrets`](../cli.md#secrets) the stage stops instead.
+
+## Checking before a run
+
+[`meridian secret check`](../cli.md#secret-check) lists every secret the
+documents declare, where each comes from, and whether that place would answer.
+It reads no value and runs no command, so it is safe in a pipeline step that
+only wants to know the run is set up:
+
+```
+$ meridian secret check site.yaml
+site (site.yaml)
+  db_password   env    ok: the environment variable SITE_DB_PASSWORD is set
+  deploy_token  file   absent, optional: the file /run/secrets/deploy-token does not exist
+```
 
 ## What each command does
 
@@ -210,6 +229,7 @@ same message.
 |---|---|---|
 | `validate` | checked: the name is declared, the expression is one a secret allows where it can be known | checked the same way |
 | `compile` | refused: `(secret db_password) is not fetched here: a secret is fetched by plan and apply, never by validate or compile` | written as its name: `password=(secret db_password)` |
+| `secret check` | not read | not read: only where each declared secret comes from is looked at |
 | `plan`, `apply` | decided. The report shows the condition as the document wrote it, never the value | the stage stops: `resource "conf": params.content holds a secret, and target "ansible" cannot be handed a secret yet` (see [where this stands](#secrets)) |
 
 What `compile --out` writes for a secret is a placeholder for reading, not
@@ -236,6 +256,7 @@ a command's arguments.
 | A function or operator that does not take a secret | `plan`, `apply` | `length(...) cannot be given a secret; the functions that can are ...` |
 | The environment variable is not set | `plan`, `apply` | `spec.secrets: secret "db_password" (from: env): the environment variable SITE_DB_PASSWORD is not set` |
 | The file can be read by others | `plan`, `apply` | `secret "token" (from: file): ... has mode 0644 ... allowWideMode: true` |
+| A secret cannot be locked in memory, with `--strict-secrets` | `plan`, `apply` | `the secret "db_password" could not be locked in memory and may reach swap, and --strict-secrets is set. ...` |
 | The command failed | `plan`, `apply` | `secret "flag" (from: exec): the command sh exited with status 4` |
 | A secret that is not base64 is given to `base64Decode` | `plan`, `apply` | `base64Decode(...): the secret is not base64` |
 

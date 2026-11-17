@@ -1,0 +1,29 @@
+[package]
+name = "meridian-tooling"
+description = "What an editor needs from Meridian: the formatter, the linter, the JSON Schema export and the analysis behind the language server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+meridian-ast = { path = "../meridian-ast" }
+meridian-expr = { path = "../meridian-expr" }
+meridian-ir = { path = "../meridian-ir" }
+meridian-orchestrator = { path = "../meridian-orchestrator" }
+meridian-plugin-host = { path = "../meridian-plugin-host" }
+meridian-sdk = { path = "../meridian-sdk" }
+serde_json = "1"
+
+[dev-dependencies]
+meridian-target-ansible = { path = "../../plugins/ansible" }
+meridian-target-chef = { path = "../../plugins/chef" }
+meridian-target-cloud-init = { path = "../../plugins/cloud-init" }
+meridian-target-dsc = { path = "../../plugins/dsc" }
+meridian-target-openvox = { path = "../../plugins/openvox" }
+meridian-target-puppet = { path = "../../plugins/puppet" }
+meridian-target-salt = { path = "../../plugins/salt" }
+meridian-target-terraform = { path = "../../plugins/terraform" }
+
+[lints]
+workspace = true

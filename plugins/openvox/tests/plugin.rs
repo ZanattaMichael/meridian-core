@@ -1,8 +1,6 @@
 //! The plugin as the host meets it: a separate process, found by its file
 //! name and driven over the protocol.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::Path;
 

@@ -1,7 +1,5 @@
 //! The `meridian` command, run as a process against a real plugin.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -109,7 +107,7 @@ fn plugins_lists_what_each_plugin_is_and_can_do() {
         text,
         format!(
             "fake\n  category:  containerization\n  can:       compile, plan, apply, outputs, inputs, import\n  \
-             resources: file\n  versions:  1, 2.4\n  imports:   Fake files (*.fake)\n  sdk:       0.1.0 (protocol 2)\n  binary:    {}\n",
+             resources: file\n  versions:  1, 2.4\n  imports:   Fake files (*.fake)\n  sdk:       0.1.0 (protocol 2)\n  binary:    {}\n  signature: not checked\n",
             binary.display()
         )
     );
@@ -121,7 +119,8 @@ fn compile_writes_each_documents_files_and_applies_nothing() {
     let out = meridian(&dir, &["compile", "site.yaml", "--out", "build"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
-        stdout(&out),
+        // The directory is printed as the system writes paths.
+        stdout(&out).replace('\\', "/"),
         "network (Infrastructure, target fake)\n  compiled 4 files into build/network\n\
          web (ResourceSet, target fake)\n  deferred: needs the output \"address\" of Infrastructure \"network\", \
          which has not been applied yet\n"
@@ -494,7 +493,10 @@ fn import_writes_a_document_that_compiles_and_reports_what_it_read() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stdout(&out), "");
     assert!(
-        stderr(&out).contains("  old (Infrastructure, 2 resources) -> imported/old.yaml\n"),
+        // The path is shown as the system writes it.
+        stderr(&out)
+            .replace('\\', "/")
+            .contains("  old (Infrastructure, 2 resources) -> imported/old.yaml\n"),
         "{}",
         stderr(&out)
     );

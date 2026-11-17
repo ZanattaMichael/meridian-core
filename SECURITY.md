@@ -29,6 +29,11 @@ Anything inside Meridian's own pipeline. In particular:
 - A path that defeats the structural exclusion of secrets from the literal-baking
   emission path.
 - An escaping bug in `exec` allowing injection into a generated artifact.
+- A plugin being started under `--plugin-signatures require` when its binary was not
+  signed by a trusted key, or a release file that verifies when it should not. What is
+  checked, and what is not, is in
+  [plugin signatures](docs/reference/plugin-signatures.md) and
+  [check what you downloaded](docs/quickstart/install.md#check-what-you-downloaded).
 
 ## Out of scope
 

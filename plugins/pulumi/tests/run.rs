@@ -1,7 +1,5 @@
 //! The running half, against a stand-in for `pulumi`.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::Path;
 
@@ -118,7 +116,7 @@ fn a_plan_selects_the_stack_and_reads_the_preview() {
     );
     assert!(dir.join("work/Pulumi.yaml").exists());
     assert!(dir.join("work/stack.json").exists());
-    let work = fs::canonicalize(dir.join("work")).unwrap();
+    let work = meridian_sdk::tool::absolute_path(&dir.join("work"));
     assert_eq!(
         fs::read_to_string(dir.join("cwd")).unwrap().trim(),
         work.to_str().unwrap()
@@ -133,10 +131,14 @@ fn state_stays_with_the_project_unless_someone_says_otherwise() {
     runner(&dir, HAPPY)
         .plan(&context(&dir), &compiled(), &KeptLog::default())
         .unwrap();
-    let work = fs::canonicalize(dir.join("work")).unwrap();
+    let work = meridian_sdk::tool::absolute_path(&dir.join("work"));
     assert_eq!(
         seen_env(&dir),
-        format!("backend=file://{} passphrase= check=true", work.display())
+        // A URL is written with forward slashes on every system.
+        format!(
+            "backend=file://{} passphrase= check=true",
+            work.display().to_string().replace('\\', "/")
+        )
     );
 
     // The document chose a backend: the project file carries it, and the

@@ -1,0 +1,76 @@
+name: vscode
+
+# The Visual Studio Code extension under editors/vscode: type-check it, run
+# its unit tests, drive it inside a real VS Code against a real `meridian lsp`,
+# and package it. The package is kept as an artifact of the run so it can be
+# installed without building. Nothing here publishes to a marketplace.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'editors/vscode/**'
+      - 'crates/meridian-lsp/**'
+      - 'crates/meridian-tooling/**'
+      - '.github/workflows/vscode.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  extension:
+    name: the extension builds, works in VS Code, and packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install the extension's dependencies
+        working-directory: editors/vscode
+        run: npm ci
+
+      - name: Type-check
+        working-directory: editors/vscode
+        run: npm run typecheck
+
+      - name: Unit tests
+        working-directory: editors/vscode
+        run: npm test
+
+      - name: Install the stable toolchain
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+
+      - name: Build meridian and a plugin for the editor to talk to
+        run: cargo build --locked -p meridian-cli -p meridian-target-ansible
+
+      # The test opens a document in VS Code and checks what the editor
+      # shows: diagnostics, completion, hover, go to definition, a quick fix
+      # and formatting, all answered by the binary just built.
+      - name: End-to-end test in VS Code
+        working-directory: editors/vscode
+        env:
+          MERIDIAN_BIN: ${{ github.workspace }}/target/debug/meridian
+        run: xvfb-run -a npm run test:e2e
+
+      - name: Package
+        working-directory: editors/vscode
+        run: npm run package
+
+      - name: The package holds the extension and nothing it should not
+        working-directory: editors/vscode
+        run: |
+          unzip -l meridian.vsix
+          unzip -l meridian.vsix | grep -q 'extension/out/extension.js'
+          ! unzip -l meridian.vsix | grep -q 'node_modules'
+          ! unzip -l meridian.vsix | grep -q 'extension/src/'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meridian-vscode
+          path: editors/vscode/meridian.vsix
+          if-no-files-found: error

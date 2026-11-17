@@ -27,6 +27,77 @@ pub fn supported_resource_types() -> Vec<String> {
         .to_vec()
 }
 
+/// What each resource type takes, for editors. The lists repeat what each
+/// type's function accepts below; the tooling crate's schema conformance
+/// test fails if the two ever disagree.
+pub fn resource_schemas() -> Vec<meridian_sdk::ResourceSchema> {
+    use meridian_sdk::schema::shared;
+    vec![
+        shared(
+            "exec",
+            &["chdir", "command", "creates", "removes", "shell"],
+            &["command"],
+            &[],
+            "",
+            &["run"],
+        ),
+        shared(
+            "file",
+            &[
+                "append", "content", "encoding", "group", "mode", "owner", "path",
+            ],
+            &["path"],
+            &["absent", "directory", "file", "present"],
+            "present",
+            &[],
+        ),
+        shared(
+            "group",
+            &["members", "name"],
+            &["name"],
+            &["present"],
+            "present",
+            &[],
+        ),
+        shared(
+            "package",
+            &["name", "version"],
+            &["name"],
+            &["present"],
+            "present",
+            &[],
+        ),
+        shared(
+            "service",
+            &["enabled", "name"],
+            &["name"],
+            &["reloaded", "restarted", "running", "started", "stopped"],
+            "running",
+            SERVICE_ACTIONS,
+        ),
+        shared(
+            "user",
+            &[
+                "gecos",
+                "groups",
+                "home",
+                "lock_passwd",
+                "name",
+                "primary_group",
+                "shell",
+                "ssh_authorized_keys",
+                "sudo",
+                "system",
+                "uid",
+            ],
+            &["name"],
+            &["present"],
+            "present",
+            &[],
+        ),
+    ]
+}
+
 pub(crate) fn transform(graph: &ResourceGraph) -> Result<Transformed, CompileError> {
     let mut units = Vec::with_capacity(graph.resources.len());
     let mut services = Vec::new();

@@ -174,6 +174,10 @@ impl Emitter for CloudInit {
         supported_resource_types()
     }
 
+    fn resource_schemas(&self) -> Vec<meridian_sdk::ResourceSchema> {
+        transform::resource_schemas()
+    }
+
     /// `synthetic_notify`: cloud-init applies user-data once and has no idea
     /// of a later change. On that one run every resource does change, so a
     /// notified action is run once, after everything else, and the compile

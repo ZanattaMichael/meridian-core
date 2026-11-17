@@ -95,6 +95,26 @@ a file it compiles to, such as cloud-init user-data for the machine Terraform cr
 output. It reaches the tool as the tool's own variable, and the documents run in the order
 that needs. Values a tool marks sensitive are masked wherever Meridian prints.
 
+## Editor support
+
+The same command carries the tools for writing documents, and they are the compiler, so
+an editor never accepts what `meridian compile` refuses:
+
+```
+meridian fmt .                              # one standard layout; never changes a value
+meridian lint --strict .                    # every error in a project, plus probable mistakes
+meridian schema -o meridian.schema.json     # a JSON Schema, for editors that only know YAML
+meridian lsp                                # the language server, started by your editor
+```
+
+![Writing a resource with completion](docs/tooling/images/writing-a-resource.gif)
+
+The language server gives completion, hover documentation, errors as you type, go to
+definition, rename, formatting and quick fixes, with resource types and params read from
+the plugins you have installed. There is a [Visual Studio Code extension](docs/tooling/vscode.md)
+in [`editors/vscode`](editors/vscode), and recipes for [other editors](docs/tooling/other-editors.md).
+Start at [Tools for writing Meridian documents](docs/tooling/index.md).
+
 ## Layout
 
 The core is a Cargo workspace under `crates/`:
@@ -116,6 +136,10 @@ The core is a Cargo workspace under `crates/`:
 - `meridian-plugin-host` — launching, discovering and driving plugins
 - `meridian-orchestrator` — runs a workflow: compiles each document, drives its tool through a
   plugin, hands outputs from one stage to the next, and stops on the first failure
+- `meridian-tooling` — what the editor tools share: the formatter, the linter, completion, hover
+  and navigation, and the JSON Schema export, all read from the parser's own field tables and
+  from what the plugins declare
+- `meridian-lsp` — the language server
 - `meridian-cli` — the `meridian` command
 - `meridian-policy-opa` — the policy engine for Open Policy Agent, which `--policy` asks whether
   a change may be made
@@ -130,7 +154,10 @@ YAML or imports, on `meridian-yaml` and `meridian-import`: nothing of the compil
 the same position a third-party plugin is in.
 
 A plugin is a separate process. The host launches the binary, reads one handshake line
-saying where it is listening, agrees a protocol version with it, and then talks to it over gRPC.
+saying where it is listening (a Unix socket, or a named pipe on Windows), agrees a
+protocol version with it, and then talks to it over gRPC. Before it starts a plugin, the host can
+check the binary's [signature](docs/reference/plugin-signatures.md); a released `meridian`
+starts only the plugins it was released with, unless told to trust another key.
 The protocol is defined in [`proto/`](proto/meridian/plugin/v1/plugin.proto), so a plugin
 can be written in any language that can serve it. A plugin binary is not meant to be run
 by hand: its stdout carries the protocol, and it exits when the host closes its stdin.

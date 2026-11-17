@@ -11,6 +11,8 @@
 //! MERIDIAN_TEST_OPENVOX=1 cargo test -p meridian-target-openvox --test real
 //! ```
 
+// Left out on Windows: this file drives the real tool, and the workflow that
+// installs the tool and runs it is a Linux job.
 #![cfg(unix)]
 #![allow(clippy::result_large_err)]
 

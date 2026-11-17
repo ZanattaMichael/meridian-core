@@ -23,7 +23,7 @@ flowchart TD
 | Property tests | `crates/meridian-cli/tests/properties.rs` | `cargo test -p meridian-cli --test properties` |
 | Placement tests | `crates/meridian-cli/tests/placement.rs`, `placement_properties.rs` | `cargo test -p meridian-cli --test placement --test placement_properties` |
 | Secret tests | `crates/meridian-cli/tests/secret_places.rs`, `secret_properties.rs`, `secrets.rs` | `cargo test -p meridian-cli --test secret_places --test secret_properties --test secrets` |
-| Conformance tests | `crates/meridian-cli/tests/conformance.rs` | `cargo test -p meridian-cli --test conformance` |
+| Conformance tests | `crates/meridian-cli/tests/conformance.rs`, `condition_conformance.rs` | `cargo test -p meridian-cli --test conformance --test condition_conformance` |
 | Robustness tests | `crates/meridian-cli/tests/robustness.rs` | `cargo test -p meridian-cli --test robustness` |
 | Examples | `crates/meridian-cli/tests/examples.rs` | `cargo test -p meridian-cli --test examples` |
 | Real tools | a workflow per tool under `.github/workflows/` | in CI; [Real-tool tests](real-tool-tests.md) lists what each one runs and how to run it yourself |
@@ -241,6 +241,20 @@ paths; a `runtimeWhen` on any of its resources is compiled in or refused, never
 dropped; a target that declares no notify refuses one between any two
 resources; an unknown type is refused under one rule. A document written for
 Terraform compiles to the same configuration for OpenTofu.
+
+Conditions are held to it too, in `condition_conformance.rs`. Each target's
+own example is given the same `when` on every resource and every output, and
+compiled by the real command with the real plugin for each row of a table:
+one row for each kind of thing a condition can do (a comparison, logic, a
+pattern, a function, a fallback, a choice, a short circuit) and three that
+cannot be decided. True must give, byte for byte, the files the example
+compiles to with no condition in it. False must report every resource and
+output removed, in the document's own words. A condition that cannot be
+decided must be refused in the same words on every target. The same is asked
+of a `when` on the whole document. Conditions are decided before any plugin is
+started, so this holds by construction; the test is there so that a target
+that began to read a condition itself could not go unnoticed. A new target is
+covered as soon as it has an example of its own.
 
 Literal text is held to the same standard on all eighteen. Every text param of
 every example is compiled three ways: with plain text, with text that looks

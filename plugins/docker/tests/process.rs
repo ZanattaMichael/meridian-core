@@ -1,8 +1,6 @@
 //! The plugin as the host meets it: the real binary, launched and driven
 //! over the protocol, with a stand-in for `docker` behind it.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::Path;
 

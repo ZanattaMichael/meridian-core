@@ -148,10 +148,12 @@ impl Registry {
             capabilities: emitter.capabilities(),
             category: emitter.category(),
             target_versions: emitter.target_versions(),
+            resource_schemas: emitter.resource_schemas(),
             import_formats: importer.as_ref().map(|i| i.formats()).unwrap_or_default(),
             operations: Operations::COMPILE_ONLY,
             accepts_inputs: false,
             path: String::new(),
+            signature: crate::Signature::NotChecked,
         };
         self.targets.insert(
             name,

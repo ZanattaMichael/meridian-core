@@ -4,6 +4,7 @@ use std::path::Path;
 use crate::api::VersionTable;
 use crate::error::{Error, ErrorList, Position};
 use crate::node::{self, Node, NodeKind};
+use crate::schema;
 use crate::types::*;
 use meridian_value::Value;
 use meridian_yaml::scalar::Scalar;
@@ -99,6 +100,42 @@ pub fn parse_value(name: &str, data: &[u8]) -> Result<Value, ErrorList> {
         None => Value::Null,
     };
     d.errs.finish(value)
+}
+
+/// Parses every document in a YAML or JSON stream into a free-form
+/// [`Value`], without reading any of them as a Meridian document.
+///
+/// It is what lets a tool ask whether two texts say the same thing: a
+/// formatter compares the values before and after its change. A stream with
+/// no documents is an empty list.
+pub fn parse_stream(name: &str, data: &[u8]) -> Result<Vec<Value>, ErrorList> {
+    let text = match std::str::from_utf8(data) {
+        Ok(text) => text.strip_prefix('\u{feff}').unwrap_or(text),
+        Err(e) => {
+            let (line, column) = line_column(data, e.valid_up_to());
+            let pos = Position {
+                file: name.to_owned(),
+                doc_idx: 0,
+                line,
+                column,
+            };
+            return Err(Error::new(pos, "", "input is not valid UTF-8").into());
+        }
+    };
+    let (roots, json) = load_roots(name, text, true)?;
+    let mut errs = ErrorList::new();
+    let mut values = Vec::with_capacity(roots.len());
+    for (doc_idx, root) in roots.iter().enumerate() {
+        let mut d = Decoder {
+            file: name,
+            doc_idx,
+            json,
+            errs: ErrorList::new(),
+        };
+        values.push(d.value(root, ""));
+        errs.extend(d.errs);
+    }
+    errs.finish(values)
 }
 
 /// YAML reads `: ` and ` #` inside an unquoted value as its own syntax, and
@@ -332,12 +369,14 @@ impl Decoder<'_> {
                 unsupported.map(|e| e.to_string()).unwrap_or_default(),
             )),
             (_, "") => Err(("kind", "missing required field".to_owned())),
-            (_, "Infrastructure") => Ok(Kind::Infrastructure),
-            (_, "ResourceSet") => Ok(Kind::ResourceSet),
-            (_, other) => Err((
-                "kind",
-                format!("unknown kind {other:?} (expected \"Infrastructure\" or \"ResourceSet\")"),
-            )),
+            (_, other) => schema::kind_named(other).ok_or_else(|| {
+                (
+                    "kind",
+                    format!(
+                        "unknown kind {other:?} (expected \"Infrastructure\" or \"ResourceSet\")"
+                    ),
+                )
+            }),
         };
         let kind = match kind {
             Ok(kind) => kind,
@@ -347,24 +386,14 @@ impl Decoder<'_> {
             }
         };
 
-        let top = self.fields(Some(root), "", &["apiVersion", "kind", "metadata", "spec"]);
+        let top = self.fields(Some(root), "", &schema::document(kind).names());
         let metadata = self.metadata(top.get("metadata"));
         Some(match kind {
             Kind::Infrastructure => {
                 let f = self.fields(
                     top.get("spec"),
                     "spec",
-                    &[
-                        "target",
-                        "targetVersion",
-                        "when",
-                        "variables",
-                        "conditions",
-                        "secrets",
-                        "imports",
-                        "resources",
-                        "outputs",
-                    ],
+                    &schema::INFRASTRUCTURE_SPEC.names(),
                 );
                 let spec = InfrastructureSpec {
                     target: self.string(f.get("target"), "spec.target"),
@@ -385,21 +414,7 @@ impl Decoder<'_> {
                 })
             }
             Kind::ResourceSet => {
-                let f = self.fields(
-                    top.get("spec"),
-                    "spec",
-                    &[
-                        "target",
-                        "targetVersion",
-                        "when",
-                        "variables",
-                        "conditions",
-                        "secrets",
-                        "targetHost",
-                        "imports",
-                        "resources",
-                    ],
-                );
+                let f = self.fields(top.get("spec"), "spec", &schema::RESOURCE_SET_SPEC.names());
                 let spec = ResourceSetSpec {
                     target: self.string(f.get("target"), "spec.target"),
                     target_version: self.string(f.get("targetVersion"), "spec.targetVersion"),
@@ -422,7 +437,7 @@ impl Decoder<'_> {
     }
 
     fn metadata(&mut self, node: Option<&Node>) -> Metadata {
-        let f = self.fields(node, "metadata", &["name", "labels"]);
+        let f = self.fields(node, "metadata", &schema::METADATA.names());
         let mut labels = BTreeMap::new();
         for (key, value) in self.entries(f.get("labels"), "metadata.labels") {
             let value = self.string(Some(value), &join("metadata.labels", key));
@@ -515,27 +530,14 @@ impl Decoder<'_> {
         let mut out = Vec::new();
         for (index, item) in self.list(node, "spec.resources").iter().enumerate() {
             let path = format!("spec.resources[{index}]");
-            let f = self.fields(
-                Some(item),
-                &path,
-                &[
-                    "id",
-                    "type",
-                    "state",
-                    "params",
-                    "dependsOn",
-                    "notifies",
-                    "when",
-                    "runtimeWhen",
-                ],
-            );
+            let f = self.fields(Some(item), &path, &schema::RESOURCE.names());
             let pos = self.at_or(item, doc_pos);
 
             let mut depends_on = Vec::new();
             let deps_path = join(&path, "dependsOn");
             for (j, dep) in self.list(f.get("dependsOn"), &deps_path).iter().enumerate() {
                 let p = format!("{deps_path}[{j}]");
-                let d = self.fields(Some(dep), &p, &["resource", "ifMissing", "when"]);
+                let d = self.fields(Some(dep), &p, &schema::DEPENDENCY.names());
                 depends_on.push(Dependency {
                     resource: self.string(d.get("resource"), &join(&p, "resource")),
                     if_missing: IfMissing::from_text(
@@ -554,11 +556,7 @@ impl Decoder<'_> {
                 .enumerate()
             {
                 let p = format!("{notifies_path}[{j}]");
-                let d = self.fields(
-                    Some(n),
-                    &p,
-                    &["resource", "on", "action", "ifMissing", "when"],
-                );
+                let d = self.fields(Some(n), &p, &schema::NOTIFICATION.names());
                 notifies.push(Notification {
                     resource: self.string(d.get("resource"), &join(&p, "resource")),
                     on: self.string(d.get("on"), &join(&p, "on")),
@@ -591,7 +589,7 @@ impl Decoder<'_> {
         let mut out = Vec::new();
         for (i, item) in self.list(node, "spec.outputs").iter().enumerate() {
             let path = format!("spec.outputs[{i}]");
-            let f = self.fields(Some(item), &path, &["name", "value", "when"]);
+            let f = self.fields(Some(item), &path, &schema::OUTPUT.names());
             out.push(Output {
                 name: self.string(f.get("name"), &join(&path, "name")),
                 value: self.string(f.get("value"), &join(&path, "value")),
@@ -606,11 +604,7 @@ impl Decoder<'_> {
         let mut out = Vec::new();
         for (i, item) in self.list(node, "spec.imports").iter().enumerate() {
             let path = format!("spec.imports[{i}]");
-            let f = self.fields(
-                Some(item),
-                &path,
-                &["name", "from", "ref", "file", "output", "sensitive"],
-            );
+            let f = self.fields(Some(item), &path, &schema::IMPORT.names());
             out.push(Import {
                 name: self.string(f.get("name"), &join(&path, "name")),
                 from: self.string(f.get("from"), &join(&path, "from")),
@@ -629,20 +623,7 @@ impl Decoder<'_> {
         let mut out = Vec::new();
         for (i, item) in self.list(node, "spec.secrets").iter().enumerate() {
             let path = format!("spec.secrets[{i}]");
-            let f = self.fields(
-                Some(item),
-                &path,
-                &[
-                    "name",
-                    "from",
-                    "key",
-                    "path",
-                    "command",
-                    "optional",
-                    "allowWideMode",
-                    "keepTrailingNewline",
-                ],
-            );
+            let f = self.fields(Some(item), &path, &schema::SECRET.names());
             let command_path = join(&path, "command");
             let command = self
                 .list(f.get("command"), &command_path)
@@ -692,7 +673,7 @@ impl Decoder<'_> {
     fn target_host(&mut self, node: Option<&Node>, doc_pos: &Position) -> Option<TargetHost> {
         let node = node.filter(|n| !n.is_null())?;
         let path = "spec.targetHost";
-        let f = self.fields(Some(node), path, &["from", "ref", "output", "host"]);
+        let f = self.fields(Some(node), path, &schema::TARGET_HOST.names());
         Some(TargetHost {
             from: self.string(f.get("from"), &join(path, "from")),
             r#ref: self.string(f.get("ref"), &join(path, "ref")),

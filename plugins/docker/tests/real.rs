@@ -6,6 +6,8 @@
 //! Set `MERIDIAN_REAL_DOCKER=1` to make a missing Docker a failure instead,
 //! or `MERIDIAN_REAL_DOCKER=0` to skip it even where Docker is present.
 
+// Left out on Windows: this file drives the real tool, and the workflow that
+// installs the tool and runs it is a Linux job.
 #![cfg(unix)]
 
 use std::io::{Read, Write};

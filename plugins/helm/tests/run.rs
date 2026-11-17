@@ -1,8 +1,6 @@
 //! The running half, against stand-ins for `helm`, `kustomize` and
 //! `kubectl`.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::Path;
 

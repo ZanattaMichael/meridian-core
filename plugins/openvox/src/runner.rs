@@ -94,30 +94,36 @@ pub fn find_program(name: &str, path: Option<&OsStr>, fallbacks: &[&Path]) -> St
     let on_path = path
         .map(|p| std::env::split_paths(p).collect::<Vec<PathBuf>>())
         .unwrap_or_default();
-    if on_path.iter().any(|dir| is_program(&dir.join(name))) {
+    if on_path
+        .iter()
+        .any(|dir| program_at(&dir.join(name)).is_some())
+    {
         return name.to_owned();
     }
     fallbacks
         .iter()
-        .map(|dir| dir.join(name))
-        .find(|candidate| is_program(candidate))
+        .find_map(|dir| program_at(&dir.join(name)))
         .and_then(|found| found.to_str().map(str::to_owned))
         .unwrap_or_else(|| name.to_owned())
 }
 
-fn is_program(path: &Path) -> bool {
+/// The file that running `path` would start, if there is one. On Windows a
+/// program is known by its extension, so that is what is looked for, and the
+/// answer carries it: `puppet` is found as `puppet.bat`.
+fn program_at(path: &Path) -> Option<PathBuf> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         path.metadata()
             .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+            .then(|| path.to_path_buf())
     }
     #[cfg(not(unix))]
     {
-        path.is_file()
-            || ["bat", "cmd", "exe"]
-                .iter()
-                .any(|ext| path.with_extension(ext).is_file())
+        ["exe", "cmd", "bat"]
+            .iter()
+            .map(|ext| path.with_extension(ext))
+            .find(|candidate| candidate.is_file())
     }
 }
 

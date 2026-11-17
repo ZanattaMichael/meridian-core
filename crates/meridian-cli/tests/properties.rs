@@ -866,7 +866,13 @@ fn model() -> impl Strategy<Value = Model> {
         any::<bool>().prop_map(Value::Bool),
         (-50i64..50).prop_map(Value::Int),
         (-50i64..50).prop_map(|n| Value::Float(n as f64 + 0.5)),
-        prop_oneof!["[a-z]{0,5}", "[ -~]{0,8}"].prop_map(Value::String),
+        // Text that opens an interpolation is refused in a condition, which
+        // `tests/interpolation.rs` covers; here it would only be noise.
+        prop_oneof!["[a-z]{0,5}", "[ -~]{0,8}"]
+            .prop_filter("opens an interpolation", |text| {
+                !text.contains(INTERPOLATION)
+            })
+            .prop_map(Value::String),
     ];
     let leaf = prop_oneof![
         3 => literal.prop_map(Model::Literal),

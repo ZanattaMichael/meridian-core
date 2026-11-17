@@ -90,6 +90,10 @@ impl Emitter for Ansible {
         supported_resource_types()
     }
 
+    fn resource_schemas(&self) -> Vec<meridian_sdk::ResourceSchema> {
+        transform::resource_schemas()
+    }
+
     /// `native_notify`: notify and handlers are Ansible's own mechanism, so
     /// nothing is synthesised.
     ///

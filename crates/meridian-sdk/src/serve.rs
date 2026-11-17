@@ -1,22 +1,21 @@
 //! The plugin's side of the process boundary.
 //!
 //! [`serve`] is everything a plugin's `main` needs. It listens on a private
-//! socket, announces where on stdout, answers the host until the host closes
+//! endpoint (a Unix socket, or a named pipe on Windows), announces where on stdout, answers the host until the host closes
 //! the plugin's stdin, and then exits. A plugin author writes an [`Emitter`]
 //! and perhaps a [`Runner`], and never touches the protocol.
 
 use std::fmt;
 use std::io::{Read, Write};
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use tokio::net::UnixListener;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::{ReceiverStream, UnixListenerStream};
+use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::Stream;
 use tonic::{Request, Response, Status};
 
+use crate::listen::Listening;
 use crate::pb::emitter_server::{Emitter as EmitterService, EmitterServer};
 use crate::pb::importer_server::{Importer as ImporterService, ImporterServer};
 use crate::pb::runner_server::{Runner as RunnerService, RunnerServer};
@@ -71,7 +70,7 @@ pub struct ServeError {
 }
 
 impl ServeError {
-    fn new(what: &str, cause: impl fmt::Display) -> Self {
+    pub(crate) fn new(what: &str, cause: impl fmt::Display) -> Self {
         ServeError {
             msg: format!("{what}: {cause}"),
         }
@@ -101,11 +100,9 @@ pub fn serve(plugin: Plugin) -> Result<(), ServeError> {
 }
 
 async fn serve_async(plugin: Plugin) -> Result<(), ServeError> {
-    let socket = Socket::create()?;
-    let listener = UnixListener::bind(&socket.path)
-        .map_err(|e| ServeError::new("listening on the plugin socket", e))?;
+    let listening = Listening::start()?;
 
-    // Announce only once the socket is listening, so the host can dial the
+    // Announce only once the endpoint is listening, so the host can dial the
     // moment it has read the line.
     //
     // The version announced is the highest the host offered that this SDK
@@ -117,8 +114,9 @@ async fn serve_async(plugin: Plugin) -> Result<(), ServeError> {
         let mut stdout = std::io::stdout().lock();
         writeln!(
             stdout,
-            "{HANDSHAKE_MAGIC}|{protocol}|{VERSION}|unix|{}",
-            socket.path.display()
+            "{HANDSHAKE_MAGIC}|{protocol}|{VERSION}|{}|{}",
+            Listening::NETWORK,
+            listening.address
         )
         .and_then(|()| stdout.flush())
         .map_err(|e| ServeError::new("writing the plugin handshake", e))?;
@@ -144,8 +142,11 @@ async fn serve_async(plugin: Plugin) -> Result<(), ServeError> {
         }));
     }
 
+    let Listening {
+        incoming, _guard, ..
+    } = listening;
     router
-        .serve_with_incoming_shutdown(UnixListenerStream::new(listener), host_is_done())
+        .serve_with_incoming_shutdown(incoming, host_is_done())
         .await
         .map_err(|e| ServeError::new("serving the plugin", e))
 }
@@ -162,6 +163,7 @@ async fn host_is_done() {
         let _ = tx.send(());
     });
 
+    #[cfg(unix)]
     let terminate = async {
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
             Ok(mut signal) => {
@@ -170,70 +172,15 @@ async fn host_is_done() {
             Err(_) => std::future::pending().await,
         }
     };
+    // Windows has no termination signal a process can catch; closing stdin
+    // and Ctrl-C are the two ways a plugin is told to stop there.
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
 
     tokio::select! {
         _ = stdin_closed => {}
         _ = tokio::signal::ctrl_c() => {}
         _ = terminate => {}
-    }
-}
-
-/// The plugin's socket, in a directory only this user can enter. The
-/// directory is removed when the plugin stops serving.
-struct Socket {
-    dir: PathBuf,
-    path: PathBuf,
-}
-
-impl Socket {
-    fn create() -> Result<Socket, ServeError> {
-        use std::os::unix::fs::DirBuilderExt;
-
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or_default();
-        // A unix socket's path has a small fixed limit, and a temporary
-        // directory can be deep enough to exceed it (macOS's is, and so is a
-        // CI runner's). When it is, fall back to /tmp, where the path is short.
-        let bases = [std::env::temp_dir(), PathBuf::from("/tmp")];
-        let mut last = String::from("no usable temporary directory");
-        for base in bases {
-            // The name only has to be unused; what keeps other users out is
-            // the directory's mode, and creating it fails if anything is
-            // already there, so a guessed name cannot be used against the
-            // plugin.
-            for attempt in 0..16u32 {
-                let dir = base.join(format!(
-                    "meridian-plugin-{}-{:08x}",
-                    std::process::id(),
-                    nanos.wrapping_add(attempt)
-                ));
-                let path = dir.join("plugin.sock");
-                if path.as_os_str().len() > SOCKET_PATH_LIMIT {
-                    last = format!("{} is too long a path for a unix socket", path.display());
-                    break;
-                }
-                match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
-                    Ok(()) => return Ok(Socket { dir, path }),
-                    Err(e) => last = format!("{}: {e}", dir.display()),
-                }
-            }
-        }
-        Err(ServeError::new(
-            "creating a directory for the plugin socket",
-            last,
-        ))
-    }
-}
-
-/// The longest socket path used. `sockaddr_un` holds 104 bytes on macOS and
-/// 108 on Linux, including a terminator; this stays under both.
-const SOCKET_PATH_LIMIT: usize = 100;
-
-impl Drop for Socket {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 
@@ -263,6 +210,12 @@ impl EmitterService for EmitterHandler {
             capabilities: Some(wire::capabilities_to_wire(self.emitter.capabilities())),
             category: wire::category_to_wire(self.emitter.category()) as i32,
             target_versions: self.emitter.target_versions(),
+            resource_schemas: self
+                .emitter
+                .resource_schemas()
+                .iter()
+                .map(wire::resource_schema_to_wire)
+                .collect(),
             operations: Some(wire::operations_to_wire(self.operations)),
             accepts_inputs: self.accepts_inputs,
             import_formats: wire::import_formats_to_wire(

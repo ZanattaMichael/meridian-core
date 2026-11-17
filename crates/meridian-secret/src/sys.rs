@@ -213,7 +213,9 @@ mod imp {
 
     /// Whether a process with this id exists.
     pub(crate) fn process_exists(pid: u32) -> bool {
-        let Ok(pid) = libc::pid_t::try_from(pid) else {
+        // 0 is not a process: to `kill` it means this process's whole
+        // group, which always exists.
+        let Ok(pid @ 1..) = libc::pid_t::try_from(pid) else {
             return false;
         };
         // SAFETY: signal 0 sends nothing; it only asks whether the process

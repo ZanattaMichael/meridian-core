@@ -139,6 +139,10 @@ impl Emitter for Puppet {
         supported_resource_types()
     }
 
+    fn resource_schemas(&self) -> Vec<meridian_sdk::ResourceSchema> {
+        transform::resource_schemas()
+    }
+
     /// `native_notify`: the `notify` metaparameter is Puppet's own mechanism.
     /// That it is narrower than Ansible's is a matter for the mapping table.
     ///

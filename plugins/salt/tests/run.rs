@@ -2,8 +2,6 @@
 //! is tested on a machine with no Salt installed. The canned results are the
 //! JSON a real Salt 3008 printed for the same states.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::Path;
 
@@ -52,20 +50,19 @@ fn runner(dir: &Path, body: &str) -> SaltRunner {
 }
 
 fn args(dir: &Path) -> String {
+    // Compared with forward slashes, so one expectation serves every system.
     fs::read_to_string(dir.join("args"))
         .unwrap()
         .trim()
-        .to_owned()
+        .replace('\\', "/")
 }
 
 /// The work directory as the runner hands it to the tool: absolute.
 fn work(dir: &Path) -> String {
-    dir.join("work")
-        .canonicalize()
-        .unwrap()
+    meridian_sdk::tool::absolute_path(&dir.join("work"))
         .to_str()
         .unwrap()
-        .to_owned()
+        .replace('\\', "/")
 }
 
 fn print(json: &str) -> String {
@@ -116,7 +113,13 @@ fn a_plan_is_a_test_run_and_reports_what_would_change_in_run_order() {
         )
     );
     // The tool runs in the work directory, where the artifact was written.
-    assert_eq!(fs::read_to_string(dir.join("cwd")).unwrap().trim(), work);
+    assert_eq!(
+        fs::read_to_string(dir.join("cwd"))
+            .unwrap()
+            .trim()
+            .replace('\\', "/"),
+        work
+    );
     assert_eq!(
         fs::read_to_string(Path::new(&work).join("states/web.sls")).unwrap(),
         "#!yaml\n"
@@ -312,7 +315,10 @@ fn another_host_is_reached_with_salt_ssh() {
          \"web01.example.com\":\n  host: \"web01.example.com\"\n"
     );
     assert_eq!(
-        fs::read_to_string(Path::new(&work).join("ssh/master")).unwrap(),
+        // A Windows path is written with its backslashes escaped.
+        fs::read_to_string(Path::new(&work).join("ssh/master"))
+            .unwrap()
+            .replace("\\\\", "/"),
         format!(
             "# Written by Meridian for salt-ssh. It is rewritten on every run.\n\
              root_dir: \"{work}/ssh/root\"\nfile_roots:\n  base:\n    - \"{work}/states\"\n"

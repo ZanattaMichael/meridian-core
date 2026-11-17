@@ -128,6 +128,7 @@ impl Site {
             dir: &self.dir,
             state_dir: &self.state,
             core_version: CORE,
+            signatures: &meridian_module::NO_SIGNATURES,
         }
     }
 
@@ -647,6 +648,7 @@ fn a_module_is_refused_for_what_it_asks_of_the_core_or_of_the_disk() {
             dir: &empty,
             state_dir: &empty.join(".meridian"),
             core_version: CORE,
+            signatures: &meridian_module::NO_SIGNATURES,
         },
         Mode::Install,
     )

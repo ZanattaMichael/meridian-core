@@ -1,7 +1,5 @@
 //! The running half, against a stand-in for `pwsh`.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::Path;
 
@@ -72,7 +70,10 @@ fn a_plan_is_the_runners_test_mode() {
         script.starts_with("$ErrorActionPreference = 'Stop'; Import-Module 'Dsc.PipelineRunner'; $run = Invoke-DscRunner -ConfigurationSourcePath '"),
         "{script}"
     );
-    assert!(script.contains("/work' -Mode Test;"), "{script}");
+    assert!(
+        script.replace('\\', "/").contains("/work' -Mode Test;"),
+        "{script}"
+    );
     assert!(dir.join("work/Projects/Present/web.yml").exists());
 }
 

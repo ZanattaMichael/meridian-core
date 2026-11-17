@@ -2,8 +2,6 @@
 //! tested on a machine with neither a cloud-init to check with nor a machine
 //! to wait for.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 

@@ -160,6 +160,20 @@ pub struct Secret {
     pub pos: Position,
 }
 
+impl Secret {
+    /// Where the secret comes from, as the secrets crate reads it.
+    pub fn source(&self) -> meridian_secret::Source {
+        meridian_secret::Source {
+            from: self.from.clone(),
+            key: self.key.clone(),
+            path: self.path.clone(),
+            command: self.command.clone(),
+            allow_wide_mode: self.allow_wide_mode,
+            keep_trailing_newline: self.keep_trailing_newline,
+        }
+    }
+}
+
 /// Binds a ResourceSet to the node it configures. `from: infrastructure`
 /// resolves `ref`/`output` against a sibling Infrastructure document.
 #[derive(Clone, Debug, Default, PartialEq)]

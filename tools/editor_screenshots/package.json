@@ -1,0 +1,11 @@
+{
+  "name": "meridian-editor-screenshots",
+  "private": true,
+  "description": "Regenerates the images in docs/tooling/images from a real `meridian lsp`.",
+  "scripts": {
+    "capture": "node capture.js"
+  },
+  "dependencies": {
+    "monaco-editor": "0.52.2"
+  }
+}

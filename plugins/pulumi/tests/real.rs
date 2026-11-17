@@ -10,6 +10,8 @@
 //! workflow does. It needs no cloud account: state is kept in a scratch
 //! directory and the random provider touches nothing outside it.
 
+// Left out on Windows: this file drives the real tool, and the workflow that
+// installs the tool and runs it is a Linux job.
 #![cfg(unix)]
 
 use std::path::Path;

@@ -102,6 +102,26 @@ impl Emitter for Template {
         vec!["file".to_owned()]
     }
 
+    /// What each type takes, for editors: `meridian lsp` completes and
+    /// documents the params and states listed here, and reports a param that
+    /// is not listed before the document is ever compiled. Build it from the
+    /// same table the transform stage checks against, so the two cannot
+    /// disagree.
+    ///
+    /// TODO(plugin): a native target with open-ended types can leave this
+    /// out; its types are then offered by name and their params are not
+    /// checked in the editor.
+    fn resource_schemas(&self) -> Vec<meridian_sdk::ResourceSchema> {
+        vec![meridian_sdk::schema::shared(
+            "file",
+            &transform::PARAMS,
+            &["path"],
+            &["present", "absent"],
+            "present",
+            &[],
+        )]
+    }
+
     /// TODO(plugin): declare only what the tool can really do. Each `true`
     /// here is a promise the capability matrix publishes: `native_notify`
     /// when the tool has its own way to react to a change, `synthetic_notify`

@@ -10,7 +10,7 @@ use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
 use crate::{refuse, refuse_at, Entry};
 
 /// The params a `file` resource may carry.
-const PARAMS: [&str; 3] = ["content", "mode", "path"];
+pub(crate) const PARAMS: [&str; 3] = ["content", "mode", "path"];
 
 pub(crate) fn transform(graph: &ResourceGraph) -> Result<Vec<Entry>, CompileError> {
     // TODO(plugin): a tool that can report values (an address, an id) compiles

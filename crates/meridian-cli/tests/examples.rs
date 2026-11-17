@@ -1,8 +1,6 @@
 //! Every document under `examples/` compiles through the real command and
 //! the real plugins, so an example the documentation shows cannot rot.
 
-#![cfg(unix)]
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -179,7 +177,12 @@ fn compiled(file: &Path, data: &[PathBuf], scratch_name: &str) -> BTreeMap<Strin
                 pending.push(path);
             } else {
                 let relative = path.strip_prefix(&out).unwrap().to_str().unwrap();
-                files.insert(relative.to_owned(), fs::read_to_string(&path).unwrap());
+                // Named with forward slashes on every system, so the tests
+                // can ask for "document/file" wherever they run.
+                files.insert(
+                    relative.replace('\\', "/"),
+                    fs::read_to_string(&path).unwrap(),
+                );
             }
         }
     }
@@ -608,8 +611,6 @@ fn everything_under(dir: &Path) -> Vec<(PathBuf, String)> {
 /// a password manager.
 #[test]
 fn secrets_decide_an_example_and_are_written_nowhere() {
-    use std::os::unix::fs::PermissionsExt;
-
     let example = repo_root().join(DECIDED_BY_A_SECRET[0]);
     let source = fs::read_to_string(&example).unwrap();
     let data = &data_sets(&example)[0];
@@ -638,7 +639,12 @@ fn secrets_decide_an_example_and_are_written_nowhere() {
         if let Some(license) = machine.license {
             let path = dir.join("license.key");
             fs::write(&path, format!("{license}\n")).unwrap();
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+            // Only Unix has a mode to keep the file private with.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+            }
         }
 
         let meridian = |command: &str| {

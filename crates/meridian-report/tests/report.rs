@@ -447,3 +447,51 @@ fn a_document_left_out_by_its_condition_is_skipped_and_says_why() {
         "{junit}"
     );
 }
+
+/// A value that names a secret holds a slot of the run's secret table, never
+/// the secret. Should one ever land in an event, the line sent to sinks and
+/// every report show the placeholder and nothing else about it.
+#[test]
+fn a_secret_reference_in_an_event_prints_only_the_placeholder() {
+    let slot = 4_815_162_342;
+    let secret = Value::Secret(meridian_sdk::SecretRef::new(slot));
+    let events = Stream::new()
+        .run(
+            "run.started",
+            &[("mode", text("apply")), ("token", secret.clone())],
+        )
+        .step(
+            "step.started",
+            "web",
+            &[("phase", text("apply")), ("token", secret.clone())],
+        )
+        .step(
+            "step.failed",
+            "web",
+            &[
+                ("phase", text("apply")),
+                ("reason", secret.clone()),
+                ("token", secret.clone()),
+            ],
+        )
+        .run(
+            "run.finished",
+            &[("status", text("failed")), ("token", secret)],
+        )
+        .0;
+
+    for event in &events {
+        let line = event.to_json();
+        assert!(line.contains(meridian_sdk::SENSITIVE), "{line}");
+        assert!(!line.contains(&slot.to_string()), "{line}");
+    }
+    let report = Report::from_events(&events);
+    for format in [Format::Json, Format::Junit, Format::Markdown, Format::Html] {
+        let out = render(&report, format);
+        assert!(
+            !out.contains(&slot.to_string()),
+            "{}: {out}",
+            format.as_str()
+        );
+    }
+}

@@ -1,0 +1,486 @@
+name: release
+
+# Builds everything a release is made of, for every platform, and checks it:
+# the archives with their signed plugins, the checksums, the install scripts,
+# the package-manager manifests, the SBOMs and the container image.
+#
+# It runs in two ways.
+#
+#   A rehearsal, on a pull request that touches the release machinery and on
+#   demand (workflow_dispatch). Everything is built and tested; nothing leaves
+#   the run but its own workflow artifacts.
+#
+#   A release, when a tag `v<version>` is pushed AND the repository variable
+#   MERIDIAN_RELEASE_PUBLISH is `true`. After the same build and the same
+#   tests, the `publish` job signs the checksums and the image with Sigstore,
+#   records build provenance, pushes the image to GHCR and opens a DRAFT
+#   GitHub release holding every file. Without the variable, a tag is only
+#   another rehearsal.
+#
+# docs/contributing/releasing.md is the maintainer's guide to all of it.
+
+on:
+  push:
+    tags: ["v[0-9]*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - packaging/**
+      - tools/release/**
+      - Cargo.toml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  plan:
+    name: decide what this run is
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      publish: ${{ steps.plan.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: plan
+        env:
+          PUBLISH_ENABLED: ${{ vars.MERIDIAN_RELEASE_PUBLISH }}
+          REF: ${{ github.ref }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          version="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          publish=false
+          if [ "$EVENT" = push ]; then
+            # The tag and the workspace version are one fact, stated twice.
+            if [ "$REF" != "refs/tags/v$version" ]; then
+              echo "::error::the tag is ${REF#refs/tags/} and Cargo.toml says the version is $version"
+              exit 1
+            fi
+            if [ "$PUBLISH_ENABLED" = true ]; then
+              publish=true
+            else
+              echo "::notice::MERIDIAN_RELEASE_PUBLISH is not 'true', so this tag is built and tested and nothing is published"
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "Meridian $version; publish: $publish" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: build ${{ matrix.target }}
+    needs: plan
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `run` says whether the runner can start what it built, which
+          # decides whether the archive is tried out here.
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, run: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm, run: true }
+          - { target: aarch64-apple-darwin, os: macos-latest, run: true }
+          - { target: x86_64-apple-darwin, os: macos-latest, run: false }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest, run: true }
+          - { target: aarch64-pc-windows-msvc, os: windows-latest, run: false }
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      TARGET: ${{ matrix.target }}
+      PYTHON: ${{ startsWith(matrix.os, 'windows') && 'python' || 'python3' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustup target add "$TARGET"
+
+      # The TLS code a module registry is reached with has C in it, and a
+      # static Linux build compiles that with the musl C compiler.
+      - name: Install the musl C compiler
+        if: contains(matrix.target, 'linux-musl')
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+
+      # A rehearsal may reuse an earlier build. A release never does: what it
+      # ships is compiled from the tagged source and nothing else.
+      - uses: Swatinem/rust-cache@v2
+        if: github.event_name == 'pull_request'
+        with:
+          key: release-${{ matrix.target }}
+
+      # The signer is a meridian for the runner itself, since the one being
+      # released may be for another processor.
+      - name: Build the signer
+        run: cargo build --release --locked -p meridian-cli
+
+      # Each build signs its plugins with a key made for it here and deleted
+      # below. The public half is compiled into this build's meridian, which
+      # is how a released meridian knows its own plugins. The secret half
+      # never leaves this job, so there is no long-lived signing secret.
+      - name: Make this build's signing key
+        run: |
+          mkdir -p "$RUNNER_TEMP/key"
+          target/release/meridian signing keygen \
+            --secret "$RUNNER_TEMP/key/release.key" --public "$RUNNER_TEMP/key/release.pub"
+          echo "MERIDIAN_RELEASE_PUBLIC_KEY=$(cut -d' ' -f2 "$RUNNER_TEMP/key/release.pub")" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: cargo build --profile dist --locked --target "$TARGET" --workspace --bins
+
+      - name: Sign the plugins and pack the archive
+        run: |
+          "$PYTHON" tools/release/package.py --version "$VERSION" --target "$TARGET" \
+            --bin-dir "target/$TARGET/dist" --out dist \
+            --signer target/release/meridian --key "$RUNNER_TEMP/key/release.key"
+
+      - name: Delete the signing key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/key"
+
+      - name: Try the archive out
+        if: matrix.run
+        run: |
+          mkdir try
+          case "$TARGET" in
+            *windows*) "$PYTHON" -m zipfile -e "dist/meridian-$VERSION-$TARGET.zip" try ;;
+            *) tar -xzf "dist/meridian-$VERSION-$TARGET.tar.gz" -C try ;;
+          esac
+          cd "try/meridian-$VERSION-$TARGET"
+          ./meridian --version | tee version.txt
+          grep -qx "meridian $VERSION" version.txt
+
+          # Every plugin starts, and each one's signature verifies against the
+          # key compiled into this meridian, with no flag and no key file.
+          ./meridian plugins > plugins.txt
+          shipped="$(ls "$GITHUB_WORKSPACE/plugins" | wc -l | tr -d ' ')"
+          verified="$(grep -c '  signature: verified, signed by key ' plugins.txt)"
+          echo "$verified of $shipped plugins verified"
+          [ "$verified" = "$shipped" ]
+
+          # A plugin that is not the one that was signed is not started.
+          plugin="$(ls | grep -E '^meridian-target-dsc(\.exe)?$')"
+          printf 'x' >> "$plugin"
+          if ./meridian plugins > changed.txt 2>&1; then
+            echo "::error::a changed plugin was started"
+            exit 1
+          fi
+          grep -q "its contents have changed" changed.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archive-${{ matrix.target }}
+          path: dist/meridian-*
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    name: checksums, manifests and SBOMs
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: archive-*
+          path: dist
+          merge-multiple: true
+
+      - name: Write the checksums and the package-manager manifests
+        run: python3 tools/release/manifests.py --version "$VERSION" --dir dist
+
+      - name: Check the manifests and the install script
+        run: |
+          (cd dist && sha256sum --check "meridian-$VERSION-checksums.txt")
+          ruby -c dist/packaging/homebrew/meridian.rb
+          python3 -c 'import json, sys; json.load(open(sys.argv[1]))' dist/packaging/scoop/meridian.json
+          for file in dist/packaging/winget/*.yaml; do
+            ruby -ryaml -e 'YAML.safe_load(File.read(ARGV[0])) or abort("empty")' "$file"
+          done
+          shellcheck packaging/install/install.sh
+          sh -n packaging/install/install.sh
+
+      # What a release is made from: every crate in Cargo.lock, by version.
+      - name: SBOM (SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/meridian-${{ needs.plan.outputs.version }}-sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: SBOM (CycloneDX)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: dist/meridian-${{ needs.plan.outputs.version }}-sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Check the SBOMs name what Meridian is built from
+        run: |
+          for sbom in "dist/meridian-$VERSION-sbom.spdx.json" "dist/meridian-$VERSION-sbom.cdx.json"; do
+            python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "$sbom"
+            for crate in tonic tokio ed25519-dalek; do
+              grep -q "\"$crate\"" "$sbom" || { echo "::error::$sbom does not list $crate"; exit 1; }
+            done
+          done
+
+      - name: Lay out the release's files
+        run: |
+          cp packaging/install/install.sh packaging/install/install.ps1 dist/
+          tar -czf "dist/meridian-$VERSION-package-manifests.tar.gz" -C dist packaging
+          rm -rf dist/packaging
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
+
+  install:
+    name: install on ${{ matrix.os }}
+    needs: [plan, assemble]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: dist
+
+      # The install script, exactly as a person would run it, pointed at this
+      # run's files in place of a published release.
+      - name: Install with install.sh
+        if: runner.os != 'Windows'
+        run: |
+          export MERIDIAN_DOWNLOAD_BASE="$PWD/dist" MERIDIAN_INSTALL_DIR="$PWD/installed"
+          sh dist/install.sh
+          installed/meridian plugins | tee plugins.txt
+          grep -q '  signature: verified, signed by key ' plugins.txt
+          if grep -Eq '  signature: (unsigned|invalid|not checked)' plugins.txt; then
+            echo "::error::a plugin's signature did not verify"
+            exit 1
+          fi
+
+          # A download that does not match its checksum is not installed.
+          for archive in dist/meridian-*.tar.gz; do
+            case "$archive" in *package-manifests*) ;; *) printf 'x' >> "$archive" ;; esac
+          done
+          if MERIDIAN_INSTALL_DIR="$PWD/second" sh dist/install.sh > refused.txt 2>&1; then
+            echo "::error::a corrupted archive was installed"
+            exit 1
+          fi
+          grep -q "does not match its checksum" refused.txt
+          if [ -e second/meridian ]; then
+            echo "::error::a corrupted archive was unpacked"
+            exit 1
+          fi
+
+      - name: Install with install.ps1
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:MERIDIAN_DOWNLOAD_BASE = Join-Path $PWD 'dist'
+          $env:MERIDIAN_INSTALL_DIR = Join-Path $PWD 'installed'
+          $env:MERIDIAN_NO_PATH = '1'
+          & ./dist/install.ps1
+          $plugins = & ./installed/meridian.exe plugins
+          if ($LASTEXITCODE -ne 0) { throw 'meridian plugins failed' }
+          $plugins
+          if (-not ($plugins -match '  signature: verified, signed by key ')) { throw 'no plugin verified' }
+          if ($plugins -match '  signature: (unsigned|invalid|not checked)') { throw 'a plugin did not verify' }
+
+          # A download that does not match its checksum is not installed.
+          Get-ChildItem dist -Filter 'meridian-*.zip' | ForEach-Object { Add-Content -LiteralPath $_.FullName -Value 'x' }
+          $env:MERIDIAN_INSTALL_DIR = Join-Path $PWD 'second'
+          $refused = $false
+          try { & ./dist/install.ps1 } catch { $refused = "$_" -match 'does not match its checksum' }
+          if (-not $refused) { throw 'a corrupted archive was installed' }
+          if (Test-Path second/meridian.exe) { throw 'a corrupted archive was unpacked' }
+
+  cargo-install:
+    name: cargo install from source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the stable toolchain
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        if: github.event_name == 'pull_request'
+
+      # What the install page tells a person with a Rust toolchain to do, from
+      # this checkout in place of the repository's URL.
+      - name: Install the command and a plugin
+        run: |
+          cargo install --locked --debug --root "$RUNNER_TEMP/cargo-root" --path crates/meridian-cli
+          cargo install --locked --debug --root "$RUNNER_TEMP/cargo-root" --path plugins/terraform
+          "$RUNNER_TEMP/cargo-root/bin/meridian" plugins | tee plugins.txt
+          grep -qx terraform plugins.txt
+
+  image:
+    name: container image
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: archive-*-unknown-linux-musl
+          path: dist
+          merge-multiple: true
+
+      - name: Lay out the build context
+        run: tools/release/image-context.sh "$VERSION" dist context
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the image for both platforms
+        run: |
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --build-arg "VERSION=$VERSION" --file packaging/docker/Dockerfile \
+            --output type=oci,dest=meridian-image.tar context
+
+      - name: Run it on each platform
+        run: |
+          shipped="$(ls plugins | wc -l | tr -d ' ')"
+          for arch in amd64 arm64; do
+            docker buildx build --platform "linux/$arch" --load --tag "meridian:$arch" \
+              --build-arg "VERSION=$VERSION" --file packaging/docker/Dockerfile context
+            docker run --rm --platform "linux/$arch" "meridian:$arch" --version
+            verified="$(docker run --rm --platform "linux/$arch" "meridian:$arch" plugins \
+              | grep -c '  signature: verified, signed by key ')"
+            echo "linux/$arch: $verified of $shipped plugins verified"
+            [ "$verified" = "$shipped" ]
+          done
+          # It starts a plugin and compiles a document as the unprivileged user it runs as.
+          docker run --rm --volume "$PWD/examples:/work/examples:ro" meridian:amd64 \
+            compile examples/terraform/web-vm.yaml
+
+  publish:
+    name: sign, attest and open the draft release
+    needs: [plan, assemble, install, cargo-install, image]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    # An environment, so the owner can require an approval before this job
+    # runs (Settings, Environments, release, Required reviewers).
+    environment: release
+    permissions:
+      contents: write # create the draft release
+      packages: write # push the image to GHCR
+      id-token: write # Sigstore keyless signing, as this workflow
+      attestations: write # build provenance and SBOM attestations
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      IMAGE: ghcr.io/${{ github.repository_owner }}/meridian
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: dist
+
+      - uses: sigstore/cosign-installer@v3
+
+      # One signature covers every archive: the checksums file lists them
+      # all, and the install scripts check the archive against it.
+      - name: Sign the checksums
+        run: |
+          cosign sign-blob --yes \
+            --bundle "dist/meridian-$VERSION-checksums.txt.sigstore.json" \
+            "dist/meridian-$VERSION-checksums.txt"
+
+      - name: Record where the archives were built
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-checksums: dist/meridian-${{ needs.plan.outputs.version }}-checksums.txt
+
+      - name: Attest the SBOM for the archives
+        uses: actions/attest-sbom@v2
+        with:
+          subject-checksums: dist/meridian-${{ needs.plan.outputs.version }}-checksums.txt
+          sbom-path: dist/meridian-${{ needs.plan.outputs.version }}-sbom.spdx.json
+
+      - name: Lay out the image's build context
+        run: tools/release/image-context.sh "$VERSION" dist context
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
+
+      - name: Push the image
+        id: image
+        run: |
+          image="$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')"
+          tags=(--tag "$image:$VERSION")
+          # A pre-release is not what `latest` means.
+          case "$VERSION" in *-*) ;; *) tags+=(--tag "$image:latest") ;; esac
+          docker buildx build --platform linux/amd64,linux/arm64 --push "${tags[@]}" \
+            --build-arg "VERSION=$VERSION" --file packaging/docker/Dockerfile \
+            --metadata-file image.json context
+          digest="$(python3 -c 'import json; print(json.load(open("image.json"))["containerimage.digest"])')"
+          echo "name=$image" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Sign the image
+        env:
+          NAME: ${{ steps.image.outputs.name }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: cosign sign --yes "$NAME@$DIGEST"
+
+      - name: Record where the image was built
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+
+      # A draft: nothing is announced and `releases/latest` does not move
+      # until the owner reads it and presses Publish.
+      - name: Open the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NAME: ${{ steps.image.outputs.name }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          flags=(--draft --verify-tag --generate-notes --title "Meridian $VERSION")
+          case "$VERSION" in *-*) flags+=(--prerelease) ;; esac
+          {
+            echo "Container image: \`$NAME:$VERSION\` (\`$DIGEST\`)"
+            echo
+            echo "How to install and how to verify what you downloaded: [docs/quickstart/install.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/docs/quickstart/install.md)."
+          } > notes.md
+          find dist -maxdepth 1 -type f -print0 \
+            | xargs -0 gh release create "v$VERSION" "${flags[@]}" --notes-file notes.md

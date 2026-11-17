@@ -4,6 +4,7 @@ use std::fmt::{self, Write as _};
 use meridian_value::{canonical_map, Value};
 
 use crate::run::Category;
+use crate::schema::ResourceSchema;
 
 /// A point inside a source document. `line` and `column` are 1-based; a zero
 /// `line` means the position is unknown. It travels with every resource so a
@@ -320,6 +321,15 @@ pub trait Emitter {
     /// that asks such a target for a version is refused, because accepting a
     /// version nothing checks would be a silent loss.
     fn target_versions(&self) -> Vec<String> {
+        Vec::new()
+    }
+    /// What each resource type takes, for editors: its params, states and
+    /// notify actions. See [`crate::schema`].
+    ///
+    /// The default, an empty list, means the target does not say, and an
+    /// editor then knows only the names in `supported_resource_types`. A
+    /// schema is advice; `emit` stays the judge of what compiles.
+    fn resource_schemas(&self) -> Vec<ResourceSchema> {
         Vec::new()
     }
     /// Compiles the tree, or refuses it.

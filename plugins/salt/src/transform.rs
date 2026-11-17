@@ -274,6 +274,39 @@ fn mapping(resource_type: &str) -> Option<Mapping> {
     })
 }
 
+/// What each resource type takes, read from the same table a resource is
+/// checked against, so an editor is never told something `emit` refuses.
+pub fn resource_schemas() -> Vec<meridian_sdk::ResourceSchema> {
+    supported_resource_types()
+        .iter()
+        .filter_map(|name| {
+            let m = mapping(name)?;
+            // Which params a type takes depends on its state; an editor is
+            // offered every param some state takes.
+            let mut params = Vec::new();
+            for (_, shape) in m.states {
+                params.extend(shape.params.iter().map(|(param, _)| *param));
+                params.extend(shape.moot.iter().copied());
+            }
+            let states: Vec<&str> = m
+                .states
+                .iter()
+                .map(|(state, _)| *state)
+                .filter(|state| !state.is_empty())
+                .collect();
+            let actions: Vec<&str> = m.actions.iter().map(|(action, _)| *action).collect();
+            Some(meridian_sdk::schema::shared(
+                name,
+                &params,
+                m.required,
+                &states,
+                m.default_state,
+                &actions,
+            ))
+        })
+        .collect()
+}
+
 /// Every IR resource type this target maps, sorted.
 pub fn supported_resource_types() -> Vec<String> {
     ["exec", "file", "group", "package", "service", "user"]

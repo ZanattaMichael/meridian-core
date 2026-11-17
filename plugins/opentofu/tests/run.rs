@@ -4,8 +4,6 @@
 //! answers, on a machine with nothing installed. `tests/real.rs` runs the
 //! same operations against a real `tofu`.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};

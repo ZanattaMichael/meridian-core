@@ -147,6 +147,12 @@ plugin is handed anything, so the target takes no part in it. The resources
 kept are the same whether the document names `ansible`, `terraform` or
 `kubernetes`, and a test asserts that for every target.
 
+**Bare, or wrapped.** A condition is written bare. Wrapped whole in an
+interpolation it means the same, so `when: ${{ data.env == 'prod' }}` is
+`when: data.env == 'prod'`. An interpolation mixed with other text is refused.
+Inside a quoted text the opening is only three characters, so
+`when: data.motd != '${{'` is a bare condition that compares with that text.
+
 ### Giving the data
 
 ```

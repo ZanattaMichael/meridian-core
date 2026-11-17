@@ -223,9 +223,7 @@ fn sls_name(artifact: &Artifact) -> Result<String, RunError> {
 }
 
 fn absolute(dir: &Path) -> PathBuf {
-    dir.canonicalize()
-        .or_else(|_| std::path::absolute(dir))
-        .unwrap_or_else(|_| dir.to_owned())
+    meridian_sdk::tool::absolute_path(dir)
 }
 
 fn path_text(path: &Path) -> String {
@@ -516,12 +514,16 @@ mod tests {
             ssh_roster("web01"),
             "# Written by Meridian for salt-ssh. It is rewritten on every run.\n\"web01\":\n  host: \"web01\"\n"
         );
-        let config = ssh_config(Path::new("/work dir"));
-        assert!(
-            config.contains("root_dir: \"/work dir/ssh/root\"\n"),
-            "{config}"
-        );
-        assert!(config.contains("    - \"/work dir/states\"\n"), "{config}");
+        // The paths are spelled the Unix way: salt-ssh, which reads this
+        // file, does not run from a Windows machine.
+        if cfg!(unix) {
+            let config = ssh_config(Path::new("/work dir"));
+            assert!(
+                config.contains("root_dir: \"/work dir/ssh/root\"\n"),
+                "{config}"
+            );
+            assert!(config.contains("    - \"/work dir/states\"\n"), "{config}");
+        }
     }
 
     #[test]

@@ -124,6 +124,10 @@ impl Emitter for Salt {
         supported_resource_types()
     }
 
+    fn resource_schemas(&self) -> Vec<meridian_sdk::ResourceSchema> {
+        transform::resource_schemas()
+    }
+
     /// `native_notify`: `watch` and `onchanges` are Salt's own requisites, so
     /// a notification compiles to the tool's mechanism and nothing is shelled
     /// out.

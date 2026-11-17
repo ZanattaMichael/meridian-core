@@ -1,7 +1,5 @@
 //! The running half, against stand-ins for `chef-client` and `chef-run`.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::Path;
 

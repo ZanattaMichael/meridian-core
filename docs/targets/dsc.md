@@ -216,8 +216,32 @@ message.
 
 The runner is tested against a real PowerShell, the DscPipelineRunner module
 from the PowerShell Gallery and DSC v3 on Linux, on every pull request that
-touches it. On Windows the same compiled projects are run through both DSC v2
-(`PSDscResources`) and DSC v3 (`Microsoft.Windows/Registry`) and the machine's
-environment and registry are checked afterwards. The plugin's own Rust runner
-has not yet run on Windows, and reaching another machine over WinRM or SSH is
-not tested for real. See [Real-tool tests](../contributing/real-tool-tests.md#dsc).
+touches it. On Windows the plugin's own runner is run against both DSC v2 and
+DSC v3, and compiled projects that use real Windows resources (`PSDscResources`
+through DSC v2, `Microsoft.Windows/Registry` through DSC v3) are run and the
+machine's environment and registry are checked afterwards. Reaching another
+machine over WinRM or SSH is not tested for real. See
+[Real-tool tests](../contributing/real-tool-tests.md#dsc).
+
+### A class-based resource that DSC v2 cannot find
+
+DSC v2 looks a resource up with `Get-DscResource`, and DscPipelineRunner does
+the same before it runs anything. A plan that stops with
+
+```text
+The term 'MarkerFile' is not recognized as the name of a Resource.
+```
+
+for a class-based resource whose module is installed usually means the module's
+manifest hides it. When a manifest lists `FunctionsToExport`, `CmdletsToExport`
+and `AliasesToExport` all three, without a wildcard, PowerShell does not look
+inside the module when it lists it, and reports no DSC resources for it
+whatever `DscResourcesToExport` says. Check with:
+
+```pwsh
+(Get-Module -ListAvailable TheModule).ExportedDscResources
+```
+
+If that is empty, remove one of the three keys from the module's manifest (or
+use a module version that has). DSC v3 is not affected: its PowerShell adapter
+reads the module itself.

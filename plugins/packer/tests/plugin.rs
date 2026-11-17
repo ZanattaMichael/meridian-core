@@ -1,8 +1,6 @@
 //! The real plugin binary, driven by the host across the process boundary,
 //! from a document to the outputs of a build.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::Path;
 use std::sync::Mutex;

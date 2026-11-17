@@ -282,6 +282,52 @@ them, so each one is a promise:
   output, as DSC does. Leave it out otherwise, and a document that asks your
   target for a version is refused instead of being silently ignored.
 
+### Describe your resource types for editors
+
+One more declaration is optional and worth making: `resource_schemas()`. It
+tells the [editor tools](../tooling/index.md) what each of your resource types
+takes. With it, the language server completes and documents your params and
+states, `meridian lint` and the editor report an unknown param in its place
+before the document is compiled, and the [JSON Schema](../tooling/json-schema.md)
+checks them too. Without it, your types are still offered by name, and your
+own transform stage still refuses what is wrong when the document is compiled.
+
+```rust
+fn resource_schemas(&self) -> Vec<ResourceSchema> {
+    vec![ResourceSchema::closed("bucket", "An object storage bucket.")
+        .states(&["present", "absent"], "present")
+        .param(ParamSchema::new("name", ParamKind::String, "The bucket's name.").required())
+        .param(
+            ParamSchema::new("access", ParamKind::String, "Who may read it.")
+                .values(&["private", "public"]),
+        )]
+}
+```
+
+- `ResourceSchema::closed` says the params listed are all there are, so any
+  other param is an error. `ResourceSchema::open` says the type takes params
+  you do not list, which is right for a type that passes params through to
+  the tool.
+- `.states(states, default)` lists the values of `state` and which one an
+  omitted `state` means. A type with no states takes no `state` at all.
+- `.actions(...)` lists the `action` values a `notifies` aimed at this type
+  may ask for.
+- A configuration management target that maps the shared types (`package`,
+  `file`, `service`, `user`, `group`, `exec`) calls
+  `meridian_sdk::schema::shared(name, params, required, states, default, actions)`
+  with the lists its transform stage already checks against. The descriptions
+  of the shared params come from the SDK, so every target documents `mode` the
+  same way. The template plugin does this, and so do the first-party
+  configuration management plugins.
+
+Build the description from the same tables your transform stage reads, never
+from a second list, so the two cannot disagree. The description is advice to
+editors and never replaces your checks: the host does not enforce it when
+compiling. `crates/meridian-tooling/tests/schema_conformance.rs` holds the
+first-party plugins to it, by compiling a resource with every declared param
+and state and checking that the plugin accepts what it said it takes and
+refuses what it left out.
+
 ## Step 5: the runner
 
 `runner.rs` hands the artifact to the real tool. The host gives you a
@@ -602,6 +648,7 @@ is this list:
 - [ ] The example compiles, and its golden files are what the tool should get
 - [ ] Everything the tool cannot express is refused, with a test for each refusal
 - [ ] `capabilities()`, `category()` and `supported_resource_types()` claim only what a test proves
+- [ ] `resource_schemas()` describes each type from the tables the transform stage checks, or is left out on purpose
 - [ ] The runner builds no shell command strings, or says where it does and why
 - [ ] `docs/targets/<name>.md` is complete and opens with what is and is not supported
 - [ ] The target is listed in the README, the docs index, the install page and the capability matrix
@@ -655,6 +702,14 @@ in [`proto/meridian/plugin/v1/plugin.proto`](../../proto/meridian/plugin/v1/plug
 So a plugin can be written in any language, and can live in its own
 repository: build a binary named `meridian-target-<name>`, put it beside
 `meridian` or in a directory named by `--plugin-dir`, and the host finds it.
+A released `meridian` starts only plugins signed by a key it trusts, so the
+people who run your plugin need your public key, or need to relax the check:
+[Plugin signatures](../reference/plugin-signatures.md#signing-plugins-of-your-own)
+shows how to make a key and sign a binary. A plugin written without the SDK
+also has to listen where the host can dial it: print one line to stdout,
+`MERIDIAN-PLUGIN|<protocol>|<sdk version>|<network>|<address>`, where the
+network is `unix` with a socket path, `npipe` with a Windows named pipe's
+name, or `tcp` with a loopback address, and exit when stdin closes.
 The Rust SDK is the supported path today, and the only one with a test kit.
 If you write one in another language, please open an issue and tell us what
 was hard; that is how the protocol gets better.

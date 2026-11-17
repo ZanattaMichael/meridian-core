@@ -21,9 +21,6 @@ metadata:
     tier: web
 spec:
   target: ansible
-  targetHost:
-    from: inline
-    host: ${{ data.project }}-${{ data.env }}.example.com
 
   # Named values, worked out once. They may be written in any order, and one
   # may read another.
@@ -41,6 +38,9 @@ spec:
   conditions:
     is_prod: data.env == 'prod'
     needs_tls: cond.is_prod || (data.force_tls ?? false)
+  targetHost:
+    from: inline
+    host: ${{ data.project }}-${{ data.env }}.example.com
 
   resources:
     - id: web_pkg

@@ -11,7 +11,9 @@ use semver::{Version, VersionReq};
 use crate::integrity::hash_dir;
 use crate::lock::{Lock, Locked, LOCK_FILE};
 use crate::manifest::{safe_relative, Manifest, Source, MANIFEST_FILE};
-use crate::{git, oci, Error};
+use meridian_signing::{Signature, Verification};
+
+use crate::{git, oci, signature, Error};
 
 /// What opens a reference to a file in a module: `@acme/nginx:documents/web.yaml`.
 pub const MODULE_REFERENCE_PREFIX: char = '@';
@@ -26,6 +28,9 @@ pub struct Project<'a> {
     /// The core release doing the work, checked against each module's
     /// `spec.meridian`.
     pub core_version: &'a str,
+    /// Whether fetched modules must be signed, and by whom. A `path` module
+    /// is the project's own working copy and is never checked.
+    pub signatures: &'a Verification,
 }
 
 /// What [`install`] is allowed to change.
@@ -62,6 +67,24 @@ pub struct Report {
     pub changes: Vec<(Locked, Change)>,
     /// Whether `meridian.lock` was written.
     pub wrote_lock: bool,
+    /// What checking each fetched module's signature found, by module name.
+    /// Empty when signatures are off.
+    pub signatures: BTreeMap<String, Signature>,
+}
+
+impl Report {
+    /// A line for each module that was installed although its signature did
+    /// not pass, which only the `warn` policy allows.
+    pub fn warnings(&self) -> Vec<String> {
+        warnings(&self.lock.modules, &self.signatures)
+    }
+}
+
+fn warnings(modules: &[Locked], signatures: &BTreeMap<String, Signature>) -> Vec<String> {
+    modules
+        .iter()
+        .filter_map(|m| signature::warning(&label(m), signatures.get(&m.name)?))
+        .collect()
 }
 
 /// One pinned module and what, if anything, is wrong with it.
@@ -69,6 +92,9 @@ pub struct Report {
 pub struct Check {
     pub module: Locked,
     pub problem: Option<String>,
+    /// What its signature says. `NotChecked` when signatures are off, for a
+    /// `path` module, and when `problem` is about something else.
+    pub signature: Signature,
 }
 
 fn label(locked: &Locked) -> String {
@@ -634,6 +660,21 @@ pub fn install(project: &Project<'_>, mode: Mode) -> Result<Report, Error> {
     }
     changes.sort_by(|a, b| a.0.name.cmp(&b.0.name));
 
+    // Before the lockfile is written: a module that may not be used is not
+    // pinned either.
+    let mut signatures = BTreeMap::new();
+    for module in lock
+        .modules
+        .iter()
+        .filter(|m| !m.source.starts_with("path+"))
+    {
+        let dir = store_dir(project.state_dir, module);
+        let found = signed(project, module, &dir).map_err(Error::new)?;
+        if found != Signature::NotChecked {
+            signatures.insert(module.name.clone(), found);
+        }
+    }
+
     let lock_path = project.dir.join(LOCK_FILE);
     let on_disk = fs::read_to_string(&lock_path).ok();
     let rendered = lock.render();
@@ -665,16 +706,17 @@ pub fn install(project: &Project<'_>, mode: Mode) -> Result<Report, Error> {
         lock,
         changes,
         wrote_lock: differs,
+        signatures,
     })
 }
 
 /// The directory a pinned module's files are in, and what is wrong with it
 /// if anything is.
-fn locate(project: &Project<'_>, module: &Locked) -> Result<PathBuf, String> {
+fn locate(project: &Project<'_>, module: &Locked) -> Result<(PathBuf, Signature), String> {
     if let Some(path) = module.source.strip_prefix("path+") {
         let dir = project.dir.join(path);
         return if dir.join(MANIFEST_FILE).is_file() {
-            Ok(dir)
+            Ok((dir, Signature::NotChecked))
         } else {
             Err(format!(
                 "{} is required from {}, which has no {MANIFEST_FILE}",
@@ -691,7 +733,10 @@ fn locate(project: &Project<'_>, module: &Locked) -> Result<PathBuf, String> {
         ));
     }
     match hash_dir(&dir) {
-        Ok(found) if found == module.integrity => Ok(dir),
+        Ok(found) if found == module.integrity => {
+            let signature = signed(project, module, &dir)?;
+            Ok((dir, signature))
+        }
         Ok(found) => Err(format!(
             "{} in {} does not match {LOCK_FILE}\n    pinned: {}\n    found:  {found}\nA file \
              in it was changed after it was fetched. Delete that directory and run `meridian \
@@ -704,6 +749,17 @@ fn locate(project: &Project<'_>, module: &Locked) -> Result<PathBuf, String> {
     }
 }
 
+/// Applies the project's signature policy to a fetched module whose content
+/// already matched its pin.
+fn signed(project: &Project<'_>, module: &Locked, dir: &Path) -> Result<Signature, String> {
+    signature::check(
+        project.signatures,
+        dir,
+        &label(module),
+        (&module.name, &module.version, &module.integrity),
+    )
+}
+
 /// Checks every pinned module, and reports on each instead of stopping at
 /// the first that is wrong.
 pub fn verify(project: &Project<'_>) -> Result<Vec<Check>, Error> {
@@ -712,9 +768,17 @@ pub fn verify(project: &Project<'_>) -> Result<Vec<Check>, Error> {
     Ok(lock
         .modules
         .into_iter()
-        .map(|module| {
-            let problem = locate(project, &module).err();
-            Check { module, problem }
+        .map(|module| match locate(project, &module) {
+            Ok((_, signature)) => Check {
+                module,
+                problem: None,
+                signature,
+            },
+            Err(problem) => Check {
+                module,
+                problem: Some(problem),
+                signature: Signature::NotChecked,
+            },
         })
         .collect())
 }
@@ -723,6 +787,8 @@ pub fn verify(project: &Project<'_>) -> Result<Vec<Check>, Error> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Modules {
     roots: BTreeMap<String, PathBuf>,
+    /// A line for each module in use although its signature did not pass.
+    warnings: Vec<String>,
 }
 
 impl Modules {
@@ -743,6 +809,7 @@ impl Modules {
             if root.modules.is_empty() {
                 return Ok(Modules {
                     roots: BTreeMap::new(),
+                    warnings: Vec::new(),
                 });
             }
             return Err(Error::new(format!(
@@ -778,11 +845,22 @@ impl Modules {
             }
         }
         let mut roots = BTreeMap::new();
+        let mut signatures = BTreeMap::new();
         for module in &lock.modules {
-            let dir = locate(project, module).map_err(Error::new)?;
+            let (dir, signature) = locate(project, module).map_err(Error::new)?;
             roots.insert(module.name.clone(), dir);
+            signatures.insert(module.name.clone(), signature);
         }
-        Ok(Modules { roots })
+        Ok(Modules {
+            roots,
+            warnings: warnings(&lock.modules, &signatures),
+        })
+    }
+
+    /// A line for each module in use although it is unsigned or its
+    /// signature does not pass, which only the `warn` policy allows.
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
     }
 
     /// The names of the pinned modules, sorted.

@@ -123,6 +123,27 @@ pub(crate) fn mapping(resource_type: &str) -> Option<Mapping> {
 
 const TYPES: [&str; 6] = ["exec", "file", "group", "package", "service", "user"];
 
+/// What each resource type takes, read from the same table a resource is
+/// checked against, so an editor is never told something `emit` refuses.
+pub fn resource_schemas() -> Vec<meridian_sdk::ResourceSchema> {
+    supported_resource_types()
+        .iter()
+        .filter_map(|name| {
+            let m = mapping(name)?;
+            let params: Vec<&str> = m.params.iter().map(|(param, _)| *param).collect();
+            let states: Vec<&str> = m.states.iter().map(|(state, _)| *state).collect();
+            Some(meridian_sdk::schema::shared(
+                name,
+                &params,
+                m.required,
+                &states,
+                m.default_state,
+                m.actions,
+            ))
+        })
+        .collect()
+}
+
 /// Every IR resource type this target maps, sorted.
 pub fn supported_resource_types() -> Vec<String> {
     TYPES.map(str::to_owned).to_vec()

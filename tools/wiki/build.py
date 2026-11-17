@@ -50,13 +50,14 @@ GENERATED = "generated"
 # Top-level sections in reading order. A directory that is not listed is placed
 # after these and before the planning documents, in alphabetical order.
 SECTION_ORDER = [
-    "quickstart", "concepts", "reference", "targets", "operations", "sdk",
+    "quickstart", "concepts", "tooling", "reference", "targets", "operations", "sdk",
     "troubleshooting", "contributing",
 ]
 SECTION_LAST = ["plans", "branding"]
 SECTION_TITLES = {
     "quickstart": "Quickstart",
     "concepts": "Concepts",
+    "tooling": "Editor and authoring tools",
     "reference": "Reference",
     "targets": "Targets",
     "operations": "Operations",
@@ -70,7 +71,8 @@ SECTION_TITLES = {
 PAGE_ORDER = {
     "quickstart": ["install", "first-resourceset", "first-two-stage", "workflows"],
     "concepts": ["ir-overview", "dependencies", "capability-model", "two-stage-architecture"],
-    "reference": ["cli", "resource-types", "capability-matrix", "conformance-matrix"],
+    "tooling": ["language-server", "vscode", "other-editors", "formatter", "linter", "json-schema"],
+    "reference": ["cli", "resource-types", "capability-matrix", "conformance-matrix", "lint"],
     "plans": ["design-plan", "testing-plan", "documentation-plan"],
 }
 INDEX_NAMES = ("index.md", "README.md")

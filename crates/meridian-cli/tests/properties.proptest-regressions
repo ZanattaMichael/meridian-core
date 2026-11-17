@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc 5cc15fcab0962d9b2062cbf2879b3143378db6f8a25259c556dd54f95766e618 # shrinks to sketch = Sketch { name: "a", labels: {}, resources: [SketchResource { type: "a", state: "", params: {"a": Map({"a": Float(-1.1058996435910009e278)})}, depends_on: [], notifies: [], runtime_when: "" }] }
 cc 9f7c752d9c4761bb9ca2d0968c0a7a607b8d946c53e49af28171e7a780732c34 # shrinks to map = {"a": Map({"a": Map({"a": Float(-3.1774504355745994e25)})})}
+cc 6f44d65046937aa914816bb1b6b280bbc33eb57148dc02a387d8ee40812b24bb # shrinks to model = Or(And(Literal(Null), Literal(String("${{"))), Literal(Null)), data = {}

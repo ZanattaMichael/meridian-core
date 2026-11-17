@@ -7,6 +7,8 @@
 //! `MERIDIAN_TEST_REAL_CLOUD_INIT`, which turns a missing tool into a
 //! failure.
 
+// Left out on Windows: this file drives the real tool, and the workflow that
+// installs the tool and runs it is a Linux job.
 #![cfg(unix)]
 
 use std::fs;

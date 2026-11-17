@@ -5,8 +5,6 @@
 //! directory, which makes plan and apply real: a plan is a comparison with
 //! what the last apply left behind.
 
-#![cfg(unix)]
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
@@ -434,11 +432,16 @@ fn a_plugin_is_never_asked_for_an_operation_it_did_not_declare() {
         .expect("it still compiles");
 }
 
+// Unix only: on Windows a plugin listens on a named pipe, which is not a file
+// and is gone when the plugin is, so there is nothing it could leave behind.
+#[cfg(unix)]
 #[test]
 fn a_rust_plugin_leaves_nothing_behind_when_it_exits() {
     // The plugin is given a temporary directory of its own, so what it leaves
-    // there can be told apart from every other test's plugins.
-    let tmp = std::env::temp_dir().join(format!("meridian-test-{}", std::process::id()));
+    // there can be told apart from every other test's plugins. It is under
+    // /tmp and not the system's temporary directory, which on macOS is too
+    // deep for a socket: the plugin would then, rightly, not use it.
+    let tmp = Path::new("/tmp").join(format!("meridian-test-{}", std::process::id()));
     let _ = fs::remove_dir_all(&tmp);
     fs::create_dir_all(&tmp).unwrap();
     let mut env: Vec<(String, String)> = std::env::vars().filter(|(k, _)| k != "TMPDIR").collect();

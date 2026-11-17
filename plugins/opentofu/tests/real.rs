@@ -15,6 +15,8 @@
 //! machine that has no OpenTofu. Set `MERIDIAN_TEST_TOFU_NETWORK=1` as well to
 //! include the test that downloads a provider from the registry.
 
+// Left out on Windows: this file drives the real tool, and the workflow that
+// installs the tool and runs it is a Linux job.
 #![cfg(unix)]
 #![allow(clippy::result_large_err)]
 

@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+use crate::signature::SIGNATURE_FILE;
 use crate::Error;
 
 /// Directories that are never part of a module: git's own, and Meridian's
@@ -78,10 +79,14 @@ pub(crate) fn files(root: &Path) -> Result<Vec<(String, PathBuf)>, Error> {
 
 /// The integrity hash of the module at `root`: `h1:` and the SHA-256 of a
 /// listing with one line per file, `<sha-256 of the file>  <path>`, sorted
-/// by path.
+/// by path. The module's signature file is left out: it signs this hash.
 pub fn hash_dir(root: &Path) -> Result<String, Error> {
     let mut listing = String::new();
     for (relative, path) in files(root)? {
+        // The signature is over this hash, so it cannot be part of it.
+        if relative == SIGNATURE_FILE {
+            continue;
+        }
         let content =
             fs::read(&path).map_err(|e| Error::new(format!("reading {}: {e}", path.display())))?;
         listing.push_str(&sha256_hex(&content));

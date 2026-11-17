@@ -1,7 +1,5 @@
 //! A whole workflow, run through real plugin processes.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -1088,4 +1086,45 @@ fn a_document_that_cannot_be_resolved_fails_its_stage_and_says_where() {
         why.contains("no plugin provides target \"nosuch\""),
         "{why}"
     );
+}
+
+#[test]
+fn checking_what_a_document_declares_reads_no_value_and_runs_no_command() {
+    use meridian_orchestrator::check_declared;
+    use meridian_secret::Probe;
+    let dir = std::env::temp_dir().join(format!("meridian-check-declared-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let marker = dir.join("ran");
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata: {{name: site}}\nspec:\n  target: fake\n  \
+         targetHost: {{from: inline, host: web01}}\n  secrets:\n    \
+         - {{name: a, from: env, key: MERIDIAN_TEST_CHECK_DECLARED_NOT_SET}}\n    \
+         - {{name: b, from: env, key: MERIDIAN_TEST_CHECK_DECLARED_NOT_SET, optional: true}}\n    \
+         - {{name: c, from: exec, command: [touch, {}]}}\n    \
+         - {{name: d, from: file, path: {}}}\n  \
+         resources:\n    - {{id: motd, type: file, params: {{content: hi}}}}\n",
+        marker.display(),
+        dir.display()
+    );
+    let docs = meridian_ir::parse("site.yaml", text.as_bytes()).unwrap();
+    let rows = check_declared(&docs[0]);
+    let seen: Vec<(&str, &str, bool)> = rows
+        .iter()
+        .map(|row| (row.name.as_str(), row.from.as_str(), row.unanswered()))
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            ("a", "env", true),
+            ("b", "env", false),
+            ("c", "exec", false),
+            ("d", "file", true)
+        ]
+    );
+    assert!(matches!(rows[0].probe, Probe::Absent(_)));
+    assert!(matches!(rows[2].probe, Probe::Unknown(_)));
+    assert!(matches!(rows[3].probe, Probe::Refused(_)));
+    assert!(!marker.exists());
+    let _ = std::fs::remove_dir_all(&dir);
 }

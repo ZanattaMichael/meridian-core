@@ -295,17 +295,62 @@ pub fn scratch(base: &str, name: &str) -> PathBuf {
 
 /// Writes an executable shell script that stands in for a tool, and returns
 /// its path. The script sees the tool's real arguments and working directory.
-#[cfg(unix)]
+///
+/// On Windows a script cannot be started as a program, so the stand-in is a
+/// small program, `<name>.exe`, that runs the script `<name>.sh` beside it
+/// with the `sh` that Git for Windows installs (see `src/bin/meridian-stand-in.rs`).
+/// The path returned is the program's.
 pub fn stand_in(dir: &Path, name: &str, body: &str) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
     fs::create_dir_all(dir).expect("creating the stand-in directory");
+    place_stand_in(dir, name, &format!("#!/bin/sh\n{body}\n"))
+}
+
+#[cfg(unix)]
+fn place_stand_in(dir: &Path, name: &str, script: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
     let path = dir.join(name);
     // Written under another name and renamed, so the file is never executed
     // while it is still open for writing.
     let staged = dir.join(format!("{name}.staged"));
-    fs::write(&staged, format!("#!/bin/sh\n{body}\n")).expect("writing the stand-in");
+    fs::write(&staged, script).expect("writing the stand-in");
     fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).expect("marking it executable");
     fs::rename(&staged, &path).expect("placing the stand-in");
+    path
+}
+
+#[cfg(not(unix))]
+fn place_stand_in(dir: &Path, name: &str, script: &str) -> PathBuf {
+    let launcher = built_binary("meridian-plugin-testkit", "meridian-stand-in");
+    // The name is extended, not given a new extension: `docker.real` must
+    // become `docker.real.exe` and its script `docker.real.sh`.
+    let with = |extension: &str| dir.join(format!("{name}.{extension}"));
+    // The launcher passes the tool's arguments in the environment; these
+    // lines make them the script's own. `pwd` answers with the directory as
+    // Windows names it, which is how the code under test names it too.
+    let script = script.replacen(
+        "#!/bin/sh\n",
+        "#!/bin/sh\n\
+         set --\n\
+         meridian_arg=1\n\
+         while [ \"$meridian_arg\" -le \"${MERIDIAN_STAND_IN_ARGC:-0}\" ]; do\n\
+         \x20 eval \"set -- \\\"\\$@\\\" \\\"\\$MERIDIAN_STAND_IN_ARG_$meridian_arg\\\"\"\n\
+         \x20 meridian_arg=$((meridian_arg + 1))\n\
+         done\n\
+         unset meridian_arg\n\
+         pwd() { cygpath -w \"$(command pwd)\"; }\n",
+        1,
+    );
+    fs::write(with("sh"), script).expect("writing the stand-in's script");
+    let path = with("exe");
+    // A stand-in a test replaces may still be running; one that is already
+    // there is the same launcher, so only its script needed replacing.
+    if let Err(err) = fs::copy(&launcher, &path) {
+        assert!(
+            path.is_file(),
+            "placing the stand-in {}: {err}",
+            path.display()
+        );
+    }
     path
 }
 
@@ -334,18 +379,24 @@ impl meridian_sdk::Log for KeptLog {
 /// Builds a workspace plugin's binary and returns its path, for a test that
 /// needs the real process. Each binary is placed in a directory of its own,
 /// so discovering that directory finds exactly one plugin.
+pub fn plugin_binary(package: &str) -> PathBuf {
+    built_binary(package, package)
+}
+
+/// Builds one binary of a workspace package and returns the path of a copy
+/// that is safe to run, in a directory of its own.
 ///
 /// A test cannot ask Cargo for another package's binary through an
 /// environment variable, so it is built here, and Cargo is asked where it put
 /// the result: the layout of a target directory is Cargo's business and has
 /// changed between releases.
-pub fn plugin_binary(package: &str) -> PathBuf {
+pub fn built_binary(package: &str, binary: &str) -> PathBuf {
     static BUILT: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
     let mut built = BUILT
         .get_or_init(Mutex::default)
         .lock()
         .expect("no build panicked while holding the lock");
-    if let Some(path) = built.get(package) {
+    if let Some(path) = built.get(binary) {
         return path.clone();
     }
 
@@ -358,7 +409,7 @@ pub fn plugin_binary(package: &str) -> PathBuf {
         "-p",
         package,
         "--bin",
-        package,
+        binary,
     ]);
     // Built the way the test itself was, so a release test run does not also
     // compile a debug plugin.
@@ -368,7 +419,7 @@ pub fn plugin_binary(package: &str) -> PathBuf {
     let output = build.current_dir(repo_root()).output().expect("cargo runs");
     assert!(
         output.status.success(),
-        "building {package}:\n{}",
+        "building {binary}:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
     let messages = String::from_utf8_lossy(&output.stdout);
@@ -376,23 +427,28 @@ pub fn plugin_binary(package: &str) -> PathBuf {
         .lines()
         .filter(|line| line.contains("\"reason\":\"compiler-artifact\""))
         .filter_map(executable_in)
-        .rfind(|path| path.file_stem().is_some_and(|n| n == package))
-        .unwrap_or_else(|| panic!("cargo did not report where it built {package}:\n{messages}"));
+        .rfind(|path| path.file_stem().is_some_and(|n| n == binary))
+        .unwrap_or_else(|| panic!("cargo did not report where it built {binary}:\n{messages}"));
 
     let dir = executable
         .parent()
         .expect("the binary is in a directory")
         .join("plugins-under-test")
-        .join(package);
+        .join(binary);
     fs::create_dir_all(&dir).expect("creating the plugin directory");
     let name = executable.file_name().expect("the binary has a name");
     // Copied under another name and renamed, so a test process running in
     // parallel never executes a half-written file.
-    let staged = dir.join(format!("{package}.{}", std::process::id()));
+    let staged = dir.join(format!("{binary}.{}", std::process::id()));
     fs::copy(&executable, &staged).expect("copying the plugin binary");
     let placed = dir.join(name);
-    fs::rename(&staged, &placed).expect("placing the plugin binary");
-    built.insert(package.to_owned(), placed.clone());
+    if let Err(err) = fs::rename(&staged, &placed) {
+        // Windows will not replace a program that is running. One that is
+        // already in place was built from the same sources moments ago.
+        let _ = fs::remove_file(&staged);
+        assert!(placed.is_file(), "placing {}: {err}", placed.display());
+    }
+    built.insert(binary.to_owned(), placed.clone());
     placed
 }
 

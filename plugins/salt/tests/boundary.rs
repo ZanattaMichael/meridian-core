@@ -2,7 +2,6 @@
 //! over the plugin protocol. Each stage is tested in process elsewhere; this
 //! proves nothing is lost or reworded on the way across the boundary.
 
-#![cfg(unix)]
 #![allow(clippy::result_large_err)]
 
 use std::path::Path;

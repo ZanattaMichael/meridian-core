@@ -7,7 +7,7 @@
 //! are not rewritten, slightly differently, by every plugin.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use crate::{sys, SecretValue};
@@ -47,7 +47,10 @@ fn candidates() -> Vec<(PathBuf, bool)> {
 fn random_name() -> std::io::Result<String> {
     let mut bytes = [0u8; 16];
     #[cfg(unix)]
-    File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    {
+        use std::io::Read;
+        File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    }
     #[cfg(not(unix))]
     {
         // Not a secret: only a name that will not collide. The directory is
@@ -63,6 +66,8 @@ fn random_name() -> std::io::Result<String> {
 }
 
 fn private_dir(path: &Path) -> std::io::Result<()> {
+    // Only Unix has a mode to set on it.
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     {

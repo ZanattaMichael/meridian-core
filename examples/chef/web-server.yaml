@@ -70,8 +70,8 @@ spec:
     # the Ruby an only_if guard holds.
     - id: open_firewall
       type: exec
+      runtimeWhen: "node['platform_family'] == 'debian'"
       params:
         command: ufw allow 80/tcp
-      runtimeWhen: "node['platform_family'] == 'debian'"
       dependsOn:
         - resource: nginx_svc

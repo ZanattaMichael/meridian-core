@@ -11,6 +11,7 @@ on:
   pull_request:
     paths:
       - 'crates/meridian-module/**'
+      - 'crates/meridian-signing/**'
       - 'crates/meridian-cli/**'
       - 'crates/meridian-ir/**'
       - 'examples/modules/**'

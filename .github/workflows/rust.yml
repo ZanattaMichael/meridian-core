@@ -27,3 +27,43 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
+
+  # The same suite on the other systems Meridian is released for. Formatting
+  # is checked once, above; clippy runs again here because code behind
+  # `cfg(windows)` is only ever compiled on Windows.
+  platforms:
+    name: clippy and test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the stable toolchain
+        run: rustup toolchain install stable --profile minimal --component clippy --no-self-update && rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      # Every failure in one run, and the whole output kept, so the step
+      # below can show the failures without the thousands of lines between.
+      - name: Test
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace --locked --no-fail-fast 2>&1 | tee test.log
+
+      # The detail first and the list of failed tests last, so the end of
+      # the log is the summary.
+      - name: Show only what failed
+        if: failure()
+        shell: bash
+        run: |
+          grep -aE "panicked at|^  left:|^ right:|^error(\[|:)|assertion|^Test failed|minimal failing input" test.log \
+            | grep -av '"reason":' | cut -c1-400 | tail -n 150 || true
+          echo "== failed tests =="
+          grep -aE "^test .* FAILED|^    \`-p " test.log | cut -c1-200 || true

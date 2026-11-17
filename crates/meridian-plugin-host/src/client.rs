@@ -15,7 +15,7 @@ use meridian_sdk::{
 use tokio::runtime::Runtime;
 use tonic::transport::{Channel, Endpoint};
 
-use crate::{EmitError, Error, ImportFailure, Info, RunFailure};
+use crate::{EmitError, Error, ImportFailure, Info, RunFailure, Verification};
 
 /// How long a host waits for a plugin to announce itself. A plugin that has
 /// not printed its handshake line by then is either not a Meridian plugin or is
@@ -39,6 +39,9 @@ pub struct StartOptions {
     pub env: Option<Vec<(String, String)>>,
     /// How long to wait for the handshake line and the first reply.
     pub handshake_timeout: Duration,
+    /// Whether, and against which keys, the binary's signature is checked
+    /// before it is started. The default checks nothing.
+    pub verification: Verification,
 }
 
 impl Default for StartOptions {
@@ -47,6 +50,7 @@ impl Default for StartOptions {
             args: Vec::new(),
             env: None,
             handshake_timeout: HANDSHAKE_TIMEOUT,
+            verification: Verification::off(),
         }
     }
 }
@@ -79,7 +83,20 @@ impl Client {
     ///
     /// On any failure the process is killed before returning, so a
     /// half-started plugin never survives the error that describes it.
+    ///
+    /// The binary's signature is checked first, as `options.verification`
+    /// says: a plugin that must not run is never started, not started and
+    /// then stopped.
     pub fn start(path: &str, options: &StartOptions) -> Result<Client, Error> {
+        let signature = options
+            .verification
+            .check(std::path::Path::new(path))
+            .map_err(|cause| Error {
+                path: path.to_owned(),
+                msg: "the plugin was not started".to_owned(),
+                cause,
+                ..Error::default()
+            })?;
         let process = Process::spawn(path, options)?;
         let deadline = Instant::now() + options.handshake_timeout;
 
@@ -112,15 +129,15 @@ impl Client {
                 ))
             }
         };
-        let endpoint = match handshake.endpoint() {
-            Ok(endpoint) => endpoint,
+        let dial = match handshake.dial() {
+            Ok(dial) => dial,
             Err(cause) => return Err(process.fail(path, "could not connect to the plugin", cause)),
         };
 
         let remaining = deadline.saturating_duration_since(Instant::now());
         let described = runtime.block_on(async {
             let connect_and_describe = async {
-                let channel = endpoint
+                let channel = dial
                     .connect()
                     .await
                     .map_err(|e| ("could not connect to the plugin", describe(&e)))?;
@@ -170,10 +187,16 @@ impl Client {
             capabilities: wire::capabilities_from_wire(reply.capabilities),
             category: wire::category_from_wire(reply.category),
             target_versions: reply.target_versions,
+            resource_schemas: reply
+                .resource_schemas
+                .into_iter()
+                .map(wire::resource_schema_from_wire)
+                .collect(),
             operations: wire::operations_from_wire(reply.operations),
             accepts_inputs: reply.accepts_inputs,
             import_formats: wire::import_formats_from_wire(reply.import_formats),
             path: path.to_owned(),
+            signature,
         };
         Ok(Client {
             info,
@@ -517,17 +540,69 @@ impl Handshake {
         })
     }
 
-    fn endpoint(&self) -> Result<Endpoint, String> {
+    fn dial(&self) -> Result<Dial, String> {
         let uri = match self.network.as_str() {
             "unix" => format!("unix:{}", self.address),
             "tcp" | "tcp4" | "tcp6" => format!("http://{}", self.address),
+            #[cfg(windows)]
+            "npipe" => return Ok(Dial::Pipe(self.address.clone())),
             other => {
                 return Err(format!(
                     "the handshake named network {other:?}, which this host cannot dial"
                 ))
             }
         };
-        Endpoint::from_shared(uri).map_err(|e| describe(&e))
+        Endpoint::from_shared(uri)
+            .map(|endpoint| Dial::Endpoint(Box::new(endpoint)))
+            .map_err(|e| describe(&e))
+    }
+}
+
+/// How to reach a plugin, from its handshake.
+#[derive(Debug)]
+enum Dial {
+    /// A Unix socket or a TCP address, which the transport dials by itself.
+    Endpoint(Box<Endpoint>),
+    /// A Windows named pipe, by its full name.
+    #[cfg(windows)]
+    Pipe(String),
+}
+
+impl Dial {
+    async fn connect(self) -> Result<Channel, tonic::transport::Error> {
+        match self {
+            Dial::Endpoint(endpoint) => endpoint.connect().await,
+            #[cfg(windows)]
+            Dial::Pipe(name) => {
+                // The address is never dialled: every connection goes to the
+                // pipe. The transport only needs something shaped like one.
+                Endpoint::from_static("http://meridian-plugin.invalid")
+                    .connect_with_connector(tower::service_fn(move |_: tonic::transport::Uri| {
+                        let name = name.clone();
+                        async move { open_pipe(&name).await.map(hyper_util::rt::TokioIo::new) }
+                    }))
+                    .await
+            }
+        }
+    }
+}
+
+/// Opens a plugin's named pipe, waiting out the moment between one
+/// connection being taken and the plugin offering the next.
+#[cfg(windows)]
+async fn open_pipe(
+    name: &str,
+) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
+    const PIPE_BUSY: i32 = 231;
+    let mut attempt = 0;
+    loop {
+        match tokio::net::windows::named_pipe::ClientOptions::new().open(name) {
+            Err(err) if err.raw_os_error() == Some(PIPE_BUSY) && attempt < 200 => {
+                attempt += 1;
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            result => return result,
+        }
     }
 }
 
@@ -734,11 +809,12 @@ const _: fn() = || {
 /// middle of starting holds every open file for an instant. The condition
 /// clears by itself, so it is waited out instead of reported.
 fn spawn_when_ready(command: &mut std::process::Command) -> std::io::Result<std::process::Child> {
-    const TEXT_FILE_BUSY: i32 = 26;
+    // "Text file busy" on Unix, and a sharing violation on Windows.
+    const BUSY: i32 = if cfg!(windows) { 32 } else { 26 };
     let mut attempt = 0;
     loop {
         match command.spawn() {
-            Err(err) if err.raw_os_error() == Some(TEXT_FILE_BUSY) && attempt < 50 => {
+            Err(err) if err.raw_os_error() == Some(BUSY) && attempt < 50 => {
                 attempt += 1;
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
@@ -764,13 +840,18 @@ mod tests {
                 address: "/tmp/meridian-plugin-1/plugin.sock".to_owned(),
             }
         );
-        assert!(h.endpoint().is_ok());
+        assert!(h.dial().is_ok());
         assert!(
             Handshake::parse("MERIDIAN-PLUGIN|1|0.1.0|tcp|127.0.0.1:4000")
                 .unwrap()
-                .endpoint()
+                .dial()
                 .is_ok()
         );
+        // A named pipe is something only a Windows host can open.
+        let pipe = Handshake::parse(r"MERIDIAN-PLUGIN|1|0.1.0|npipe|\\.\pipe\meridian-plugin-1")
+            .unwrap()
+            .dial();
+        assert_eq!(pipe.is_ok(), cfg!(windows));
     }
 
     #[test]
@@ -787,7 +868,7 @@ mod tests {
         }
         let err = Handshake::parse("MERIDIAN-PLUGIN|1|0.1.0|carrier-pigeon|coop")
             .unwrap()
-            .endpoint()
+            .dial()
             .unwrap_err();
         assert!(err.contains("network \"carrier-pigeon\""), "{err}");
         // A long first line is quoted only in part.

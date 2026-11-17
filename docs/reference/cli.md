@@ -3,8 +3,8 @@
 ```
 meridian validate <files>...
 meridian compile  <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--out DIR]
-meridian plan     <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE]
-meridian apply    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--resume [RUN]] [--on-failure stop|rollback]
+meridian plan     <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets]
+meridian apply    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets] [--resume [RUN]] [--on-failure stop|rollback]
 meridian drift    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE]
 meridian rollback <files>... [--run RUN]
 meridian status
@@ -16,8 +16,13 @@ meridian plugins
 meridian import   <paths>... [--from TARGET] [--name NAME] [-o DIR] [-r] [--force] [--strict]
 meridian migrate  <files>... [--to APIVERSION] [--check]
 meridian version
-meridian module   install [--locked] | update [NAME]... | verify | list | pack [--out FILE] | push REPOSITORY
+meridian module   install [--locked] | update [NAME]... | verify | list | sign --key FILE | pack [--out FILE] | push REPOSITORY
+meridian secret check <files>...
 meridian rules check --hierarchy FILE [--rules FILE] [--require-rules] [--data FILE] [--set KEY=VALUE]
+meridian fmt      <paths>... [--check] [--keep-order]
+meridian lint     <paths>... [--data FILE] [--set KEY=VALUE] [--state-dir DIR] [--fix] [--strict] [--json]
+meridian schema   [--target TARGET] [-o FILE]
+meridian lsp
 ```
 
 The files given to one command are one workflow. A file may hold several
@@ -239,7 +244,7 @@ second one collide with it.
 
 Lists every plugin Meridian can find: its category, what it can do, the resource
 types it takes, the versions of its tool it compiles for (when it declares any),
-and where its binary is.
+where its binary is, and what checking its signature found.
 
 ```
 dsc
@@ -251,6 +256,7 @@ dsc
   imports:   DSC v3 configuration documents and DscPipelineRunner projects (*.dsc.yaml, *.dsc.yml, *.dsc.json, *.dsc.config.yaml, *.dsc.config.yml, *.dsc.config.json, Datum.yml, *.yaml, *.yml, *.json)
   sdk:       0.1.0 (protocol 2)
   binary:    /usr/local/bin/meridian-target-dsc
+  signature: verified, signed by key 780001b5de1d7691
 ```
 
 `inputs` in the `can` line says the plugin hands its tool the values a
@@ -379,11 +385,105 @@ merged over the hierarchy, `--set` last. Each is checked as a layer of the
 group `(command line)`, and a layer path's `%{KEY}` reads the `--set` value. [The reference](compile-rules.md#running-the-check) has the options
 and the output in full.
 
+### `secret check`
+
+Says, for every [secret](dsl/secrets.md) the documents declare, where it comes
+from and whether that place would answer. It reads no value: a file is looked
+at and not opened, a command is found and not run.
+
+```
+$ meridian secret check site.yaml
+site (site.yaml)
+  db_password   env    ok: the environment variable SITE_DB_PASSWORD is set
+  deploy_token  file   REFUSED: the file /run/secrets/deploy-token has mode 0644, which lets others than its owner read it; make it 0600, or set allowWideMode: true on the secret if that is intended
+  vault_token   exec   not checked: the command vault is there, and is only run by plan and apply
+  extra         env    absent, optional: the environment variable SITE_EXTRA is not set
+error: 1 secret would not be found by plan or apply
+```
+
+| State | Meaning | Fails the check |
+|---|---|---|
+| `ok` | the place holds something a fetch would read | no |
+| `not checked` | the command exists; only running it tells what it prints | no |
+| `absent, optional` | nothing is there, and the secret is `optional: true`, so it reads as `null` | no |
+| `MISSING` | nothing is there | yes |
+| `REFUSED` | the place is there and a fetch would refuse it, or the command was not found | yes |
+
+It takes `--state-dir`, for a file written `@<module>:<path>`, and loads no
+plugin.
+
+### `fmt`
+
+Rewrites documents in the one standard layout: two-space indentation, the
+language's own field order, no trailing spaces. It changes how a document is
+laid out and never what it says, and it checks that before writing. `--check`
+changes nothing, lists the files that are not formatted and exits `1` if there
+are any. `--keep-order` leaves fields in the order they were written. `-` reads
+standard input and writes standard output.
+
+A path may be a directory, which is searched for Meridian documents. Full
+description: [The formatter](../tooling/formatter.md).
+
+### `lint`
+
+Reports everything `validate` and `compile` would refuse, for every document
+under the paths given, and then things that compile and are probably mistakes.
+Each document is compiled by its target's plugin in memory; nothing is written
+and no tool is run.
+
+```console
+$ meridian lint stacks/
+stacks/web.yaml:16:15: warning: mode 0644 is read as a number, not as permissions; write it as a quoted string [unquoted-mode]
+stacks/web.yaml:35:21: error: spec.resources[3].dependsOn[0].resource: resource "warm" depends on unknown resource "wbe" [invalid-document]
+1 error, 1 warning, 0 notes
+```
+
+`--fix` applies the fixes that are safe. `--strict` fails on warnings as well
+as errors. `--json` prints one JSON object per finding. `--data` and `--set`
+are as for `compile`; without them a document that needs data is checked
+with every `when` treated as true. Full
+description: [The linter](../tooling/linter.md); the rules:
+[Lint rules](lint.md).
+
+### `schema`
+
+Prints a JSON Schema (draft 7) of the document language and of the resource
+types of every plugin found, for editors that validate YAML against a schema.
+`--target` writes one target's rules only; `-o` writes to a file. Full
+description: [The JSON Schema](../tooling/json-schema.md).
+
+### `lsp`
+
+Runs the language server on standard input and output. An editor starts it;
+there is nothing to see when it is run by hand. Full description:
+[The language server](../tooling/language-server.md).
+
+### `signing`
+
+Makes signing keys, signs plugin binaries and checks their signatures. It is
+for people who ship a plugin, or who want to check one without starting it;
+[Plugin signatures](plugin-signatures.md) is the guide.
+
+```
+meridian signing keygen --secret acme.key --public acme.pub
+meridian signing sign --key acme.key meridian-target-acme
+meridian signing verify --trusted-key acme.pub meridian-target-acme
+```
+
+| Command | Does |
+|---|---|
+| `signing keygen --secret FILE --public FILE` | makes a new key pair. Neither file may exist already |
+| `signing sign --key FILE BINARY...` | writes `<BINARY>.sig` beside each binary |
+| `signing verify [--trusted-key FILE]... BINARY...` | prints what each binary's signature amounts to; exits non-zero if any is not verified |
+
 ## Options
 
 | Option | Environment | Default | Meaning |
 |---|---|---|---|
-| `--plugin-dir DIR` | `MERIDIAN_PLUGIN_DIR` (separated by `:`) | the directory `meridian` is in | where to look for plugins; may be repeated |
+| `--plugin-dir DIR` | `MERIDIAN_PLUGIN_DIR` (separated by `:`, or `;` on Windows) | the directory `meridian` is really in, following a link to it | where to look for plugins; may be repeated |
+| `--plugin-signatures POLICY` | `MERIDIAN_PLUGIN_SIGNATURES` | `require` in a released `meridian`, `off` in one built from source | what to do about [plugin signatures](plugin-signatures.md): `off` does not look, `warn` starts an unsigned or wrongly signed plugin and says so, `require` starts only plugins signed by a trusted key |
+| `--trusted-key FILE` | `MERIDIAN_TRUSTED_KEYS` (separated by `:`, or `;` on Windows) | the key a released `meridian` was built with | a public key whose signatures on plugins and on [modules](modules.md#signatures) are trusted, or a directory of `*.pub` files; may be repeated, and given to any command |
+| `--module-signatures POLICY` | `MERIDIAN_MODULE_SIGNATURES` | `off` | what to do about [module signatures](modules.md#signatures): `off` does not look, `warn` uses an unsigned or wrongly signed module and says so, `require` uses only modules signed by a trusted key. Applies to modules fetched from git or a registry, when they are installed and every time they are used; may be given to any command |
 | `--state-dir DIR` | `MERIDIAN_STATE_DIR` | `.meridian` | each tool's working files, fetched [modules](modules.md#where-modules-are-kept), and with the local backend Meridian's own record |
 | `--backend NAME` | `MERIDIAN_BACKEND` | `local` | where Meridian's own record (the lock, the run-state, the runs) is kept: `local`, or a [backend program](state.md#writing-a-backend) |
 | `--backend-config KEY=VALUE` | | | a setting for the backend; may be repeated |
@@ -402,6 +502,7 @@ and the output in full.
 | `--out DIR` | | | `compile` only: where to write the compiled files |
 | `-l SELECTOR`, `--selector SELECTOR` | | every document | `compile`, `plan`, `apply`: run only the documents whose `metadata.labels` match, as in `tier=web,env!=prod`. May be repeated; every requirement must hold. [Labels and selectors](dsl/index.md#labels-and-selectors) |
 | `--data FILE` | | no data | `compile`, `plan`, `apply`: a YAML or JSON mapping of values that [`when`](dsl/index.md#when-and-runtimewhen) conditions and [interpolations](dsl/interpolation.md) read as `data.<key>`. May be repeated; a later file's key replaces an earlier file's |
+| `--strict-secrets` | `MERIDIAN_STRICT_SECRETS` | off | `plan`, `apply`: stop a stage whose secret cannot be [locked in memory](#secrets), instead of warning once and going on |
 | `--set KEY=VALUE` | | | `compile`, `plan`, `apply`: one value for `when` conditions and interpolations, applied after every `--data` file, so it wins. `KEY` may be dotted to set one key inside a mapping (`region.name=eu-west-1`). The value is typed as YAML types it. May be repeated. See [giving the data](dsl/conditions.md#giving-the-data) |
 
 ### Running part of a workflow
@@ -455,6 +556,19 @@ errors and the run's state show `(sensitive)`. The process also turns off its
 own core dumps before it reads anything
 ([how a secret is held](../concepts/secrets-in-memory.md)).
 
+A secret is locked in memory so that it cannot be written to swap. Where the
+machine does not allow that (the limit on locked memory, `ulimit -l`, is too
+small), the run says so once and goes on:
+
+```
+site (ResourceSet, target ansible on web01)
+  warning: secrets: the secret "db_password" could not be locked in memory and may reach swap. Raise the limit on locked memory (ulimit -l, or LimitMEMLOCK= for a service). --strict-secrets makes this an error
+```
+
+With `--strict-secrets` the stage stops instead, before its tool is run.
+[`meridian secret check`](#secret-check) says where each declared secret
+comes from and whether it would be found, without reading any.
+
 ### `module`
 
 Fetches, pins and checks the [modules](modules.md) that the `meridian.yaml` in
@@ -464,8 +578,9 @@ the current directory requires.
 |---|---|
 | `meridian module install` | Resolves the requirements, fetches what is missing, writes `meridian.lock`. With `--locked`, fails if the lockfile would change |
 | `meridian module update [NAME]...` | Moves the named modules, or all of them, to the newest version that still fits |
-| `meridian module verify` | Checks every pinned module against its hash; exits `1` if any differs |
+| `meridian module verify` | Checks every pinned module against its hash, and its signature when `--module-signatures` says to; exits `1` if any fails |
 | `meridian module list` | Lists the pinned modules, their versions and sources |
+| `meridian module sign --key FILE` | Signs the module in the current directory, writing `meridian.sig` in it |
 | `meridian module pack [--out FILE]` | Writes the module in the current directory as the archive a registry stores |
 | `meridian module push REPOSITORY [--insecure]` | Publishes the module in the current directory to an OCI registry under its version. A version that is already published is never replaced with other content |
 
@@ -489,8 +604,10 @@ No version is deprecated today.
 not compile, a tool failed, a policy denied a change or could not be asked, a
 stage could not be rolled back, or the run was
 refused because the state is locked or there was nothing to resume or roll
-back, or a [sink](reporting.md#sinks) marked `required` failed. `2` for a mistake in the command line itself, and from `drift` when a
-stage has drifted.
+back, or a [sink](reporting.md#sinks) marked `required` failed; when
+`fmt --check` found a file that is not formatted; and when `lint` found an
+error, or a warning with `--strict`. `2` for a mistake in the command line
+itself, and from `drift` when a stage has drifted.
 
 `import` exits `0` when it wrote its documents, whatever it reported about
 them; `1` when the source could not be read or no plugin imports it, and, with

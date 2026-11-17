@@ -13,6 +13,7 @@ mod migrate;
 mod node;
 mod parse;
 mod resolve;
+pub mod schema;
 mod types;
 mod validate;
 
@@ -21,7 +22,7 @@ pub use condition::{prune, Condition, Data};
 pub use error::{Error, ErrorList, Position};
 pub use meridian_value::{canonical_map, Value};
 pub use migrate::{migrate, Decisions, MigrateError, Migrated, Step, STEPS};
-pub use parse::{parse, parse_file, parse_value};
+pub use parse::{parse, parse_file, parse_stream, parse_value};
 pub use resolve::{resolve, resolve_with, resolved_labels, Removed, Resolution, Secrets};
 pub use types::{
     Dependency, Document, IfMissing, Import, Infrastructure, InfrastructureSpec, Kind, Metadata,

@@ -2,8 +2,6 @@
 //! records how it was called and prints what the real tool would. The suite
 //! therefore needs nothing installed but Rust.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::Path;
 
@@ -97,7 +95,9 @@ fn a_failing_tool_is_an_error_that_says_what_was_run() {
     assert_eq!(err.msg, "filesync apply failed");
     assert_eq!(err.exit_code, Some(3));
     assert!(
-        err.command.ends_with("filesync apply manifest.tsv"),
+        // The program is shown by its full path, which on Windows is quoted
+        // and ends in .exe.
+        err.command.contains("filesync") && err.command.ends_with(" apply manifest.tsv"),
         "{}",
         err.command
     );

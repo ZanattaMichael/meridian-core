@@ -1,8 +1,6 @@
 //! The running half, against a stand-in for `ansible-playbook`, so it is
 //! tested on a machine with no Ansible installed.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::Path;
 

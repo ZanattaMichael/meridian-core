@@ -11,6 +11,8 @@
 //! Nothing here needs a cloud account, a Packer plugin or the network: the
 //! builds use the null builder and run their steps on this machine.
 
+// Left out on Windows: this file drives the real tool, and the workflow that
+// installs the tool and runs it is a Linux job.
 #![cfg(unix)]
 
 use std::fs;

@@ -2,7 +2,6 @@
 //! the plugin protocol, and run through the orchestrator as a stage of a
 //! workflow.
 
-#![cfg(unix)]
 #![allow(clippy::result_large_err)]
 
 use std::fs;
@@ -126,7 +125,11 @@ fn the_host_learns_what_the_plugin_is_from_the_plugin() {
             runtime_condition: false,
         }
     );
-    assert!(info.path.ends_with(PACKAGE), "{}", info.path);
+    assert!(
+        info.path.trim_end_matches(".exe").ends_with(PACKAGE),
+        "{}",
+        info.path
+    );
     registry.close().unwrap();
 }
 
@@ -229,7 +232,11 @@ fn a_workflow_plans_then_applies_through_the_real_plugin() {
     let seed_dir = outputs.iter().find(|o| o.name == "seed_dir").unwrap();
     assert_eq!(
         seed_dir.value,
-        Value::String(seed.canonicalize().unwrap().to_string_lossy().into_owned())
+        Value::String(
+            meridian_sdk::tool::absolute_path(&seed)
+                .to_string_lossy()
+                .into_owned()
+        )
     );
 
     // Applying the same document again has nothing to do.

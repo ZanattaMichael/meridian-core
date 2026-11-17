@@ -211,12 +211,25 @@ where the content came from (a commit or a manifest digest) and is what is asked
 re-fetch, so a moved tag cannot substitute different content silently: it fails the
 integrity check instead.
 
-Signing is not built yet. Modules will be signed and verified with the same mechanism
-the release work adds for plugins (the `meridian-signing` crate: a signature over a
-file's SHA-256, checked against the keys a project trusts), so there is one trust model
-and one set of trusted keys for both. Verification starts as optional: off until a
-project names whom it trusts. It waits for plugin signing to land, and is tracked in
-[issue 68](https://github.com/ZanattaMichael/meridian-core/issues/68).
+**Signing** uses the mechanism plugins are signed with (the `meridian-signing` crate,
+Ed25519), so there is one trust model and one set of trusted keys for both
+([issue 68](https://github.com/ZanattaMichael/meridian-core/issues/68)).
+
+- `meridian module sign --key FILE` writes `meridian.sig` in the module: a signature over
+  a statement of the module's name, version and integrity hash. Naming all three means a
+  signature cannot be moved to another module, another version or other content.
+- `meridian.sig` is the one file the integrity hash leaves out. So signing does not change
+  a module's pin, the signature needs no storage of its own in a registry, and git, OCI
+  and mirrors all carry it the same way. The cost: the pin does not protect the signature
+  file, which is why the signature is checked wherever the pin is.
+- `--module-signatures off|warn|require` (default `off`) with the existing
+  `--trusted-key`. The check runs on install and update before the lockfile is written,
+  on every use of a module, and in `module verify`. `path` modules are not checked.
+- The policy belongs to the machine and not to the lockfile: nothing about signatures is
+  recorded in `meridian.lock`, so a project's pins do not differ between someone who
+  checks and someone who does not, and the check cannot be skipped by a lockfile that
+  claims it was made.
+- A version is published once, so a version cannot be signed after it is published.
 
 ### 1.7 Where modules are kept
 
@@ -358,11 +371,10 @@ code and checked by a test, so it cannot drift:
 
 - **A public index.** Deliberately absent. If one is ever wanted, it is a hosted service
   and a decision for the owner.
-- **Signing.** Decided: reuse the signing and verification that the release work adds
-  for plugins, optional at first. It waits for that work to land;
-  [issue 68](https://github.com/ZanattaMichael/meridian-core/issues/68). Whether registry
-  artifacts are also verified with cosign/Sigstore is open: it would be new work with a
-  new dependency.
+- **Signing beyond keys on disk.** Built: Ed25519 signatures shared with plugins
+  (section 1.6). Open: verifying registry artifacts with cosign/Sigstore as well, which
+  would be new work with a new dependency; a project-level statement of which key may
+  sign which module; and revocation, which today means removing a key file.
 - **Credentials for registries.** Only `auths` entries of the Docker configuration are read
   at first. Decided: a module source will also be able to name a credential declared in
   the language's model ([language expansion §12](language-expansion.md#12-credentials),

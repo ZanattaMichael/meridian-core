@@ -9,6 +9,8 @@
 //!   needs systemd, and root or passwordless `sudo`. CI runs it; do not run
 //!   it on a machine you care about without reading it first.
 
+// Left out on Windows: this file drives the real tool, and the workflow that
+// installs the tool and runs it is a Linux job.
 #![cfg(unix)]
 
 use std::fs;

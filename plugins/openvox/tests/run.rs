@@ -2,8 +2,6 @@
 //! `bolt`, so it runs on a machine with neither installed. `real.rs` does the
 //! same against the real tool.
 
-#![cfg(unix)]
-
 use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
@@ -388,7 +386,7 @@ fn the_tool_is_looked_for_on_the_path_and_then_where_the_packages_put_it() {
     fs::create_dir_all(&empty).unwrap();
     stand_in(&on_path, "puppet", "exit 0");
     let installed = stand_in(&packaged, "puppet", "exit 0");
-    stand_in(&packaged, "bolt", "exit 0");
+    let bolt = stand_in(&packaged, "bolt", "exit 0");
     // Not executable, so not a program.
     fs::write(empty.join("puppet"), "").unwrap();
 
@@ -399,7 +397,7 @@ fn the_tool_is_looked_for_on_the_path_and_then_where_the_packages_put_it() {
     // Not on the PATH: the packaged one, by its full path.
     assert_eq!(
         find_program("bolt", Some(&path), &fallbacks),
-        packaged.join("bolt").to_str().unwrap()
+        bolt.to_str().unwrap()
     );
     assert_eq!(
         find_program("puppet", Some(OsStr::new("")), &fallbacks),

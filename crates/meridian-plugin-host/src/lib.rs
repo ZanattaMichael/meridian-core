@@ -19,6 +19,11 @@
 
 mod client;
 mod registry;
+/// Signatures on plugin binaries. The code is in the `meridian-signing`
+/// crate, which is not about plugins and can be used for any file.
+pub mod signature {
+    pub use meridian_signing::*;
+}
 
 use std::fmt;
 
@@ -28,6 +33,7 @@ use meridian_sdk::{
 
 pub use client::{Client, StartOptions, HANDSHAKE_TIMEOUT};
 pub use registry::{binary_name, Registry, Target};
+pub use signature::{Policy, PublicKey, SecretKey, Signature, Verification};
 
 /// The naming convention a discoverable plugin binary follows. Discovery is by
 /// name, not by executing every file in a directory, because running an
@@ -56,11 +62,16 @@ pub struct Info {
     /// The versions of its tool the target compiles for; empty when it does
     /// not say.
     pub target_versions: Vec<String>,
+    /// What each resource type takes, as the target describes it for
+    /// editors; empty when it does not say.
+    pub resource_schemas: Vec<meridian_sdk::ResourceSchema>,
     /// The kinds of existing configuration the target can turn into Meridian
     /// documents; empty when it does not import.
     pub import_formats: Vec<ImportFormat>,
     /// The binary the plugin was loaded from; empty for an in-process emitter.
     pub path: String,
+    /// What checking the binary's signature found, before it was started.
+    pub signature: Signature,
 }
 
 /// A plugin-loading or plugin-transport failure.

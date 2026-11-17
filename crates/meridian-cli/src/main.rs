@@ -5,13 +5,16 @@
 //! own output and errors, and the exit status says whether everything asked
 //! for was done.
 
+mod tools;
+
 use std::collections::BTreeMap;
 mod import;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -21,7 +24,10 @@ use meridian_orchestrator::{
     Observer, OnFailure, Options, Outcome, Policy, Resume, RollbackOutcome, RollbackReport,
     RunRecord, Selector, StageId, StageReport, MASK, REASON_POLICY_DENIED,
 };
-use meridian_plugin_host::{Registry, StartOptions};
+use meridian_plugin_host::{
+    signature::signature_path, Policy as SignaturePolicy, PublicKey, Registry, SecretKey,
+    Signature, StartOptions, Verification,
+};
 use meridian_report::sink::{self, Dispatcher};
 use meridian_report::{Format, Report};
 use meridian_sdk::{ChangeAction, Data, LogLine, LogStream, Output};
@@ -35,6 +41,56 @@ use meridian_sdk::{ChangeAction, Data, LogLine, LogStream, Output};
 struct Cli {
     #[command(subcommand)]
     command: Command,
+    #[command(flatten)]
+    trust: Trust,
+}
+
+/// Whose signatures count, for plugins and for modules alike, and whether
+/// modules must carry one. These can be given to any command.
+#[derive(Args)]
+struct Trust {
+    /// What to do about module signatures: off (do not look), warn (use an
+    /// unsigned or wrongly signed module, and say so) or require (use only
+    /// modules signed by a trusted key). Applies to modules fetched from git
+    /// or a registry, when they are installed and every time they are used
+    #[arg(
+        long = "module-signatures",
+        global = true,
+        value_name = "POLICY",
+        env = "MERIDIAN_MODULE_SIGNATURES",
+        default_value = "off"
+    )]
+    module_signatures: SignaturePolicy,
+    #[command(flatten)]
+    keys: TrustedKeys,
+}
+
+/// The trusted keys the command line named, kept for the whole run: plugins
+/// and modules are checked against the same ones.
+static TRUSTED_KEYS: OnceLock<TrustedKeys> = OnceLock::new();
+/// The policy and keys fetched modules are checked against.
+static MODULE_SIGNATURES: OnceLock<meridian_module::Verification> = OnceLock::new();
+
+/// Every key to trust: the release's own, then the ones named.
+fn trusted_keys() -> Result<Vec<PublicKey>, Failure> {
+    match TRUSTED_KEYS.get() {
+        Some(keys) => keys.read(),
+        None => TrustedKeys::default().read(),
+    }
+}
+
+/// Settles the trust settings once, before any command runs.
+fn settle(trust: Trust) -> Result<(), Failure> {
+    let policy = trust.module_signatures;
+    let _ = TRUSTED_KEYS.set(trust.keys);
+    // With signatures off the keys are not needed, and a key file that has
+    // gone missing should not stop a run that does not use it.
+    let trusted = match policy {
+        SignaturePolicy::Off => Vec::new(),
+        SignaturePolicy::Warn | SignaturePolicy::Require => trusted_keys()?,
+    };
+    let _ = MODULE_SIGNATURES.set(meridian_module::Verification { policy, trusted });
+    Ok(())
 }
 
 #[derive(Subcommand)]
@@ -206,6 +262,24 @@ enum Command {
     /// Show every version this build carries: core, language, SDK and
     /// plugin protocol
     Version,
+    /// Work with the secrets documents declare, without showing any
+    Secret {
+        #[command(subcommand)]
+        command: SecretCommand,
+    },
+    /// Rewrite documents in the one standard layout, changing no value
+    Fmt(tools::FmtArgs),
+    /// Report errors, and things that compile but are probably mistakes
+    Lint(tools::LintArgs),
+    /// Print a JSON Schema of the document language, for YAML editors
+    Schema(tools::SchemaArgs),
+    /// Run the language server, for editors, on standard input and output
+    Lsp(tools::LspArgs),
+    /// Make signing keys, sign plugin binaries and check their signatures
+    Signing {
+        #[command(subcommand)]
+        command: SigningCommand,
+    },
     /// Fetch, pin and check the modules the project's meridian.yaml requires
     Module {
         #[command(subcommand)]
@@ -235,10 +309,18 @@ enum ModuleCommand {
         /// The modules to move; every module when none is named
         names: Vec<String>,
     },
-    /// Check every pinned module against the hash in meridian.lock
+    /// Check every pinned module against the hash in meridian.lock, and its
+    /// signature when --module-signatures says to
     Verify,
     /// List the pinned modules, their versions and where they come from
     List,
+    /// Sign this module as it is now, writing meridian.sig in it. Do it
+    /// last, before the version is tagged or pushed
+    Sign {
+        /// The secret key to sign with, from `meridian signing keygen`
+        #[arg(long, value_name = "FILE")]
+        key: PathBuf,
+    },
     /// Write this module as the archive a registry stores
     Pack {
         /// The file to write. Defaults to a file under the state directory
@@ -292,17 +374,130 @@ enum RulesCommand {
     },
 }
 
+#[derive(Subcommand)]
+enum SigningCommand {
+    /// Make a new key pair for signing plugins
+    Keygen {
+        /// Where to write the secret key, which signs. Keep it private
+        #[arg(long, value_name = "FILE")]
+        secret: PathBuf,
+        /// Where to write the public key, which those who run the plugins trust
+        #[arg(long, value_name = "FILE")]
+        public: PathBuf,
+    },
+    /// Sign plugin binaries, writing <BINARY>.sig beside each
+    Sign {
+        /// The secret key to sign with
+        #[arg(long, value_name = "FILE")]
+        key: PathBuf,
+        /// The binaries to sign
+        #[arg(required = true)]
+        binaries: Vec<PathBuf>,
+    },
+    /// Check the signatures of plugin binaries against the trusted keys
+    Verify {
+        /// The binaries to check
+        #[arg(required = true)]
+        binaries: Vec<PathBuf>,
+    },
+}
+
+/// The public key this build's own plugins were signed with, when it is a
+/// release build: the release workflow sets the variable while it compiles.
+/// A build from source has none.
+const RELEASE_PUBLIC_KEY: Option<&str> = option_env!("MERIDIAN_RELEASE_PUBLIC_KEY");
+
+#[derive(Args, Default)]
+struct TrustedKeys {
+    /// A public key file whose signatures on plugins and modules are
+    /// trusted, or a directory of *.pub files; may be given more than once.
+    /// A released meridian already trusts the key its own plugins were
+    /// signed with
+    #[arg(
+        long = "trusted-key",
+        global = true,
+        value_name = "FILE",
+        env = "MERIDIAN_TRUSTED_KEYS",
+        value_delimiter = PATH_LIST_SEPARATOR
+    )]
+    trusted_keys: Vec<PathBuf>,
+}
+
+impl TrustedKeys {
+    /// Every key to trust: the release's own, then the ones named.
+    fn read(&self) -> Result<Vec<PublicKey>, Failure> {
+        let mut keys = Vec::new();
+        if let Some(key) = RELEASE_PUBLIC_KEY.filter(|k| !k.trim().is_empty()) {
+            keys.push(PublicKey::parse(key).map_err(|e| {
+                Failure::Message(format!("the public key built into this meridian: {e}"))
+            })?);
+        }
+        for path in &self.trusted_keys {
+            if path.is_dir() {
+                let mut files: Vec<PathBuf> = std::fs::read_dir(path)
+                    .map_err(|e| {
+                        Failure::Message(format!(
+                            "reading the key directory {}: {e}",
+                            path.display()
+                        ))
+                    })?
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.path())
+                    .filter(|file| file.extension().is_some_and(|ext| ext == "pub"))
+                    .collect();
+                files.sort();
+                for file in files {
+                    keys.push(PublicKey::read(&file).map_err(Failure::Message)?);
+                }
+            } else {
+                keys.push(PublicKey::read(path).map_err(Failure::Message)?);
+            }
+        }
+        Ok(keys)
+    }
+}
+
+/// What separates the directories in `MERIDIAN_PLUGIN_DIR`: the system's own
+/// separator for a list of paths, since a Windows path holds a colon.
+const PATH_LIST_SEPARATOR: char = if cfg!(windows) { ';' } else { ':' };
+
 #[derive(Args)]
-struct PluginDirs {
+pub(crate) struct PluginDirs {
     /// A directory to look for plugins in; may be given more than once.
     /// Defaults to the directory the meridian binary is in
     #[arg(
         long = "plugin-dir",
         value_name = "DIR",
         env = "MERIDIAN_PLUGIN_DIR",
-        value_delimiter = ':'
+        value_delimiter = PATH_LIST_SEPARATOR
     )]
-    dirs: Vec<PathBuf>,
+    pub(crate) dirs: Vec<PathBuf>,
+    /// What to do about plugin signatures: off (do not look), warn (start an
+    /// unsigned or wrongly signed plugin, and say so) or require (start only
+    /// plugins signed by a trusted key). Defaults to require in a released
+    /// meridian and to off in one built from source
+    #[arg(
+        long = "plugin-signatures",
+        value_name = "POLICY",
+        env = "MERIDIAN_PLUGIN_SIGNATURES"
+    )]
+    signatures: Option<SignaturePolicy>,
+}
+
+impl PluginDirs {
+    fn verification(&self) -> Result<Verification, Failure> {
+        let policy = self.signatures.unwrap_or(match RELEASE_PUBLIC_KEY {
+            Some(key) if !key.trim().is_empty() => SignaturePolicy::Require,
+            _ => SignaturePolicy::Off,
+        });
+        // With signatures off the keys are not needed, and a key file that
+        // has gone missing should not stop a run that does not use it.
+        let trusted = match policy {
+            SignaturePolicy::Off => Vec::new(),
+            SignaturePolicy::Warn | SignaturePolicy::Require => trusted_keys()?,
+        };
+        Ok(Verification { policy, trusted })
+    }
 }
 
 /// Where Meridian keeps what it knows.
@@ -419,6 +614,29 @@ struct Workflow {
     /// YAML would type it: true, 3 and null are not text, "3" is
     #[arg(long, value_name = "KEY=VALUE")]
     set: Vec<String>,
+    /// Refuse to run when a secret cannot be locked in memory, instead of
+    /// warning once and going on
+    #[arg(long, env = "MERIDIAN_STRICT_SECRETS")]
+    strict_secrets: bool,
+}
+
+#[derive(Subcommand)]
+enum SecretCommand {
+    /// Say, for every secret the documents declare, where it comes from and
+    /// whether that place would answer, without reading any value
+    Check {
+        /// The documents whose secrets to check
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Where fetched modules are kept, for a file written @module:path
+        #[arg(
+            long,
+            value_name = "DIR",
+            env = "MERIDIAN_STATE_DIR",
+            default_value = ".meridian"
+        )]
+        state_dir: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -427,11 +645,14 @@ fn main() -> ExitCode {
     // cannot leave that way.
     let _ = meridian_secret::harden_process();
     let cli = Cli::parse();
-    let outcome = match cli.command {
+    let outcome = settle(cli.trust).and_then(|()| match cli.command {
         Command::Validate { files, state_dir } => load(&files, &state_dir).map(|bundle| {
             println!("{} valid", count(bundle.documents.len(), "document"));
         }),
         Command::Module { command, state_dir } => module(command, &state_dir),
+        Command::Secret {
+            command: SecretCommand::Check { files, state_dir },
+        } => check_secrets(&files, &state_dir),
         Command::Compile { workflow, out } => orchestrate(
             &workflow,
             Mode::Compile,
@@ -527,7 +748,12 @@ fn main() -> ExitCode {
             print!("{}", versions());
             Ok(())
         }
-    };
+        Command::Fmt(args) => tools::format(&args),
+        Command::Lint(args) => tools::lint(&args),
+        Command::Schema(args) => tools::schema(&args),
+        Command::Lsp(args) => tools::lsp(&args),
+        Command::Signing { command } => signing(command),
+    });
     match outcome {
         Ok(()) => ExitCode::SUCCESS,
         Err(Failure::Reported) => ExitCode::FAILURE,
@@ -539,7 +765,7 @@ fn main() -> ExitCode {
     }
 }
 
-enum Failure {
+pub(crate) enum Failure {
     /// Something to print.
     Message(String),
     /// Already printed, stage by stage.
@@ -548,7 +774,7 @@ enum Failure {
     Drifted,
 }
 
-fn count(n: usize, noun: &str) -> String {
+pub(crate) fn count(n: usize, noun: &str) -> String {
     if n == 1 {
         format!("1 {noun}")
     } else {
@@ -682,6 +908,20 @@ fn project(state_dir: &Path) -> meridian_module::Project<'_> {
         dir: Path::new("."),
         state_dir,
         core_version: env!("CARGO_PKG_VERSION"),
+        signatures: MODULE_SIGNATURES
+            .get()
+            .unwrap_or(&meridian_module::NO_SIGNATURES),
+    }
+}
+
+/// Says, once a run, which modules are in use although their signature did
+/// not pass. Only the warn policy lets that happen.
+fn warn_about_modules(warnings: &[String]) {
+    static SAID: AtomicBool = AtomicBool::new(false);
+    if !warnings.is_empty() && !SAID.swap(true, Ordering::Relaxed) {
+        for warning in warnings {
+            eprintln!("warning: {warning}");
+        }
     }
 }
 
@@ -699,6 +939,7 @@ fn in_modules(files: &[PathBuf], state_dir: &Path) -> Result<Vec<PathBuf>, Failu
         return Ok(files.to_vec());
     }
     let modules = Modules::load(&project(state_dir)).map_err(module_failure)?;
+    warn_about_modules(modules.warnings());
     files
         .iter()
         .map(|file| match file.to_str() {
@@ -732,7 +973,19 @@ fn module(command: ModuleCommand, state_dir: &Path) -> Result<(), Failure> {
             let mut failed = 0;
             for check in &checks {
                 match &check.problem {
-                    None => println!("ok      {}", named(&check.module)),
+                    None => match &check.signature {
+                        Signature::NotChecked => println!("ok      {}", named(&check.module)),
+                        Signature::Verified { key_id } => {
+                            println!("ok      {}  signed by key {key_id}", named(&check.module))
+                        }
+                        Signature::Unsigned => {
+                            println!("ok      {}  not signed", named(&check.module))
+                        }
+                        Signature::Invalid(why) => println!(
+                            "ok      {}  signature does not pass: {why}",
+                            named(&check.module)
+                        ),
+                    },
                     Some(problem) => {
                         failed += 1;
                         println!("FAILED  {}", named(&check.module));
@@ -772,6 +1025,23 @@ fn module(command: ModuleCommand, state_dir: &Path) -> Result<(), Failure> {
             }
             return Ok(());
         }
+        ModuleCommand::Sign { key } => {
+            let key = SecretKey::read(&key).map_err(Failure::Message)?;
+            let signed = meridian_module::sign(project.dir, &key).map_err(module_failure)?;
+            println!(
+                "signed {}{} with key {}",
+                signed.name,
+                if signed.version.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {}", signed.version)
+                },
+                signed.key_id
+            );
+            println!("  integrity: {}", signed.integrity);
+            println!("  wrote:     {}", meridian_module::SIGNATURE_FILE);
+            return Ok(());
+        }
         ModuleCommand::Pack { out } => return pack_module(&project, out),
         ModuleCommand::Push {
             repository,
@@ -780,6 +1050,7 @@ fn module(command: ModuleCommand, state_dir: &Path) -> Result<(), Failure> {
     };
 
     let report = meridian_module::install(&project, mode).map_err(module_failure)?;
+    warn_about_modules(&report.warnings());
     let mut unchanged = 0;
     for (m, change) in &report.changes {
         match change {
@@ -881,7 +1152,7 @@ fn push_module(
 
 /// Reads the `--data` files into one map. Each file is a mapping; a key in a
 /// later file replaces the same key from an earlier one, whole.
-fn read_data(files: &[PathBuf], state_dir: &Path) -> Result<Data, Failure> {
+pub(crate) fn read_data(files: &[PathBuf], state_dir: &Path) -> Result<Data, Failure> {
     let mut data = Data::new();
     for file in &in_modules(files, state_dir)? {
         let name = file.to_string_lossy();
@@ -989,7 +1260,7 @@ fn check_rules(
 /// Applies the `--set key=value` options to the data, in the order given.
 /// A dotted key sets a value inside a mapping, creating the mappings on the
 /// way; the other keys of those mappings are kept.
-fn apply_sets(data: &mut Data, sets: &[String]) -> Result<(), Failure> {
+pub(crate) fn apply_sets(data: &mut Data, sets: &[String]) -> Result<(), Failure> {
     use meridian_ir::Value;
     for set in sets {
         let refuse = |why: &str| Failure::Message(format!("--set {set}: {why}"));
@@ -1033,11 +1304,7 @@ fn apply_sets(data: &mut Data, sets: &[String]) -> Result<(), Failure> {
 /// The directories plugins, and backend programs, are looked for in.
 fn plugin_dirs(plugins: &PluginDirs) -> Vec<PathBuf> {
     if plugins.dirs.is_empty() {
-        std::env::current_exe()
-            .ok()
-            .and_then(|exe| exe.parent().map(Path::to_path_buf))
-            .into_iter()
-            .collect()
+        own_directory().into_iter().collect()
     } else {
         plugins.dirs.clone()
     }
@@ -1068,15 +1335,107 @@ fn backend(state: &State) -> Result<Arc<dyn Backend>, Failure> {
         .map_err(Failure::Message)
 }
 
-fn registry(plugins: &PluginDirs) -> Result<Registry, Failure> {
+pub(crate) fn registry(plugins: &PluginDirs) -> Result<Registry, Failure> {
     let dirs = plugin_dirs(plugins);
+    let options = StartOptions {
+        verification: plugins.verification()?,
+        ..StartOptions::default()
+    };
     let mut registry = Registry::new();
     for dir in dirs {
-        registry
-            .discover(&dir.to_string_lossy(), &StartOptions::default())
+        let loaded = registry
+            .discover(&dir.to_string_lossy(), &options)
             .map_err(|e| Failure::Message(e.to_string()))?;
+        // Under `warn` a plugin that did not pass was started all the same;
+        // this is the saying so.
+        for info in loaded {
+            match &info.signature {
+                Signature::Unsigned => {
+                    eprintln!("warning: plugin {} is not signed", info.path)
+                }
+                Signature::Invalid(why) => eprintln!(
+                    "warning: plugin {}: its signature does not pass: {why}",
+                    info.path
+                ),
+                Signature::NotChecked | Signature::Verified { .. } => {}
+            }
+        }
     }
     Ok(registry)
+}
+
+fn signing(command: SigningCommand) -> Result<(), Failure> {
+    match command {
+        SigningCommand::Keygen { secret, public } => {
+            // Neither file is replaced: writing over a secret key loses the
+            // only thing that can make signatures its public key accepts.
+            for path in [&secret, &public] {
+                if path.exists() {
+                    return Err(Failure::Message(format!(
+                        "{} already exists; a key is not written over",
+                        path.display()
+                    )));
+                }
+            }
+            let key = SecretKey::generate().map_err(Failure::Message)?;
+            write_secret(&secret, &format!("{}\n", key.to_text()))
+                .and_then(|()| std::fs::write(&public, format!("{}\n", key.public().to_text())))
+                .map_err(|e| Failure::Message(format!("writing the key pair: {e}")))?;
+            println!("key {}", key.public().id());
+            println!("  secret: {}", secret.display());
+            println!("  public: {}", public.display());
+            Ok(())
+        }
+        SigningCommand::Sign { key, binaries } => {
+            let key = SecretKey::read(&key).map_err(Failure::Message)?;
+            for binary in binaries {
+                let text = key.sign_file(&binary).map_err(Failure::Message)?;
+                let path = signature_path(&binary);
+                std::fs::write(&path, text)
+                    .map_err(|e| Failure::Message(format!("writing {}: {e}", path.display())))?;
+                println!("signed {} with key {}", binary.display(), key.public().id());
+            }
+            Ok(())
+        }
+        SigningCommand::Verify { binaries } => {
+            let trusted = trusted_keys()?;
+            let mut failed = false;
+            for binary in binaries {
+                let found = meridian_plugin_host::signature::verify_file(&binary, &trusted);
+                failed |= !matches!(found, Signature::Verified { .. });
+                println!("{}: {found}", binary.display());
+            }
+            if failed {
+                Err(Failure::Reported)
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Writes a secret key so that only its owner can read it, where the system
+/// has such a thing as a file mode.
+fn write_secret(path: &Path, text: &str) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)?.write_all(text.as_bytes())
+}
+
+/// The directory the `meridian` binary really is in.
+///
+/// A package manager often puts a link to the binary on the `PATH` and keeps
+/// the binary itself, with its plugins beside it, somewhere else. The link is
+/// followed, so the plugins are found wherever the command was started from.
+fn own_directory() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let exe = meridian_sdk::tool::absolute_path(&exe);
+    exe.parent().map(Path::to_path_buf)
 }
 
 fn import_configuration(plugins: &PluginDirs, request: &import::Request) -> Result<(), Failure> {
@@ -1135,10 +1494,61 @@ fn list_plugins(plugins: &PluginDirs) -> Result<(), Failure> {
             info.sdk_version, info.protocol_version
         );
         println!("  binary:    {}", info.path);
+        println!("  signature: {}", info.signature);
     }
     registry
         .close()
         .map_err(|e| Failure::Message(e.to_string()))
+}
+
+/// Says where each declared secret comes from and whether that place would
+/// answer. Nothing is fetched: a file is looked at and not read, a command is
+/// found and not run. Fails when a secret that is not optional has no answer.
+fn check_secrets(files: &[PathBuf], state_dir: &Path) -> Result<(), Failure> {
+    use meridian_orchestrator::check_declared;
+    use meridian_secret::Probe;
+    let bundle = load(files, state_dir)?;
+    let (mut declared, mut unanswered) = (0, 0);
+    for doc in &bundle.documents {
+        let rows = check_declared(doc);
+        if rows.is_empty() {
+            continue;
+        }
+        println!("{} ({})", doc.name(), doc.position().file);
+        let width = rows.iter().map(|row| row.name.len()).max().unwrap_or(0);
+        // Each row is a declaration and what a probe found. No value is
+        // read by this command.
+        for row in &rows {
+            declared += 1;
+            let state = match (&row.probe, row.optional) {
+                (Probe::Present(_), _) => "ok",
+                (Probe::Unknown(_), _) => "not checked",
+                (Probe::Absent(_), true) => "absent, optional",
+                (Probe::Absent(_), false) => "MISSING",
+                (Probe::Refused(_), _) => "REFUSED",
+            };
+            if row.unanswered() {
+                unanswered += 1;
+            }
+            println!(
+                "  {:width$}  {:5}  {state}: {}",
+                row.name,
+                row.from,
+                row.probe.words()
+            );
+        }
+    }
+    if declared == 0 {
+        println!("no secret is declared");
+    }
+    if unanswered == 0 {
+        Ok(())
+    } else {
+        Err(Failure::Message(format!(
+            "{} would not be found by plan or apply",
+            count(unanswered, "secret")
+        )))
+    }
 }
 
 /// What a command adds to the workflow it runs.
@@ -1244,6 +1654,7 @@ fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Result<(), Fai
             Some(id) => Resume::Run(id.to_owned()),
         },
         policy,
+        strict_secrets: workflow.strict_secrets,
         ..Options::new(&workflow.state.state_dir)
     };
     let registry = registry(&workflow.state.plugins)?;

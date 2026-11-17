@@ -72,6 +72,37 @@ fn is_contained(name: &str) -> bool {
             .all(|c| matches!(c, Component::Normal(_)))
 }
 
+/// The absolute form of a path, as a tool can be given it.
+///
+/// Links are resolved when the path exists; when it does not, the path is
+/// only made absolute. On Windows the result never carries the `\\?\` prefix
+/// that resolving a path adds there: Windows itself accepts that form, but
+/// most command-line tools do not, and a `file://` URL built from it is not
+/// one.
+pub fn absolute_path(path: &Path) -> PathBuf {
+    let resolved = path
+        .canonicalize()
+        .or_else(|_| std::path::absolute(path))
+        .unwrap_or_else(|_| path.to_owned());
+    without_verbatim_prefix(resolved)
+}
+
+/// `\\?\C:\dir` as `C:\dir`, and `\\?\UNC\server\share` as `\\server\share`.
+/// Any other path, including every path on another system, is returned as is.
+fn without_verbatim_prefix(path: PathBuf) -> PathBuf {
+    let Some(text) = path.to_str() else {
+        return path;
+    };
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    match text.strip_prefix(r"\\?\") {
+        // Only a drive path has a plain form; `\\?\Volume{...}` does not.
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+        _ => path,
+    }
+}
+
 /// One invocation of a command-line tool.
 #[derive(Clone, Debug)]
 pub struct Tool {
@@ -173,7 +204,7 @@ impl Tool {
     /// Any exit status is a result; only failing to start the tool at all is
     /// an error. Use [`Tool::run_ok`] when a non-zero status is a failure.
     pub fn run(&self, log: &dyn Log) -> Result<Finished, RunError> {
-        let mut command = Command::new(&self.program);
+        let mut command = Command::new(resolve_program(&self.program));
         command
             .args(&self.args)
             .stdin(if self.stdin.is_some() {
@@ -374,6 +405,76 @@ fn display_word(word: &str) -> String {
     }
 }
 
+/// The file to start for a program name.
+///
+/// On Unix a name is what it is. On Windows a tool is as often a script as a
+/// program: `az` is `az.cmd`, `puppet` is `puppet.bat`, and starting a process
+/// by bare name finds only `.exe` files. So the name is looked up the way a
+/// Windows shell would look it up, through `PATH` and the executable
+/// extensions, and the file that is found is what gets started.
+#[cfg(not(windows))]
+fn resolve_program(program: &str) -> PathBuf {
+    PathBuf::from(program)
+}
+
+#[cfg(windows)]
+fn resolve_program(program: &str) -> PathBuf {
+    let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default();
+    find_program(program, &path_dirs, |candidate| candidate.is_file())
+        .unwrap_or_else(|| PathBuf::from(program))
+}
+
+/// The extensions Windows runs, in the order a shell tries them. Scripts for
+/// an interpreter (`.ps1`, `.vbs`, `.js`) are left out: a process cannot be
+/// started from one directly.
+#[cfg(any(windows, test))]
+const EXECUTABLE_EXTENSIONS: [&str; 4] = ["exe", "cmd", "bat", "com"];
+
+/// Finds the file a program name stands for among `path_dirs`, or beside the
+/// path when the name is one. `exists` answers whether a candidate is a file.
+#[cfg(any(windows, test))]
+fn find_program(
+    program: &str,
+    path_dirs: &[PathBuf],
+    exists: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    let given = Path::new(program);
+    let has_known_extension = given.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+        EXECUTABLE_EXTENSIONS
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(e))
+    });
+    let candidates = |base: &Path| -> Option<PathBuf> {
+        if has_known_extension {
+            return exists(base).then(|| base.to_path_buf());
+        }
+        // The extension is added to the whole name: `kubectl.docker` is a
+        // name, not a file called `kubectl` with the extension `docker`.
+        EXECUTABLE_EXTENSIONS
+            .iter()
+            .map(|ext| {
+                let mut name = base.as_os_str().to_owned();
+                name.push(".");
+                name.push(ext);
+                PathBuf::from(name)
+            })
+            .find(|candidate| exists(candidate))
+            // A file with no extension cannot be started on Windows, but
+            // leaving it as given keeps the error about the name asked for.
+            .or_else(|| exists(base).then(|| base.to_path_buf()))
+    };
+    let is_path = given.is_absolute() || program.contains(['/', '\\']);
+    if is_path {
+        return candidates(given);
+    }
+    path_dirs
+        .iter()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .find_map(|dir| candidates(&dir.join(given)))
+}
+
 /// Starts a process, trying again when the program is briefly "busy".
 ///
 /// A program that was written a moment ago cannot be run while any process
@@ -381,11 +482,12 @@ fn display_word(word: &str) -> String {
 /// middle of starting holds every open file for an instant. The condition
 /// clears by itself, so it is waited out instead of reported.
 fn spawn_when_ready(command: &mut std::process::Command) -> std::io::Result<std::process::Child> {
-    const TEXT_FILE_BUSY: i32 = 26;
+    // "Text file busy" on Unix, and a sharing violation on Windows.
+    const BUSY: i32 = if cfg!(windows) { 32 } else { 26 };
     let mut attempt = 0;
     loop {
         match command.spawn() {
-            Err(err) if err.raw_os_error() == Some(TEXT_FILE_BUSY) && attempt < 50 => {
+            Err(err) if err.raw_os_error() == Some(BUSY) && attempt < 50 => {
                 attempt += 1;
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
@@ -397,11 +499,18 @@ fn spawn_when_ready(command: &mut std::process::Command) -> std::io::Result<std:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LogLine, LogStream, NoLog};
+    use crate::NoLog;
+    // The tests that run a real command use `sh` and `cat`, which a Windows
+    // machine need not have. Running a tool there is covered by the plugins'
+    // runner tests, whose stand-ins the test kit makes portable.
+    #[cfg(unix)]
+    use crate::{LogLine, LogStream};
 
+    #[cfg(unix)]
     #[derive(Default)]
     struct Kept(Mutex<Vec<LogLine>>);
 
+    #[cfg(unix)]
     impl Log for Kept {
         fn line(&self, line: LogLine) {
             self.0.lock().unwrap().push(line);
@@ -474,6 +583,72 @@ mod tests {
             .unwrap();
         assert_eq!(finished.stdout, "{\"a\": 1}\n");
         assert!(log.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_absolute_path_never_carries_the_verbatim_prefix() {
+        for (given, want) in [
+            (r"\\?\C:\work\dir", r"C:\work\dir"),
+            (r"\\?\UNC\server\share\dir", r"\\server\share\dir"),
+            (r"\\?\Volume{b75e2c83}\dir", r"\\?\Volume{b75e2c83}\dir"),
+            (r"C:\work", r"C:\work"),
+            ("/var/lib/meridian", "/var/lib/meridian"),
+        ] {
+            assert_eq!(
+                without_verbatim_prefix(PathBuf::from(given)),
+                PathBuf::from(want)
+            );
+        }
+        let here = absolute_path(Path::new("."));
+        assert!(here.is_absolute());
+        assert!(!here.to_string_lossy().starts_with(r"\\?\"));
+        // A path that does not exist is still made absolute.
+        assert!(absolute_path(Path::new("no-such-directory-here")).is_absolute());
+    }
+
+    #[test]
+    fn a_program_name_is_looked_up_as_a_windows_shell_would() {
+        let files = [
+            Path::new("tools").join("az.cmd"),
+            Path::new("tools").join("terraform.exe"),
+            Path::new("tools").join("terraform.cmd"),
+            Path::new("tools").join("kubectl.docker.exe"),
+            Path::new("other").join("az.exe"),
+            Path::new("stand-ins").join("helm.exe"),
+            Path::new("stand-ins").join("plain"),
+        ];
+        let exists = |candidate: &Path| files.iter().any(|f| f == candidate);
+        let dirs = [PathBuf::from(""), "tools".into(), "other".into()];
+        let find = |program: &str| find_program(program, &dirs, exists);
+
+        // The first directory on the path wins, whatever the extension.
+        assert_eq!(find("az"), Some(Path::new("tools").join("az.cmd")));
+        // Within a directory a program is preferred to a script.
+        assert_eq!(
+            find("terraform"),
+            Some(Path::new("tools").join("terraform.exe"))
+        );
+        assert_eq!(
+            find("terraform.cmd"),
+            Some(Path::new("tools").join("terraform.cmd"))
+        );
+        assert_eq!(
+            find("kubectl.docker"),
+            Some(Path::new("tools").join("kubectl.docker.exe"))
+        );
+        assert_eq!(find("pulumi"), None);
+        // A path is completed where it is, and not searched for.
+        let given = Path::new("stand-ins").join("helm");
+        assert_eq!(
+            find(given.to_str().unwrap()),
+            Some(Path::new("stand-ins").join("helm.exe"))
+        );
+        let plain = Path::new("stand-ins").join("plain");
+        assert_eq!(find(plain.to_str().unwrap()), Some(plain.clone()));
+        assert_eq!(
+            find(Path::new("stand-ins").join("az").to_str().unwrap()),
+            None
+        );
     }
 
     #[test]

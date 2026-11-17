@@ -4,6 +4,10 @@
 //! has to turn every one of them into an error that says what happened, within
 //! a bounded time, and leave no process behind.
 
+// Left out on Windows: each broken plugin here is a shell script started as
+// the plugin binary itself, which Windows cannot do. Starting, driving and
+// stopping a real plugin on Windows is covered by `runner.rs` and by every
+// plugin's `tests/plugin.rs`.
 #![cfg(unix)]
 
 use std::fs;

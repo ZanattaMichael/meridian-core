@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use meridian_sdk::{CompileError, EdgeKind, Resource, ResourceGraph, Value};
+use meridian_sdk::{CompileError, EdgeKind, Resource, ResourceGraph, ResourceSchema, Value};
 
 use crate::{refuse, Playbook, Task};
 
@@ -188,6 +188,33 @@ pub fn supported_resource_types() -> Vec<String> {
     ["exec", "file", "group", "package", "service", "user"]
         .map(str::to_owned)
         .to_vec()
+}
+
+/// What each resource type takes, read from the same table a resource is
+/// checked against, so an editor is never told something `emit` refuses.
+pub fn resource_schemas() -> Vec<ResourceSchema> {
+    supported_resource_types()
+        .iter()
+        .filter_map(|name| {
+            let m = mapping(name)?;
+            // A type's params can depend on the module its params select;
+            // an editor is offered every param some module takes.
+            let mut params = Vec::new();
+            for module in [COPY, ""] {
+                params.extend((m.params)(module).iter().map(|(param, _)| *param));
+            }
+            let states: Vec<&str> = m.states.iter().map(|(state, _)| *state).collect();
+            let actions: Vec<&str> = m.actions.iter().map(|(action, _)| *action).collect();
+            Some(meridian_sdk::schema::shared(
+                name,
+                &params,
+                m.required,
+                &states,
+                m.default_state,
+                &actions,
+            ))
+        })
+        .collect()
 }
 
 fn keys(pairs: &[(&str, &str)]) -> String {

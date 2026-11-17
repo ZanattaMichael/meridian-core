@@ -22,9 +22,9 @@
 //!
 //! `Invoke-DscResource` only works on Windows: on Linux, PowerShell's DSC
 //! module needs a management library (`libmi`) that PowerShell does not ship.
-//! So the `dsc` workflow, which runs these tests on Linux, asks for DSC v3
-//! only. Nothing in this file is specific to one operating system, and it is
-//! written to run on Windows, with both engines, as it stands.
+//! So the `dsc` workflow asks for DSC v3 only on Linux, and for both engines
+//! on Windows, where it runs these same tests. Nothing in this file is
+//! specific to one operating system.
 
 #![allow(clippy::result_large_err)]
 

@@ -308,6 +308,7 @@ fn run(dir: &Path, mode: Mode) -> Result<meridian_module::Report, String> {
             dir,
             state_dir: &dir.join(".meridian"),
             core_version: CORE,
+            signatures: &meridian_module::NO_SIGNATURES,
         },
         mode,
     )
@@ -380,6 +381,7 @@ fn a_module_is_fetched_by_version_and_refetched_by_digest() {
         dir: &dir,
         state_dir: &dir.join(".meridian"),
         core_version: CORE,
+        signatures: &meridian_module::NO_SIGNATURES,
     };
     Modules::load(&project).unwrap();
 

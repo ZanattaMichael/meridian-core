@@ -286,7 +286,7 @@ fn local_backend(work_dir: &Path) -> String {
     // Pulumi resolves a relative path against its own working directory,
     // which is this one, so the absolute path is the one that cannot be
     // misread.
-    let dir = std::fs::canonicalize(work_dir).unwrap_or_else(|_| work_dir.to_owned());
+    let dir = meridian_sdk::tool::absolute_path(work_dir);
     format!("file://{}", dir.display().to_string().replace('\\', "/"))
 }
 

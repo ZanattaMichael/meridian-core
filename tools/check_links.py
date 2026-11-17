@@ -43,7 +43,8 @@ def anchors(path: Path) -> set[str]:
 
 def main() -> int:
     # target/ is build output: cargo's, and the staged wiki from tools/wiki/build.py.
-    skip = {".git", "target"}
+    # node_modules/ holds other projects' pages, once an npm package is installed.
+    skip = {".git", "target", "node_modules"}
     docs = sorted(p for p in ROOT.rglob("*.md") if not skip & set(p.relative_to(ROOT).parts))
     anchor_cache: dict[Path, set[str]] = {}
     failures: list[str] = []

@@ -13,3 +13,11 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# What a release is built with: `cargo build --profile dist`. Symbols are
+# stripped and the binaries are optimised across crates, since a release
+# ships some twenty of them.
+[profile.dist]
+inherits = "release"
+strip = true
+lto = "thin"

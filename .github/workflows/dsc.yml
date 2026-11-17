@@ -6,11 +6,14 @@ name: dsc
 # linux    the plugin's own runner (plugins/dsc/tests/real.rs) drives DSC v3
 #          (the dsc command) for real, with a resource that ships with the
 #          tests. DSC v2 (Invoke-DscResource) does not work on Linux.
+# windows-runner
+#          the same tests on Windows, where the plugin's own runner drives
+#          both engines: DSC v2 (Invoke-DscResource) and DSC v3.
 # windows  real Windows resources, a machine environment variable and
-#          registry values, through both engines. Meridian does not build on
-#          Windows yet, so the documents are compiled on Linux and the
-#          Windows runner runs the compiled projects with the same
-#          Invoke-DscRunner calls the plugin makes.
+#          registry values, through both engines. The documents are compiled
+#          on Linux and the Windows runner runs the compiled projects with
+#          the same Invoke-DscRunner calls the plugin makes, which also shows
+#          that a project compiled on one system runs on the other.
 #
 # The rust workflow already runs the plugin's other tests; without
 # MERIDIAN_TEST_REAL_DSC the real ones pass without doing anything.
@@ -85,6 +88,60 @@ jobs:
           MERIDIAN_TEST_REAL_DSC: '1'
           # Invoke-DscResource (DSC v2) does not work on Linux, so only DSC v3
           # is asked for here. The windows job covers DSC v2.
+          MERIDIAN_TEST_REAL_DSC_V3: '1'
+        run: cargo test -p meridian-target-dsc --locked --test real -- --nocapture --test-threads=1
+
+  windows-runner:
+    name: the plugin's runner on Windows, DSC v2 and v3
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the stable toolchain
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+
+      - name: Install DscPipelineRunner
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name Dsc.PipelineRunner, Datum.InvokeCommand -Scope CurrentUser -Force
+          Get-Module -ListAvailable Dsc.PipelineRunner, Datum, Datum.InvokeCommand, powershell-yaml, PSDesiredStateConfiguration |
+            Format-Table Name, Version
+          # The test resource ships with the tests.
+          $modules = Join-Path $env:GITHUB_WORKSPACE 'plugins/dsc/tests/modules'
+          "PSModulePath=$modules$([IO.Path]::PathSeparator)$env:PSModulePath" >> $env:GITHUB_ENV
+
+      - name: Install the dsc command
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $archive = "DSC-$env:DSC_VERSION-x86_64-pc-windows-msvc.zip"
+          gh release download "v$env:DSC_VERSION" --repo PowerShell/DSC --pattern $archive --dir $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'the dsc release could not be downloaded' }
+          $target = Join-Path $env:RUNNER_TEMP 'dsc'
+          Expand-Archive -LiteralPath (Join-Path $env:RUNNER_TEMP $archive) -DestinationPath $target
+          $target >> $env:GITHUB_PATH
+
+      - name: Show the versions under test
+        shell: pwsh
+        run: |
+          $PSVersionTable.PSVersion.ToString()
+          [System.Environment]::OSVersion.VersionString
+          dsc --version
+          # DSC v2 finds a resource with Get-DscResource; say so here, before the tests.
+          $found = Get-DscResource -Name MarkerFile -Module MeridianTestDsc
+          $found | Format-Table Name, ModuleName, Version, ImplementedAs
+          if (-not $found) { throw 'Get-DscResource does not list MeridianTestDsc/MarkerFile' }
+          dsc resource list --adapter Microsoft.DSC/PowerShell 'MeridianTestDsc/*'
+
+      # Both engines are asked for, so either one missing fails the tests.
+      - name: Test against DscPipelineRunner
+        shell: pwsh
+        env:
+          MERIDIAN_TEST_REAL_DSC: '1'
+          MERIDIAN_TEST_REAL_DSC_V2: '1'
           MERIDIAN_TEST_REAL_DSC_V3: '1'
         run: cargo test -p meridian-target-dsc --locked --test real -- --nocapture --test-threads=1
 

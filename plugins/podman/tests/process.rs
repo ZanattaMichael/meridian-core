@@ -1,8 +1,6 @@
 //! The plugin as the host meets it: the real binary, in its own process,
 //! configured through its environment.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::Path;
 

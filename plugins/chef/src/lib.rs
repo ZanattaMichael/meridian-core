@@ -108,6 +108,10 @@ impl Emitter for Chef {
         supported_resource_types()
     }
 
+    fn resource_schemas(&self) -> Vec<meridian_sdk::ResourceSchema> {
+        transform::resource_schemas()
+    }
+
     /// Chef has both: `notifies` is its own mechanism, and a guard is
     /// evaluated on the node during the run.
     fn capabilities(&self) -> Capabilities {

@@ -92,8 +92,8 @@ spec:
       value: ${app_vm.private_ip}
     # Declared only where there is a database to point at.
     - name: database
-      when: cond.own_database
       value: ${db.address}
+      when: cond.own_database
 ---
 apiVersion: meridian/v1
 kind: ResourceSet
@@ -104,12 +104,6 @@ metadata:
     stage: configure
 spec:
   target: salt
-  # The machine is the one Terraform made: its address is not known until
-  # the first document has been applied.
-  targetHost:
-    from: infrastructure
-    ref: network
-    output: address
 
   variables:
     name: ${{ data.tenant }}-${{ data.plan }}
@@ -118,6 +112,12 @@ spec:
 
   conditions:
     tls: data.plan == 'enterprise'
+  # The machine is the one Terraform made: its address is not known until
+  # the first document has been applied.
+  targetHost:
+    from: infrastructure
+    ref: network
+    output: address
 
   resources:
     - id: web_pkg

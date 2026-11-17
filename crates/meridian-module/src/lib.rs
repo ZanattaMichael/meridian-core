@@ -17,6 +17,8 @@
 //! - [`verify`] reports on every pinned module without stopping at the first
 //!   that is wrong.
 //! - [`pack`] writes the archive a registry stores, and [`push`] publishes it.
+//! - [`sign`] signs a module, and every function above checks signatures
+//!   when the [`Project`] it is given says to.
 
 use std::fmt;
 
@@ -27,6 +29,7 @@ mod manifest;
 mod oci;
 mod pack;
 mod project;
+mod signature;
 
 pub use integrity::hash_dir;
 pub use lock::{Lock, Locked, LOCK_FILE, LOCK_VERSION};
@@ -36,6 +39,11 @@ pub use pack::{pack, unpack, MAX_UNPACKED_BYTES};
 pub use project::{
     install, verify, Change, Check, Mode, Modules, Project, Report, MODULE_REFERENCE_PREFIX,
 };
+pub use signature::{sign, Signed, NO_SIGNATURES, SIGNATURE_FILE};
+
+/// The signing mechanism modules share with plugins, re-exported so a caller
+/// can build the [`Project::signatures`] it passes in.
+pub use meridian_signing::{Policy, PublicKey, SecretKey, Signature, Verification};
 
 /// Why something to do with modules failed. The text is the whole message:
 /// it names the file, the module and what to do about it.

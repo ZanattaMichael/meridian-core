@@ -1,7 +1,5 @@
 //! The running half, against stand-ins for `puppet` and `bolt`.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::Path;
 

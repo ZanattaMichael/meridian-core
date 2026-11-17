@@ -5,8 +5,6 @@
 //! or reworded on the way across the boundary, and that the binary is wired
 //! to the runner and reads its settings from the environment.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 

@@ -206,6 +206,39 @@ message DescribeResponse {
   // values would otherwise be dropped without a word. A plugin built before
   // this field existed reports false, so the protocol version did not change.
   bool accepts_inputs = 10;
+  // resource_schemas describes the target's resource types for editors: the
+  // params and states each takes. It is advice, not a contract: Emit remains
+  // the only judge of whether a document compiles. A plugin built before this
+  // field existed reports none, and an editor then knows only the names in
+  // resource_types, so the protocol version did not change.
+  repeated ResourceSchema resource_schemas = 20;
+}
+
+// ParamSchema is one param of a resource type.
+message ParamSchema {
+  string name = 1;
+  string description = 2;
+  // kind is the shape of the value: "string", "boolean", "integer", "number",
+  // "list" or "mapping". Empty, or a name the host does not know, is any.
+  string kind = 3;
+  bool required = 4;
+  // values lists what the param accepts when that is a fixed set.
+  repeated string values = 5;
+}
+
+// ResourceSchema is one resource type as a target takes it.
+message ResourceSchema {
+  // type is the type as a document writes it. A name holding "<", such as
+  // "<provider>_<type>", is a pattern.
+  string type = 1;
+  string description = 2;
+  repeated string states = 3;
+  string default_state = 4;
+  repeated ParamSchema params = 5;
+  // open says params beyond the listed ones are accepted.
+  bool open = 6;
+  // actions lists the notify actions the type can perform.
+  repeated string actions = 7;
 }
 
 message EmitRequest {

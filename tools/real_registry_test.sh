@@ -128,6 +128,27 @@ if "$meridian" module install 2> "$work/image.txt"; then
 fi
 grep -q 'is not a Meridian module' "$work/image.txt" || { cat "$work/image.txt"; fail "the refusal does not say why"; }
 
+say "a signed module, through a registry"
+"$meridian" signing keygen --secret "$work/publisher.key" --public "$work/publisher.pub"
+cp -r "$root/examples/modules/hardening" "$work/src-3.0.0"
+sed -i "s/^  version: .*/  version: 3.0.0/" "$work/src-3.0.0/meridian.yaml"
+(cd "$work/src-3.0.0" && "$meridian" module sign --key "$work/publisher.key" && "$meridian" module push "$open" --insecure)
+project "$work/signed" "$open" "^3.0"
+cd "$work/signed"
+"$meridian" module install --module-signatures require --trusted-key "$work/publisher.pub"
+"$meridian" module verify --module-signatures require --trusted-key "$work/publisher.pub" | tee "$work/signed.txt"
+grep -q 'acme/hardening 3.0.0  signed by key ' "$work/signed.txt" || fail "the signer was not reported"
+# The signature is not part of what is pinned: the hash is the unsigned module's.
+unsigned=$(cd "$work/src-3.0.0" && "$meridian" module pack --out "$work/signed.tar.gz" | sed -n 's/^  integrity:  //p')
+grep -q "integrity: $unsigned" meridian.lock || fail "signing changed the pinned hash"
+# The versions published before were not signed, and are refused here.
+project "$work/unsigned" "$open" "^1.2"
+cd "$work/unsigned"
+if "$meridian" module install --module-signatures require --trusted-key "$work/publisher.pub" 2> "$work/unsigned.txt"; then
+  fail "an unsigned module was installed where signatures are required"
+fi
+grep -q 'is not signed' "$work/unsigned.txt" || { cat "$work/unsigned.txt"; fail "the refusal does not say why"; }
+
 say "a registry that wants a login"
 private=localhost:5001/acme/meridian-hardening
 export DOCKER_CONFIG="$work/docker"

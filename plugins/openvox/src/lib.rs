@@ -46,6 +46,11 @@ impl Emitter for OpenVox {
         Puppet.supported_resource_types()
     }
 
+    /// The types are the language's, so they are Puppet's.
+    fn resource_schemas(&self) -> Vec<meridian_sdk::ResourceSchema> {
+        Puppet.resource_schemas()
+    }
+
     /// The capabilities are the language's, so they are Puppet's: a native
     /// `notify`, and no apply-time conditional.
     fn capabilities(&self) -> Capabilities {

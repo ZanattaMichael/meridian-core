@@ -63,10 +63,10 @@ spec:
     # PowerShell predicate in the runner's own function language.
     - id: app_pool
       type: WebAdministrationDsc/WebAppPool
+      runtimeWhen: "equals (nodeName) 'web'"
       params:
         Name: app
         Ensure: Present
         State: Started
       dependsOn:
         - resource: iis
-      runtimeWhen: "equals (nodeName) 'web'"

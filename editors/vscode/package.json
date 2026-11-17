@@ -1,0 +1,110 @@
+{
+  "name": "meridian",
+  "displayName": "Meridian",
+  "description": "Completion, hover documentation, diagnostics from the real compiler, navigation, formatting and lint for Meridian documents.",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "meridian",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZanattaMichael/meridian-core.git",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Formatters"
+  ],
+  "keywords": [
+    "meridian",
+    "infrastructure as code",
+    "yaml"
+  ],
+  "icon": "icon.png",
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:yaml",
+    "workspaceContains:**/*.meridian.yaml"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "meridian.restartServer",
+        "title": "Restart Language Server",
+        "category": "Meridian"
+      },
+      {
+        "command": "meridian.reloadPlugins",
+        "title": "Reload Target Plugins",
+        "category": "Meridian"
+      },
+      {
+        "command": "meridian.showOutput",
+        "title": "Show Language Server Output",
+        "category": "Meridian"
+      }
+    ],
+    "configuration": {
+      "title": "Meridian",
+      "properties": {
+        "meridian.path": {
+          "type": "string",
+          "default": "meridian",
+          "scope": "machine-overridable",
+          "markdownDescription": "The `meridian` command to run as the language server. A bare name is looked up on `PATH`; `${workspaceFolder}` stands for the first workspace folder."
+        },
+        "meridian.pluginDirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine-overridable",
+          "markdownDescription": "Directories to load target plugins (`meridian-target-<name>`) from. They are searched before the directory the `meridian` command is in. `${workspaceFolder}` stands for the first workspace folder."
+        },
+        "meridian.lint.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show `meridian lint` findings alongside the compiler's errors."
+        },
+        "meridian.format.sortFields": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When formatting, write fields in the language's own order. Turn off to keep the order they were written in (`meridian fmt --keep-order`)."
+        },
+        "meridian.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Log the messages exchanged with the language server to the Meridian output channel."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --platform=node --target=node18 --format=cjs --external:vscode --outfile=out/extension.js",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc -p test && node --test out-test/test/settings.test.js",
+    "package": "npm run build -- --minify && vsce package --no-dependencies --out meridian.vsix",
+    "test:e2e": "npm run build && tsc -p test/e2e && node out-e2e/run.js"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "@types/vscode": "~1.82.0",
+    "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.28.1",
+    "typescript": "^5.6.0",
+    "@vscode/test-electron": "^2.4.1"
+  }
+}

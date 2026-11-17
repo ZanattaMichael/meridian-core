@@ -1,8 +1,6 @@
 //! The running half, against stand-ins for `podman`, `systemctl`, Quadlet's
 //! generator and `ssh`. The scripts themselves run under the real `sh`.
 
-#![cfg(unix)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -368,6 +366,10 @@ fn a_unit_that_is_installed_but_not_running_is_started() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "the stand-in for Quadlet names its scratch directory as a Windows shell does, which is not what the runner strips from the message; Quadlet itself only exists on Linux"
+)]
 fn a_unit_quadlet_refuses_stops_the_run_before_anything_changes() {
     let dir = scratch(TMP, "refused");
     let bad = compiled(&format!("{DATA}{WEB}        Bogus: 1\n"), "");

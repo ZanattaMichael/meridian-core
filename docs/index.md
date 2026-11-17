@@ -35,7 +35,8 @@ byte. The reasons, the layout and the order of work are in
 
 | Start here | |
 |---|---|
-| [Install](quickstart/install.md) | build Meridian, and what each target needs |
+| [Install](quickstart/install.md) | install a release or build from source, check what you downloaded, and what each target needs |
+| [Meridian on Windows](quickstart/windows.md) | what is different on Windows, and which targets make sense there |
 | [Your first ResourceSet](quickstart/first-resourceset.md) | one document, from validate to apply, and the same document on another tool |
 | [A two-stage workflow](quickstart/first-two-stage.md) | one tool creates a machine, another configures it |
 | [Worked workflows](quickstart/workflows.md) | seven workflows across every target: three tiers on four tools, a cluster platform, a golden image, Windows on Azure, an edge site, one file for every environment, and one file for every customer |
@@ -54,9 +55,21 @@ byte. The reasons, the layout and the order of work are in
 | [Compile rules](concepts/compile-rules.md) | policies over layered configuration: what a layer may and may not override, checked before anything is compiled |
 | [How a secret is held in memory](concepts/secrets-in-memory.md) | locked, wiped memory, the hardened process, how a secret reaches a tool, and what is not promised |
 
+| Editor and authoring tools | |
+|---|---|
+| [Overview](tooling/index.md) | what the tools are, and why they never disagree with the compiler |
+| [The language server](tooling/language-server.md) | completion, hover documentation, errors as you type, navigation |
+| [Visual Studio Code](tooling/vscode.md) | the extension: install, settings, commands |
+| [Other editors](tooling/other-editors.md) | Neovim, Helix, Emacs, and pre-commit |
+| [The formatter](tooling/formatter.md) | `meridian fmt`: one layout, and the guarantee that it changes nothing else |
+| [The linter](tooling/linter.md) | `meridian lint`: every error in a project, plus probable mistakes |
+| [The JSON Schema](tooling/json-schema.md) | `meridian schema`: validation for editors that only know YAML |
+
 | Reference | |
 |---|---|
 | [The `meridian` command](reference/cli.md) | commands, options, exit status |
+| [Lint rules](reference/lint.md) | every rule of `meridian lint`, with an example and what to do |
+| [Plugin signatures](reference/plugin-signatures.md) | how `meridian` decides a plugin may be started, trusting a plugin from elsewhere, and signing your own |
 | [Policy checks](reference/policy.md) | asking a policy before a change is made: the options, the input a policy sees, Rego with Open Policy Agent, and how to write an engine |
 | [State, runs and backends](reference/state.md) | what Meridian keeps about its runs, the events, and how to write a state backend |
 | [Reports and sinks](reference/reporting.md) | report files in JSON, JUnit, Markdown and HTML, sending a run's events elsewhere as they happen, and how to write a sink |
@@ -107,6 +120,7 @@ plugins.
 | [Writing a plugin](contributing/writing-a-plugin.md) | add a tool to Meridian, step by step, starting from a template that already works |
 | [How Meridian is tested](contributing/testing.md) | unit tests and golden files, property tests, cross-target conformance, examples, coverage; and how to add to each |
 | [Real-tool tests](contributing/real-tool-tests.md) | what each target is tested against for real, what that proves and what it cannot, and the settings the Azure job needs |
+| [Releasing](contributing/releasing.md) | what the release pipeline builds and checks, the settings a release needs, and the steps to cut one |
 | [Code of Conduct](../CODE_OF_CONDUCT.md) | how we treat each other |
 
 Security reports go through [`SECURITY.md`](../SECURITY.md), not the issue tracker.

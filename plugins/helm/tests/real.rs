@@ -5,6 +5,8 @@
 //! with `cargo test -p meridian-target-helm --test real -- --ignored`; the
 //! `helm` workflow does on every pull request that touches the plugin.
 
+// Left out on Windows: this file drives the real tool, and the workflow that
+// installs the tool and runs it is a Linux job.
 #![cfg(unix)]
 #![allow(clippy::result_large_err)]
 
