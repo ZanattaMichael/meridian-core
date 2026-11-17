@@ -355,6 +355,12 @@ fn outputs(
         .into_iter()
         .map(|mut p| {
             p.description = first_paragraph(&p.description);
+            let property = properties.get(&p.name).and_then(Value::as_map);
+            if property
+                .is_some_and(|property| matches!(property.get("secret"), Some(Value::Bool(true))))
+            {
+                p.sensitive = true;
+            }
             p.computed()
         })
         .collect()
@@ -569,6 +575,7 @@ mod tests {
                 "separator":{"type":"string","description":"The character to separate words.\n\nMore."},
                 "legacy":{"type":"string","deprecationMessage":"Do not use."},
                 "secretly":{"type":"string","secret":true},
+                "result":{"type":"string","secret":true},
                 "tags":{"$ref":"#/types/random:index/Keepers:Keepers"}},
               "inputProperties":{
                 "length":{"type":"integer","description":"The length (in words)."},
@@ -628,6 +635,10 @@ mod tests {
         assert!(p("legacy").deprecated);
         assert_eq!(p("legacy").description, "Do not use.");
         assert!(p("secretly").sensitive);
+        assert!(
+            p("result").computed && p("result").sensitive,
+            "a secret output is read, and still a secret"
+        );
         assert_eq!(
             p("tags").params[0].name,
             "k",
