@@ -44,6 +44,12 @@ it is. Which keys to trust is your decision.
 The default is `require` in a released `meridian` and `off` in one built from
 source, which has no key of its own and whose plugins nobody signed.
 
+Every command that starts plugins follows the policy, the
+[language server](../tooling/language-server.md#plugin-signatures) included.
+The one exception is stricter: plugin directories an editor names in its own
+settings are always held to `require`, unless `meridian lsp` is started with
+`--trust-editor-plugin-dirs`.
+
 `meridian plugins` shows what the check found for each plugin:
 
 ```
