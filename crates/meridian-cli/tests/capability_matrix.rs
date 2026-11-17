@@ -5,7 +5,7 @@
 use std::fs;
 
 use meridian_plugin_testkit::repo_root;
-use meridian_sdk::{Emitter, Importer, Runner};
+use meridian_sdk::{Emitter, Importer, Runner, SchemaSource};
 
 const PATH: &str = "docs/reference/capability-matrix.md";
 
@@ -34,10 +34,18 @@ compiled, with the reason. Each target's own page says how it does what it can.
 - **import** is what `meridian import` can read of the tool's existing
   configuration and turn into a document for the target. See
   [Importing existing configuration](../operations/importing.md).
+- **schemas** says the plugin exports its tool's own resource schemas, so
+  `meridian schema sync` can cache them for the editor tools. See
+  [Tool schemas](../tooling/schema-sync.md).
 
 ";
 
-fn row(emitter: &dyn Emitter, runner: &dyn Runner, importer: Option<&dyn Importer>) -> String {
+fn row(
+    emitter: &dyn Emitter,
+    runner: &dyn Runner,
+    importer: Option<&dyn Importer>,
+    schemas: Option<&dyn SchemaSource>,
+) -> String {
     let capabilities = emitter.capabilities();
     let notifies = match (capabilities.native_notify, capabilities.synthetic_notify) {
         (true, true) => "native and synthetic",
@@ -62,7 +70,8 @@ fn row(emitter: &dyn Emitter, runner: &dyn Runner, importer: Option<&dyn Importe
         None => "no".to_owned(),
     };
     format!(
-        "| [{name}](../targets/{name}.md) | {category} | {types} | {notifies} | {runtime} | {plan} | {apply} | {outputs} | {inputs} | {import} |\n",
+        "| [{name}](../targets/{name}.md) | {category} | {types} | {notifies} | {runtime} | {plan} | {apply} | {outputs} | {inputs} | {import} | {schemas} |\n",
+        schemas = yes(schemas.is_some()),
         name = emitter.name(),
         category = emitter.category(),
         types = types.join(", "),
@@ -79,16 +88,18 @@ fn matrix() -> String {
         .iter()
         .map(|target| {
             let importer = target.importer();
+            let schemas = target.schemas();
             row(
                 target.emitter().as_ref(),
                 target.runner().as_ref(),
                 importer.as_deref().map(|i| i as &dyn Importer),
+                schemas.as_deref(),
             )
         })
         .collect();
     rows.sort();
     format!(
-        "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | apply | outputs | inputs | import |\n|---|---|---|---|---|---|---|---|---|---|\n{}",
+        "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | apply | outputs | inputs | import | schemas |\n|---|---|---|---|---|---|---|---|---|---|---|\n{}",
         rows.concat()
     )
 }

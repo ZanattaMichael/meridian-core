@@ -1178,6 +1178,7 @@ dependencies = [
  "clap",
  "jsonschema",
  "meridian-all-targets",
+ "meridian-ast",
  "meridian-expr",
  "meridian-graph",
  "meridian-import",
@@ -1244,7 +1245,9 @@ version = "0.1.0"
 dependencies = [
  "lsp-server",
  "lsp-types",
+ "meridian-module",
  "meridian-plugin-host",
+ "meridian-sdk",
  "meridian-target-ansible",
  "meridian-target-terraform",
  "meridian-tooling",
@@ -1349,6 +1352,8 @@ dependencies = [
  "meridian-value",
  "prost",
  "protox",
+ "serde",
+ "serde_json",
  "tokio",
  "tokio-stream",
  "tonic",
@@ -1489,6 +1494,7 @@ dependencies = [
  "meridian-plugin-host",
  "meridian-plugin-testkit",
  "meridian-sdk",
+ "meridian-target-terraform",
 ]
 
 [[package]]
@@ -1565,10 +1571,13 @@ dependencies = [
  "meridian-ast",
  "meridian-expr",
  "meridian-ir",
+ "meridian-module",
  "meridian-orchestrator",
  "meridian-plugin-host",
  "meridian-sdk",
+ "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

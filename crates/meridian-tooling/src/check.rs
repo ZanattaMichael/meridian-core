@@ -14,7 +14,7 @@ use meridian_ast::ResourceGraph;
 use meridian_ir::{Bundle, Document, Resolution, Value};
 use meridian_orchestrator::version_fits;
 use meridian_plugin_host::{to_sdk, EmitError, Registry};
-use meridian_sdk::Data;
+use meridian_sdk::{Data, ParamKind, ParamSchema};
 
 use crate::catalog::Catalog;
 use crate::syntax::{self, parse_path, File, NodeKind, Pos, Seg, Span};
@@ -593,24 +593,23 @@ fn schema_problems(file: &Parsed, parsed: &ParsedDoc, catalog: &Catalog) -> Vec<
             ));
             continue;
         };
+        // The params, at every level the schema describes.
+        let mut at_params = Vec::new();
+        check_params(
+            &ParamLevel {
+                file,
+                doc: parsed.index,
+                id: &r.id,
+                type_name: &r.r#type,
+                target: source,
+            },
+            &schema.params,
+            schema.open,
+            &r.params,
+            &mut at_params,
+            &mut out,
+        );
         if !schema.open {
-            for name in r.params.keys() {
-                if schema.find_param(name).is_none() {
-                    out.push(problem(
-                        file,
-                        key_span(file, parsed.index, &r.id, name),
-                        "unsupported-param",
-                        source,
-                        format!(
-                            "resource type {:?} does not take param {:?} on target {:?} (it takes: {})",
-                            r.r#type,
-                            name,
-                            target.name,
-                            list(schema.params.iter().map(|p| &p.name))
-                        ),
-                    ));
-                }
-            }
             // A state worked out from data is judged once it is known.
             if !r.state.is_empty()
                 && !schema.states.contains(&r.state)
@@ -636,40 +635,6 @@ fn schema_problems(file: &Parsed, parsed: &ParsedDoc, catalog: &Catalog) -> Vec<
                     "unsupported-state",
                     source,
                     message,
-                ));
-            }
-        }
-        for param in schema.params.iter().filter(|p| p.required) {
-            if !r.params.contains_key(&param.name) {
-                out.push(problem(
-                    file,
-                    at("params"),
-                    "missing-param",
-                    source,
-                    format!(
-                        "resource type {:?} requires param {:?} on target {:?}",
-                        r.r#type, param.name, target.name
-                    ),
-                ));
-            }
-        }
-        for (name, value) in &r.params {
-            let Some(param) = schema.find_param(name) else {
-                continue;
-            };
-            let Value::String(text) = value else { continue };
-            if !param.values.is_empty() && !param.values.contains(text) && !text.contains("${") {
-                out.push(problem(
-                    file,
-                    at(&format!("params.{name}")),
-                    "unsupported-value",
-                    source,
-                    format!(
-                        "param {:?} does not take {:?} (it takes: {})",
-                        name,
-                        text,
-                        list(&param.values)
-                    ),
                 ));
             }
         }
@@ -711,22 +676,236 @@ fn schema_problems(file: &Parsed, parsed: &ParsedDoc, catalog: &Catalog) -> Vec<
 
 /// The span of a param's key, so an unwanted param is marked at its name.
 fn key_span(file: &Parsed, doc: usize, id: &str, param: &str) -> Span {
-    let found = file.resource_index(doc, id).and_then(|index| {
-        file.file
-            .locate(
-                doc,
-                &[
-                    Seg::Key("spec".into()),
-                    Seg::Key("resources".into()),
-                    Seg::Index(index),
-                    Seg::Key("params".into()),
-                    Seg::Key(param.to_owned()),
-                ],
-            )
-            .filter(|l| l.complete)
-            .and_then(|l| l.key)
-    });
-    found.unwrap_or_else(|| file.resource_span(doc, id, "params"))
+    key_span_at(file, doc, id, &[Seg::Key(param.to_owned())])
+}
+
+/// The span of the key at a path inside `params`, such as
+/// `tags.Name` or `ports[0].port`; the key itself when it is in the text,
+/// else the nearest thing above it.
+fn key_span_at(file: &Parsed, doc: usize, id: &str, inside: &[Seg]) -> Span {
+    let Some(index) = file.resource_index(doc, id) else {
+        return file.resource_span(doc, id, "params");
+    };
+    let mut path = vec![
+        Seg::Key("spec".into()),
+        Seg::Key("resources".into()),
+        Seg::Index(index),
+        Seg::Key("params".into()),
+    ];
+    path.extend(inside.iter().cloned());
+    let found = file
+        .file
+        .locate(doc, &path)
+        .filter(|l| l.complete)
+        .and_then(|l| l.key);
+    found.unwrap_or_else(|| {
+        let shown: Vec<String> = inside
+            .iter()
+            .map(|s| match s {
+                Seg::Key(k) => k.clone(),
+                Seg::Index(i) => format!("[{i}]"),
+            })
+            .collect();
+        file.resource_span(
+            doc,
+            id,
+            &format!("params.{}", shown.join(".").replace(".[", "[")),
+        )
+    })
+}
+
+/// Where a param check is happening, for its messages and spans.
+struct ParamLevel<'a> {
+    file: &'a Parsed,
+    doc: usize,
+    id: &'a str,
+    type_name: &'a str,
+    target: &'a str,
+}
+
+/// Checks the keys of one mapping of params against the params a schema
+/// lists for that level, and goes on into the mappings and lists inside
+/// it that the schema describes. `inside` is the path from `params` to
+/// the mapping.
+fn check_params(
+    level: &ParamLevel<'_>,
+    listed: &[ParamSchema],
+    open: bool,
+    given: &BTreeMap<String, Value>,
+    inside: &mut Vec<Seg>,
+    out: &mut Vec<Diagnostic>,
+) {
+    let shown = |inside: &[Seg], name: &str| {
+        let mut path = String::new();
+        for seg in inside {
+            match seg {
+                Seg::Key(k) => {
+                    if !path.is_empty() {
+                        path.push('.');
+                    }
+                    path.push_str(k);
+                }
+                Seg::Index(i) => path.push_str(&format!("[{i}]")),
+            }
+        }
+        if !path.is_empty() {
+            path.push('.');
+        }
+        path.push_str(name);
+        path
+    };
+    let where_ = |inside: &[Seg]| {
+        if inside.is_empty() {
+            String::new()
+        } else {
+            format!(" in {:?}", shown(inside, "").trim_end_matches('.'))
+        }
+    };
+    if !open {
+        for name in given.keys() {
+            if listed.iter().any(|p| &p.name == name) {
+                continue;
+            }
+            inside.push(Seg::Key(name.clone()));
+            let span = key_span_at(level.file, level.doc, level.id, inside);
+            inside.pop();
+            out.push(problem(
+                level.file,
+                span,
+                "unsupported-param",
+                level.target,
+                format!(
+                    "resource type {:?} does not take param {:?}{} on target {:?} (it takes: {})",
+                    level.type_name,
+                    name,
+                    where_(inside),
+                    level.target,
+                    list(listed.iter().filter(|p| !p.computed).map(|p| &p.name))
+                ),
+            ));
+        }
+    }
+    for param in listed.iter().filter(|p| p.required) {
+        if !given.contains_key(&param.name) {
+            let span = if inside.is_empty() {
+                level.file.resource_span(level.doc, level.id, "params")
+            } else {
+                key_span_at(level.file, level.doc, level.id, inside)
+            };
+            out.push(problem(
+                level.file,
+                span,
+                "missing-param",
+                level.target,
+                format!(
+                    "resource type {:?} requires param {:?}{} on target {:?}",
+                    level.type_name,
+                    param.name,
+                    where_(inside),
+                    level.target
+                ),
+            ));
+        }
+    }
+    for (name, value) in given {
+        let Some(param) = listed.iter().find(|p| &p.name == name) else {
+            continue;
+        };
+        inside.push(Seg::Key(name.clone()));
+        let span = || key_span_at(level.file, level.doc, level.id, inside);
+        if param.computed {
+            out.push(problem(
+                level.file,
+                span(),
+                "computed-param",
+                level.target,
+                format!(
+                    "param {:?} is set by the tool, so a document cannot write it; read it \
+                     with `${{{}.{}}}`",
+                    shown(&inside[..inside.len() - 1], name),
+                    level.id,
+                    shown(&inside[..inside.len() - 1], name)
+                ),
+            ));
+        }
+        match value {
+            Value::String(text) => {
+                // A reference or an expression may become anything.
+                if !text.contains("${") {
+                    if !param.values.is_empty() && !param.values.contains(text) {
+                        out.push(problem(
+                            level.file,
+                            span(),
+                            "unsupported-value",
+                            level.target,
+                            format!(
+                                "param {:?} does not take {:?} (it takes: {})",
+                                shown(&inside[..inside.len() - 1], name),
+                                text,
+                                list(&param.values)
+                            ),
+                        ));
+                    } else if matches!(param.kind, ParamKind::List | ParamKind::Map) {
+                        out.push(problem(
+                            level.file,
+                            span(),
+                            "wrong-param-kind",
+                            level.target,
+                            format!(
+                                "param {:?} is a {} on target {:?}, and was given text",
+                                shown(&inside[..inside.len() - 1], name),
+                                param.kind.as_str(),
+                                level.target
+                            ),
+                        ));
+                    }
+                }
+            }
+            Value::Map(map) => {
+                if param.kind == ParamKind::List {
+                    out.push(problem(
+                        level.file,
+                        span(),
+                        "wrong-param-kind",
+                        level.target,
+                        format!(
+                            "param {:?} is a list on target {:?}, and was given a mapping",
+                            shown(&inside[..inside.len() - 1], name),
+                            level.target
+                        ),
+                    ));
+                } else if !param.params.is_empty() || (param.kind == ParamKind::Map && !param.open)
+                {
+                    check_params(level, &param.params, param.open, map, inside, out);
+                }
+            }
+            Value::List(items) => {
+                if param.kind == ParamKind::Map {
+                    out.push(problem(
+                        level.file,
+                        span(),
+                        "wrong-param-kind",
+                        level.target,
+                        format!(
+                            "param {:?} is a mapping on target {:?}, and was given a list",
+                            shown(&inside[..inside.len() - 1], name),
+                            level.target
+                        ),
+                    ));
+                } else if !param.params.is_empty() {
+                    for (i, item) in items.iter().enumerate() {
+                        if let Value::Map(map) = item {
+                            inside.push(Seg::Index(i));
+                            check_params(level, &param.params, param.open, map, inside, out);
+                            inside.pop();
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        inside.pop();
+    }
 }
 
 /// Asks the document's target to compile it and reports what it says. This

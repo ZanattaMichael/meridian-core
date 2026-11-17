@@ -48,6 +48,7 @@ mod import;
 mod listen;
 mod run;
 pub mod schema;
+mod schemas;
 mod serve;
 pub mod tool;
 mod types;
@@ -75,6 +76,7 @@ pub use run::{
     Plan, RunContext, RunError, Runner,
 };
 pub use schema::{ParamKind, ParamSchema, ResourceSchema};
+pub use schemas::{version_in, SchemaExport, SchemaRequest, SchemaSource};
 pub use serve::{serve, Plugin, ServeError};
 pub use types::{
     Artifact, Capabilities, CompileError, Data, Edge, EdgeKind, Emitted, Emitter,
@@ -93,9 +95,9 @@ pub use version::PROTOCOLS_ENV;
 /// in the host's range.
 ///
 /// Version 2 added the plugin's category and operations to `Describe`, and
-/// the `Runner` service. The optional `Importer` service was added without a
-/// new version: a plugin built before it lists no import formats and is never
-/// asked to import.
+/// the `Runner` service. The optional `Importer` and `SchemaSource` services
+/// were added without a new version: a plugin built before them lists no
+/// import formats and does not say it exports schemas, and is never asked.
 pub const PROTOCOL_VERSION: u32 = 2;
 
 /// The oldest wire protocol this SDK still speaks. It trails

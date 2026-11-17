@@ -20,7 +20,10 @@ meridian secret check <files>... | set NAME <files>...
 meridian rules check --hierarchy FILE [--rules FILE] [--require-rules] [--data FILE] [--set KEY=VALUE]
 meridian fmt      <paths>... [--check] [--keep-order]
 meridian lint     <paths>... [--data FILE] [--set KEY=VALUE] [--state-dir DIR] [--fix] [--strict] [--json]
-meridian schema   [--target TARGET] [-o FILE]
+meridian schema   [--target TARGET] [-o FILE] [--state-dir DIR]
+meridian schema   sync <paths>... [--target TARGET] [--data FILE] [--set KEY=VALUE] [--state-dir DIR] [--check] [--no-lock]
+meridian schema   status [--state-dir DIR] [--json]
+meridian schema   clean [TARGET]... [--state-dir DIR]
 meridian lsp
 ```
 
@@ -456,7 +459,9 @@ stacks/web.yaml:35:21: error: spec.resources[3].dependsOn[0].resource: resource 
 `--fix` applies the fixes that are safe. `--strict` fails on warnings as well
 as errors. `--json` prints one JSON object per finding. `--data` and `--set`
 are as for `compile`; without them a document that needs data is checked
-with every `when` treated as true. Full
+with every `when` treated as true. `--state-dir` is where the project's
+fetched modules and [synced tool schemas](../tooling/schema-sync.md) are,
+so a tool's own params are checked too. Full
 description: [The linter](../tooling/linter.md); the rules:
 [Lint rules](lint.md).
 
@@ -464,8 +469,27 @@ description: [The linter](../tooling/linter.md); the rules:
 
 Prints a JSON Schema (draft 7) of the document language and of the resource
 types of every plugin found, for editors that validate YAML against a schema.
-`--target` writes one target's rules only; `-o` writes to a file. Full
+The tool schemas cached under `--state-dir` are written in too. `--target`
+writes one target's rules only; `-o` writes to a file. Full
 description: [The JSON Schema](../tooling/json-schema.md).
+
+### `schema sync`, `schema status`, `schema clean`
+
+`schema sync` asks each target's installed tool, through its plugin, for the
+schemas of the resource types the documents under the paths use, caches them
+under `--state-dir` (`.meridian/schemas/<target>.json`) and records the
+versions they came from in `meridian.lock`. Editors, `lint` and `schema`
+read the cache, so a tool's own types (`aws_instance`, `apps/v1/Deployment`)
+are completed and checked without the editor ever running a tool. `--target`
+syncs one target; `--check` changes nothing and exits `1` if any cache is
+missing or is not what the lock records; `--no-lock` leaves the lock alone.
+
+`schema status` shows what is cached for each target and how it stands
+against the lock, as text or with `--json` one object per line. `schema
+clean` removes the cache of the targets named, or of every target, and their
+records in the lock.
+
+Full description: [Tool schemas](../tooling/schema-sync.md).
 
 ### `lsp`
 

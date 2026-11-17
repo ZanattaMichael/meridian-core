@@ -8,6 +8,8 @@ export interface Settings {
   pluginDirs: string[];
   lintEnabled: boolean;
   sortFields: boolean;
+  /** Where `meridian schema sync` keeps the tool schemas it cached. */
+  stateDir: string;
 }
 
 /** What `meridian lsp` reads from the `initialize` request. */
@@ -15,6 +17,7 @@ export interface InitializationOptions {
   pluginDirs: string[];
   lint: boolean;
   sortFields: boolean;
+  stateDir: string;
 }
 
 /** The process to start. */
@@ -69,7 +72,25 @@ export function initializationOptions(
       .map((dir) => expand(dir, workspaceFolder, home)),
     lint: settings.lintEnabled,
     sortFields: settings.sortFields,
+    stateDir: expand(settings.stateDir.trim() === "" ? ".meridian" : settings.stateDir.trim(), workspaceFolder, home),
   };
+}
+
+/** The command that caches the tool schemas: `<meridian> schema sync`. */
+export function syncCommand(
+  settings: Settings,
+  workspaceFolder: string | undefined,
+  home: string | undefined,
+): string {
+  const { command } = serverCommand(settings, workspaceFolder, home);
+  const stateDir = settings.stateDir.trim();
+  const quoted = (text: string): string => (/[\s"']/.test(text) ? JSON.stringify(text) : text);
+  const parts = [quoted(command), "schema", "sync"];
+  if (stateDir !== "" && stateDir !== ".meridian") {
+    parts.push("--state-dir", quoted(expand(stateDir, workspaceFolder, home)));
+  }
+  parts.push(".");
+  return parts.join(" ");
 }
 
 /**

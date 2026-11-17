@@ -26,11 +26,12 @@ lists it, with its documentation.
 | `spec.targetVersion` | the versions the target says it compiles for |
 | A resource's `type` | the target's resource types |
 | A resource's `state` | the states that type takes on that target |
-| Under a resource's `params` | the params that type takes on that target, required ones first, leaving out the ones already set |
+| Under a resource's `params` | the params that type takes on that target, required ones first, leaving out the ones already set; for a tool's own type, the params the [synced tool schema](schema-sync.md) lists, and inside a map param its nested params |
 | A param with fixed values | the values |
 | `dependsOn[].resource`, `notifies[].resource` | the ids of the other resources in the document |
 | `notifies[].action` | the actions the notified resource's type takes |
-| Inside `${...}` | the resources of the document, and after `resource.` the things that can be read from it |
+| Inside `${...}` | the resources of the document, and after `resource.` the things that can be read from it: the outputs of an Infrastructure, and the params of the resource's type, including the ones the tool sets |
+| Inside `${{ ... }}` | the [built-in functions](../reference/dsl/expressions.md) of the expression language, each inserted with its parentheses and shown with its signature and what it returns |
 | `when` (on a document, a resource, an edge or an output) | `data.<key>` and `defined(...)`, and the names the document declares: `cond.<name>` from `spec.conditions`, `var.<name>` from `spec.variables`, `secret.<name>` from `spec.secrets` |
 | An entry of `spec.imports` | its fields, and for `from` the two sources (`artifact`, `output`) |
 | An entry of `spec.secrets` | its fields, `name` and `from` first, and for `from` the three sources (`env`, `file`, `exec`) |
@@ -57,7 +58,11 @@ Hovering shows the documentation of what is under the pointer:
 - a target: its category, what it can do, the versions it compiles for;
 - a resource type: its description and a table of its params and states on
   this target;
-- a param: its kind, whether it is required, the values it takes;
+- a param: its kind, whether it is required, the values it takes, and for
+  a tool's own type whether the tool sets it, whether it is sensitive or
+  deprecated, and its nested params;
+- a built-in function in `${{ ... }}`: its signature, what it does and what
+  it returns;
 - a value with a fixed set of choices, such as `ifMissing: skip`: what the
   choice means;
 - a resource id in `dependsOn`, `notifies` or `${...}`: the resource it names;
@@ -74,7 +79,7 @@ come from four places, and each says which in its code:
 | Source | Example | Where it comes from |
 |---|---|---|
 | The parser | `syntax`, `invalid-document` | the same code as `meridian validate`: YAML that does not parse, a field that does not exist, a value of the wrong kind, a dependency on a resource that does not exist, a cycle |
-| The target's description | `unknown-target`, `kind-does-not-fit-target`, `unsupported-target-version`, `unsupported-resource-type`, `unsupported-param`, `unsupported-state`, `unsupported-value`, `unsupported-action`, `missing-param` | what the plugin says it takes, checked resource by resource so that every problem is shown at once and in its place |
+| The target's description | `unknown-target`, `kind-does-not-fit-target`, `unsupported-target-version`, `unsupported-resource-type`, `unsupported-param`, `unsupported-state`, `unsupported-value`, `unsupported-action`, `missing-param`, `wrong-param-kind`, `computed-param` | what the plugin says it takes, and what the [synced tool schemas](schema-sync.md) say about the tool's own types, checked resource by resource and param by param, nested params included, so that every problem is shown at once and in its place |
 | The target's compiler | whatever the plugin refuses, such as `unsupported-runtime-condition`, and `target-warning` for what it warns about | the document is compiled by the real plugin, in memory; nothing is written |
 | The linter | `unquoted-mode`, `literal-secret`, ... | [the lint rules](../reference/lint.md); turn them off with the `lint` option |
 
@@ -137,6 +142,7 @@ The editor passes these in `initializationOptions` when it starts the server.
 | `pluginDirs` | `[]` | directories to load plugins from, searched before the ones on the command line |
 | `lint` | `true` | include the linter's findings in the diagnostics |
 | `sortFields` | `true` | when formatting, write fields in the language's own order |
+| `stateDir` | `.meridian` | where each workspace folder's [synced tool schemas](schema-sync.md) are read from, relative to the folder |
 
 Plugins are looked for, in order, in `pluginDirs`, in each `--plugin-dir` given
 to `meridian lsp` and in `MERIDIAN_PLUGIN_DIR`, and in the directory the
@@ -162,6 +168,13 @@ command-line policy then applies to them as well.
 The server loads plugins when it starts. After installing or rebuilding one,
 run the `meridian.reloadPlugins` command (in VS Code, **Meridian: Reload Target
 Plugins**) or restart the server.
+
+The server also reads the tool schemas `meridian schema sync` cached under
+each workspace folder's state directory, when it starts and again whenever
+the cache changes, so a sync run in a terminal shows in the editor without
+a restart. It never runs a sync itself. When `meridian.lock` records schemas
+that are not cached here, or the cache is not what the lock records, it says
+so once in a message.
 
 ## What the server supports
 

@@ -34,9 +34,10 @@ use std::path::Path;
 use meridian_plugin_testkit::{graph_from_text, scratch, KeptLog};
 use meridian_sdk::tool::Tool;
 use meridian_sdk::{
-    Applied, Artifact, Change, ChangeAction, Data, Emitter, NoLog, Plan, RunContext, Runner,
+    Applied, Artifact, Change, ChangeAction, Data, Emitter, NoLog, ParamKind, Plan, RunContext,
+    Runner, SchemaRequest, SchemaSource,
 };
-use meridian_target_dsc::{Dsc, DscRunner};
+use meridian_target_dsc::{Dsc, DscRunner, DscSchemas};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
 
@@ -319,5 +320,80 @@ fn a_resource_dsc_does_not_have_fails_with_the_runners_reason() {
             );
         }
         Ok(applied) => panic!("a resource that does not exist was applied: {applied:?}"),
+    }
+}
+
+#[ignore = "needs a real dsc; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn the_resources_properties_are_exported_for_an_editor() {
+    let Some(version) = any_engine() else { return };
+    let dir = scratch(TMP, "real-schemas");
+    let state = shown(&dir.join("state"));
+    let mut resources = format!(
+        "    - id: config\n      type: MeridianTestDsc/MarkerFile\n      params:\n        Name: config\n        Path: {state}\n"
+    );
+    // A resource built for DSC v3 alone comes with the dsc command.
+    if version == "3" {
+        resources.push_str("    - id: os\n      type: Microsoft/OSInfo\n      params: {}\n");
+    }
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: site\nspec:\n  target: dsc\n  targetVersion: \"{version}\"\n  targetHost:\n    from: inline\n    host: localhost\n  resources:\n{resources}"
+    );
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_text("site.yaml", &text, "dsc")],
+    );
+    let log = KeptLog::default();
+    let export = DscSchemas::from_env()
+        .export(&request, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(export.tool, "dsc");
+    assert!(
+        export
+            .pins
+            .get("powershell")
+            .is_some_and(|v| v.starts_with('7')),
+        "PowerShell's version is pinned: {:?}",
+        export.pins
+    );
+    assert_eq!(
+        export.pins.get("MeridianTestDsc").map(String::as_str),
+        Some("1.0.0"),
+        "the module's version is pinned: {:?}; notes: {:?}",
+        export.pins,
+        export.notes
+    );
+
+    // The PowerShell resource, as Get-DscResource describes it.
+    let marker = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "MeridianTestDsc/MarkerFile")
+        .unwrap_or_else(|| panic!("MarkerFile is described: {:?}", export.notes));
+    assert_eq!(marker.source, "MeridianTestDsc 1.0.0");
+    let p = |name: &str| marker.find_param(name).unwrap_or_else(|| panic!("{name}"));
+    assert!(p("Name").required && p("Path").required);
+    assert!(!p("Content").required && p("Content").kind == ParamKind::String);
+    assert_eq!(p("Ensure").values, ["Absent", "Present"]);
+
+    if version == "3" {
+        assert!(
+            export.tool_version.starts_with('3'),
+            "dsc's version: {:?}",
+            export.tool_version
+        );
+        // The native resource, from its manifest's schema.
+        let os = export
+            .schemas
+            .iter()
+            .find(|s| s.r#type == "Microsoft/OSInfo")
+            .unwrap_or_else(|| panic!("OSInfo is described: {:?}", export.notes));
+        assert!(os.find_param("family").is_some(), "{:?}", os.params);
+        assert!(export.pins.contains_key("Microsoft/OSInfo"));
+        // Every other native resource is offered by name.
+        assert!(export
+            .schemas
+            .iter()
+            .any(|s| s.r#type.starts_with("Microsoft.DSC/") && s.open));
     }
 }

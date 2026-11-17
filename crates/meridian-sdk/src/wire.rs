@@ -10,6 +10,7 @@ use crate::import::*;
 use crate::pb;
 use crate::run::*;
 use crate::schema::{ParamKind, ParamSchema, ResourceSchema};
+use crate::schemas::{SchemaExport, SchemaRequest};
 use crate::types::*;
 
 fn to_i32(n: usize) -> i32 {
@@ -290,23 +291,29 @@ pub fn resource_schema_to_wire(s: &ResourceSchema) -> pb::ResourceSchema {
         description: s.description.clone(),
         states: s.states.clone(),
         default_state: s.default_state.clone(),
-        params: s
-            .params
-            .iter()
-            .map(|p| pb::ParamSchema {
-                name: p.name.clone(),
-                description: p.description.clone(),
-                // Any travels as the empty string, the proto3 default.
-                kind: match p.kind {
-                    ParamKind::Any => String::new(),
-                    kind => kind.as_str().to_owned(),
-                },
-                required: p.required,
-                values: p.values.clone(),
-            })
-            .collect(),
+        params: s.params.iter().map(param_schema_to_wire).collect(),
         open: s.open,
         actions: s.actions.clone(),
+        source: s.source.clone(),
+    }
+}
+
+fn param_schema_to_wire(p: &ParamSchema) -> pb::ParamSchema {
+    pb::ParamSchema {
+        name: p.name.clone(),
+        description: p.description.clone(),
+        // Any travels as the empty string, the proto3 default.
+        kind: match p.kind {
+            ParamKind::Any => String::new(),
+            kind => kind.as_str().to_owned(),
+        },
+        required: p.required,
+        values: p.values.clone(),
+        params: p.params.iter().map(param_schema_to_wire).collect(),
+        open: p.open,
+        computed: p.computed,
+        deprecated: p.deprecated,
+        sensitive: p.sensitive,
     }
 }
 
@@ -316,20 +323,88 @@ pub fn resource_schema_from_wire(s: pb::ResourceSchema) -> ResourceSchema {
         description: s.description,
         states: s.states,
         default_state: s.default_state,
-        params: s
-            .params
-            .into_iter()
-            .map(|p| ParamSchema {
-                name: p.name,
-                description: p.description,
-                kind: ParamKind::from_name(&p.kind),
-                required: p.required,
-                values: p.values,
-            })
-            .collect(),
+        params: s.params.into_iter().map(param_schema_from_wire).collect(),
         open: s.open,
         actions: s.actions,
+        source: s.source,
     }
+}
+
+fn param_schema_from_wire(p: pb::ParamSchema) -> ParamSchema {
+    ParamSchema {
+        name: p.name,
+        description: p.description,
+        kind: ParamKind::from_name(&p.kind),
+        required: p.required,
+        values: p.values,
+        params: p.params.into_iter().map(param_schema_from_wire).collect(),
+        open: p.open,
+        computed: p.computed,
+        deprecated: p.deprecated,
+        sensitive: p.sensitive,
+    }
+}
+
+pub fn export_schemas_request(r: &SchemaRequest) -> pb::ExportSchemasRequest {
+    pb::ExportSchemasRequest {
+        work_dir: r.work_dir.to_string_lossy().into_owned(),
+        graphs: r.graphs.iter().map(graph_to_wire).collect(),
+        types: r.types.clone(),
+    }
+}
+
+pub fn export_schemas_request_from_wire(
+    r: pb::ExportSchemasRequest,
+) -> Result<SchemaRequest, String> {
+    let graphs = r
+        .graphs
+        .into_iter()
+        .map(graph_from_wire)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("reading a resource graph: {e}"))?;
+    Ok(SchemaRequest {
+        work_dir: r.work_dir.into(),
+        graphs,
+        types: r.types,
+    })
+}
+
+pub fn export_schemas_response(
+    outcome: Result<SchemaExport, RunError>,
+) -> pb::ExportSchemasResponse {
+    match outcome {
+        Ok(export) => pb::ExportSchemasResponse {
+            schemas: export.schemas.iter().map(resource_schema_to_wire).collect(),
+            tool: export.tool,
+            tool_version: export.tool_version,
+            pins: export.pins.into_iter().collect(),
+            notes: export.notes,
+            error: None,
+        },
+        Err(e) => pb::ExportSchemasResponse {
+            error: Some(run_error_to_wire(e)),
+            ..Default::default()
+        },
+    }
+}
+
+pub fn export_schemas_response_from_wire(
+    r: pb::ExportSchemasResponse,
+) -> Result<SchemaExport, RunError> {
+    if let Some(e) = r.error {
+        return Err(run_error_from_wire(e, Vec::new()));
+    }
+    Ok(SchemaExport {
+        schemas: r
+            .schemas
+            .into_iter()
+            .map(resource_schema_from_wire)
+            .collect(),
+        tool: r.tool,
+        tool_version: r.tool_version,
+        pins: r.pins.into_iter().collect(),
+        notes: r.notes,
+    })
 }
 
 pub fn operations_to_wire(o: Operations) -> pb::Operations {

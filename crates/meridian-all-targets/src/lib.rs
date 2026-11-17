@@ -10,7 +10,7 @@
 //! The crate is for the workspace's own tests and tools. The `meridian`
 //! binary does not depend on it: it finds plugins on disk.
 
-use meridian_sdk::{Emitter, Importer, Runner};
+use meridian_sdk::{Emitter, Importer, Runner, SchemaSource};
 
 /// One shipped plugin: how to make each of its parts in-process.
 pub struct Target {
@@ -22,6 +22,8 @@ pub struct Target {
     pub runner: fn() -> Box<dyn Runner>,
     /// The importer, for a plugin that has one.
     pub importer: Option<fn() -> Box<dyn Importer + Send + Sync>>,
+    /// The schema source, for a plugin that describes its tool's types.
+    pub schemas: Option<fn() -> Box<dyn SchemaSource>>,
 }
 
 impl Target {
@@ -36,6 +38,10 @@ impl Target {
     pub fn importer(&self) -> Option<Box<dyn Importer + Send + Sync>> {
         self.importer.map(|make| make())
     }
+
+    pub fn schemas(&self) -> Option<Box<dyn SchemaSource>> {
+        self.schemas.map(|make| make())
+    }
 }
 
 macro_rules! target {
@@ -45,6 +51,7 @@ macro_rules! target {
             emitter: || Box::new($krate::$emitter),
             runner: || Box::new($krate::$runner::from_env()),
             importer: None,
+            schemas: None,
         }
     };
     ($name:literal, $krate:ident, $emitter:ident, $runner:ident, $importer:ident) => {
@@ -53,6 +60,7 @@ macro_rules! target {
             emitter: || Box::new($krate::$emitter),
             runner: || Box::new($krate::$runner::from_env()),
             importer: Some(|| Box::new($krate::$importer)),
+            schemas: None,
         }
     };
 }
@@ -88,35 +96,58 @@ pub const ALL: &[Target] = &[
         DockerRunner,
         DockerImporter
     ),
-    target!("dsc", meridian_target_dsc, Dsc, DscRunner, DscImporter),
+    Target {
+        name: "dsc",
+        emitter: || Box::new(meridian_target_dsc::Dsc),
+        runner: || Box::new(meridian_target_dsc::DscRunner::from_env()),
+        importer: Some(|| Box::new(meridian_target_dsc::DscImporter)),
+        schemas: Some(|| Box::new(meridian_target_dsc::DscSchemas::from_env())),
+    },
     target!("helm", meridian_target_helm, Helm, HelmRunner),
-    target!(
-        "kubernetes",
-        meridian_target_kubernetes,
-        Kubernetes,
-        KubernetesRunner,
-        KubernetesImporter
-    ),
-    target!(
-        "opentofu",
-        meridian_target_opentofu,
-        OpenTofu,
-        OpenTofuRunner,
-        OpenTofuImporter
-    ),
+    Target {
+        name: "kubernetes",
+        emitter: || Box::new(meridian_target_kubernetes::Kubernetes),
+        runner: || Box::new(meridian_target_kubernetes::KubernetesRunner::from_env()),
+        importer: Some(|| Box::new(meridian_target_kubernetes::KubernetesImporter)),
+        schemas: Some(|| Box::new(meridian_target_kubernetes::KubernetesSchemas::from_env())),
+    },
+    Target {
+        name: "opentofu",
+        emitter: || Box::new(meridian_target_opentofu::OpenTofu),
+        runner: || Box::new(meridian_target_opentofu::OpenTofuRunner::from_env()),
+        importer: Some(|| Box::new(meridian_target_opentofu::OpenTofuImporter)),
+        // OpenTofu describes its types through the Terraform plugin's
+        // source, run as `tofu`.
+        schemas: Some(|| {
+            Box::new(meridian_target_terraform::TerraformSchemas::new(
+                "tofu", "opentofu",
+            ))
+        }),
+    },
     target!("openvox", meridian_target_openvox, OpenVox, OpenVoxRunner),
     target!("packer", meridian_target_packer, Packer, PackerRunner),
     target!("podman", meridian_target_podman, Podman, PodmanRunner),
-    target!("pulumi", meridian_target_pulumi, Pulumi, PulumiRunner),
+    Target {
+        name: "pulumi",
+        emitter: || Box::new(meridian_target_pulumi::Pulumi),
+        runner: || Box::new(meridian_target_pulumi::PulumiRunner::from_env()),
+        importer: None,
+        schemas: Some(|| Box::new(meridian_target_pulumi::PulumiSchemas::from_env())),
+    },
     target!("puppet", meridian_target_puppet, Puppet, PuppetRunner),
     target!("salt", meridian_target_salt, Salt, SaltRunner),
-    target!(
-        "terraform",
-        meridian_target_terraform,
-        Terraform,
-        TerraformRunner,
-        TerraformImporter
-    ),
+    Target {
+        name: "terraform",
+        emitter: || Box::new(meridian_target_terraform::Terraform),
+        runner: || Box::new(meridian_target_terraform::TerraformRunner::from_env()),
+        importer: Some(|| Box::new(meridian_target_terraform::TerraformImporter)),
+        schemas: Some(|| {
+            Box::new(meridian_target_terraform::TerraformSchemas::new(
+                "terraform",
+                "terraform",
+            ))
+        }),
+    },
 ];
 
 /// Every target's emitter, sorted by name.

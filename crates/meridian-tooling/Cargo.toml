@@ -10,10 +10,13 @@ repository.workspace = true
 meridian-ast = { path = "../meridian-ast" }
 meridian-expr = { path = "../meridian-expr" }
 meridian-ir = { path = "../meridian-ir" }
+meridian-module = { path = "../meridian-module" }
 meridian-orchestrator = { path = "../meridian-orchestrator" }
 meridian-plugin-host = { path = "../meridian-plugin-host" }
 meridian-sdk = { path = "../meridian-sdk" }
+serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 
 [dev-dependencies]
 meridian-all-targets = { path = "../meridian-all-targets" }

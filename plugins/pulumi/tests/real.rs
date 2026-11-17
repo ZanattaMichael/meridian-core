@@ -1,4 +1,4 @@
-//! The running half against the real `pulumi`.
+//! The running half, and the schema export, against the real `pulumi`.
 //!
 //! Every other test of the runner uses a stand-in, which proves the runner
 //! does what it was written to do. This one proves that what it was written
@@ -18,9 +18,10 @@ use std::path::Path;
 
 use meridian_plugin_testkit::{graph_from_file, graph_from_text, scratch, KeptLog};
 use meridian_sdk::{
-    Artifact, ChangeAction, Data, Emitter, Output, Plan, RunContext, Runner, Value,
+    Artifact, ChangeAction, Data, Emitter, Output, ParamKind, Plan, RunContext, Runner,
+    SchemaRequest, SchemaSource, Value,
 };
-use meridian_target_pulumi::{Pulumi, PulumiRunner};
+use meridian_target_pulumi::{Pulumi, PulumiRunner, PulumiSchemas};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
 
@@ -268,4 +269,70 @@ fn what_pulumi_refuses_comes_back_as_its_own_words() {
         err.output.contains("NoSuchThing"),
         "the failure does not say what was wrong:\n{err}"
     );
+}
+
+#[ignore = "needs a real pulumi; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn the_packages_schemas_are_exported_for_an_editor() {
+    if !enabled("the_packages_schemas_are_exported_for_an_editor") {
+        return;
+    }
+    let dir = scratch(TMP, "real-schemas");
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_file("examples/pulumi/pets.yaml", "pulumi")],
+    );
+    let log = KeptLog::default();
+    let export = PulumiSchemas::from_env()
+        .export(&request, &log)
+        .unwrap_or_else(|e| {
+            panic!(
+                "exporting schemas: {e}\n--- log ---\n{}",
+                log.text().join("\n")
+            )
+        });
+    assert_eq!(export.tool, "pulumi");
+    assert!(
+        export
+            .tool_version
+            .starts_with(|c: char| c.is_ascii_digit()),
+        "{:?}",
+        export.tool_version
+    );
+    let pinned = export
+        .pins
+        .get("random")
+        .unwrap_or_else(|| panic!("the random package is pinned: {:?}", export.pins));
+    assert!(pinned.starts_with(|c: char| c.is_ascii_digit()), "{pinned}");
+
+    // The types the document uses are described property by property.
+    let pet = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "random:index/randomPet:RandomPet")
+        .unwrap_or_else(|| panic!("RandomPet is described: {:?}", export.notes));
+    assert_eq!(pet.source, format!("random {pinned}"));
+    assert!(!pet.open);
+    assert!(pet
+        .find_param("length")
+        .is_some_and(|p| p.kind == ParamKind::Integer));
+    assert!(pet.find_param("id").is_some_and(|p| p.computed));
+    assert!(pet.find_param("resourceOptions").is_some());
+    let password = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "random:index/randomPassword:RandomPassword")
+        .unwrap();
+    assert!(password.find_param("length").is_some_and(|p| p.required));
+    assert!(password
+        .find_param("result")
+        .is_some_and(|p| p.computed && p.sensitive));
+
+    // The rest of the package is offered by name.
+    let other = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "random:index/randomUuid:RandomUuid")
+        .unwrap();
+    assert!(other.open && other.params.is_empty());
 }

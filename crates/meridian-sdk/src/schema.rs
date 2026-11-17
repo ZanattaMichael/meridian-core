@@ -9,10 +9,33 @@
 //!
 //! A target that takes its tool's own types, such as `aws_instance`, cannot
 //! list every param of every provider. It marks such a type `open`, which
-//! tells an editor to accept any param and offer only what is listed.
+//! tells an editor to accept any param and offer only what is listed. A
+//! plugin that can ask its tool for those types serves
+//! [`SchemaSource`](crate::SchemaSource), and the host caches what the tool
+//! says; those schemas carry a [`source`](ResourceSchema::source).
+//!
+//! A schema is also data: it is written to the cache as JSON, and read back
+//! by an editor that never started the plugin.
+
+use std::collections::BTreeMap;
+
+use meridian_value::Value;
 
 /// The shape of one param's value.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
 pub enum ParamKind {
     /// Not stated: any value.
     #[default]
@@ -22,6 +45,7 @@ pub enum ParamKind {
     Integer,
     Number,
     List,
+    #[serde(rename = "mapping")]
     Map,
 }
 
@@ -55,16 +79,41 @@ impl ParamKind {
 }
 
 /// One param of a resource type.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct ParamSchema {
     pub name: String,
     /// What the param means, for the person filling it in.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub description: String,
     pub kind: ParamKind,
     /// Whether the target refuses a resource that leaves it out.
+    #[serde(skip_serializing_if = "is_false")]
     pub required: bool,
     /// The values it accepts, when they are a fixed set; empty otherwise.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<String>,
+    /// What a mapping holds, or each item of a list, when that is known:
+    /// one entry per key. Empty means any content.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<ParamSchema>,
+    /// Whether a mapping accepts keys beyond the ones in `params`.
+    #[serde(skip_serializing_if = "is_false")]
+    pub open: bool,
+    /// Whether the tool sets the value. A document never writes a computed
+    /// param, but a reference such as `${id.name}` may read it.
+    #[serde(skip_serializing_if = "is_false")]
+    pub computed: bool,
+    /// Whether the tool still takes the param but warns about it.
+    #[serde(skip_serializing_if = "is_false")]
+    pub deprecated: bool,
+    /// Whether the tool treats the value as a secret.
+    #[serde(skip_serializing_if = "is_false")]
+    pub sensitive: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 impl ParamSchema {
@@ -73,8 +122,7 @@ impl ParamSchema {
             name: name.to_owned(),
             description: description.to_owned(),
             kind,
-            required: false,
-            values: Vec::new(),
+            ..ParamSchema::default()
         }
     }
 
@@ -87,24 +135,59 @@ impl ParamSchema {
         self.values = values.iter().map(|v| (*v).to_owned()).collect();
         self
     }
+
+    /// Describes what a mapping, or each item of a list, holds.
+    pub fn with_params(mut self, params: Vec<ParamSchema>) -> Self {
+        self.params = params;
+        self
+    }
+
+    /// Says the mapping accepts keys beyond the listed ones.
+    pub fn open(mut self) -> Self {
+        self.open = true;
+        self
+    }
+
+    /// Says the tool sets the value and a document does not write it.
+    pub fn computed(mut self) -> Self {
+        self.computed = true;
+        self
+    }
+
+    /// The nested param called `name`, if this one lists it.
+    pub fn find_param(&self, name: &str) -> Option<&ParamSchema> {
+        self.params.iter().find(|p| p.name == name)
+    }
 }
 
 /// One resource type of a target.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct ResourceSchema {
     /// The type as a document writes it. A name with `<` in it, such as
     /// `<provider>_<type>`, is a pattern and not a literal type.
     pub r#type: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub description: String,
     /// The states the type accepts. Empty means it takes no state.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub states: Vec<String>,
     /// The state assumed when a resource declares none.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub default_state: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub params: Vec<ParamSchema>,
     /// Whether params beyond the listed ones are accepted.
+    #[serde(skip_serializing_if = "is_false")]
     pub open: bool,
     /// The notify actions the type can perform.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<String>,
+    /// Where the schema came from, when a tool described it: the provider,
+    /// package or API server and its version. Empty for a schema the plugin
+    /// itself declares.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub source: String,
 }
 
 impl ResourceSchema {
@@ -142,6 +225,11 @@ impl ResourceSchema {
         self
     }
 
+    pub fn with_params(mut self, params: Vec<ParamSchema>) -> Self {
+        self.params = params;
+        self
+    }
+
     /// Whether the type name is a pattern, such as `<provider>_<type>`.
     pub fn is_pattern(&self) -> bool {
         self.r#type.contains('<')
@@ -151,6 +239,225 @@ impl ResourceSchema {
     pub fn find_param(&self, name: &str) -> Option<&ParamSchema> {
         self.params.iter().find(|p| p.name == name)
     }
+
+    /// The param at a path inside `params`, such as `["tags", "Name"]`, and
+    /// whether unlisted keys are accepted where the path ends. `None` when
+    /// a step names something the schema does not list; the second value
+    /// is then meaningless. An empty path is the type itself: `Some(None)`.
+    pub fn at_path(&self, path: &[&str]) -> Option<Option<&ParamSchema>> {
+        let mut current: Option<&ParamSchema> = None;
+        for step in path {
+            let next = match current {
+                None => self.find_param(step),
+                Some(p) => p.find_param(step),
+            };
+            current = Some(next?);
+        }
+        Some(current)
+    }
+
+    /// Says where the schema was read from.
+    pub fn from_source(mut self, source: &str) -> Self {
+        self.source = source.to_owned();
+        self
+    }
+}
+
+/// Reads a [JSON Schema](https://json-schema.org/) object into the params
+/// of a resource type. Many tools publish their types in it: DSC v3
+/// resource manifests, the CloudFormation registry, Pulumi packages, and
+/// Kubernetes once its OpenAPI document is resolved.
+///
+/// `schema` is the JSON Schema as a [`Value`] (see
+/// [`decode_value`](crate::decode_value)). `resolve` answers a `$ref` with
+/// the schema it points to, or `None` to leave it as any value; a tool
+/// whose documents are self-contained passes `|_| None`. What this reads:
+/// `properties`, `required`, `type`, `enum`, `description`, `items`,
+/// `additionalProperties`, `deprecated`, `readOnly` (as computed) and
+/// `writeOnly` (as sensitive), plus `allOf`, `oneOf` and `anyOf` when every
+/// branch describes an object (their properties are joined). Nesting stops
+/// at [`MAX_SCHEMA_DEPTH`], so a recursive schema ends.
+pub fn params_from_json_schema<'a>(
+    schema: &'a Value,
+    resolve: &dyn Fn(&str) -> Option<&'a Value>,
+) -> (Vec<ParamSchema>, bool) {
+    let mut seen = Vec::new();
+    json_object(schema, resolve, 0, &mut seen)
+}
+
+/// How many mappings inside mappings a JSON Schema is read down to.
+pub const MAX_SCHEMA_DEPTH: usize = 12;
+
+fn json_text(v: &Value, key: &str) -> String {
+    v.as_map()
+        .and_then(|m| m.get(key))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned()
+}
+
+fn json_flag(v: &Value, key: &str) -> bool {
+    matches!(v.as_map().and_then(|m| m.get(key)), Some(Value::Bool(true)))
+}
+
+/// Follows `$ref`s until a schema with content is found. A reference that
+/// cannot be answered, or that loops, is treated as any value.
+fn json_deref<'a>(
+    schema: &'a Value,
+    resolve: &dyn Fn(&str) -> Option<&'a Value>,
+    seen: &mut Vec<String>,
+) -> Option<&'a Value> {
+    let mut current = schema;
+    for _ in 0..MAX_SCHEMA_DEPTH {
+        let Some(target) = current
+            .as_map()
+            .and_then(|m| m.get("$ref"))
+            .and_then(Value::as_str)
+        else {
+            return Some(current);
+        };
+        if seen.iter().any(|s| s == target) {
+            return None;
+        }
+        seen.push(target.to_owned());
+        current = resolve(target)?;
+    }
+    None
+}
+
+/// The keys of an object schema, and whether it accepts other keys.
+fn json_object<'a>(
+    schema: &'a Value,
+    resolve: &dyn Fn(&str) -> Option<&'a Value>,
+    depth: usize,
+    seen: &mut Vec<String>,
+) -> (Vec<ParamSchema>, bool) {
+    let mark = seen.len();
+    let Some(schema) = json_deref(schema, resolve, seen) else {
+        seen.truncate(mark);
+        return (Vec::new(), true);
+    };
+    let Some(map) = schema.as_map() else {
+        seen.truncate(mark);
+        return (Vec::new(), true);
+    };
+    let mut params: Vec<ParamSchema> = Vec::new();
+    let mut open = match map.get("additionalProperties") {
+        Some(Value::Bool(false)) => false,
+        // A schema that lists no properties and says nothing about others
+        // is a free mapping.
+        _ => !map.contains_key("properties"),
+    };
+    let required: Vec<&str> = map
+        .get("required")
+        .and_then(Value::as_list)
+        .map(|l| l.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    if let Some(props) = map.get("properties").and_then(Value::as_map) {
+        for (name, prop) in props {
+            let mut p = json_param(name, prop, resolve, depth + 1, seen);
+            p.required = required.contains(&name.as_str());
+            params.push(p);
+        }
+    }
+    // A type made of several object schemas takes the keys of all of them.
+    for combinator in ["allOf", "oneOf", "anyOf"] {
+        let Some(branches) = map.get(combinator).and_then(Value::as_list) else {
+            continue;
+        };
+        for branch in branches {
+            if depth >= MAX_SCHEMA_DEPTH {
+                break;
+            }
+            let (more, branch_open) = json_object(branch, resolve, depth + 1, seen);
+            open |= branch_open && combinator != "allOf";
+            for p in more {
+                if !params.iter().any(|q| q.name == p.name) {
+                    params.push(p);
+                }
+            }
+        }
+    }
+    seen.truncate(mark);
+    (params, open)
+}
+
+fn json_kind(map: &BTreeMap<String, Value>) -> ParamKind {
+    let named = match map.get("type") {
+        Some(Value::String(t)) => Some(t.as_str()),
+        // `["string", "null"]`: the first kind that is not null.
+        Some(Value::List(kinds)) => kinds
+            .iter()
+            .filter_map(Value::as_str)
+            .find(|t| *t != "null"),
+        _ => None,
+    };
+    match named {
+        Some("string") => ParamKind::String,
+        Some("boolean") => ParamKind::Bool,
+        Some("integer") => ParamKind::Integer,
+        Some("number") => ParamKind::Number,
+        Some("array") => ParamKind::List,
+        Some("object") => ParamKind::Map,
+        _ if map.contains_key("properties") => ParamKind::Map,
+        _ if map.contains_key("items") => ParamKind::List,
+        _ if map.contains_key("enum") => ParamKind::String,
+        _ => ParamKind::Any,
+    }
+}
+
+fn json_param<'a>(
+    name: &str,
+    schema: &'a Value,
+    resolve: &dyn Fn(&str) -> Option<&'a Value>,
+    depth: usize,
+    seen: &mut Vec<String>,
+) -> ParamSchema {
+    let mark = seen.len();
+    let mut p = ParamSchema::new(name, ParamKind::Any, "");
+    let Some(schema) = json_deref(schema, resolve, seen) else {
+        seen.truncate(mark);
+        return p;
+    };
+    let Some(map) = schema.as_map() else {
+        seen.truncate(mark);
+        return p;
+    };
+    p.description = json_text(schema, "description");
+    p.kind = json_kind(map);
+    p.deprecated = json_flag(schema, "deprecated");
+    p.computed = json_flag(schema, "readOnly");
+    p.sensitive = json_flag(schema, "writeOnly");
+    if let Some(values) = map.get("enum").and_then(Value::as_list) {
+        p.values = values
+            .iter()
+            .filter_map(|v| match v {
+                Value::String(s) => Some(s.clone()),
+                Value::Int(i) => Some(i.to_string()),
+                Value::Bool(b) => Some(b.to_string()),
+                _ => None,
+            })
+            .collect();
+    }
+    if depth < MAX_SCHEMA_DEPTH {
+        match p.kind {
+            ParamKind::Map => {
+                let (nested, open) = json_object(schema, resolve, depth, seen);
+                p.params = nested;
+                p.open = open;
+            }
+            ParamKind::List => {
+                if let Some(items) = map.get("items") {
+                    let (nested, open) = json_object(items, resolve, depth, seen);
+                    p.params = nested;
+                    p.open = open;
+                }
+            }
+            _ => {}
+        }
+    }
+    seen.truncate(mark);
+    p
 }
 
 /// What each of the shared configuration management types is.
@@ -415,6 +722,87 @@ mod tests {
         let odd = schema.find_param("flavour").unwrap();
         assert_eq!(odd.kind, ParamKind::Any);
         assert!(odd.description.is_empty());
+    }
+
+    #[test]
+    fn a_json_schema_becomes_params() {
+        let text = br##"{
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+                "name": {"type": "string", "description": "The name."},
+                "size": {"type": "integer", "enum": [1, 2]},
+                "tags": {"type": "object", "additionalProperties": {"type": "string"}},
+                "spec": {"$ref": "#/defs/spec"},
+                "ports": {"type": "array", "items": {"$ref": "#/defs/port"}},
+                "arn": {"type": "string", "readOnly": true},
+                "old": {"type": ["string", "null"], "deprecated": true}
+            }
+        }"##;
+        let defs = meridian_value::decode_value(
+            br##"{
+                "spec": {"type": "object", "properties": {"replicas": {"type": "integer"}}},
+                "port": {"type": "object", "properties": {"port": {"type": "integer"}, "next": {"$ref": "#/defs/port"}}}
+            }"##,
+        )
+        .unwrap();
+        let schema = meridian_value::decode_value(text).unwrap();
+        let resolve = |r: &str| defs.as_map().unwrap().get(r.trim_start_matches("#/defs/"));
+        let (params, open) = params_from_json_schema(&schema, &resolve);
+        assert!(!open);
+        let find = |n: &str| params.iter().find(|p| p.name == n).unwrap();
+        assert!(find("name").required && find("name").kind == ParamKind::String);
+        assert_eq!(find("name").description, "The name.");
+        assert_eq!(find("size").values, ["1", "2"]);
+        assert!(find("tags").kind == ParamKind::Map && find("tags").open);
+        assert_eq!(find("spec").params[0].name, "replicas");
+        assert_eq!(find("ports").kind, ParamKind::List);
+        let item = |n: &str| {
+            find("ports")
+                .params
+                .iter()
+                .find(|p| p.name == n)
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(item("port").kind, ParamKind::Integer);
+        // The recursive reference ends instead of looping.
+        assert!(item("next").params.is_empty());
+        assert!(find("arn").computed);
+        assert!(find("old").deprecated && find("old").kind == ParamKind::String);
+        let schema = ResourceSchema::closed("t", "").with_params(params);
+        assert_eq!(
+            schema.at_path(&["spec", "replicas"]).unwrap().unwrap().kind,
+            ParamKind::Integer
+        );
+        assert!(schema.at_path(&["spec", "nothing"]).is_none());
+        assert!(schema.at_path(&[]).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_schema_survives_json() {
+        let schema = ResourceSchema::open("aws_instance", "An instance.")
+            .param(
+                ParamSchema::new("ami", ParamKind::String, "The image.")
+                    .required()
+                    .values(&["a", "b"]),
+            )
+            .param(
+                ParamSchema::new("tags", ParamKind::Map, "")
+                    .with_params(vec![ParamSchema::new("Name", ParamKind::String, "")])
+                    .open(),
+            )
+            .param(ParamSchema::new("arn", ParamKind::String, "").computed())
+            .from_source("hashicorp/aws 5.60.0");
+        let text = serde_json::to_string(&schema).unwrap();
+        assert!(text.contains("\"mapping\""), "{text}");
+        assert!(
+            !text.contains("deprecated"),
+            "a false flag is left out: {text}"
+        );
+        let back: ResourceSchema = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, schema);
     }
 
     #[test]

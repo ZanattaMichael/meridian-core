@@ -15,6 +15,13 @@
 //! A line that starts with `?` is something the importer does not
 //! understand, which it reports instead of dropping, and a line that is only
 //! `BROKEN` is a syntax error.
+//!
+//! It exports schemas too, for `meridian schema sync`: its "tool" describes
+//! the `file` type with a nested `owner` mapping and a `size` the tool sets,
+//! reports itself as `faketool 1.0` pinned to `fakelib 2.3`, and writes a
+//! `schemas.log` line in the work directory each time, so a test can see
+//! the sync happened. `FAKE_SCHEMAS=fail` makes the export fail as a tool
+//! would; `FAKE_SCHEMAS=none` serves no schema source at all.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -26,7 +33,8 @@ use meridian_sdk::{
     canonical_map, decode_map, serve, Applied, Artifact, Capabilities, Category, Change,
     ChangeAction, CompileError, Data, DocumentKind, Emitted, Emitter, ImportError, ImportFormat,
     ImportNote, ImportSource, Imported, ImportedDocument, ImportedResource, Importer, Log,
-    NoteLevel, Operations, Output, Plan, Plugin, ResourceGraph, RunContext, RunError, Runner,
+    NoteLevel, Operations, Output, ParamKind, ParamSchema, Plan, Plugin, ResourceGraph,
+    ResourceSchema, RunContext, RunError, Runner, SchemaExport, SchemaRequest, SchemaSource,
     ServeError, Value, Warning,
 };
 
@@ -393,12 +401,80 @@ pub fn serve_from_env() -> Result<(), ServeError> {
     if std::env::var("FAKE_IMPORT").as_deref() != Ok("none") {
         plugin = plugin.with_importer(FakeImporter);
     }
+    match std::env::var("FAKE_SCHEMAS").as_deref() {
+        Ok("none") => {}
+        Ok("fail") => plugin = plugin.with_schema_source(FakeSchemas { fail: true }),
+        _ => plugin = plugin.with_schema_source(FakeSchemas { fail: false }),
+    }
     match operations {
         Some(operations) => serve(plugin.with_runner(FakeRunner {
             operations,
             accepts_inputs: std::env::var("FAKE_INPUTS").as_deref() != Ok("none"),
         })),
         None => serve(plugin),
+    }
+}
+
+/// The schema-exporting half: what the fake tool says its `file` type takes.
+pub struct FakeSchemas {
+    /// Whether the "tool" fails instead of answering.
+    pub fail: bool,
+}
+
+/// The schemas the fake tool describes, the same whether served in-process
+/// or over the protocol.
+pub fn fake_schemas() -> Vec<ResourceSchema> {
+    vec![
+        ResourceSchema::closed("file", "A file the fake tool writes.")
+            .states(&["present", "absent"], "present")
+            .param(
+                ParamSchema::new("content", ParamKind::String, "What the file holds.").required(),
+            )
+            .param(
+                ParamSchema::new("owner", ParamKind::Map, "Who owns the file.").with_params(vec![
+                    ParamSchema::new("name", ParamKind::String, "The owner's login name.")
+                        .required(),
+                    ParamSchema::new("group", ParamKind::String, "The owning group.")
+                        .values(&["staff", "wheel"]),
+                ]),
+            )
+            .param(
+                ParamSchema::new("size", ParamKind::Integer, "How many bytes were written.")
+                    .computed(),
+            )
+            .from_source("fakelib 2.3"),
+    ]
+}
+
+impl SchemaSource for FakeSchemas {
+    fn export(&self, request: &SchemaRequest, log: &dyn Log) -> Result<SchemaExport, RunError> {
+        log.out("faketool: describing types");
+        if self.fail {
+            return Err(RunError {
+                msg: "faketool could not describe its types".to_owned(),
+                command: "faketool schema".to_owned(),
+                exit_code: Some(3),
+                output: "no such library".to_owned(),
+                changes: Vec::new(),
+            });
+        }
+        // What was asked for, left where a test can read it.
+        let line = format!("types: {}\n", request.types.join(", "));
+        let _ = fs::create_dir_all(&request.work_dir);
+        let _ = fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(request.work_dir.join("schemas.log"))
+            .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
+        let mut export = SchemaExport::new("faketool", "1.0");
+        export.pin("fakelib", "2.3");
+        export.schemas = fake_schemas();
+        for t in &request.types {
+            if t != "file" {
+                export.note(format!("faketool knows nothing about type {t:?}"));
+            }
+        }
+        Ok(export)
     }
 }
 

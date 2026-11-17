@@ -100,7 +100,9 @@ has that data.
   error.
 
 `--state-dir DIR` (or `MERIDIAN_STATE_DIR`, default `.meridian`) is where the
-project's fetched modules are, for `--data` files named inside a module.
+project's fetched modules are, for `--data` files named inside a module, and
+where the [tool schemas](schema-sync.md) `meridian schema sync` cached are
+read from, so a tool's own params are checked as a plugin's are.
 
 ## Module manifests
 
