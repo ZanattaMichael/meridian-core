@@ -107,6 +107,7 @@ fn site(root: &Path, content: &str, mode: &str) -> Artifact {
     ))
 }
 
+#[ignore = "needs a real chef-client; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_plan_changes_nothing_an_apply_converges_and_a_second_plan_is_in_sync() {
     let Some(runner) = chef() else { return };
@@ -190,6 +191,7 @@ fn a_plan_changes_nothing_an_apply_converges_and_a_second_plan_is_in_sync() {
     assert!(!conf.exists());
 }
 
+#[ignore = "needs a real chef-client; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_notify_and_a_runtime_condition_behave_as_chef_does_them() {
     let Some(runner) = chef() else { return };
@@ -225,6 +227,7 @@ fn a_notify_and_a_runtime_condition_behave_as_chef_does_them() {
     assert!(!dir.join("skipped").exists());
 }
 
+#[ignore = "needs a real chef-client; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_command_that_fails_fails_the_apply_and_reports_what_changed_before_it() {
     let Some(runner) = chef() else { return };
@@ -250,6 +253,7 @@ fn a_command_that_fails_fails_the_apply_and_reports_what_changed_before_it() {
 
 /// Packages, accounts and a service, which only root can manage. The names
 /// are ones nothing else on a CI runner uses.
+#[ignore = "needs a real chef-client; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn packages_accounts_and_a_service_are_managed_as_root() {
     let Some(mut runner) = chef() else { return };

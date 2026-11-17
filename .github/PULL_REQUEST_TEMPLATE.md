@@ -16,6 +16,7 @@
 - [ ] A test covers the change; a bug fix has a test that fails without it
 - [ ] Golden files were recorded on purpose and their diff was read
 - [ ] The documentation is updated in this pull request
+- [ ] A design choice made in this change has a record under `docs/decisions/`
 
 ## For a new or changed plugin
 

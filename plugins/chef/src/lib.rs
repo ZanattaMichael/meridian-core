@@ -119,6 +119,8 @@ impl Emitter for Chef {
             native_notify: true,
             synthetic_notify: false,
             runtime_condition: true,
+            secrets: false,
+            credentials: false,
         }
     }
 

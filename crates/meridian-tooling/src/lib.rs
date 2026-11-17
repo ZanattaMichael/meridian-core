@@ -7,6 +7,8 @@
 //! - [`analysis`]: completion, hover, definitions and the outline, which
 //!   the language server serves.
 //! - [`catalog`]: what the loaded plugins say about themselves.
+//! - [`schemas`]: the cache of tool schemas `meridian schema sync` writes,
+//!   which the catalog reads so native types are completed and checked.
 //! - [`syntax`]: a forgiving, positioned reading of a YAML file.
 //!
 //! None of these holds a copy of the language. The fields a document may
@@ -18,4 +20,5 @@ pub mod check;
 pub mod fmt;
 pub mod jsonschema;
 pub mod lint;
+pub mod schemas;
 pub mod syntax;

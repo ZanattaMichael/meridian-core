@@ -111,6 +111,7 @@ fn asked_for_the_reader() -> bool {
     true
 }
 
+#[ignore = "needs a real az; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn every_example_is_a_template_real_tooling_reads() {
     if !asked_for_the_reader() {
@@ -154,6 +155,7 @@ fn every_example_is_a_template_real_tooling_reads() {
     }
 }
 
+#[ignore = "needs a real az; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn child_resources_and_an_extension_resource_are_read() {
     if !asked_for_the_reader() {
@@ -192,6 +194,7 @@ fn child_resources_and_an_extension_resource_are_read() {
     assert!(bicep.contains(lock), "no {lock:?} in\n{bicep}");
 }
 
+#[ignore = "needs a real az; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_template_with_a_broken_expression_is_refused_by_the_reader() {
     if !asked_for_the_reader() {
@@ -311,6 +314,7 @@ fn output<'a>(outputs: &'a [Output], name: &str) -> &'a str {
         .expect("the output is text")
 }
 
+#[ignore = "needs a real az; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_deployment_is_previewed_made_read_back_and_changed_in_azure() {
     let Some(group) = resource_group() else {

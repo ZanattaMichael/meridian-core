@@ -10,11 +10,26 @@
 //! `FAIL` makes the tool fail at that file, `PANIC` panics the runner, and
 //! `EXIT` kills the whole plugin process mid-run.
 //!
+//! It takes secrets, as a real target does. A secret in a param is compiled
+//! as the reference `<<secret NAME>>`, which its tool would resolve when it
+//! runs; when it runs, the values are handed to the tool in a private file,
+//! and `secrets-delivery.json` in the work directory says what was handed
+//! over and how (never a value). A test that must see the bytes reach the
+//! tool names a file in `FAKE_SECRET_SINK`, and the tool copies the private
+//! file there. `FAKE_SECRETS=none` makes it a target that takes no secret.
+//!
 //! It imports as well. Its tool's "existing configuration" is a `*.fake`
 //! file of `name = content` lines, each of which becomes a `file` resource.
 //! A line that starts with `?` is something the importer does not
 //! understand, which it reports instead of dropping, and a line that is only
 //! `BROKEN` is a syntax error.
+//!
+//! It exports schemas too, for `meridian schema sync`: its "tool" describes
+//! the `file` type with a nested `owner` mapping and a `size` the tool sets,
+//! reports itself as `faketool 1.0` pinned to `fakelib 2.3`, and writes a
+//! `schemas.log` line in the work directory each time, so a test can see
+//! the sync happened. `FAKE_SCHEMAS=fail` makes the export fail as a tool
+//! would; `FAKE_SCHEMAS=none` serves no schema source at all.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -26,7 +41,8 @@ use meridian_sdk::{
     canonical_map, decode_map, serve, Applied, Artifact, Capabilities, Category, Change,
     ChangeAction, CompileError, Data, DocumentKind, Emitted, Emitter, ImportError, ImportFormat,
     ImportNote, ImportSource, Imported, ImportedDocument, ImportedResource, Importer, Log,
-    NoteLevel, Operations, Output, Plan, Plugin, ResourceGraph, RunContext, RunError, Runner,
+    NoteLevel, Operations, Output, ParamKind, ParamSchema, Plan, Plugin, ResourceGraph,
+    ResourceSchema, RunContext, RunError, Runner, SchemaExport, SchemaRequest, SchemaSource,
     ServeError, Value, Warning,
 };
 
@@ -47,6 +63,8 @@ impl Emitter for Fake {
             native_notify: false,
             synthetic_notify: true,
             runtime_condition: false,
+            secrets: std::env::var("FAKE_SECRETS").as_deref() != Ok("none"),
+            credentials: std::env::var("FAKE_SECRETS").as_deref() != Ok("none"),
         }
     }
 
@@ -63,6 +81,9 @@ impl Emitter for Fake {
 
     fn emit(&self, graph: &ResourceGraph, data: &Data) -> Result<Emitted, CompileError> {
         let mut emitted = Emitted::default();
+        // A secret is written as a reference its tool resolves when it runs,
+        // never as a value: the emitter has none.
+        let graph = graph.secrets_written_as(|name| format!("<<secret {name}>>"));
         for resource in &graph.resources {
             if resource.r#type != "file" {
                 return Err(CompileError::for_resource(
@@ -92,6 +113,18 @@ impl Emitter for Fake {
                 .files
                 .insert(format!("files/{}", resource.id), content);
         }
+        // The credential the host is reached with: what a compile knows of
+        // it, which is never a value.
+        if let Some(credential) = &graph.credential {
+            emitted.artifact.files.insert(
+                "credential.txt".to_owned(),
+                format!(
+                    "{}\nsecret fields: {}\n",
+                    credential.summary(),
+                    credential.secret_fields.join(", ")
+                ),
+            );
+        }
         // A declared output is compiled into the artifact, as a real target
         // compiles one into its tool's own output block.
         for output in &graph.outputs {
@@ -116,6 +149,132 @@ pub struct FakeRunner {
     pub operations: Operations,
     /// Whether the tool takes inputs, which it then echoes when it applies.
     pub accepts_inputs: bool,
+}
+
+/// Hands the run's secrets to the tool the way a real plugin would, in a
+/// file only the user can read, and records in the work directory what was
+/// handed over and how, never a value. The file lives as long as the
+/// returned value.
+fn hand_over_secrets(
+    context: &RunContext,
+    log: &dyn Log,
+) -> Result<Option<meridian_sdk::SecretFile>, RunError> {
+    let record = context.work_dir.join("secrets-delivery.json");
+    if context.secrets.is_empty() {
+        let _ = fs::remove_file(&record);
+        return Ok(None);
+    }
+    let file = context
+        .secrets
+        .json_file("secrets.json", str::to_owned)
+        .map_err(|e| RunError::new(format!("writing the secrets file: {e}")))?;
+    let names: Vec<Value> = context
+        .secrets
+        .names()
+        .into_iter()
+        .map(Value::from)
+        .collect();
+    let delivery = BTreeMap::from([
+        ("names".to_owned(), Value::List(names)),
+        ("channel".to_owned(), Value::from("file")),
+        ("in_memory".to_owned(), Value::Bool(file.in_memory())),
+        (
+            "bytes".to_owned(),
+            Value::Int(context.secrets.iter().map(|(_, v)| v.len() as i64).sum()),
+        ),
+    ]);
+    fs::write(&record, canonical_map(&delivery))
+        .map_err(|e| RunError::new(format!("recording the delivery: {e}")))?;
+    log.err(&format!(
+        "{} secret(s) handed over in a private file",
+        context.secrets.len()
+    ));
+    if let Some(sink) = std::env::var_os("FAKE_SECRET_SINK") {
+        fs::copy(file.path(), sink)
+            .map_err(|e| RunError::new(format!("copying the secrets to the sink: {e}")))?;
+    }
+    Ok(Some(file))
+}
+
+/// Hands the credential's secret fields to the tool as a real plugin would,
+/// in a file only the user can read, and records what was handed over and
+/// how, never a value. The file lives as long as the returned value.
+fn hand_over_credential(
+    context: &RunContext,
+    log: &dyn Log,
+) -> Result<Option<meridian_sdk::SecretFile>, RunError> {
+    let record = context.work_dir.join("credential-delivery.json");
+    let Some(credential) = &context.credential else {
+        let _ = fs::remove_file(&record);
+        return Ok(None);
+    };
+    let fields: Vec<(String, &meridian_sdk::SecretValue)> = credential
+        .secrets()
+        .map(|(field, value)| (Value::String(field.to_owned()).canonical(), value))
+        .collect();
+    let mut parts = vec![meridian_sdk::Part::Text("{")];
+    for (i, (key, value)) in fields.iter().enumerate() {
+        if i > 0 {
+            parts.push(meridian_sdk::Part::Text(","));
+        }
+        parts.push(meridian_sdk::Part::Text(key));
+        parts.push(meridian_sdk::Part::Text(":\""));
+        parts.push(meridian_sdk::Part::JsonString(value));
+        parts.push(meridian_sdk::Part::Text("\""));
+    }
+    parts.push(meridian_sdk::Part::Text("}\n"));
+    let file = meridian_sdk::SecretFile::create("credential.json", &parts)
+        .map_err(|e| RunError::new(format!("writing the credential file: {e}")))?;
+    let delivery = BTreeMap::from([
+        ("name".to_owned(), Value::from(credential.name())),
+        ("type".to_owned(), Value::from(credential.kind())),
+        ("ambient".to_owned(), Value::Bool(credential.ambient())),
+        (
+            "text".to_owned(),
+            Value::Map(
+                credential
+                    .declared
+                    .text
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Value::from(v.as_str())))
+                    .collect(),
+            ),
+        ),
+        (
+            "flags".to_owned(),
+            Value::Map(
+                credential
+                    .declared
+                    .flags
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Value::Bool(*v)))
+                    .collect(),
+            ),
+        ),
+        (
+            "secretFields".to_owned(),
+            Value::List(
+                credential
+                    .declared
+                    .secret_fields
+                    .iter()
+                    .map(|f| Value::from(f.as_str()))
+                    .collect(),
+            ),
+        ),
+        ("channel".to_owned(), Value::from("file")),
+    ]);
+    fs::write(&record, canonical_map(&delivery))
+        .map_err(|e| RunError::new(format!("recording the delivery: {e}")))?;
+    log.err(&format!(
+        "credential {} handed over in a private file",
+        credential.summary()
+    ));
+    if let Some(sink) = std::env::var_os("FAKE_CREDENTIAL_SINK") {
+        fs::copy(file.path(), sink)
+            .map_err(|e| RunError::new(format!("copying the credential to the sink: {e}")))?;
+    }
+    Ok(Some(file))
 }
 
 /// What the last apply wrote, by artifact path.
@@ -214,6 +373,8 @@ impl Runner for FakeRunner {
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
         let state = read_state(&context.work_dir)?;
+        let _secrets = hand_over_secrets(context, log)?;
+        let _credential = hand_over_credential(context, log)?;
         log.out(&format!(
             "comparing {} files for {} on {}",
             artifact.files.len(),
@@ -235,6 +396,8 @@ impl Runner for FakeRunner {
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
         let mut state = read_state(&context.work_dir)?;
+        let _secrets = hand_over_secrets(context, log)?;
+        let _credential = hand_over_credential(context, log)?;
         // Tools echo their variables more often than anyone would like. This
         // one does it on purpose, so a host's masking has something to catch.
         if !context.inputs.is_empty() {
@@ -393,12 +556,80 @@ pub fn serve_from_env() -> Result<(), ServeError> {
     if std::env::var("FAKE_IMPORT").as_deref() != Ok("none") {
         plugin = plugin.with_importer(FakeImporter);
     }
+    match std::env::var("FAKE_SCHEMAS").as_deref() {
+        Ok("none") => {}
+        Ok("fail") => plugin = plugin.with_schema_source(FakeSchemas { fail: true }),
+        _ => plugin = plugin.with_schema_source(FakeSchemas { fail: false }),
+    }
     match operations {
         Some(operations) => serve(plugin.with_runner(FakeRunner {
             operations,
             accepts_inputs: std::env::var("FAKE_INPUTS").as_deref() != Ok("none"),
         })),
         None => serve(plugin),
+    }
+}
+
+/// The schema-exporting half: what the fake tool says its `file` type takes.
+pub struct FakeSchemas {
+    /// Whether the "tool" fails instead of answering.
+    pub fail: bool,
+}
+
+/// The schemas the fake tool describes, the same whether served in-process
+/// or over the protocol.
+pub fn fake_schemas() -> Vec<ResourceSchema> {
+    vec![
+        ResourceSchema::closed("file", "A file the fake tool writes.")
+            .states(&["present", "absent"], "present")
+            .param(
+                ParamSchema::new("content", ParamKind::String, "What the file holds.").required(),
+            )
+            .param(
+                ParamSchema::new("owner", ParamKind::Map, "Who owns the file.").with_params(vec![
+                    ParamSchema::new("name", ParamKind::String, "The owner's login name.")
+                        .required(),
+                    ParamSchema::new("group", ParamKind::String, "The owning group.")
+                        .values(&["staff", "wheel"]),
+                ]),
+            )
+            .param(
+                ParamSchema::new("size", ParamKind::Integer, "How many bytes were written.")
+                    .computed(),
+            )
+            .from_source("fakelib 2.3"),
+    ]
+}
+
+impl SchemaSource for FakeSchemas {
+    fn export(&self, request: &SchemaRequest, log: &dyn Log) -> Result<SchemaExport, RunError> {
+        log.out("faketool: describing types");
+        if self.fail {
+            return Err(RunError {
+                msg: "faketool could not describe its types".to_owned(),
+                command: "faketool schema".to_owned(),
+                exit_code: Some(3),
+                output: "no such library".to_owned(),
+                changes: Vec::new(),
+            });
+        }
+        // What was asked for, left where a test can read it.
+        let line = format!("types: {}\n", request.types.join(", "));
+        let _ = fs::create_dir_all(&request.work_dir);
+        let _ = fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(request.work_dir.join("schemas.log"))
+            .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
+        let mut export = SchemaExport::new("faketool", "1.0");
+        export.pin("fakelib", "2.3");
+        export.schemas = fake_schemas();
+        for t in &request.types {
+            if t != "file" {
+                export.note(format!("faketool knows nothing about type {t:?}"));
+            }
+        }
+        Ok(export)
     }
 }
 

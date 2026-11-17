@@ -402,6 +402,7 @@ impl Decoder<'_> {
                     variables: self.value_map(f.get("variables"), "spec.variables"),
                     conditions: self.conditions(f.get("conditions")),
                     secrets: self.secrets(f.get("secrets"), &pos),
+                    credentials: self.credentials(f.get("credentials"), &pos),
                     imports: self.imports(f.get("imports"), &pos),
                     resources: self.resources(f.get("resources"), &pos),
                     outputs: self.outputs(f.get("outputs"), &pos),
@@ -422,6 +423,7 @@ impl Decoder<'_> {
                     variables: self.value_map(f.get("variables"), "spec.variables"),
                     conditions: self.conditions(f.get("conditions")),
                     secrets: self.secrets(f.get("secrets"), &pos),
+                    credentials: self.credentials(f.get("credentials"), &pos),
                     target_host: self.target_host(f.get("targetHost"), &pos),
                     imports: self.imports(f.get("imports"), &pos),
                     resources: self.resources(f.get("resources"), &pos),
@@ -624,29 +626,93 @@ impl Decoder<'_> {
         for (i, item) in self.list(node, "spec.secrets").iter().enumerate() {
             let path = format!("spec.secrets[{i}]");
             let f = self.fields(Some(item), &path, &schema::SECRET.names());
-            let command_path = join(&path, "command");
-            let command = self
-                .list(f.get("command"), &command_path)
+            let first = self.secret_source(&f, &path);
+            let fallback_path = join(&path, "fallback");
+            let mut fallback = Vec::new();
+            for (j, entry) in self
+                .list(f.get("fallback"), &fallback_path)
                 .iter()
                 .enumerate()
-                .map(|(j, arg)| self.string(Some(arg), &format!("{command_path}[{j}]")))
-                .collect();
+            {
+                let path = format!("{fallback_path}[{j}]");
+                let f = self.fields(Some(entry), &path, &schema::SECRET_SOURCE.names());
+                fallback.push(self.secret_source(&f, &path));
+            }
             out.push(Secret {
                 name: self.string(f.get("name"), &join(&path, "name")),
-                from: self.string(f.get("from"), &join(&path, "from")),
-                key: self.string(f.get("key"), &join(&path, "key")),
-                path: self.string(f.get("path"), &join(&path, "path")),
-                command,
+                from: first.from,
+                key: first.key,
+                path: first.path,
+                command: first.command,
+                service: first.service,
+                account: first.account,
+                attributes: first.attributes,
                 optional: self.flag(f.get("optional"), &join(&path, "optional")),
-                allow_wide_mode: self.flag(f.get("allowWideMode"), &join(&path, "allowWideMode")),
-                keep_trailing_newline: self.flag(
-                    f.get("keepTrailingNewline"),
-                    &join(&path, "keepTrailingNewline"),
-                ),
+                allow_wide_mode: first.allow_wide_mode,
+                keep_trailing_newline: first.keep_trailing_newline,
+                fallback,
                 pos: self.at_or(item, doc_pos),
             });
         }
         out
+    }
+
+    /// `spec.credentials`: each a name, a type, and the type's fields as
+    /// written. What a field holds is checked against the type by validate.
+    fn credentials(&mut self, node: Option<&Node>, doc_pos: &Position) -> Vec<Credential> {
+        let mut out = Vec::new();
+        for (i, item) in self.list(node, "spec.credentials").iter().enumerate() {
+            let path = format!("spec.credentials[{i}]");
+            let f = self.fields(Some(item), &path, &schema::CREDENTIAL.names());
+            let mut fields = BTreeMap::new();
+            for (key, value) in &f.0 {
+                if matches!(*key, "name" | "type" | "from") {
+                    continue;
+                }
+                let value = self.value(value, &join(&path, key));
+                fields.insert((*key).to_owned(), value);
+            }
+            out.push(Credential {
+                name: self.string(f.get("name"), &join(&path, "name")),
+                r#type: self.string(f.get("type"), &join(&path, "type")),
+                from: self.string(f.get("from"), &join(&path, "from")),
+                fields,
+                pos: self.at_or(item, doc_pos),
+            });
+        }
+        out
+    }
+
+    /// One place a secret comes from: the fields of a `spec.secrets` entry
+    /// or of one of its `fallback` entries.
+    fn secret_source(&mut self, f: &Fields<'_>, path: &str) -> meridian_secret::Source {
+        let command_path = join(path, "command");
+        let command = self
+            .list(f.get("command"), &command_path)
+            .iter()
+            .enumerate()
+            .map(|(j, arg)| self.string(Some(arg), &format!("{command_path}[{j}]")))
+            .collect();
+        let attributes_path = join(path, "attributes");
+        let mut attributes = BTreeMap::new();
+        for (key, value) in self.entries(f.get("attributes"), &attributes_path) {
+            let value = self.string(Some(value), &join(&attributes_path, key));
+            attributes.insert(key.to_owned(), value);
+        }
+        meridian_secret::Source {
+            from: self.string(f.get("from"), &join(path, "from")),
+            key: self.string(f.get("key"), &join(path, "key")),
+            path: self.string(f.get("path"), &join(path, "path")),
+            command,
+            service: self.string(f.get("service"), &join(path, "service")),
+            account: self.string(f.get("account"), &join(path, "account")),
+            attributes,
+            allow_wide_mode: self.flag(f.get("allowWideMode"), &join(path, "allowWideMode")),
+            keep_trailing_newline: self.flag(
+                f.get("keepTrailingNewline"),
+                &join(path, "keepTrailingNewline"),
+            ),
+        }
     }
 
     /// A yes or a no; left out, it is no.
@@ -679,6 +745,7 @@ impl Decoder<'_> {
             r#ref: self.string(f.get("ref"), &join(path, "ref")),
             output: self.string(f.get("output"), &join(path, "output")),
             host: self.string(f.get("host"), &join(path, "host")),
+            credential: self.string(f.get("credential"), &join(path, "credential")),
             pos: self.at_or(node, doc_pos),
         })
     }

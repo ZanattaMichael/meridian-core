@@ -8,7 +8,9 @@
 
 use std::path::Path;
 
-use meridian_plugin_testkit::{assert_golden, fixture, graph_from_text, without_positions};
+use meridian_plugin_testkit::{
+    assert_golden, fixture, graph_from_text, secret_in_param, without_positions,
+};
 use meridian_sdk::{CompileError, Data, Emitted, Emitter, Position, ResourceGraph, Value};
 use meridian_target_ansible::Ansible;
 
@@ -226,4 +228,168 @@ fn a_reference_is_settled_from_the_document_or_refused() {
     assert_eq!(err.rule, "invalid-reference");
     assert_eq!(err.resource, "page");
     assert!(err.msg.contains("does not declare"), "{}", err.msg);
+}
+
+#[test]
+fn a_secret_in_a_param_is_written_as_the_variable_the_runner_hands_over() {
+    let text = "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: ansible\n  targetHost:\n    from: inline\n    host: web01.example.com\n  resources:\n    - id: env_file\n      type: file\n      params:\n        path: /etc/app/env\n        content: placeholder\n";
+    let mut graph = graph_from_text("site.yaml", text, "ansible");
+    secret_in_param(&mut graph, "env_file", "content", "db_password");
+    let playbook = emit(&graph).unwrap().artifact.files["playbook.yml"].clone();
+    assert!(
+        playbook.contains("content: '{{ meridian_secret_db_password }}'"),
+        "{playbook}"
+    );
+    assert!(!playbook.contains("(sensitive)"), "{playbook}");
+    // The task is not allowed to print what it was handed.
+    assert!(playbook.contains("    no_log: true\n"), "{playbook}");
+    assert_eq!(playbook.matches("no_log").count(), 1, "{playbook}");
+    assert_eq!(
+        meridian_target_ansible::secret_variable("db_password"),
+        "meridian_secret_db_password"
+    );
+}
+
+#[test]
+fn a_host_that_is_not_a_name_is_refused_rather_than_written_into_the_inventory() {
+    // Issue 134: a space in the host would add a host variable to
+    // inventory.ini, and a line break a section. The core refuses such a
+    // host first; this is the plugin's own line of defence.
+    let text = "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: ansible\n  targetHost:\n    from: inline\n    host: web01\n  resources:\n    - id: a\n      type: package\n      params: {name: nginx}\n";
+    let mut graph = graph_from_text("site.yaml", text, "ansible");
+    graph.host = "web01 ansible_connection=local\n[all:vars]\nansible_python_interpreter=/tmp/evil"
+        .to_owned();
+    let refused = emit(&graph).expect_err("refused");
+    assert_eq!(refused.rule, "invalid-host");
+    assert!(
+        refused.msg.contains("inventory") && refused.msg.contains("whitespace"),
+        "{refused}"
+    );
+}
+
+#[test]
+fn the_plugin_declares_jinjas_openings_so_placed_text_stays_text() {
+    // Issue 135: Ansible renders every task argument through Jinja, so the
+    // core is told what to escape in a value placed from data. What the
+    // escape is written as must be an expression that yields the opening.
+    let declared = Ansible.placed_text();
+    let texts: Vec<&str> = declared.iter().map(|e| e.text.as_str()).collect();
+    assert_eq!(texts, ["{{", "{%", "{#"]);
+    for escape in &declared {
+        assert!(!escape.only_at_start);
+        assert_eq!(escape.written, format!("{{{{ '{}' }}}}", escape.text));
+    }
+    // And what the core hands over is written as it is: the playbook holds
+    // the escaped form, which Jinja renders back to the data's text.
+    let emitted = compile(
+        "    - id: motd\n      type: file\n      params:\n        path: /etc/motd\n        content: \"hello {{ '{{' }} lookup('pipe','id') }}\"\n",
+    )
+    .unwrap();
+    assert!(
+        emitted.artifact.files["playbook.yml"].contains("{{ '{{' }} lookup"),
+        "{}",
+        emitted.artifact.files["playbook.yml"]
+    );
+}
+
+// ---- the credential a host is reached with -----------------------------
+
+/// A document reaching its host as the credential `entry` (a YAML mapping
+/// on one line), with the two secrets it may read declared.
+fn with_credential(entry: &str) -> ResourceGraph {
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: ansible\n  targetHost:\n    from: inline\n    host: web01.example.com\n    credential: deploy\n  secrets:\n    - {{name: deploy_key, from: env, key: DEPLOY_KEY}}\n    - {{name: deploy_password, from: env, key: DEPLOY_PASSWORD}}\n  credentials:\n    - {entry}\n  resources:\n    - id: a\n      type: package\n      params: {{name: nginx}}\n"
+    );
+    graph_from_text("site.yaml", &text, "ansible")
+}
+
+fn inventory(graph: &ResourceGraph) -> String {
+    emit(graph).unwrap().artifact.files["inventory.ini"].clone()
+}
+
+#[test]
+fn a_credentials_user_is_written_into_the_inventory_and_its_secrets_are_not() {
+    let graph = with_credential(
+        "{name: deploy, type: ssh, user: deploy, privateKey: \"${{ secret.deploy_key }}\"}",
+    );
+    let credential = graph.credential.as_ref().unwrap();
+    assert_eq!(credential.secret_fields, ["privateKey"]);
+    let emitted = emit(&graph).unwrap();
+    assert_eq!(
+        emitted.artifact.files["inventory.ini"],
+        "[meridian]\nweb01.example.com ansible_user=deploy\n"
+    );
+    // The playbook does not mention the credential: the runner hands its
+    // key over when it runs.
+    let playbook = &emitted.artifact.files["playbook.yml"];
+    assert!(!playbook.contains("deploy"), "{playbook}");
+    assert!(!playbook.contains("private"), "{playbook}");
+
+    // A password credential is the same in the inventory; the password
+    // goes in the private extra-vars file at run time.
+    let graph = with_credential(
+        "{name: deploy, type: usernamePassword, user: admin, password: \"${{ secret.deploy_password }}\"}",
+    );
+    assert_eq!(
+        inventory(&graph),
+        "[meridian]\nweb01.example.com ansible_user=admin\n"
+    );
+    // One with no user leaves the tool's own.
+    let graph = with_credential("{name: deploy, type: ssh, agent: true}");
+    assert_eq!(inventory(&graph), "[meridian]\nweb01.example.com\n");
+    // So does an ambient one.
+    let graph = with_credential("{name: deploy, type: ssh, from: ambient, user: ops}");
+    assert_eq!(
+        inventory(&graph),
+        "[meridian]\nweb01.example.com ansible_user=ops\n"
+    );
+}
+
+#[test]
+fn what_ansible_playbook_cannot_take_of_a_credential_is_refused_with_the_reason() {
+    for (entry, reason) in [
+        (
+            "{name: deploy, type: ssh, user: deploy, privateKey: \"${{ secret.deploy_key }}\", passphrase: \"${{ secret.deploy_password }}\"}",
+            "takes no passphrase for a private key",
+        ),
+        (
+            "{name: deploy, type: ssh, user: deploy, privateKey: \"${{ secret.deploy_key }}\", certificate: /etc/ssh/deploy-cert.pub}",
+            "takes no certificate for a key",
+        ),
+        (
+            "{name: deploy, type: usernamePassword, user: admin, domain: CORP, password: \"${{ secret.deploy_password }}\"}",
+            "takes no domain",
+        ),
+        (
+            "{name: deploy, type: ssh, user: \"deploy ansible_become=true\", agent: true}",
+            "cannot be written into the inventory",
+        ),
+        (
+            "{name: deploy, type: ssh, user: \"[all:vars]\", agent: true}",
+            "cannot be written into the inventory",
+        ),
+    ] {
+        let refused = emit(&with_credential(entry)).expect_err(entry);
+        assert_eq!(refused.rule, "unsupported-credential", "{entry}");
+        assert!(
+            refused.msg.starts_with("the credential \"deploy\": ") && refused.msg.contains(reason),
+            "{entry}: {}",
+            refused.msg
+        );
+        assert!(refused.resource.is_empty());
+    }
+    // The core only lets an ssh or usernamePassword credential reach a
+    // host; the plugin refuses any other for itself.
+    let mut graph = with_credential("{name: deploy, type: ssh, agent: true}");
+    graph.credential = Some(meridian_sdk::Credential {
+        name: "cloud".to_owned(),
+        kind: "aws".to_owned(),
+        ambient: true,
+        text: Default::default(),
+        flags: Default::default(),
+        secret_fields: Vec::new(),
+    });
+    let refused = emit(&graph).unwrap_err();
+    assert_eq!(refused.rule, "unsupported-credential");
+    assert!(refused.msg.contains("not aws"), "{}", refused.msg);
 }

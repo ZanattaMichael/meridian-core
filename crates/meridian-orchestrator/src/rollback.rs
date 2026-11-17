@@ -23,6 +23,7 @@ use meridian_ir::Document;
 
 use crate::Stop;
 use meridian_sdk::{Change, Data, LogLine, RunContext, Value};
+use meridian_secret::Masker;
 
 use crate::backend::Backend;
 use crate::record::{self, RunRecord, StepRecord, StepStatus};
@@ -42,12 +43,14 @@ pub(crate) struct Touched {
     pub previous: String,
     /// The artifact hash the run applied, or tried to.
     pub attempted: String,
+    /// A filter for what the tool prints, holding the secrets handed to it.
+    pub masker: Masker,
 }
 
 /// One stage of a rollback: ready to be put back, or already known not to
 /// be possible.
 pub(crate) enum Item {
-    Ready(Touched),
+    Ready(Box<Touched>),
     Unavailable(RollbackReport, &'static str),
 }
 
@@ -232,20 +235,28 @@ pub(crate) fn items_of(run: &mut Run<'_>, of: &RunRecord) -> Vec<Item> {
                 continue;
             }
         }
-        let context = match run.context(&step.id, &step.target, &host, inputs) {
+        let context = match run.context(
+            &step.id,
+            &step.target,
+            &host,
+            inputs,
+            meridian_sdk::Secrets::none(),
+            None,
+        ) {
             Ok(context) => context,
             Err(why) => {
                 items.push(unavailable(why, "state-failed"));
                 continue;
             }
         };
-        items.push(Item::Ready(Touched {
+        items.push(Item::Ready(Box::new(Touched {
             id: step.id.clone(),
             target: step.target.clone(),
             context,
             previous: step.previous.clone(),
             attempted: step.artifact.clone(),
-        }));
+            masker: Masker::new(),
+        })));
     }
     items
 }
@@ -274,7 +285,7 @@ pub(crate) fn execute(
                     },
                     "earlier-rollback-failed",
                 ),
-                None => one(run, journal, observer, touched),
+                None => one(run, journal, observer, *touched),
             },
         };
         let at = Some((&report.id, report.target.as_str(), report.host.as_str()));
@@ -310,6 +321,64 @@ pub(crate) fn execute(
     reports
 }
 
+/// The secrets the document of stage `id` declares, fetched now, for the
+/// tool putting the stage back: the artifact refers to them by name and
+/// needs their values. Every declared secret is handed over, as the artifact
+/// may refer to any; one an expression made from them is not among them,
+/// and a tool that needs it says so. With them comes a filter for what the
+/// tool prints. A document without secrets gives none.
+#[allow(clippy::type_complexity)]
+fn secrets_of(
+    run: &Run<'_>,
+    id: &StageId,
+) -> Result<
+    (
+        meridian_sdk::Secrets,
+        Option<meridian_sdk::HeldCredential>,
+        Masker,
+    ),
+    String,
+> {
+    let document = run
+        .bundle
+        .documents
+        .iter()
+        .find(|doc| match (doc, id.kind) {
+            (Document::Infrastructure(d), StageKind::Infrastructure) => d.metadata.name == id.name,
+            (Document::ResourceSet(d), StageKind::ResourceSet) => d.metadata.name == id.name,
+            _ => false,
+        });
+    let Some(document) = document.filter(|doc| !doc.secrets().is_empty()) else {
+        return Ok((meridian_sdk::Secrets::none(), None, Masker::new()));
+    };
+    let mut secrets = meridian_ir::Secrets::declared(document);
+    crate::secrets::fetch(document, &mut secrets)?;
+    let handed = crate::secrets::handed_by_name(&secrets)?;
+    // The credential the host is reached with is made of those secrets,
+    // read as the document resolves them.
+    let names_credential = document
+        .as_resource_set()
+        .and_then(|d| d.spec.target_host.as_ref())
+        .is_some_and(|th| !th.credential.is_empty());
+    let credential = if names_credential {
+        match meridian_ir::resolve_with(document, &run.options.data, &secrets) {
+            Ok(meridian_ir::Resolution::Kept { document, .. }) => {
+                let resolved = document
+                    .as_resource_set()
+                    .and_then(|d| d.spec.target_host.as_ref())
+                    .and_then(|th| document.credential(&th.credential))
+                    .cloned();
+                crate::secrets::handed_credential(resolved.as_ref(), secrets.table())?
+            }
+            Ok(meridian_ir::Resolution::Skipped { .. }) => None,
+            Err(e) => return Err(e.to_string()),
+        }
+    } else {
+        None
+    };
+    Ok((handed, credential, secrets.masker()))
+}
+
 /// Puts one stage back.
 fn one(
     run: &mut Run<'_>,
@@ -320,9 +389,10 @@ fn one(
     let Touched {
         id,
         target: target_name,
-        context,
+        mut context,
         previous,
         attempted,
+        mut masker,
     } = touched;
     let report = |outcome| RollbackReport {
         id: id.clone(),
@@ -367,6 +437,19 @@ fn one(
         );
     };
 
+    // The secrets are fetched at the stage's turn and held for it alone,
+    // as an apply holds them.
+    if context.secrets.is_empty() && context.credential.is_none() {
+        match secrets_of(run, &id) {
+            Ok((handed, credential, filter)) => {
+                context.secrets = handed;
+                context.credential = credential;
+                masker = filter;
+            }
+            Err(why) => return (unavailable(why), "secrets-unavailable"),
+        }
+    }
+
     let at = Some((&id, target_name.as_str(), context.host.as_str()));
     journal.emit(
         observer,
@@ -376,7 +459,7 @@ fn one(
     );
     let secrets = run.secrets.clone();
     let mut log = |mut line: LogLine| {
-        line.text = mask(&line.text, &secrets);
+        line.text = masker.mask(&mask(&line.text, &secrets));
         observer.log(&id, &line);
     };
     let outcome = target.apply(&context, &artifact, &mut log);

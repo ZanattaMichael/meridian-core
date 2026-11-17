@@ -235,6 +235,22 @@ fn a_module_changed_after_it_was_pinned_stops_the_run() {
     assert!(out.ends_with("ok      local\n"), "{out}");
     assert_eq!(err, "error: 1 module failed verification\n");
 
+    // A reader that goes away (`meridian module verify | head -0`) ends the
+    // printing, not the verdict: the exit status still says it failed.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .args(["module", "verify"])
+        .current_dir(&site)
+        .env_remove("MERIDIAN_STATE_DIR")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take());
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(err, "error: 1 module failed verification\n");
+
     // Installing again fetches what was pinned.
     ok(&site, &["module", "install", "--locked"]);
     ok(&site, &["module", "verify"]);
@@ -505,5 +521,41 @@ fn the_modules_example_runs_as_its_readme_says() {
     assert!(
         playbook.contains("/etc/ssh/sshd_config.d/10-no-root.conf"),
         "{playbook}"
+    );
+}
+
+#[test]
+fn push_takes_a_declared_credential_and_a_secret_is_fetched_only_when_used() {
+    let root = scratch("push-credential");
+    write(
+        &root.join("meridian.yaml"),
+        "apiVersion: meridian/v1\nkind: Module\nmetadata:\n  name: acme/login\n  version: 1.0.0\n\
+         spec:\n  credentials:\n    - name: internal\n      type: registry\n      \
+         server: registry.example.com\n      user: ci\n      password:\n        from: env\n        \
+         key: MERIDIAN_TEST_A_VARIABLE_THAT_IS_NOT_SET\n",
+    );
+    // Nothing names the credential, so nothing fetches its secret.
+    ok(&root, &["module", "install"]);
+    ok(&root, &["module", "verify"]);
+    ok(&root, &["module", "pack"]);
+
+    // Both refusals come before anything is sent to the registry.
+    let repository = "registry.example.com/acme/login";
+    let (_, err) = fails(
+        &root,
+        &["module", "push", repository, "--credential", "other"],
+    );
+    assert_eq!(
+        err,
+        "error: the credential other: it is not declared (declared: internal)\n"
+    );
+    let (_, err) = fails(
+        &root,
+        &["module", "push", repository, "--credential", "internal"],
+    );
+    assert!(
+        err.starts_with("error: the credential internal: ")
+            && err.contains("MERIDIAN_TEST_A_VARIABLE_THAT_IS_NOT_SET"),
+        "{err}"
     );
 }

@@ -18,10 +18,16 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request replaces the run in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   schema:
     name: user-data checked by cloud-init
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -31,12 +37,11 @@ jobs:
           sudo apt-get install --yes --no-install-recommends cloud-init
           cloud-init --version
 
-      - name: Install the stable toolchain
-        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: ./.github/actions/setup-rust
 
       # MERIDIAN_TEST_REAL_CLOUD_INIT makes a missing cloud-init a failure
       # instead of a skip, so this job can never pass by checking nothing.
       - name: Check every recorded user-data with cloud-init schema
-        run: cargo test -p meridian-target-cloud-init --locked --test schema -- --nocapture
+        run: cargo test -p meridian-target-cloud-init --locked --test schema -- --ignored --nocapture
         env:
           MERIDIAN_TEST_REAL_CLOUD_INIT: "1"

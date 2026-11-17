@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use meridian_plugin_testkit::{
-    assert_golden, assert_golden_refusal, graph_from_file, graph_from_text,
+    assert_golden, assert_golden_refusal, graph_from_file, graph_from_text, secret_in_param,
 };
 use meridian_sdk::{
     decode_value, Capabilities, Category, CompileError, Data, Emitted, Emitter, ResourceGraph,
@@ -73,6 +73,8 @@ fn the_plugin_describes_itself_as_infrastructure_as_code() {
             native_notify: false,
             synthetic_notify: true,
             runtime_condition: false,
+            secrets: true,
+            credentials: false,
         }
     );
     assert_eq!(
@@ -698,4 +700,23 @@ fn every_golden_file_is_still_asserted_by_a_test() {
             "web-vm.main_tofu_json",
         ]
     );
+}
+
+#[test]
+fn a_secret_in_a_param_is_a_sensitive_variable_the_runner_hands_over() {
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: db\nspec:\n  target: opentofu\n  resources:\n    - id: main\n      type: aws_db_instance\n      params:\n        engine: postgres\n        password: placeholder\n";
+    let mut graph = graph_from_text("infra.yaml", text, "opentofu");
+    secret_in_param(&mut graph, "main", "password", "db_password");
+    let config = emit(&graph).unwrap().artifact.files["main.tofu.json"].clone();
+    assert!(
+        config.contains("\"password\": \"${var.meridian_secret_db_password}\""),
+        "{config}"
+    );
+    assert!(
+        config.contains(
+            "\"variable\": {\n    \"meridian_secret_db_password\": {\n      \"sensitive\": true,\n      \"type\": \"string\"\n    }\n  }"
+        ),
+        "{config}"
+    );
+    assert!(!config.contains("(sensitive)"), "{config}");
 }

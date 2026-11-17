@@ -1,4 +1,4 @@
-//! The running half against the real `pulumi`.
+//! The running half, and the schema export, against the real `pulumi`.
 //!
 //! Every other test of the runner uses a stand-in, which proves the runner
 //! does what it was written to do. This one proves that what it was written
@@ -6,7 +6,7 @@
 //! accepts, that the commands exist and print what the runner reads.
 //!
 //! It needs `pulumi` on `PATH` and a network to fetch the random provider,
-//! so it runs only when `MERIDIAN_REAL_PULUMI` is set, as the `pulumi`
+//! so it runs only when `MERIDIAN_TEST_REAL_PULUMI` is set, as the `pulumi`
 //! workflow does. It needs no cloud account: state is kept in a scratch
 //! directory and the random provider touches nothing outside it.
 
@@ -18,17 +18,18 @@ use std::path::Path;
 
 use meridian_plugin_testkit::{graph_from_file, graph_from_text, scratch, KeptLog};
 use meridian_sdk::{
-    Artifact, ChangeAction, Data, Emitter, Output, Plan, RunContext, Runner, Value,
+    Artifact, ChangeAction, Data, Emitter, Output, ParamKind, Plan, RunContext, Runner,
+    SchemaRequest, SchemaSource, Value,
 };
-use meridian_target_pulumi::{Pulumi, PulumiRunner};
+use meridian_target_pulumi::{Pulumi, PulumiRunner, PulumiSchemas};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
 
 /// Whether the test should run, said once per test when it does not.
 fn enabled(test: &str) -> bool {
-    let enabled = std::env::var_os("MERIDIAN_REAL_PULUMI").is_some_and(|v| !v.is_empty());
+    let enabled = std::env::var_os("MERIDIAN_TEST_REAL_PULUMI").is_some_and(|v| !v.is_empty());
     if !enabled {
-        eprintln!("{test}: skipped; set MERIDIAN_REAL_PULUMI=1 to run it against pulumi");
+        eprintln!("{test}: skipped; set MERIDIAN_TEST_REAL_PULUMI=1 to run it against pulumi");
     }
     enabled
 }
@@ -93,6 +94,7 @@ fn text(output: &Output) -> &str {
     output.value.as_str().expect("the output is a string")
 }
 
+#[ignore = "needs a real pulumi; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_document_is_planned_applied_and_changed() {
     if !enabled("a_document_is_planned_applied_and_changed") {
@@ -195,6 +197,7 @@ fn a_document_is_planned_applied_and_changed() {
     assert_eq!(changes(&plan), ["delete password"]);
 }
 
+#[ignore = "needs a real pulumi; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn names_options_and_functions_are_ones_pulumi_accepts() {
     if !enabled("names_options_and_functions_are_ones_pulumi_accepts") {
@@ -239,6 +242,7 @@ fn names_options_and_functions_are_ones_pulumi_accepts() {
     assert!(matches!(roll, Value::Int(1..=6)), "{roll:?}");
 }
 
+#[ignore = "needs a real pulumi; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn what_pulumi_refuses_comes_back_as_its_own_words() {
     if !enabled("what_pulumi_refuses_comes_back_as_its_own_words") {
@@ -265,4 +269,70 @@ fn what_pulumi_refuses_comes_back_as_its_own_words() {
         err.output.contains("NoSuchThing"),
         "the failure does not say what was wrong:\n{err}"
     );
+}
+
+#[ignore = "needs a real pulumi; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn the_packages_schemas_are_exported_for_an_editor() {
+    if !enabled("the_packages_schemas_are_exported_for_an_editor") {
+        return;
+    }
+    let dir = scratch(TMP, "real-schemas");
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_file("examples/pulumi/pets.yaml", "pulumi")],
+    );
+    let log = KeptLog::default();
+    let export = PulumiSchemas::from_env()
+        .export(&request, &log)
+        .unwrap_or_else(|e| {
+            panic!(
+                "exporting schemas: {e}\n--- log ---\n{}",
+                log.text().join("\n")
+            )
+        });
+    assert_eq!(export.tool, "pulumi");
+    assert!(
+        export
+            .tool_version
+            .starts_with(|c: char| c.is_ascii_digit()),
+        "{:?}",
+        export.tool_version
+    );
+    let pinned = export
+        .pins
+        .get("random")
+        .unwrap_or_else(|| panic!("the random package is pinned: {:?}", export.pins));
+    assert!(pinned.starts_with(|c: char| c.is_ascii_digit()), "{pinned}");
+
+    // The types the document uses are described property by property.
+    let pet = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "random:index/randomPet:RandomPet")
+        .unwrap_or_else(|| panic!("RandomPet is described: {:?}", export.notes));
+    assert_eq!(pet.source, format!("random {pinned}"));
+    assert!(!pet.open);
+    assert!(pet
+        .find_param("length")
+        .is_some_and(|p| p.kind == ParamKind::Integer));
+    assert!(pet.find_param("id").is_some_and(|p| p.computed));
+    assert!(pet.find_param("resourceOptions").is_some());
+    let password = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "random:index/randomPassword:RandomPassword")
+        .unwrap();
+    assert!(password.find_param("length").is_some_and(|p| p.required));
+    assert!(password
+        .find_param("result")
+        .is_some_and(|p| p.computed && p.sensitive));
+
+    // The rest of the package is offered by name.
+    let other = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "random:index/randomUuid:RandomUuid")
+        .unwrap();
+    assert!(other.open && other.params.is_empty());
 }

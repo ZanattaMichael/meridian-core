@@ -1,0 +1,62 @@
+#!/bin/sh
+# Sends every event of a run to a Meridian report server.
+#
+#   meridian apply site.yaml --sink server \
+#       --sink-config server.url=https://reports.example.com \
+#       --sink-config server.project=shop
+#
+# Settings:
+#   url      the server's address. Required.
+#   project  the project the run is filed under. "default" when not set.
+#   token    the server's write token. Required. Set it as the environment
+#            variable MERIDIAN_NOTIFY_TOKEN rather than with --sink-config,
+#            which would put it in your shell history.
+#   timeout  seconds to allow each request. 10 by default.
+#
+# Needs curl. Events are sent one request each, in order, as they happen;
+# the server ignores one it already has, so a retry does no harm. The sink
+# exits 1 if any event could not be delivered.
+set -eu
+
+if [ "${MERIDIAN_NOTIFY_PROTOCOL:-}" != "1" ]; then
+    echo "meridian-notify-server speaks protocol 1, not ${MERIDIAN_NOTIFY_PROTOCOL:-none}" >&2
+    exit 1
+fi
+url="${MERIDIAN_NOTIFY_URL:-}"
+if [ -z "$url" ]; then
+    echo "set the server's address: --sink-config server.url=URL" >&2
+    exit 1
+fi
+if [ -z "${MERIDIAN_NOTIFY_TOKEN:-}" ]; then
+    echo "set the server's write token in the environment: MERIDIAN_NOTIFY_TOKEN" >&2
+    exit 1
+fi
+project="${MERIDIAN_NOTIFY_PROJECT:-default}"
+timeout="${MERIDIAN_NOTIFY_TIMEOUT:-10}"
+failed=0
+
+# The token is handed to curl in a file only this user can read, and not as
+# an argument, which every user of the machine could see.
+umask 077
+headers=$(mktemp)
+trap 'rm -f "$headers"' EXIT
+printf 'Authorization: Bearer %s\nContent-Type: application/x-ndjson\n' \
+    "$MERIDIAN_NOTIFY_TOKEN" > "$headers"
+
+while IFS= read -r event; do
+    # The run's id is in every event; it names where the event is filed.
+    run=$(printf '%s' "$event" | sed -n 's/.*"run":"\([A-Za-z0-9-]*\)".*/\1/p')
+    if [ -z "$run" ]; then
+        echo "an event has no run id" >&2
+        failed=1
+        continue
+    fi
+    if ! printf '%s\n' "$event" | curl --silent --show-error --fail \
+        --max-time "$timeout" --retry 3 --header "@$headers" \
+        --data-binary @- --output /dev/null \
+        "${url%/}/v1/projects/$project/runs/$run/events"; then
+        failed=1
+    fi
+done
+
+exit "$failed"

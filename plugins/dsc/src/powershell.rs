@@ -105,6 +105,13 @@ pub(crate) fn parse(text: &str) -> Result<Script, (usize, String)> {
             p.pos = start;
             p.line = line;
             p.statement();
+            if p.pos == start {
+                // A statement stops short of a bracket that closes nothing.
+                // Stepping over it would hide a mistake; standing still
+                // would loop forever.
+                let c = p.peek().unwrap_or('}');
+                return Err((line, format!("a \"{c}\" closes nothing")));
+            }
             script.outside.push(line);
         }
     }
@@ -723,5 +730,59 @@ Web -OutputPath .\out
     fn a_block_left_open_is_an_error_with_its_line() {
         let err = parse("Configuration C {\n  File F {\n    A = 1\n").unwrap_err();
         assert_eq!(err.0, 4);
+    }
+
+    #[test]
+    fn a_bracket_that_closes_nothing_is_an_error_not_a_hang() {
+        for (text, close) in [
+            ("}\n", '}'),
+            ("Configuration C {\n}\n\n}\n", '}'),
+            ("$x = 1\n)\n", ')'),
+            ("  ]\n", ']'),
+        ] {
+            let err = parse(text).unwrap_err();
+            assert_eq!(err.1, format!("a \"{close}\" closes nothing"), "{text:?}");
+            assert_eq!(err.0, text.lines().count(), "{text:?}");
+        }
+    }
+
+    /// Whatever the text, the parser answers.
+    #[test]
+    fn the_parser_always_terminates() {
+        let pieces = [
+            "Configuration",
+            " C ",
+            "{",
+            "}",
+            "(",
+            ")",
+            "[",
+            "]",
+            "Node",
+            "'",
+            "\"",
+            "@'\n",
+            "\n'@",
+            "#",
+            "`",
+            "\n",
+            ";",
+            " = ",
+            "File F",
+            "$x",
+            "Import-DscResource",
+            "param",
+        ];
+        let mut seed = 0x2545_F491_4F6C_DD1Du64;
+        for _ in 0..2000 {
+            let mut text = String::new();
+            for _ in 0..12 {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                text.push_str(pieces[(seed % pieces.len() as u64) as usize]);
+            }
+            let _ = parse(&text);
+        }
     }
 }

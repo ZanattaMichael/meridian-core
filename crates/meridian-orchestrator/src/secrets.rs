@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use meridian_ir::{Document, Secrets};
-use meridian_sdk::Value;
+use meridian_sdk::{ResourceGraph, Value};
 use meridian_secret::{FetchError, Probe, SecretTable};
 
 /// Fetches every secret the document declares into `secrets`.
@@ -14,18 +14,101 @@ use meridian_secret::{FetchError, Probe, SecretTable};
 /// found reads as null.
 pub(crate) fn fetch(doc: &Document, secrets: &mut Secrets) -> Result<(), String> {
     for secret in doc.secrets() {
-        match secret.source().fetch() {
-            Ok(value) => secrets.hold(&secret.name, value),
+        let sources = secret.sources();
+        match meridian_secret::fetch_first(&sources) {
+            Ok((_, value)) => secrets.hold(&secret.name, value),
             Err(FetchError::Missing(_)) if secret.optional => secrets.absent(&secret.name),
             Err(e) => {
+                let from: Vec<&str> = sources.iter().map(|s| s.from.as_str()).collect();
                 return Err(format!(
                     "secret {:?} (from: {}): {e}",
-                    secret.name, secret.from
-                ))
+                    secret.name,
+                    from.join(", then ")
+                ));
             }
         }
     }
     Ok(())
+}
+
+/// The value of every secret the graph's params refer to, each a copy in
+/// protected memory of its own, for the tool. The plugin is handed them by
+/// the names the graph gave them. An error names the secret and never a
+/// value.
+pub(crate) fn handed(
+    graph: &ResourceGraph,
+    table: &SecretTable,
+) -> Result<meridian_sdk::Secrets, String> {
+    let mut values = Vec::with_capacity(graph.secrets.len());
+    for named in &graph.secrets {
+        let value = table
+            .with(named.secret, |held| held.duplicate())
+            .map_err(|e| format!("secret {:?}: {e}", named.name))?
+            .map_err(|e| format!("secret {:?}: {e}", named.name))?;
+        values.push((named.secret, named.name.clone(), value));
+    }
+    Ok(meridian_sdk::Secrets::from_values(values))
+}
+
+/// The credential the host is reached with, with the value of each of its
+/// secret fields duplicated into protected memory of its own, for the tool.
+/// An error names the credential and the field, never a value.
+pub(crate) fn handed_credential(
+    credential: Option<&meridian_ir::Credential>,
+    table: &SecretTable,
+) -> Result<Option<meridian_sdk::HeldCredential>, String> {
+    let Some(credential) = credential else {
+        return Ok(None);
+    };
+    let mut values = Vec::new();
+    for (field, at) in credential.secrets() {
+        let value = table
+            .with(at, |held| held.duplicate())
+            .map_err(|e| format!("credential {:?}, {field}: {e}", credential.name))?
+            .map_err(|e| format!("credential {:?}, {field}: {e}", credential.name))?;
+        values.push((field.to_owned(), value));
+    }
+    let declared = meridian_sdk::Credential {
+        name: credential.name.clone(),
+        kind: credential.r#type.clone(),
+        ambient: credential.is_ambient(),
+        text: credential
+            .fields
+            .iter()
+            .filter_map(|(k, v)| match v {
+                Value::String(text) => Some((k.clone(), text.clone())),
+                _ => None,
+            })
+            .collect(),
+        flags: credential
+            .fields
+            .iter()
+            .filter_map(|(k, v)| match v {
+                Value::Bool(b) => Some((k.clone(), *b)),
+                _ => None,
+            })
+            .collect(),
+        secret_fields: Vec::new(),
+    };
+    Ok(Some(meridian_sdk::HeldCredential::from_values(
+        declared, values,
+    )))
+}
+
+/// The value of every declared secret that was fetched, by its declared
+/// name, for a tool that is handed an artifact without the graph it was
+/// compiled from: a rollback.
+pub(crate) fn handed_by_name(secrets: &Secrets) -> Result<meridian_sdk::Secrets, String> {
+    let mut values = Vec::new();
+    for (name, at) in secrets.names() {
+        let value = secrets
+            .table()
+            .with(at, |held| held.duplicate())
+            .map_err(|e| format!("secret {name:?}: {e}"))?
+            .map_err(|e| format!("secret {name:?}: {e}"))?;
+        values.push((at, name, value));
+    }
+    Ok(meridian_sdk::Secrets::from_values(values))
 }
 
 /// Where the first secret in a document's params is: the resource and the
@@ -103,7 +186,8 @@ pub(crate) fn named(names: &[String]) -> String {
 pub struct Declared {
     /// The name the document reads it by.
     pub name: String,
-    /// Its provider.
+    /// The provider of the place that would answer, or of the last place
+    /// looked at when none would.
     pub from: String,
     /// Whether nothing being there is allowed.
     pub optional: bool,
@@ -117,21 +201,49 @@ impl Declared {
         match self.probe {
             Probe::Present(_) | Probe::Unknown(_) => false,
             Probe::Absent(_) => !self.optional,
-            Probe::Refused(_) => true,
+            // No place the secret names can be used on this machine, so
+            // nothing can say it is merely absent.
+            Probe::Refused(_) | Probe::Unavailable(_) => true,
         }
     }
 }
 
 /// Looks at where each declaration of the document says its value comes
-/// from, without fetching: a file is not opened and a command is not run.
+/// from, without fetching: a file is not opened and a command is not run. A
+/// declaration with a `fallback` is answered by the first place that would.
 pub fn check_declared(doc: &Document) -> Vec<Declared> {
     doc.secrets()
         .iter()
-        .map(|entry| Declared {
-            name: entry.name.clone(),
-            from: entry.from.clone(),
-            optional: entry.optional,
-            probe: entry.source().probe(),
+        .map(|entry| {
+            let sources = entry.sources();
+            let (at, probe) = meridian_secret::probe_first(&sources);
+            Declared {
+                name: entry.name.clone(),
+                from: sources[at].from.clone(),
+                optional: entry.optional,
+                probe,
+            }
         })
         .collect()
+}
+
+/// Every place the secret `name` is looked for, in order, as the first
+/// document that declares it says. `None` when no document declares it.
+pub fn places_declared(documents: &[Document], name: &str) -> Option<Vec<meridian_secret::Source>> {
+    documents
+        .iter()
+        .flat_map(|doc| doc.secrets())
+        .find(|entry| entry.name == name)
+        .map(|entry| entry.sources())
+}
+
+/// The names the documents declare, each once, in order.
+pub fn names_declared(documents: &[Document]) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for entry in documents.iter().flat_map(|doc| doc.secrets()) {
+        if !names.contains(&entry.name) {
+            names.push(entry.name.clone());
+        }
+    }
+    names
 }

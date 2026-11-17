@@ -80,6 +80,13 @@ in Rego for Open Policy Agent, whether each change may be made, and an apply tha
 applies nothing ([policy checks](docs/reference/policy.md)). The record can be kept in a shared place with `--backend`. See
 [running safely](docs/concepts/run-safety.md).
 
+Every run can also leave a report and tell other systems what it did: `--report junit=FILE`
+(or `json`, `markdown`, `html`) writes one when the run ends, `meridian report` writes one for
+any recorded run, and `--sink NAME` sends the run's events to a program that forwards them, as
+they happen. A report names steps, resources and outputs, and never holds a value. See
+[reports and sinks](docs/reference/reporting.md). To keep every project's runs in one place, the
+optional [`meridian-report-server`](docs/reference/report-server.md) receives them through a sink.
+
 A workflow's Infrastructure documents run first, then its ResourceSets. A ResourceSet whose
 `targetHost` comes from an Infrastructure output is compiled for, and applied to, whatever
 that output turns out to be; until that infrastructure has been applied it is reported as
@@ -97,6 +104,7 @@ an editor never accepts what `meridian compile` refuses:
 meridian fmt .                              # one standard layout; never changes a value
 meridian lint --strict .                    # every error in a project, plus probable mistakes
 meridian schema -o meridian.schema.json     # a JSON Schema, for editors that only know YAML
+meridian schema sync .                      # cache each tool's own types, for completion and checking
 meridian lsp                                # the language server, started by your editor
 ```
 
@@ -104,7 +112,8 @@ meridian lsp                                # the language server, started by yo
 
 The language server gives completion, hover documentation, errors as you type, go to
 definition, rename, formatting and quick fixes, with resource types and params read from
-the plugins you have installed. There is a [Visual Studio Code extension](docs/tooling/vscode.md)
+the plugins you have installed, and a tool's own types (`aws_instance`, `apps/v1/Deployment`)
+read once from the tool by `meridian schema sync` and cached in the project. There is a [Visual Studio Code extension](docs/tooling/vscode.md)
 in [`editors/vscode`](editors/vscode), and recipes for [other editors](docs/tooling/other-editors.md).
 Start at [Tools for writing Meridian documents](docs/tooling/index.md).
 

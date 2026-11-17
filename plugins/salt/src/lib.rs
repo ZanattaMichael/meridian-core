@@ -142,6 +142,8 @@ impl Emitter for Salt {
             native_notify: true,
             synthetic_notify: false,
             runtime_condition: true,
+            secrets: false,
+            credentials: false,
         }
     }
 

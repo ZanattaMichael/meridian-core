@@ -14,10 +14,11 @@ use lsp_types as lsp;
 use lsp_types::notification::Notification as _;
 use lsp_types::request::Request as _;
 use lsp_types::Url;
-use meridian_plugin_host::{Registry, StartOptions};
+use meridian_plugin_host::{Registry, Signature, StartOptions};
 use meridian_tooling::analysis::{self, CompletionKind, SymbolKind};
 use meridian_tooling::catalog::Catalog;
 use meridian_tooling::check::{self, Diagnostic, Env, Severity, Source, Workspace};
+use meridian_tooling::schemas::{self, Store};
 use meridian_tooling::syntax::{Pos, Span};
 use meridian_tooling::{fmt, lint};
 
@@ -44,26 +45,80 @@ struct Options {
     lint: Option<bool>,
     /// Whether `fmt` writes fields in the language's order.
     sort_fields: Option<bool>,
+    /// Meridian's state directory, where `meridian schema sync` keeps the
+    /// tool schemas it cached. Relative to each workspace folder; the
+    /// default is `.meridian`.
+    state_dir: Option<PathBuf>,
 }
 
-/// Loads every plugin found in `dirs`. A directory that cannot be read is
-/// reported and skipped: an editor is still useful with fewer targets.
-pub fn load_plugins(dirs: &[PathBuf]) -> (Registry, Vec<String>) {
+/// The state directory when the client names none.
+const DEFAULT_STATE_DIR: &str = ".meridian";
+
+/// One directory plugins are loaded from, and how the plugins in it are
+/// checked before they are started.
+#[derive(Clone, Debug)]
+pub struct PluginSource {
+    pub dir: PathBuf,
+    pub options: StartOptions,
+    /// Whether the editor named the directory, rather than the command line.
+    pub from_editor: bool,
+}
+
+/// Loads every plugin found in `sources`, in order. A directory that cannot
+/// be read, or a plugin that does not pass its check, is reported and
+/// skipped: an editor is still useful with fewer targets.
+pub fn load_plugins(sources: &[PluginSource]) -> (Registry, Vec<String>) {
     let mut registry = Registry::new();
     let mut problems = Vec::new();
-    for dir in dirs {
-        if let Err(e) = registry.discover(&dir.to_string_lossy(), &StartOptions::default()) {
-            problems.push(e.to_string());
+    for source in sources {
+        match registry.discover(&source.dir.to_string_lossy(), &source.options) {
+            Ok(loaded) => {
+                // Under `warn` a plugin that did not pass was started all
+                // the same; this is the saying so.
+                for info in loaded {
+                    match &info.signature {
+                        Signature::Unsigned => {
+                            problems.push(format!("plugin {} is not signed", info.path))
+                        }
+                        Signature::Invalid(why) => problems.push(format!(
+                            "plugin {}: its signature does not pass: {why}",
+                            info.path
+                        )),
+                        Signature::NotChecked | Signature::Verified { .. } => {}
+                    }
+                }
+            }
+            Err(e) if source.from_editor => problems.push(format!(
+                "{e}. A plugin directory named in the editor's settings only loads plugins \
+                 signed by a trusted key; to load any plugin from it, start the server with \
+                 `meridian lsp --trust-editor-plugin-dirs`"
+            )),
+            Err(e) => problems.push(e.to_string()),
         }
     }
     (registry, problems)
 }
 
+/// Where `meridian lsp` looks for plugins, and how it checks them.
+#[derive(Clone, Debug)]
+pub struct Discovery {
+    /// Directories from the command line and the environment, searched
+    /// after any the editor names.
+    pub dirs: Vec<PathBuf>,
+    /// How plugins in `dirs` are started and checked.
+    pub options: StartOptions,
+    /// How plugins in the directories the editor names in its
+    /// `initializationOptions.pluginDirs` are started and checked. Those
+    /// directories can come from a project's own editor settings, so by
+    /// default they are held to a signature check whatever `options` says.
+    pub editor_options: StartOptions,
+}
+
 /// Serves the protocol over standard input and output until the client
-/// asks to exit. Plugins are loaded from `plugin_dirs`.
-pub fn run_stdio(plugin_dirs: Vec<PathBuf>) -> Result<(), Error> {
+/// asks to exit. Plugins are found as `discovery` says.
+pub fn run_stdio(discovery: Discovery) -> Result<(), Error> {
     let (connection, io_threads) = Connection::stdio();
-    serve(&connection, Plugins::Discover(plugin_dirs))?;
+    serve(&connection, Plugins::Discover(discovery))?;
     drop(connection);
     io_threads.join()?;
     Ok(())
@@ -71,9 +126,9 @@ pub fn run_stdio(plugin_dirs: Vec<PathBuf>) -> Result<(), Error> {
 
 /// Where the server's plugins come from.
 pub enum Plugins {
-    /// Find plugin binaries in these directories, and in any the client
+    /// Find plugin binaries in the directories given, and in any the client
     /// names in its initialization options.
-    Discover(Vec<PathBuf>),
+    Discover(Discovery),
     /// Use exactly this registry. This is how tests serve compiled-in
     /// plugins.
     Loaded(Registry),
@@ -109,15 +164,27 @@ pub fn serve(connection: &Connection, plugins: Plugins) -> Result<(), Error> {
         roots.extend(params.root_uri.and_then(|u| u.to_file_path().ok()));
     }
 
-    let (dirs, registry, problems) = match plugins {
+    let (sources, registry, problems) = match plugins {
         Plugins::Loaded(registry) => (Vec::new(), registry, Vec::new()),
-        Plugins::Discover(mut dirs) => {
+        Plugins::Discover(discovery) => {
             // The client's directories come first, so a project's own
             // plugins win over the ones installed beside the binary.
-            let mut all = options.plugin_dirs.clone();
-            all.append(&mut dirs);
-            let (registry, problems) = load_plugins(&all);
-            (all, registry, problems)
+            let sources: Vec<PluginSource> = options
+                .plugin_dirs
+                .iter()
+                .map(|dir| PluginSource {
+                    dir: dir.clone(),
+                    options: discovery.editor_options.clone(),
+                    from_editor: true,
+                })
+                .chain(discovery.dirs.iter().map(|dir| PluginSource {
+                    dir: dir.clone(),
+                    options: discovery.options.clone(),
+                    from_editor: false,
+                }))
+                .collect();
+            let (registry, problems) = load_plugins(&sources);
+            (sources, registry, problems)
         }
     };
 
@@ -125,19 +192,24 @@ pub fn serve(connection: &Connection, plugins: Plugins) -> Result<(), Error> {
         connection,
         catalog: Catalog::from_registry(&registry),
         registry,
-        plugin_dirs: dirs,
+        plugin_sources: sources,
         open: BTreeMap::new(),
         disk: BTreeMap::new(),
         roots,
         published: BTreeSet::new(),
         lint: options.lint.unwrap_or(true),
         sort_fields: options.sort_fields.unwrap_or(true),
+        state_dir: options
+            .state_dir
+            .unwrap_or_else(|| PathBuf::from(DEFAULT_STATE_DIR)),
+        cache_stamp: Vec::new(),
         workspace: Workspace::default(),
         stale: true,
     };
     for problem in problems {
         server.show(lsp::MessageType::WARNING, &problem);
     }
+    server.read_schemas(true);
     if server.catalog.is_empty() {
         server.show(
             lsp::MessageType::INFO,
@@ -202,7 +274,7 @@ struct Server<'a> {
     connection: &'a Connection,
     registry: Registry,
     catalog: Catalog,
-    plugin_dirs: Vec<PathBuf>,
+    plugin_sources: Vec<PluginSource>,
     /// The text of every open file, by the name diagnostics use for it.
     open: BTreeMap<String, String>,
     /// Meridian files found in the workspace folders that are not open.
@@ -212,6 +284,11 @@ struct Server<'a> {
     published: BTreeSet<String>,
     lint: bool,
     sort_fields: bool,
+    /// Where the cached tool schemas are, relative to each root.
+    state_dir: PathBuf,
+    /// The cache files and when they last changed, so the cache is read
+    /// again only when a sync wrote it.
+    cache_stamp: Vec<(PathBuf, Option<std::time::SystemTime>)>,
     workspace: Workspace,
     /// Whether `workspace` is behind the text.
     stale: bool,
@@ -280,6 +357,96 @@ impl Server<'_> {
             .send(Message::Response(Response::new_ok(id, result)));
     }
 
+    /// The cache stores: one per workspace folder, or the one directory
+    /// when the client gave an absolute path.
+    fn stores(&self) -> Vec<(PathBuf, Store)> {
+        if self.state_dir.is_absolute() {
+            let root = self.roots.first().cloned().unwrap_or_default();
+            return vec![(root, Store::new(&self.state_dir))];
+        }
+        self.roots
+            .iter()
+            .map(|root| (root.clone(), Store::new(&root.join(&self.state_dir))))
+            .collect()
+    }
+
+    /// The cache files as they stand on disk.
+    fn stamp(&self) -> Vec<(PathBuf, Option<std::time::SystemTime>)> {
+        let mut out = Vec::new();
+        for (root, store) in self.stores() {
+            let mut files: Vec<PathBuf> = std::fs::read_dir(store.dir())
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+                .collect();
+            files.push(root.join(meridian_module::LOCK_FILE));
+            files.sort();
+            for file in files {
+                let modified = std::fs::metadata(&file).and_then(|m| m.modified()).ok();
+                out.push((file, modified));
+            }
+        }
+        out
+    }
+
+    /// Reads the tool schemas `meridian schema sync` cached into the
+    /// catalog, when they changed since last time or `force` says so, and
+    /// says once what cannot be read or is missing.
+    fn read_schemas(&mut self, force: bool) {
+        let stamp = self.stamp();
+        if !force && stamp == self.cache_stamp {
+            return;
+        }
+        self.cache_stamp = stamp;
+        let mut catalog = Catalog::from_registry(&self.registry);
+        let mut messages = Vec::new();
+        for (root, store) in self.stores() {
+            let lock = schemas::lock_in(&root);
+            for problem in catalog.read_cache(&store, lock.as_ref()) {
+                messages.push((lsp::MessageType::WARNING, problem));
+            }
+            if let Some(lock) = &lock {
+                let missing = catalog.missing_caches(lock);
+                if !missing.is_empty() {
+                    messages.push((
+                        lsp::MessageType::INFO,
+                        format!(
+                            "Meridian: tool schemas for {} are recorded in {} but not cached \
+                             here, so their types are known by name only. Run `meridian schema \
+                             sync` in {}.",
+                            missing.join(", "),
+                            meridian_module::LOCK_FILE,
+                            root.display()
+                        ),
+                    ));
+                }
+            }
+        }
+        for target in catalog.targets() {
+            if let Some(cache) = &target.cache {
+                if cache.freshness != schemas::Freshness::Current
+                    && cache.freshness != schemas::Freshness::Unrecorded
+                {
+                    messages.push((
+                        lsp::MessageType::INFO,
+                        format!(
+                            "Meridian: the cached tool schemas for {} are {}.",
+                            target.name,
+                            cache.freshness.describe()
+                        ),
+                    ));
+                }
+            }
+        }
+        self.catalog = catalog;
+        self.stale = true;
+        for (kind, message) in messages {
+            self.show(kind, &message);
+        }
+    }
+
     /// Finds the Meridian documents in the workspace folders, so a
     /// reference to a document in a file that is not open still resolves.
     fn scan(&mut self) {
@@ -331,6 +498,7 @@ impl Server<'_> {
         }
         self.disk = found;
         self.stale = true;
+        self.read_schemas(false);
     }
 
     /// The workspace as it stands: open files as typed, the rest from disk.
@@ -339,17 +507,11 @@ impl Server<'_> {
             let mut sources: Vec<Source> = self
                 .open
                 .iter()
-                .map(|(name, text)| Source {
-                    name: name.clone(),
-                    text: text.clone(),
-                })
+                .map(|(name, text)| Source::new(name.clone(), text))
                 .collect();
             for (name, text) in &self.disk {
                 if !self.open.contains_key(name) {
-                    sources.push(Source {
-                        name: name.clone(),
-                        text: text.clone(),
-                    });
+                    sources.push(Source::new(name.clone(), text));
                 }
             }
             self.workspace = Workspace::new(&sources);
@@ -516,6 +678,10 @@ impl Server<'_> {
                 if let Ok(options) = serde_json::from_value::<Options>(settings) {
                     self.lint = options.lint.unwrap_or(self.lint);
                     self.sort_fields = options.sort_fields.unwrap_or(self.sort_fields);
+                    if let Some(dir) = options.state_dir {
+                        self.state_dir = dir;
+                        self.read_schemas(true);
+                    }
                 }
             }
             _ => return false,
@@ -684,14 +850,18 @@ impl Server<'_> {
             }
             lsp::request::ExecuteCommand::METHOD => {
                 let p = params!(lsp::request::ExecuteCommand);
-                if p.command == RELOAD_PLUGINS && !self.plugin_dirs.is_empty() {
-                    let (registry, problems) = load_plugins(&self.plugin_dirs);
+                if p.command == RELOAD_PLUGINS && self.plugin_sources.is_empty() {
+                    // Compiled-in plugins stay; the cache may have changed.
+                    self.read_schemas(true);
+                }
+                if p.command == RELOAD_PLUGINS && !self.plugin_sources.is_empty() {
+                    let (registry, problems) = load_plugins(&self.plugin_sources);
                     let old = std::mem::replace(&mut self.registry, registry);
                     let _ = old.close();
-                    self.catalog = Catalog::from_registry(&self.registry);
                     for problem in problems {
                         self.show(lsp::MessageType::WARNING, &problem);
                     }
+                    self.read_schemas(true);
                     self.show(
                         lsp::MessageType::INFO,
                         &format!(
@@ -733,6 +903,7 @@ impl Server<'_> {
                 CompletionKind::Reference => lsp::CompletionItemKind::REFERENCE,
                 CompletionKind::Type => lsp::CompletionItemKind::CLASS,
                 CompletionKind::Snippet => lsp::CompletionItemKind::SNIPPET,
+                CompletionKind::Function => lsp::CompletionItemKind::FUNCTION,
             }),
             detail: (!c.detail.is_empty()).then_some(c.detail),
             documentation: (!c.doc.is_empty()).then_some(lsp::Documentation::MarkupContent(

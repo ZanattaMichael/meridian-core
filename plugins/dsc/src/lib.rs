@@ -42,6 +42,7 @@ mod emit;
 mod import;
 mod powershell;
 mod runner;
+mod schemas;
 mod sort;
 mod transform;
 mod validate;
@@ -56,6 +57,7 @@ use meridian_sdk::{
 pub use emit::{node_path, DATUM_PATH};
 pub use import::DscImporter;
 pub use runner::DscRunner;
+pub use schemas::DscSchemas;
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "dsc";
@@ -157,6 +159,8 @@ impl Emitter for Dsc {
             native_notify: true,
             synthetic_notify: false,
             runtime_condition: true,
+            secrets: false,
+            credentials: false,
         }
     }
 

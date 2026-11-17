@@ -32,8 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the stable toolchain
-        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: ./.github/actions/setup-rust
 
       # Built before the cluster exists, so a compile error costs no cluster.
       - name: Build the tests
@@ -52,7 +51,7 @@ jobs:
       - name: Test against the cluster
         env:
           MERIDIAN_TEST_REAL_KUBECTL: '1'
-        run: cargo test -p meridian-target-kubernetes --locked --test real -- --nocapture --test-threads=1
+        run: cargo test -p meridian-target-kubernetes --locked --test real -- --ignored --nocapture --test-threads=1
 
       - name: Show the cluster when something failed
         if: failure()

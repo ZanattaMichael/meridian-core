@@ -201,6 +201,27 @@ same configuration written by hand in the runner's format; the imported document
 document, and [`fleet.meridian.yaml`](../../plugins/dsc/testdata/import/fleet.meridian.yaml)
 is what a script full of computed values imports as.
 
+## Editor schemas
+
+`meridian schema sync` asks DSC what each resource's properties are, so an
+editor completes and checks them ([Tool schemas](../tooling/schema-sync.md)).
+Both generations answer: a PowerShell module's resources are read with
+`Get-DscResource -Module` (in the `pwsh` that `MERIDIAN_PWSH` names), or,
+where that lists nothing, as it does on Linux for a class-based module, from
+the module's `[DscResource()]` classes themselves, which give the same
+properties, types, key and mandatory flags and enum values; and when the `dsc` command is installed (or `MERIDIAN_DSC` names it) its own
+resources are read with `dsc resource list` and `dsc resource schema`.
+
+| | |
+|---|---|
+| Described in full | every resource of each PowerShell module the documents use, from its property types (`[string]`, `[Int32]`, `[string[]]`, `[PSCredential]`), which are mandatory, and the values an enum property allows; and each DSC v3 resource the documents use, from the JSON Schema its manifest declares |
+| Listed by name | every other DSC v3 resource `dsc resource list` reports |
+| Pinned | PowerShell's version, each module's version, each DSC v3 resource's version |
+
+A module that is not on `PSModulePath`, a type neither PowerShell nor
+`dsc` describes, and every error PowerShell raised while listing are
+reported in notes.
+
 ## Running
 
 | | |

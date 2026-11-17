@@ -21,7 +21,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use meridian_plugin_testkit::{graph_from_text, scratch, KeptLog};
+use meridian_plugin_testkit::{graph_from_text, scratch, secret_in_param, secrets, KeptLog};
 use meridian_sdk::{
     Applied, Artifact, Change, ChangeAction, Data, Emitter, Plan, RunContext, RunError, Runner,
 };
@@ -105,6 +105,7 @@ fn site(root: &Path, content: &str, mode: &str) -> Artifact {
     ))
 }
 
+#[ignore = "needs a real ansible-playbook; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_plan_changes_nothing_an_apply_converges_and_a_second_plan_is_in_sync() {
     let Some(runner) = ansible() else { return };
@@ -191,6 +192,7 @@ fn reloads(dir: &Path) -> usize {
         .unwrap_or(0)
 }
 
+#[ignore = "needs a real ansible-playbook; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_handler_runs_only_when_its_notifier_changed_and_a_condition_is_answered_by_the_host() {
     let Some(runner) = ansible() else { return };
@@ -225,6 +227,7 @@ fn a_handler_runs_only_when_its_notifier_changed_and_a_condition_is_answered_by_
     assert_eq!(reloads(&dir), 5);
 }
 
+#[ignore = "needs a real ansible-playbook; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_command_ansible_cannot_preview_makes_the_plan_unknown() {
     let Some(runner) = ansible() else { return };
@@ -241,6 +244,7 @@ fn a_command_ansible_cannot_preview_makes_the_plan_unknown() {
     assert!(!dir.join("touched").exists());
 }
 
+#[ignore = "needs a real ansible-playbook; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_failed_task_fails_the_run_with_ansibles_own_reason_and_what_changed_before_it() {
     let Some(runner) = ansible() else { return };
@@ -261,4 +265,132 @@ fn a_failed_task_fails_the_run_with_ansibles_own_reason_and_what_changed_before_
         !dir.join("after").exists(),
         "nothing runs after the failure"
     );
+}
+
+#[ignore = "needs a real ansible-playbook; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_secret_reaches_the_play_through_a_private_file_and_is_in_nothing_ansible_prints_or_the_plugin_writes(
+) {
+    let Some(runner) = ansible() else { return };
+    let dir = scratch(TMP, "real-secret");
+    const VALUE: &str = "s3cr3t-not-a-real-password-Q9";
+    let root = dir.display();
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: site\nspec:\n  target: ansible\n  targetHost:\n    from: inline\n    host: localhost\n  resources:\n    - id: env_file\n      type: file\n      params:\n        path: {root}/app.env\n        content: placeholder\n        mode: \"0600\"\n"
+    );
+    let mut graph = graph_from_text("site.yaml", &text, "ansible");
+    let slot = secret_in_param(&mut graph, "env_file", "content", "db_password");
+    let artifact = Ansible
+        .emit(&graph, &Data::new())
+        .unwrap_or_else(|e| panic!("{e}"))
+        .artifact;
+    assert!(!artifact.files["playbook.yml"].contains(VALUE));
+    let mut context = context(&dir);
+    context.secrets = secrets(&[(slot, "db_password", VALUE)]);
+
+    // A check run with diff would print the content; a task handed a
+    // secret prints nothing.
+    let log = KeptLog::default();
+    let preview = runner
+        .plan(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(
+        changes(&preview.changes),
+        [("env_file", ChangeAction::Update)]
+    );
+    assert!(
+        !log.text().iter().any(|line| line.contains(VALUE)),
+        "{:?}",
+        log.text()
+    );
+
+    let log = KeptLog::default();
+    runner
+        .apply(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert!(
+        !log.text().iter().any(|line| line.contains(VALUE)),
+        "{:?}",
+        log.text()
+    );
+    assert_eq!(fs::read_to_string(dir.join("app.env")).unwrap(), VALUE);
+    // Nothing the plugin wrote to its work directory holds the value.
+    for entry in fs::read_dir(dir.join("work")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() {
+            let bytes = fs::read(&path).unwrap();
+            assert!(
+                !String::from_utf8_lossy(&bytes).contains(VALUE),
+                "{} holds the secret",
+                path.display()
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore = "needs a real ansible-playbook; see docs/contributing/real-tool-tests.md"]
+fn a_credential_names_the_user_in_the_inventory_and_its_key_reaches_ansible_privately() {
+    let Some(runner) = ansible() else { return };
+    let dir = scratch(TMP, "real-credential");
+    const KEY: &str =
+        "-----BEGIN OPENSSH PRIVATE KEY-----\nnot-a-real-key-Q9\n-----END OPENSSH PRIVATE KEY-----";
+    // The local connection runs as whoever runs the tests, so the user
+    // named in the inventory is that user: Ansible reads it, and over SSH
+    // it would log in as them. The key file is named on the command line
+    // and, over the local connection, never opened.
+    let user = std::env::var("USER")
+        .ok()
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| "root".to_owned());
+    let root = dir.display();
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: site\nspec:\n  target: ansible\n  targetHost:\n    from: inline\n    host: localhost\n    credential: deploy\n  secrets:\n    - {{name: deploy_key, from: env, key: DEPLOY_KEY}}\n  credentials:\n    - {{name: deploy, type: ssh, user: {user}, privateKey: \"${{{{ secret.deploy_key }}}}\"}}\n  resources:\n    - id: marker\n      type: file\n      params:\n        path: {root}/marker\n        content: \"reached\\n\"\n"
+    );
+    let graph = graph_from_text("site.yaml", &text, "ansible");
+    let artifact = Ansible
+        .emit(&graph, &Data::new())
+        .unwrap_or_else(|e| panic!("{e}"))
+        .artifact;
+    assert_eq!(
+        artifact.files["inventory.ini"],
+        format!("[meridian]\nlocalhost ansible_user={user}\n")
+    );
+    let mut context = context(&dir);
+    let declared = graph.credential.clone().unwrap();
+    context.credential = Some(meridian_sdk::HeldCredential::from_values(
+        declared,
+        vec![(
+            "privateKey".to_owned(),
+            meridian_sdk::SecretValue::from_reader(KEY.as_bytes(), 4096).unwrap(),
+        )],
+    ));
+
+    let log = KeptLog::default();
+    let applied = runner
+        .apply(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(
+        changes(&applied.changes),
+        [("marker", ChangeAction::Update)]
+    );
+    assert_eq!(fs::read_to_string(dir.join("marker")).unwrap(), "reached\n");
+    assert!(
+        !log.text()
+            .iter()
+            .any(|line| line.contains("not-a-real-key")),
+        "{:?}",
+        log.text()
+    );
+    for entry in fs::read_dir(dir.join("work")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() {
+            let bytes = fs::read(&path).unwrap();
+            assert!(
+                !String::from_utf8_lossy(&bytes).contains("not-a-real-key"),
+                "{} holds the key",
+                path.display()
+            );
+        }
+    }
 }

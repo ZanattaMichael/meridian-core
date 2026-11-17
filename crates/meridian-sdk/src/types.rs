@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
 
-use meridian_value::{canonical_map, Value};
+use meridian_value::{canonical_map, PlacedEscape, SecretRef, Value};
 
+use crate::credential::Credential;
 use crate::run::Category;
 use crate::schema::ResourceSchema;
+use crate::secrets::SecretName;
 
 /// A point inside a source document. `line` and `column` are 1-based; a zero
 /// `line` means the position is unknown. It travels with every resource so a
@@ -116,6 +118,17 @@ pub struct ResourceGraph {
     /// What the document promises to later stages. Only a document that
     /// provisions infrastructure declares any.
     pub outputs: Vec<OutputDeclaration>,
+    /// Every secret the resources' params refer to, by the slot a
+    /// [`Value::Secret`] in them holds and the name the document declared
+    /// it under. Empty for a document without one. The host sends a secret
+    /// only to a target whose [`Capabilities::secrets`] is true, so a plugin
+    /// that does not declare it never sees one here.
+    pub secrets: Vec<SecretName>,
+    /// The credential the host is reached with, when the document names one
+    /// in `targetHost.credential`: its plain fields and the names of its
+    /// secret fields, never a value. The host sends one only to a target
+    /// whose [`Capabilities::credentials`] is true.
+    pub credential: Option<Credential>,
 }
 
 /// A value a document promises to later stages, such as the address of a
@@ -147,6 +160,34 @@ impl ResourceGraph {
         self.resources.iter().map(|r| r.id.as_str()).collect()
     }
 
+    /// The name of the secret a [`Value::Secret`] in a param stands for.
+    pub fn secret_name(&self, secret: SecretRef) -> Option<&str> {
+        self.secrets
+            .iter()
+            .find(|n| n.secret == secret)
+            .map(|n| n.name.as_str())
+    }
+
+    /// Whether any param holds a secret.
+    pub fn has_secrets(&self) -> bool {
+        !self.secrets.is_empty()
+    }
+
+    /// The same tree with every secret in a param written as the text
+    /// `write` gives for its name: the reference the tool will resolve when
+    /// it runs, such as `{{ meridian_secret_db_password }}` for a tool that
+    /// reads variables. An emitter calls this first and compiles the result,
+    /// and its runner hands the values over under the same names.
+    pub fn secrets_written_as(&self, write: impl Fn(&str) -> String) -> ResourceGraph {
+        let mut out = self.clone();
+        for resource in &mut out.resources {
+            for value in resource.params.values_mut() {
+                *value = crate::secrets::written_as(value, &self.secrets, &write);
+            }
+        }
+        out
+    }
+
     /// Renders the tree in a stable textual form, so a test can assert that
     /// what left the host is exactly what reached the plugin.
     pub fn canonical(&self) -> String {
@@ -156,6 +197,31 @@ impl ResourceGraph {
         );
         if !self.target_version.is_empty() {
             let _ = writeln!(out, "targetVersion={}", self.target_version);
+        }
+        for s in &self.secrets {
+            let _ = writeln!(out, "secret {} slot={}", s.name, s.secret.slot());
+        }
+        if let Some(c) = &self.credential {
+            let _ = writeln!(
+                out,
+                "credential {} type={} ambient={} text={} flags={} secrets={}",
+                c.name,
+                c.kind,
+                c.ambient,
+                canonical_map(
+                    &c.text
+                        .iter()
+                        .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+                        .collect()
+                ),
+                canonical_map(
+                    &c.flags
+                        .iter()
+                        .map(|(k, v)| (k.clone(), Value::Bool(*v)))
+                        .collect()
+                ),
+                c.secret_fields.join(",")
+            );
         }
         for r in &self.resources {
             let _ = writeln!(
@@ -197,6 +263,20 @@ pub struct Capabilities {
     /// The target can evaluate a condition at the instant of apply, which is
     /// what `runtimeWhen` requires.
     pub runtime_condition: bool,
+    /// The target takes a secret in a param. Its emitter writes a reference
+    /// to the secret into the artifact and never a value, and its runner
+    /// hands the value to the tool by a private channel: standard input, or
+    /// a file only the user can read. Never on the command line and never
+    /// in the environment. A document that puts a secret in a param of a
+    /// target without this is refused.
+    pub secrets: bool,
+    /// The target takes the credential a document names for its host. Its
+    /// emitter writes the credential's plain fields where its tool reads
+    /// them, such as the user into an inventory, and its runner hands the
+    /// secret fields to the tool by a private channel, as it hands secrets.
+    /// A document that names a credential for a target without this is
+    /// refused.
+    pub credentials: bool,
 }
 
 /// The complete output of a compile: relative path to file content. It is
@@ -307,6 +387,20 @@ pub trait Emitter {
     fn supported_resource_types(&self) -> Vec<String>;
     /// What this target can express natively.
     fn capabilities(&self) -> Capabilities;
+    /// The openings of the tool's own expression syntax, and how each is
+    /// written as literal text. The core applies them to every value an
+    /// interpolation places from data before `emit` sees it, so data can
+    /// never open an expression the tool evaluates: Ansible declares Jinja's
+    /// `{{`, `{%` and `{#`; ARM declares a leading `[`, written `[[`.
+    ///
+    /// The default, an empty list, is right for a tool whose files hold no
+    /// expression syntax beyond the `${` reference, which the core always
+    /// escapes. A target that renders its files through a template engine
+    /// must declare the engine's openings, or a value from `--data` is as
+    /// live as one the author wrote.
+    fn placed_text(&self) -> Vec<PlacedEscape> {
+        Vec::new()
+    }
     /// The kind of tool this target drives. The default exists so an emitter
     /// written before categories does not stop compiling; every real target
     /// should say.

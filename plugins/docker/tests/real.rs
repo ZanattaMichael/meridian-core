@@ -3,8 +3,8 @@
 //!
 //! It runs wherever `docker compose` and a Docker daemon are available, which
 //! includes the project's CI, and is skipped with a note where they are not.
-//! Set `MERIDIAN_REAL_DOCKER=1` to make a missing Docker a failure instead,
-//! or `MERIDIAN_REAL_DOCKER=0` to skip it even where Docker is present.
+//! Set `MERIDIAN_TEST_REAL_DOCKER=1` to make a missing Docker a failure instead,
+//! or `MERIDIAN_TEST_REAL_DOCKER=0` to skip it even where Docker is present.
 
 // Left out on Windows: this file drives the real tool, and the workflow that
 // installs the tool and runs it is a Linux job.
@@ -33,16 +33,16 @@ fn quiet(program: &str, args: &[&str]) -> bool {
 
 /// Whether to run, by what the machine has and what the operator asked for.
 fn docker_is_available() -> bool {
-    let asked = std::env::var("MERIDIAN_REAL_DOCKER").unwrap_or_default();
+    let asked = std::env::var("MERIDIAN_TEST_REAL_DOCKER").unwrap_or_default();
     if asked == "0" {
-        eprintln!("skipped: MERIDIAN_REAL_DOCKER=0");
+        eprintln!("skipped: MERIDIAN_TEST_REAL_DOCKER=0");
         return false;
     }
     let available = quiet("docker", &["compose", "version"]) && quiet("docker", &["info"]);
     if !available {
         assert!(
             asked != "1",
-            "MERIDIAN_REAL_DOCKER=1, and docker compose or the Docker daemon is not available"
+            "MERIDIAN_TEST_REAL_DOCKER=1, and docker compose or the Docker daemon is not available"
         );
         eprintln!("skipped: docker compose or the Docker daemon is not available");
     }
@@ -231,6 +231,7 @@ fn get(url: &str) -> String {
     panic!("{url} did not answer: {last}");
 }
 
+#[ignore = "needs a real Docker; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_project_is_brought_up_changed_and_kept_in_step_with_its_document() {
     if !docker_is_available() {
@@ -334,6 +335,7 @@ fn a_project_is_brought_up_changed_and_kept_in_step_with_its_document() {
     assert_eq!(get(value(&outputs, "url")).trim(), "goodbye");
 }
 
+#[ignore = "needs a real Docker; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_file_only_compose_can_fault_is_refused_by_compose_itself() {
     if !docker_is_available() {

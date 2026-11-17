@@ -96,6 +96,7 @@ fn fields_come_from_the_language_and_leave_out_what_is_already_there() {
             "variables",
             "conditions",
             "secrets",
+            "credentials",
             "targetHost",
             "imports",
             "resources"
@@ -110,6 +111,7 @@ fn fields_come_from_the_language_and_leave_out_what_is_already_there() {
             "variables",
             "conditions",
             "secrets",
+            "credentials",
             "imports",
             "resources",
             "outputs"
@@ -124,6 +126,7 @@ fn fields_come_from_the_language_and_leave_out_what_is_already_there() {
             "variables",
             "conditions",
             "secrets",
+            "credentials",
             "targetHost",
             "imports",
             "resources"
@@ -508,7 +511,15 @@ fn secrets_and_what_a_condition_can_read_are_offered() {
     }
     assert_eq!(
         labels("kind: ResourceSet\nspec:\n  secrets:\n    - name: token\n      from: |"),
-        ["env", "file", "exec"]
+        [
+            "env",
+            "file",
+            "exec",
+            "keyring",
+            "systemd-creds",
+            "secret-service",
+            "keychain"
+        ]
     );
     assert_eq!(
         labels("kind: ResourceSet\nspec:\n  secrets:\n    - name: token\n      from: env\n      |"),
@@ -516,7 +527,28 @@ fn secrets_and_what_a_condition_can_read_are_offered() {
             "key",
             "path",
             "command",
+            "service",
+            "account",
+            "attributes",
+            "allowWideMode",
+            "keepTrailingNewline",
             "optional",
+            "fallback"
+        ]
+    );
+    // A further place takes what says where, and nothing of the secret's own.
+    assert_eq!(
+        labels(
+            "kind: ResourceSet\nspec:\n  secrets:\n    - name: token\n      from: env\n      \
+             key: TOKEN\n      fallback:\n        - from: keyring\n          |"
+        ),
+        [
+            "key",
+            "path",
+            "command",
+            "service",
+            "account",
+            "attributes",
             "allowWideMode",
             "keepTrailingNewline"
         ]

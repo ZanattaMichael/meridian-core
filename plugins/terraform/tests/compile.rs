@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text};
+use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text, secret_in_param};
 use meridian_sdk::{CompileError, Data, Emitted, Emitter, ResourceGraph};
 use meridian_target_terraform::Terraform;
 
@@ -229,4 +229,23 @@ fn nothing_can_depend_on_a_variable() {
         "\"region\" is a variable, which Terraform works out before or alongside everything \
          else; nothing can depend on it or be ordered by it"
     );
+}
+
+#[test]
+fn a_secret_in_a_param_is_a_sensitive_variable_the_runner_hands_over() {
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: db\nspec:\n  target: terraform\n  resources:\n    - id: main\n      type: aws_db_instance\n      params:\n        engine: postgres\n        password: placeholder\n";
+    let mut graph = graph_from_text("infra.yaml", text, "terraform");
+    secret_in_param(&mut graph, "main", "password", "db_password");
+    let config = emit(&graph).unwrap().artifact.files["main.tf.json"].clone();
+    assert!(
+        config.contains("\"password\": \"${var.meridian_secret_db_password}\""),
+        "{config}"
+    );
+    assert!(
+        config.contains(
+            "\"variable\": {\n    \"meridian_secret_db_password\": {\n      \"sensitive\": true,\n      \"type\": \"string\"\n    }\n  }"
+        ),
+        "{config}"
+    );
+    assert!(!config.contains("(sensitive)"), "{config}");
 }

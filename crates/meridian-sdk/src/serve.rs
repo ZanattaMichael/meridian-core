@@ -19,17 +19,19 @@ use crate::listen::Listening;
 use crate::pb::emitter_server::{Emitter as EmitterService, EmitterServer};
 use crate::pb::importer_server::{Importer as ImporterService, ImporterServer};
 use crate::pb::runner_server::{Runner as RunnerService, RunnerServer};
+use crate::pb::schema_source_server::{SchemaSource as SchemaSourceService, SchemaSourceServer};
 use crate::{
-    pb, version, wire, Emitter, Importer, Log, LogLine, Operations, Runner, HANDSHAKE_MAGIC,
-    VERSION,
+    pb, version, wire, Emitter, Importer, Log, LogLine, LogStream, Operations, Runner,
+    SchemaSource, HANDSHAKE_MAGIC, VERSION,
 };
 
-/// What a plugin binary serves: an emitter, and optionally a runner and an
-/// importer.
+/// What a plugin binary serves: an emitter, and optionally a runner, an
+/// importer and a schema source.
 pub struct Plugin {
     emitter: Arc<dyn Emitter + Send + Sync>,
     runner: Option<Arc<dyn Runner>>,
     importer: Option<Arc<dyn Importer>>,
+    schemas: Option<Arc<dyn SchemaSource>>,
 }
 
 impl Plugin {
@@ -39,7 +41,15 @@ impl Plugin {
             emitter: Arc::new(emitter),
             runner: None,
             importer: None,
+            schemas: None,
         }
+    }
+
+    /// Adds the half that asks the installed tool for the schemas of its
+    /// own resource types, for `meridian schema sync`.
+    pub fn with_schema_source(mut self, source: impl SchemaSource + 'static) -> Self {
+        self.schemas = Some(Arc::new(source));
+        self
     }
 
     /// Adds the half that reads the tool's existing configuration back into
@@ -128,9 +138,15 @@ async fn serve_async(plugin: Plugin) -> Result<(), ServeError> {
         operations,
         accepts_inputs: plugin.runner.as_ref().is_some_and(|r| r.accepts_inputs()),
         importer: plugin.importer.clone(),
+        exports_schemas: plugin.schemas.is_some(),
         protocol,
     });
     let mut router = tonic::transport::Server::builder().add_service(emitter);
+    if let Some(source) = &plugin.schemas {
+        router = router.add_service(SchemaSourceServer::new(SchemaSourceHandler {
+            source: Arc::clone(source),
+        }));
+    }
     if let Some(runner) = &plugin.runner {
         router = router.add_service(RunnerServer::new(RunnerHandler {
             runner: Arc::clone(runner),
@@ -190,6 +206,8 @@ struct EmitterHandler {
     accepts_inputs: bool,
     /// Kept only to describe it: importing is served by its own handler.
     importer: Option<Arc<dyn Importer>>,
+    /// Whether a schema source is served, likewise by its own handler.
+    exports_schemas: bool,
     /// The protocol version agreed with the host.
     protocol: u32,
 }
@@ -208,6 +226,7 @@ impl EmitterService for EmitterHandler {
             name: self.emitter.name().to_owned(),
             resource_types,
             capabilities: Some(wire::capabilities_to_wire(self.emitter.capabilities())),
+            placed_text: wire::placed_text_to_wire(&self.emitter.placed_text()),
             category: wire::category_to_wire(self.emitter.category()) as i32,
             target_versions: self.emitter.target_versions(),
             resource_schemas: self
@@ -224,6 +243,7 @@ impl EmitterService for EmitterHandler {
                     .map(|i| i.formats())
                     .unwrap_or_default(),
             ),
+            exports_schemas: self.exports_schemas,
         }))
     }
 
@@ -240,6 +260,43 @@ impl EmitterService for EmitterHandler {
             .await
             .map_err(|e| Status::internal(format!("the emitter panicked: {e}")))?;
         Ok(Response::new(wire::emit_response(outcome)))
+    }
+}
+
+struct SchemaSourceHandler {
+    source: Arc<dyn SchemaSource>,
+}
+
+/// Where a schema source's log goes: the plugin's own stderr, which the host
+/// shows when the export fails and `meridian schema sync` relays as it runs.
+struct StderrLog;
+
+impl Log for StderrLog {
+    fn line(&self, line: LogLine) {
+        let prefix = match line.stream {
+            LogStream::Stdout => "",
+            LogStream::Stderr => "! ",
+        };
+        eprintln!("{prefix}{}", line.text);
+    }
+}
+
+#[tonic::async_trait]
+impl SchemaSourceService for SchemaSourceHandler {
+    async fn export_schemas(
+        &self,
+        request: Request<pb::ExportSchemasRequest>,
+    ) -> Result<Response<pb::ExportSchemasResponse>, Status> {
+        let request = wire::export_schemas_request_from_wire(request.into_inner())
+            .map_err(Status::invalid_argument)?;
+        let source = Arc::clone(&self.source);
+        // A source runs a tool and parses what it prints, so a panic in it
+        // must reach the host as this call failing, not take the plugin
+        // down.
+        let outcome = tokio::task::spawn_blocking(move || source.export(&request, &StderrLog))
+            .await
+            .map_err(|e| Status::internal(format!("the schema source panicked: {e}")))?;
+        Ok(Response::new(wire::export_schemas_response(outcome)))
     }
 }
 

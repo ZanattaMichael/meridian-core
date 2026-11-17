@@ -211,10 +211,46 @@ directory, so keep that directory.
 
 An output Terraform marks sensitive is reported as sensitive and never printed.
 
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a
+resource's params is compiled as `${var.meridian_secret_<name>}`, with the
+variable declared `sensitive`, so Terraform shows `(sensitive value)` wherever
+it would print it. When the stage runs, the values are written into a
+variables file only the user can read, held in memory where the system
+allows, and passed to `terraform plan` as `-var-file=<path>`; the file is
+removed once the plan is saved. The saved plan holds every variable's value,
+as every Terraform plan file does, so it is overwritten and removed as soon as
+it has been applied or shown. The value is never on the command line and never
+in Terraform's environment. Terraform writes a resource's arguments into its
+state whichever variable they came from, so a document that hands it a secret
+should declare a `backend` that protects its state.
+
+## Editor schemas
+
+`meridian schema sync` asks Terraform for the providers' own schemas, so an
+editor completes and checks `aws_instance`'s arguments as it does a plugin's
+own types ([Tool schemas](../tooling/schema-sync.md)). The plugin writes a
+configuration into its work directory that requires every provider the
+documents use (the `source` and `version` of each `provider` resource, or
+`hashicorp/<name>` for a provider only named by a type's prefix), runs
+`terraform init -backend=false` there and reads `terraform providers schema
+-json`.
+
+| | |
+|---|---|
+| Described in full | the `<provider>_<type>` and `data.<type>` types the documents use: every attribute with its type, whether it is required, optional or set by the provider, sensitive or deprecated; every nested block; and Terraform's meta-arguments `count`, `for_each`, `provider`, `lifecycle`, `provisioner` and `connection` |
+| Listed by name | every other resource and data source of those providers, with its description, and `terraform_data` |
+| Pinned | each provider's version, from the `.terraform.lock.hcl` that `init` writes in the work directory |
+
+An attribute that is both optional and computed is described as one the
+provider sets when the document leaves it out, and is not an error to write.
+An attribute that is only computed, such as `arn`, is: a document reads it
+with `${id.arn}`.
+
 The runner is tested against the real `terraform` command (1.13) on every pull
 request that touches it, and the same tests run again with `tofu`: a plan that
 creates nothing, an apply checked on disk, a second plan that is in sync, an
-update, a replacement, outputs including a sensitive one, and a configuration
-Terraform refuses. They use `terraform_data` and a local state file, so a
+update, a replacement, outputs including a sensitive one, a configuration
+Terraform refuses, and a secret that reaches a resource through the variables
+file and is in nothing Terraform prints. They use `terraform_data` and a local state file, so a
 provider that talks to a cloud has not been run this way. See
 [Real-tool tests](../contributing/real-tool-tests.md).

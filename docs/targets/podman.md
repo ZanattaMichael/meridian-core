@@ -575,8 +575,8 @@ runs the compiler against golden files, and the runner against stand-ins for `po
 real tools:
 
 ```
-MERIDIAN_TEST_PODMAN=quadlet cargo test -p meridian-target-podman --test real
-MERIDIAN_TEST_PODMAN=system  cargo test -p meridian-target-podman --test real
+MERIDIAN_TEST_REAL_PODMAN=quadlet cargo test -p meridian-target-podman --test real
+MERIDIAN_TEST_REAL_PODMAN=system  cargo test -p meridian-target-podman --test real
 ```
 
 `quadlet` has the machine's own Quadlet read every example and installs nothing. `system`

@@ -42,6 +42,7 @@
 
 mod emit;
 mod runner;
+mod schemas;
 mod sort;
 mod transform;
 mod validate;
@@ -55,6 +56,7 @@ use meridian_sdk::{
 
 pub use emit::{PROGRAM_PATH, STACK_PATH};
 pub use runner::{PulumiRunner, PROGRAM_VARIABLE};
+pub use schemas::PulumiSchemas;
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "pulumi";

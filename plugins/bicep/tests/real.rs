@@ -123,6 +123,7 @@ fn asked_for_the_compiler() -> bool {
     true
 }
 
+#[ignore = "needs a real az and the Bicep compiler; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn the_example_is_bicep_the_real_compiler_builds() {
     if !asked_for_the_compiler() {
@@ -148,6 +149,7 @@ fn the_example_is_bicep_the_real_compiler_builds() {
     assert!(text.contains("dependsOn"), "{text}");
 }
 
+#[ignore = "needs a real az and the Bicep compiler; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn every_kind_of_value_the_plugin_writes_is_valid_bicep() {
     if !asked_for_the_compiler() {
@@ -241,6 +243,7 @@ spec:
     }
 }
 
+#[ignore = "needs a real az and the Bicep compiler; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn what_the_compiler_rejects_is_reported_by_the_compiler() {
     if !asked_for_the_compiler() {
@@ -345,6 +348,7 @@ fn output<'a>(outputs: &'a [Output], name: &str) -> &'a str {
         .expect("the output is text")
 }
 
+#[ignore = "needs a real az and the Bicep compiler; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_deployment_is_previewed_made_read_back_and_changed_in_azure() {
     let Some(group) = resource_group() else {

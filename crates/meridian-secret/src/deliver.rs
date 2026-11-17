@@ -127,6 +127,9 @@ impl SecretFile {
                 match part {
                     Part::Text(text) => handle.write_all(text.as_bytes())?,
                     Part::Secret(secret) => secret.expose(|bytes| handle.write_all(bytes))?,
+                    Part::JsonString(secret) => {
+                        secret.expose(|bytes| write_json_string(&mut handle, bytes))?
+                    }
                 }
             }
             handle.flush()?;
@@ -156,7 +159,45 @@ impl SecretFile {
 #[derive(Debug)]
 pub enum Part<'a> {
     Text(&'a str),
+    /// The secret's bytes as they are.
     Secret(&'a SecretValue),
+    /// The secret as the inside of a JSON string: escaped, between the
+    /// quotes the text around it supplies. For a variables file a tool reads
+    /// as JSON. A secret that is not text (not UTF-8) cannot be one and is
+    /// refused.
+    JsonString(&'a SecretValue),
+}
+
+/// Writes `bytes` escaped as JSON requires inside a string, straight to the
+/// file, so no escaped copy of the secret is made in memory.
+fn write_json_string(out: &mut impl Write, bytes: &[u8]) -> std::io::Result<()> {
+    let text = std::str::from_utf8(bytes).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "the secret is not text, so it cannot be written as a JSON string",
+        )
+    })?;
+    // Runs of text that need no escaping are written in one piece, so a
+    // long secret is not one write per character.
+    let mut plain = 0;
+    for (at, c) in text.char_indices() {
+        let escaped: Option<std::borrow::Cow<'static, [u8]>> = match c {
+            '"' => Some(b"\\\"".as_slice().into()),
+            '\\' => Some(b"\\\\".as_slice().into()),
+            '\n' => Some(b"\\n".as_slice().into()),
+            '\r' => Some(b"\\r".as_slice().into()),
+            '\t' => Some(b"\\t".as_slice().into()),
+            c if (c as u32) < 0x20 => Some(format!("\\u{:04x}", c as u32).into_bytes().into()),
+            _ => None,
+        };
+        if let Some(escaped) = escaped {
+            out.write_all(&bytes[plain..at])?;
+            out.write_all(&escaped)?;
+            plain = at + c.len_utf8();
+        }
+    }
+    out.write_all(&bytes[plain..])?;
+    Ok(())
 }
 
 /// Overwrites a file's contents with zeroes, as far as the filesystem lets

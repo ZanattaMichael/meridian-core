@@ -400,6 +400,18 @@ An output that reads a `variable` marked `sensitive: true` is itself written wit
 `sensitive = true`. OpenTofu refuses to plan an output that could reveal a secret unless
 the output says so, and Meridian masks a sensitive output wherever it is shown.
 
+## Editor schemas
+
+`meridian schema sync` asks OpenTofu for the providers' schemas, exactly as
+the [Terraform target](terraform.md#editor-schemas) does with `terraform`:
+the plugin writes a configuration requiring the providers the documents use
+into its work directory, runs `tofu init -backend=false` and reads `tofu
+providers schema -json`. The types the documents use are described in full,
+including `ephemeral.<type>` resources; the rest of each provider is listed
+by name; each provider's version is pinned from `.terraform.lock.hcl`. The
+cache records the tool as `opentofu`, so a project that uses both targets
+keeps one cache for each. See [Tool schemas](../tooling/schema-sync.md).
+
 ## What running does
 
 | Step | Command |
@@ -417,6 +429,16 @@ document declares a `backend`, its state file there, so keep that directory betw
 Changes are reported as create, update, delete or replace against the resource's `id`. A
 resource inside a module, or one of several instances made with `count` or `for_each`,
 keeps OpenTofu's full address.
+
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a resource's
+params is compiled as `${var.meridian_secret_<name>}`, with the variable declared
+`sensitive`. When the stage runs, the values are written into a variables file only the
+user can read, held in memory where the system allows, and passed to `tofu plan` as
+`-var-file=<path>`; the file is removed once the plan is saved, and the saved plan, which
+holds every variable's value, is overwritten and removed as soon as it has been applied
+or shown. The value is never on the command line and never in OpenTofu's environment. A
+document that hands OpenTofu a secret should [encrypt its state](#state-and-plan-encryption),
+since a resource's arguments are written there whichever variable they came from.
 
 | Environment variable | Effect |
 |---|---|
@@ -514,7 +536,7 @@ The plugin's tests are in [`plugins/opentofu/tests`](../../plugins/opentofu/test
 
 ```sh
 cargo test -p meridian-target-opentofu
-MERIDIAN_TEST_TOFU=tofu cargo test -p meridian-target-opentofu --test real
+MERIDIAN_TEST_REAL_TOFU=tofu cargo test -p meridian-target-opentofu --test real
 UPDATE_GOLDEN=1 cargo test -p meridian-target-opentofu    # re-record the golden files
 ```
 

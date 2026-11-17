@@ -4,7 +4,8 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use crate::{Artifact, Data, Value};
+use crate::credential::HeldCredential;
+use crate::{Artifact, Data, Secrets, Value};
 
 /// The kind of tool a plugin drives. The core routes on it, to decide which
 /// workflows a plugin can join and where in one it sits. It is a declared
@@ -92,6 +93,16 @@ pub struct RunContext {
     /// Values handed to this stage from the outputs of earlier ones, keyed by
     /// the name the document gave them.
     pub inputs: Data,
+    /// The value of every secret the graph's params referred to, for the
+    /// runner to hand to the tool. Sent only to a target whose
+    /// [`Capabilities::secrets`](crate::Capabilities::secrets) is true, and
+    /// only for `plan` and `apply`.
+    pub secrets: Secrets,
+    /// The credential the host is reached with, with the value of each of
+    /// its secret fields, when the document names one. Sent only to a target
+    /// whose [`Capabilities::credentials`](crate::Capabilities::credentials)
+    /// is true, and only for `plan` and `apply`.
+    pub credential: Option<HeldCredential>,
 }
 
 /// What the tool would do, or did, to one thing it manages.

@@ -1,12 +1,14 @@
 # Language expansion: expressions, data, reuse, endpoints, secrets, workflows and run state
 
-**Status: accepted, not yet built.** The owner accepted this design and every
-recommendation in [section 17](#17-decisions-for-the-owner) on 2026-11-17.
-Nothing in it is implemented yet; the
-[language reference](../reference/dsl/index.md) stays the description of what
-the `meridian` command accepts today. Each phase in
-[section 18](#18-delivery-in-phases) lands as its own pull request and moves its
-part of this plan into the reference.
+**Status: accepted, being built in phases.** The owner accepted this design
+and every recommendation in [section 17](#17-decisions-for-the-owner) on
+2026-11-17. Phases 1 and 2 and most of 6a are built (pull requests 66, 71,
+75, 77 and 144); [section 18](#18-delivery-in-phases) marks each phase that
+has landed. The [language reference](../reference/dsl/index.md) describes what
+the `meridian` command accepts today, and is the authority where the two
+differ; each remaining phase lands as its own pull request and moves its part
+of this plan into the reference. Design choices made while building that
+this plan did not settle are in the [decision records](../decisions/README.md).
 
 The choices marked **Decision** are the ones the rest of the design hangs on.
 
@@ -1688,6 +1690,20 @@ tested once. A crash that skips the guard leaves a file in a `0700` directory
 on a filesystem that does not survive a reboot; the next run removes any such
 directory it finds whose owning process is gone.
 
+**As built (phase 7, first part).** A target declares `Capabilities::secrets`
+and is then handed a secret in a param: at compile as `Value::Secret` with
+its name in `ResourceGraph::secrets`, which the emitter writes as a reference
+(`secrets_written_as`); at plan and apply as the value in
+`RunContext::secrets`, which the runner hands over with `Secrets::json_file`
+(rank 2) or `Tool::stdin_secret` (rank 1). Built for `ansible` (extra-vars
+file, and the task marked `no_log`), `terraform` and `opentofu` (`-var-file`
+on `plan`, the variable declared `sensitive`, the saved plan scrubbed after
+use since it holds every variable) and the test target. Every other target
+still stops the stage, naming the targets that take one. A value made from a
+secret and text is handed over as a secret of its own, `derived_<n>`.
+`secretDelivery: literal`, rank 4 for provider credentials and the SSH agent
+are not built. See [the reference](../reference/dsl/secrets.md#handing-a-secret-to-a-tool).
+
 ### 11.7 The operating system's own stores
 
 The best place for a long-lived credential on a workstation is the store the
@@ -1717,15 +1733,24 @@ spec:
 ```
 
 A secret may list several sources, tried in order, so one document works on a
-laptop and in CI:
+laptop and in CI. As built, the first place is `from` and its fields, and the
+rest are a `fallback` list of places written the same way (the schema has no
+field that is either text or a list, and `from` stays the one word that says
+the provider everywhere else):
 
 ```yaml
     - name: api_token
-      from:
-        - {provider: keychain, service: meridian, account: api}
-        - {provider: secret-service, attributes: {app: meridian, name: api}}
-        - {provider: env, key: API_TOKEN}
+      from: keychain
+      service: meridian
+      account: api
+      fallback:
+        - {from: secret-service, attributes: {app: meridian, name: api}}
+        - {from: env, key: API_TOKEN}
 ```
+
+The first place that has the secret answers. A place that has nothing, or
+that this machine does not have at all, is passed over; a place that is
+there and refuses stops the run.
 
 `meridian secret set <name>` stores a value in the first writable store a
 secret names, reading it from standard input or a prompt with echo off, never
@@ -1763,6 +1788,21 @@ most exact.
 | A malicious or compromised plugin | not stopped by any of the above: a plugin given a secret can do anything with it. The defences are the ones for any code you run: a plugin is a signed release from a named publisher ([governance](governance.md)), a document's `requires` pins it, and a plugin is given only the secrets of the resources it compiles. A plugin that should never see secrets can be told so in the project's settings: `plugins: {<name>: {secrets: deny}}` |
 | A secret provider plugin returns a value over the same wire | the same stream, in the other direction; the provider's settings are sent to it and never echoed back in an error |
 | A notification sink receives a secret | it cannot: events are built from structures that hold handles, and a sink is never sent a secret stream. A sink's own credential reaches it by the same stream as any plugin's |
+
+**As built (phase 7, first part).** A secret is sent only to a target that
+declares the capability, only for the params its resources hold, and only at
+plan and apply; `outputs` is sent none. At compile the graph carries the mask,
+the path to it and the secret's slot and name, and the SDK puts a
+`Value::Secret` back. The value travels in the `RunContext` of the plan or
+apply request, over the plugin's private socket, rather than on a stream of
+its own: the message is the one copy outside protected memory, dropped once
+sent, and the SDK takes each value into a `SecretValue` and wipes the
+message's bytes as it reads it. The plugin holds the values in
+`RunContext::secrets` for the length of the call. The recording tool of the
+contract suite is, for now, each plugin's stand-in in its own run tests and
+the test target, which keeps a copy of what it was handed for the CLI tests
+to read back; `plugins: {<name>: {secrets: deny}}`, the peer check and the
+TCP refusal are not built.
 
 ### 11.9 What is tested
 
@@ -1882,6 +1922,29 @@ and not an authentication failure an hour later. A plugin can add a type.
   ```
   rollout@web01 (ansible)   endpoint web01 as credential "deploy" (ssh, user deploy)
   ```
+
+**As built (phase 7, second part).** `spec.credentials` takes every type of
+the table, checked against a fixed list of plain fields, secret fields and
+flags per type (`meridian_secret::credential_types`), and a completeness rule
+per type (`privateKey`, or `password`, or `agent: true`), unless the
+credential is `from: ambient`. A secret field is exactly `${{ secret.<name>
+}}` of a declared secret; a literal, an undeclared secret or any other
+expression is refused by `validate`, and a plain field takes interpolation
+from data but never a secret. Endpoints are not built yet, so the first use
+is `targetHost.credential`, which takes an `ssh` or `usernamePassword`
+credential; a target declares `Capabilities::credentials`, is given the
+credential's shape and secret field names at compile (`ResourceGraph::
+credential`) and its values at plan and apply (`RunContext::credential`, a
+`HeldCredential`), and a document that names one for a target without the
+capability is refused before anything runs. Built for `ansible`
+(`ansible_user` in the inventory, the key as `--private-key` naming a `0600`
+file, the password as `ansible_password` in the extra-vars file; passphrase,
+certificate and domain refused) and the test target. The plan line reads
+`on web01 as deploy (ssh, user deploy)`. A credential's secret fields are
+secrets of the document, so the run record, the events and the mask treat
+them as any other. Not built: a credential as a `final` declaration, a
+plugin adding a type, and the other uses (settings, stores, sinks). See
+[the reference](../reference/dsl/credentials.md).
 
 ## 13. Workflows
 
@@ -2289,8 +2352,8 @@ green before the next starts.
 | 5a | `Data`: layers per endpoint on the existing merge engine, the strategies, `final` keys, the in-data directives, `meridian explain`; the compile-rules hook after layers load | 5 |
 | 5b | `Composite`, `include`, `extends`, the configuration type (`segment`, `targets`) | 5 |
 | 6 | `Inventory`, endpoint types, `spec.endpoints`, one instance per endpoint, `--endpoint`, sources from outputs | 4, 5 |
-| 6a | `meridian-secret`: the locked, wiped-on-drop value, process hardening, the secret handle in `Value` and how the mark spreads, the output filter, the delivery helpers (standard input, user-only files), `spec.secrets` with the `env`, `file`, `exec` and operating-system store providers, `meridian secret set` and `check`, `resolve_credential`, and the tests of [11.9](#119-what-is-tested). **Built so far:** the crate, the handle and the mark, `spec.secrets` with `env`, `file` and `exec`, fetched per stage and wiped after it, `--strict-secrets` and the warning when memory cannot be locked, `meridian secret check`, and `resolve_credential` for the `registry`, `usernamePassword` and `token` types ([reference](../reference/dsl/secrets.md), [how it is held](../concepts/secrets-in-memory.md)). **Still to come:** the operating-system stores, several sources for one secret, `meridian secret set` | 2 |
-| 7 | secrets and credentials on targets: credential types, sealed references and the secret stream in the protocol, delivery on every target by its channel of [11.6](#116-handing-a-secret-to-a-tool), the plugin contract suite with the recording tool | 6, 6a |
+| 6a (built in part) | `meridian-secret`: the locked, wiped-on-drop value, process hardening, the secret handle in `Value` and how the mark spreads, the output filter, the delivery helpers (standard input, user-only files), `spec.secrets` with the `env`, `file`, `exec` and operating-system store providers, `meridian secret set` and `check`, `resolve_credential`, and the tests of [11.9](#119-what-is-tested). **Built so far:** the crate, the handle and the mark, `spec.secrets` with `env`, `file` and `exec`, fetched per stage and wiped after it, `--strict-secrets` and the warning when memory cannot be locked, `meridian secret check`, and `resolve_credential` for the `registry`, `usernamePassword` and `token` types ([reference](../reference/dsl/secrets.md), [how it is held](../concepts/secrets-in-memory.md)). Then the `keyring`, `systemd-creds`, `secret-service` and `keychain` stores, `fallback` places for one secret, and `meridian secret set` into the keyring and the Secret Service. **Still to come:** `credential-manager` on Windows, writing the keychain, the `tpm` plugin | 2 |
+| 7 (built in part) | secrets and credentials on targets: credential types, sealed references and the secret stream in the protocol, delivery on every target by its channel of [11.6](#116-handing-a-secret-to-a-tool), the plugin contract suite with the recording tool. **Built so far:** the `secrets` capability, secrets by name in the graph and by value in the run context, delivery on `ansible`, `terraform` and `opentofu` and the test target, the SDK's `Secrets`, `json_file` and `stdin_secret`, and the stand-in and real-tool tests of the handover; credential types in documents (`spec.credentials`, every type checked, `targetHost.credential`, the `credentials` capability, delivery on `ansible` and the test target). **Still to come:** delivery on every other target, the recording tool as one suite | 6, 6a |
 | 7a | events and the run record: the event stream, `status`, `runs`, `events`, locking, `--events json` | 4 |
 | 8 | `Workflow`: steps, order from needs, `with`, `assign` from data, fan-out strategies, gates, failure handling, resume | 5a, 6, 7a |
 | 8a | notification sinks: the sink protocol, `webhook` and `command` built in, then `slack`, `teams`, `email`, `opentelemetry` | 7, 7a |

@@ -4,23 +4,27 @@
 meridian validate <files>...
 meridian compile  <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--out DIR]
 meridian plan     <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets]
-meridian apply    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets] [--resume [RUN]] [--on-failure stop|rollback]
+meridian apply    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets] [--resume | --resume=RUN] [--on-failure stop|rollback]
 meridian drift    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE]
 meridian rollback <files>... [--run RUN]
 meridian status
 meridian runs
 meridian events   [RUN] [--type TYPE]
+meridian report   [RUN] [--format FORMAT] [--out FILE] [--from FILE]
 meridian unlock   <ID>
 meridian plugins
 meridian import   <paths>... [--from TARGET] [--name NAME] [-o DIR] [-r] [--force] [--strict]
 meridian migrate  <files>... [--to APIVERSION] [--check]
 meridian version
 meridian module   install [--locked] | update [NAME]... | verify | list | sign --key FILE | pack [--out FILE] | push REPOSITORY
-meridian secret check <files>...
+meridian secret check <files>... | set NAME <files>...
 meridian rules check --hierarchy FILE [--rules FILE] [--require-rules] [--data FILE] [--set KEY=VALUE]
 meridian fmt      <paths>... [--check] [--keep-order]
 meridian lint     <paths>... [--data FILE] [--set KEY=VALUE] [--state-dir DIR] [--fix] [--strict] [--json]
-meridian schema   [--target TARGET] [-o FILE]
+meridian schema   [--target TARGET] [-o FILE] [--state-dir DIR]
+meridian schema   sync <paths>... [--target TARGET] [--data FILE] [--set KEY=VALUE] [--state-dir DIR] [--check] [--no-lock]
+meridian schema   status [--state-dir DIR] [--json]
+meridian schema   clean [TARGET]... [--state-dir DIR]
 meridian lsp
 ```
 
@@ -122,11 +126,13 @@ continue:
 web (ResourceSet, target ansible on 203.0.113.10)
   ~ update nginx_conf
   FAILED: the play failed (ran `ansible-playbook ...`, exit status 2)
-run 2026-11-17T09-14-03Z-0cc7 failed. Once the cause is fixed, `meridian apply --resume` with the same documents continues from the stage that failed
+run 2026-11-17T09-14-03Z-0cc7 failed. Once the cause is fixed, `meridian apply --resume site.yaml` continues from the stage that failed
 ```
 
 `--resume` continues the last apply that failed or was interrupted, and
-`--resume <run>` a named one. Stages that run already applied, from documents
+`--resume=<run>` a named one. The run's id is joined to the flag with `=`, so
+that a file after `--resume` is always a file; `--resume` may come before or
+after the documents. Stages that run already applied, from documents
 that still compile to the same artifact, are left alone; the rest are applied.
 [Picking up where a run stopped](../concepts/run-safety.md#picking-up-where-a-run-stopped)
 has the rules.
@@ -216,6 +222,19 @@ family as `'step.*'`, and may be repeated.
 
 ```
 meridian events --type step.failed --type 'resource.*'
+```
+
+### `report`
+
+Writes a [report](reporting.md) of a recorded run, the last one when no run
+is named: `--format` is `json`, `junit`, `markdown` (the default) or `html`,
+and `--out` names a file to write instead of standard output. `--from FILE`
+reports on a file of events, as `--events json` wrote them, and not on the
+state; `-` reads standard input.
+
+```
+meridian report --format junit --out meridian.xml
+meridian apply site.yaml --events json | meridian report --from - --format html --out run.html
 ```
 
 ### `unlock`
@@ -394,9 +413,36 @@ error: 1 secret would not be found by plan or apply
 | `absent, optional` | nothing is there, and the secret is `optional: true`, so it reads as `null` | no |
 | `MISSING` | nothing is there | yes |
 | `REFUSED` | the place is there and a fetch would refuse it, or the command was not found | yes |
+| `UNAVAILABLE` | the store cannot be used on this machine: another operating system, no session bus, its tool not installed | yes |
+
+A secret with [several places](dsl/secrets.md#several-places-for-one-secret)
+is shown with the first place that would answer, or with every place's reason
+when none would. The Secret Service and the keychain are `not checked`, since
+asking them can open a prompt.
 
 It takes `--state-dir`, for a file written `@<module>:<path>`, and loads no
 plugin.
+
+### `secret set`
+
+Stores a value for the [secret](dsl/secrets.md#storing-a-secret) `NAME`, as
+the documents declare it, in the first place it names that meridian can
+write and this machine has: the kernel keyring (`from: keyring`) or the
+Secret Service (`from: secret-service`). The value is read from standard
+input, or typed at a prompt that does not show it, and is never an argument.
+
+```
+$ meridian secret set deploy_token site.yaml
+Value for deploy_token (not shown):
+stored deploy_token in the kernel keyring, key meridian:deploy-token
+$ printf '%s' "$TOKEN" | meridian secret set deploy_token site.yaml
+stored deploy_token in the kernel keyring, key meridian:deploy-token
+```
+
+From a pipe the value is everything read without its last line ending; at a
+terminal it is the line typed. An empty value stores nothing. A secret that
+names no writable place, or one that is not declared, is refused and the
+value is not read. It takes `--state-dir` as `secret check` does.
 
 ### `fmt`
 
@@ -427,7 +473,9 @@ stacks/web.yaml:35:21: error: spec.resources[3].dependsOn[0].resource: resource 
 `--fix` applies the fixes that are safe. `--strict` fails on warnings as well
 as errors. `--json` prints one JSON object per finding. `--data` and `--set`
 are as for `compile`; without them a document that needs data is checked
-with every `when` treated as true. Full
+with every `when` treated as true. `--state-dir` is where the project's
+fetched modules and [synced tool schemas](../tooling/schema-sync.md) are,
+so a tool's own params are checked too. Full
 description: [The linter](../tooling/linter.md); the rules:
 [Lint rules](lint.md).
 
@@ -435,13 +483,35 @@ description: [The linter](../tooling/linter.md); the rules:
 
 Prints a JSON Schema (draft 7) of the document language and of the resource
 types of every plugin found, for editors that validate YAML against a schema.
-`--target` writes one target's rules only; `-o` writes to a file. Full
+The tool schemas cached under `--state-dir` are written in too. `--target`
+writes one target's rules only; `-o` writes to a file. Full
 description: [The JSON Schema](../tooling/json-schema.md).
+
+### `schema sync`, `schema status`, `schema clean`
+
+`schema sync` asks each target's installed tool, through its plugin, for the
+schemas of the resource types the documents under the paths use, caches them
+under `--state-dir` (`.meridian/schemas/<target>.json`) and records the
+versions they came from in `meridian.lock`. Editors, `lint` and `schema`
+read the cache, so a tool's own types (`aws_instance`, `apps/v1/Deployment`)
+are completed and checked without the editor ever running a tool. `--target`
+syncs one target; `--check` changes nothing and exits `1` if any cache is
+missing or is not what the lock records; `--no-lock` leaves the lock alone.
+
+`schema status` shows what is cached for each target and how it stands
+against the lock, as text or with `--json` one object per line. `schema
+clean` removes the cache of the targets named, or of every target, and their
+records in the lock.
+
+Full description: [Tool schemas](../tooling/schema-sync.md).
 
 ### `lsp`
 
 Runs the language server on standard input and output. An editor starts it;
-there is nothing to see when it is run by hand. Full description:
+there is nothing to see when it is run by hand. It takes the plugin options
+(`--plugin-dir`, `--plugin-signatures`, `--trusted-key`) like every command,
+plus `--trust-editor-plugin-dirs` to load unsigned plugins from directories the
+editor names. Full description:
 [The language server](../tooling/language-server.md).
 
 ### `signing`
@@ -474,12 +544,16 @@ meridian signing verify --trusted-key acme.pub meridian-target-acme
 | `--backend NAME` | `MERIDIAN_BACKEND` | `local` | where Meridian's own record (the lock, the run-state, the runs) is kept: `local`, or a [backend program](state.md#writing-a-backend) |
 | `--backend-config KEY=VALUE` | | | a setting for the backend; may be repeated |
 | `--lock-timeout DURATION` | | `0s` | `plan`, `apply`, `drift`, `rollback`: how long to wait for another run to release the lock, as in `30s`, `5m`, `1h`. By default a locked state is refused at once |
-| `--resume [RUN]` | | | `apply` only: continue the last apply, or the run named |
+| `--resume`, `--resume=RUN` | | | `apply` only: continue the last apply, or the run named (joined with `=`) |
 | `--on-failure ACTION` | | `stop` | `apply` only: `stop` leaves what was applied in place; `rollback` puts back every stage the run changed |
 | `--run RUN` | | the last apply | `rollback` only: the apply to put back |
 | `--policy PATH` | | no policy | `plan`, `apply`: a [policy](policy.md) file or directory every stage is checked against before anything is applied; may be repeated |
 | `--policy-engine NAME` | `MERIDIAN_POLICY_ENGINE` | `opa` | `plan`, `apply`: the program `meridian-policy-<NAME>` that reads the policies |
 | `--events json` | | | `compile`, `plan`, `apply`, `drift`, `rollback`: write every [event](state.md#events) to standard output as it happens, one JSON object per line. The report for people moves to standard error |
+| `--report FORMAT=FILE` | | | `compile`, `plan`, `apply`, `drift`, `rollback`: write a [report](reporting.md#--report) of the run when it ends, as `json`, `junit`, `markdown` or `html`; may be repeated |
+| `--sink NAME` | `MERIDIAN_SINKS` (separated by `,`) | | the same commands: send every event, as it happens, to a [sink](reporting.md#sinks); may be repeated |
+| `--sink-config SINK.KEY=VALUE` | | | a setting for a sink; may be repeated. `on` chooses the event types and `required=true` fails the run when the sink fails |
+| `--sink-timeout DURATION` | | `30s` | how long a sink has to finish sending after the run's last event |
 | `--keep-runs N` | | `50` | `plan`, `apply`, `drift`, `rollback`: how many runs' records to keep |
 | `--out DIR` | | | `compile` only: where to write the compiled files |
 | `-l SELECTOR`, `--selector SELECTOR` | | every document | `compile`, `plan`, `apply`: run only the documents whose `metadata.labels` match, as in `tier=web,env!=prod`. May be repeated; every requirement must hold. [Labels and selectors](dsl/index.md#labels-and-selectors) |
@@ -564,7 +638,7 @@ the current directory requires.
 | `meridian module list` | Lists the pinned modules, their versions and sources |
 | `meridian module sign --key FILE` | Signs the module in the current directory, writing `meridian.sig` in it |
 | `meridian module pack [--out FILE]` | Writes the module in the current directory as the archive a registry stores |
-| `meridian module push REPOSITORY [--insecure]` | Publishes the module in the current directory to an OCI registry under its version. A version that is already published is never replaced with other content |
+| `meridian module push REPOSITORY [--insecure] [--credential NAME]` | Publishes the module in the current directory to an OCI registry under its version. A version that is already published is never replaced with other content. `--credential` logs in with a [credential the manifest declares](modules.md#registry-logins) instead of the Docker configuration |
 
 Only `install`, `update` and `push` use the network. Each command, its output and its
 errors are described in [Modules](modules.md#commands).
@@ -586,13 +660,20 @@ No version is deprecated today.
 not compile, a tool failed, a policy denied a change or could not be asked, a
 stage could not be rolled back, or the run was
 refused because the state is locked or there was nothing to resume or roll
-back; when `fmt --check` found a file that is not formatted; and when `lint`
-found an error, or a warning with `--strict`. `2` for a mistake in the command
-line itself, and from `drift` when a stage has drifted.
+back, or a [sink](reporting.md#sinks) marked `required` failed; when
+`fmt --check` found a file that is not formatted; and when `lint` found an
+error, or a warning with `--strict`. `2` for a mistake in the command line
+itself, and from `drift` when a stage has drifted.
 
 `import` exits `0` when it wrote its documents, whatever it reported about
 them; `1` when the source could not be read or no plugin imports it, and, with
 `--strict`, when anything was changed or not translated.
+
+A reader that stops early, as in `meridian plugins | head`, ends the printing
+and nothing else: the command still runs to its end and exits with the status
+above, so `meridian module verify | head -1` still fails on a tampered module.
+If standard output cannot be written for any other reason, such as a full
+disk, the command says so on standard error and exits `1`.
 
 ## Plugins and their tools
 

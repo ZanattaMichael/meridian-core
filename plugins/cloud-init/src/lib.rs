@@ -191,6 +191,8 @@ impl Emitter for CloudInit {
             native_notify: false,
             synthetic_notify: true,
             runtime_condition: false,
+            secrets: false,
+            credentials: false,
         }
     }
 

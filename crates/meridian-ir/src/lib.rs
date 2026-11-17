@@ -20,14 +20,19 @@ mod validate;
 pub use api::{api_version_name, ApiVersion, Status, Unsupported, VersionTable, API_GROUP};
 pub use condition::{prune, Condition, Data};
 pub use error::{Error, ErrorList, Position};
-pub use meridian_value::{canonical_map, Value};
+pub use meridian_value::{canonical_map, PlacedEscape, Value};
 pub use migrate::{migrate, Decisions, MigrateError, Migrated, Step, STEPS};
 pub use parse::{parse, parse_file, parse_stream, parse_value};
-pub use resolve::{resolve, resolve_with, resolved_labels, Removed, Resolution, Secrets};
-pub use types::{
-    Dependency, Document, IfMissing, Import, Infrastructure, InfrastructureSpec, Kind, Metadata,
-    Notification, Output, Resource, ResourceSet, ResourceSetSpec, Secret, TargetHost,
-    API_VERSION_V1, IMPORT_FROM_ARTIFACT, IMPORT_FROM_OUTPUT, NOTIFY_ON_CHANGED,
-    TARGET_HOST_FROM_INFRASTRUCTURE, TARGET_HOST_FROM_INLINE,
+pub use resolve::{
+    resolve, resolve_for, resolve_with, resolved_labels, Removed, Resolution, Secrets,
 };
-pub use validate::{load, validate, Bundle};
+pub use types::{
+    Credential, Dependency, Document, IfMissing, Import, Infrastructure, InfrastructureSpec, Kind,
+    Metadata, Notification, Output, Resource, ResourceSet, ResourceSetSpec, Secret, TargetHost,
+    API_VERSION_V1, CREDENTIAL_FROM_AMBIENT, IMPORT_FROM_ARTIFACT, IMPORT_FROM_OUTPUT,
+    NOTIFY_ON_CHANGED, TARGET_HOST_FROM_INFRASTRUCTURE, TARGET_HOST_FROM_INLINE,
+};
+pub use validate::{
+    is_document_name, load, secret_reference, validate, Bundle, HOST_CREDENTIAL_TYPES,
+    MAX_DOCUMENT_NAME,
+};

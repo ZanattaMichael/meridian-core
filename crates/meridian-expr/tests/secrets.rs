@@ -284,6 +284,29 @@ fn a_secret_that_is_not_fetched_is_described_and_cannot_be_compared() {
         "(secret pending) is not fetched here: a secret is fetched by plan and apply, never by \
          validate or compile"
     );
+    // Whether it is null is whether it was found, which only a fetch can
+    // say: an optional secret is null on a machine that does not have it.
+    for asked in [
+        "secret.pending != null",
+        "secret.pending == null",
+        "null == secret.pending",
+    ] {
+        assert_eq!(
+            f.eval(asked).unwrap_err(),
+            "(secret pending) is not fetched here: a secret is fetched by plan and apply, \
+             never by validate or compile",
+            "{asked}"
+        );
+    }
+    // One that was fetched was found, and one that was wiped is not said to
+    // be awaiting a fetch.
+    assert_eq!(f.eval("secret.user == null").unwrap(), Value::Bool(false));
+    assert_eq!(
+        f.table.awaited(at),
+        Some("token=urlEncode((secret pending))\n".to_owned())
+    );
+    f.table.wipe_all();
+    assert_eq!(f.table.awaited(at), None);
 }
 
 #[test]

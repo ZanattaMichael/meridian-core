@@ -22,6 +22,13 @@ use meridian_value::Value;
 /// and small enough that reading one can never exhaust the stack.
 const MAX_DEPTH: usize = 64;
 
+/// How many operators, field reads and indexes one expression may hold. A
+/// chain such as `a || b || c` is not nested, so the depth limit does not
+/// count it, but it builds a tree as long as the chain, and reading that
+/// tree back is recursive: without this limit a long enough chain would
+/// exhaust the stack instead of reporting an error.
+const MAX_LINKS: usize = 1000;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Unary {
     Not,
@@ -304,6 +311,8 @@ struct Parser<'a> {
     tokens: Vec<Token>,
     at: usize,
     depth: usize,
+    /// Operators and postfixes read so far, against `MAX_LINKS`.
+    links: usize,
     what: &'a str,
 }
 
@@ -363,6 +372,18 @@ impl Parser<'_> {
         out
     }
 
+    /// Counts one more operator, field read or index.
+    fn link(&mut self) -> Result<(), String> {
+        self.links += 1;
+        if self.links > MAX_LINKS {
+            return Err(format!(
+                "the {} has more than {MAX_LINKS} operators",
+                self.what
+            ));
+        }
+        Ok(())
+    }
+
     fn expr(&mut self) -> Result<Node, String> {
         self.nested(|p| {
             let condition = p.coalesce()?;
@@ -388,6 +409,7 @@ impl Parser<'_> {
         let symbols: Vec<&'static str> = ops.iter().map(|(symbol, _)| *symbol).collect();
         let mut left = next(self)?;
         while let Some(symbol) = self.take_op(&symbols) {
+            self.link()?;
             let op = ops.iter().find(|(s, _)| *s == symbol).map(|(_, op)| *op);
             let right = next(self)?;
             left = Node::Binary(op.unwrap_or(Binary::Or), Box::new(left), Box::new(right));
@@ -480,6 +502,7 @@ impl Parser<'_> {
         let mut node = self.primary()?;
         loop {
             if self.take(&Token::Dot) {
+                self.link()?;
                 match self.peek().cloned() {
                     Some(Token::Name(key)) => {
                         self.at += 1;
@@ -493,6 +516,7 @@ impl Parser<'_> {
                     _ => return Err("a \".\" must be followed by a key".to_owned()),
                 }
             } else if self.take(&Token::OpenList) {
+                self.link()?;
                 let index = self.expr()?;
                 self.expect(Token::CloseList)?;
                 node = Node::Index(Box::new(node), Box::new(index));
@@ -598,6 +622,7 @@ pub(crate) fn parse(text: &str, what: &str) -> Result<Node, String> {
         tokens: tokens(text, what)?,
         at: 0,
         depth: 0,
+        links: 0,
         what,
     };
     let node = parser.expr()?;

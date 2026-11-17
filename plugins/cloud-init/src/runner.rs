@@ -172,6 +172,11 @@ impl CloudInitRunner {
                 "{WAIT_VARIABLE}=ssh needs a host to wait for, and this document resolved none"
             )));
         }
+        // The core checked the host already; this runner is the last thing
+        // between it and ssh's command line, where a leading "-" is an
+        // option.
+        meridian_sdk::check_host(host)
+            .map_err(|why| RunError::new(format!("ssh cannot be given this host: {why}")))?;
         let finished = Tool::new(&wait.program)
             // Waiting must never stop to ask for a password nobody is there
             // to type.

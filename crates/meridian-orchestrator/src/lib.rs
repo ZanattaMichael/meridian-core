@@ -58,9 +58,9 @@ use meridian_ir::{
     Bundle, Document, Infrastructure, Removed, Resolution, ResourceSet, Secrets,
     TARGET_HOST_FROM_INFRASTRUCTURE,
 };
-use meridian_plugin_host::{to_sdk, EmitError, Registry, RunFailure};
+use meridian_plugin_host::{name_secrets, to_sdk, EmitError, Registry, RunFailure};
 use meridian_sdk::{
-    Artifact, Category, Change, Data, LogLine, Output, Plan, RunContext, Value, Warning,
+    Artifact, Category, Change, Data, LogLine, Output, Plan, RunContext, SecretRef, Value, Warning,
 };
 use meridian_secret::Masker;
 
@@ -70,7 +70,7 @@ pub use lock::{LockError, LockInfo};
 pub use policy::{Decisions, Policy};
 pub use record::{RunRecord, RunStatus, StepRecord, StepStatus};
 pub use rollback::{RollbackOutcome, RollbackReport};
-pub use secrets::{check_declared, Declared};
+pub use secrets::{check_declared, names_declared, places_declared, Declared};
 pub use select::Selector;
 pub use state::{artifact_hash, stage_key, RunState, StageRecord, STATE_KEY};
 
@@ -203,6 +203,11 @@ pub struct StageReport {
     /// The host the document configures; empty for an Infrastructure
     /// document, or when the host is not known yet.
     pub host: String,
+    /// The credential the host is reached with, in a few words (`deploy
+    /// (ssh, user deploy)`), so that which identity touches a machine can
+    /// be read off a plan; empty when the document names none. Never any
+    /// part of a secret.
+    pub credential: String,
     /// What the document compiled to, when it got that far.
     pub artifact: Option<Artifact>,
     pub warnings: Vec<Warning>,
@@ -605,6 +610,7 @@ pub fn run_selected(
                 } else {
                     StageReport {
                         host: String::new(),
+                        credential: String::new(),
                         artifact: None,
                         warnings: Vec::new(),
                         outcome: Outcome::NotRun {
@@ -636,6 +642,7 @@ pub fn run_selected(
                 id,
                 target,
                 host: String::new(),
+                credential: String::new(),
                 artifact: None,
                 warnings: Vec::new(),
                 removed: Vec::new(),
@@ -672,7 +679,7 @@ pub fn run_selected(
     } else if failed.is_some() && mode == Mode::Apply && options.on_failure == OnFailure::Rollback {
         let items = std::mem::take(&mut run.touched)
             .into_iter()
-            .map(rollback::Item::Ready)
+            .map(|touched| rollback::Item::Ready(Box::new(touched)))
             .collect();
         report.rollbacks = rollback::execute(&mut run, &mut journal, observer, items);
     }
@@ -1327,6 +1334,9 @@ struct Compiled {
     host: String,
     /// The values the stage's tool is handed.
     inputs: Data,
+    /// The credential the host is reached with, when the document names
+    /// one, with its secret fields as slots.
+    credential: Option<meridian_ir::Credential>,
 }
 
 /// Why a stage did not compile, or cannot yet.
@@ -1397,6 +1407,7 @@ impl Run<'_> {
             id: id.clone(),
             target: stage.target().to_owned(),
             host: String::new(),
+            credential: String::new(),
             artifact: None,
             warnings: Vec::new(),
             removed: Vec::new(),
@@ -1447,7 +1458,8 @@ impl Run<'_> {
             emitted,
             host,
             mut inputs,
-        } = match self.compile(stage) {
+            credential,
+        } = match self.compile(stage, &secrets.names()) {
             Ok(compiled) => compiled,
             Err(Stop::Failed { reason, why, host }) => {
                 report.host = host;
@@ -1464,6 +1476,7 @@ impl Run<'_> {
             .expect("the stage was compiled by its target");
         let info = target.info();
         report.host = host;
+        report.credential = credential.as_ref().map(|c| c.summary()).unwrap_or_default();
         report.warnings = emitted.warnings;
         self.artifacts.insert(id.clone(), emitted.artifact.clone());
         report.artifact = Some(emitted.artifact.clone());
@@ -1528,7 +1541,17 @@ impl Run<'_> {
             );
         }
 
-        let context = match self.context(&id, stage.target(), &report.host, inputs) {
+        // The value of each secret a param holds, for the tool. The target
+        // declared it takes them, or the read would have stopped.
+        let handed = match secrets::handed(&graph, secrets.table()) {
+            Ok(handed) => handed,
+            Err(why) => return fail(report, REASON_COMPILE_REFUSED, why),
+        };
+        let held = match secrets::handed_credential(credential.as_ref(), secrets.table()) {
+            Ok(held) => held,
+            Err(why) => return fail(report, REASON_COMPILE_REFUSED, why),
+        };
+        let context = match self.context(&id, stage.target(), &report.host, inputs, handed, held) {
             Ok(context) => context,
             Err(why) => return fail(report, REASON_STATE_FAILED, why),
         };
@@ -1626,12 +1649,19 @@ impl Run<'_> {
             },
             Mode::Apply => {
                 report.previous_good = last.map(|l| l.last_good).unwrap_or_default();
+                // Kept without the stage's secrets, which are wiped when the
+                // stage ends; a rollback fetches them again at its turn.
                 self.touched.push(rollback::Touched {
                     id: id.clone(),
                     target: stage.target().to_owned(),
-                    context: context.clone(),
+                    context: RunContext {
+                        secrets: meridian_sdk::Secrets::none(),
+                        credential: None,
+                        ..context.clone()
+                    },
                     previous: report.previous_good.clone(),
                     attempted: hash.clone(),
+                    masker: Masker::new(),
                 });
                 let outcome = target.apply(&context, &emitted.artifact, &mut log);
                 match outcome {
@@ -1682,7 +1712,19 @@ impl Run<'_> {
     fn read(&self, stage: Stage<'_>, fetch: bool) -> Read {
         let document = stage.document();
         let mut secrets = Secrets::declared(&document);
-        let mut resolution = meridian_ir::resolve_with(&document, &self.options.data, &secrets);
+        // What the target's plugin declares of its tool's own expression
+        // syntax, so that a value placed from data is literal to the tool
+        // as well as to Meridian. A target no plugin provides gets only
+        // Meridian's own escape, and is refused for want of a plugin later.
+        let registry = self.registry;
+        let escapes_for = |target: &str| {
+            registry
+                .target(target)
+                .map(|t| t.info().placed_text.clone())
+                .unwrap_or_default()
+        };
+        let mut resolution =
+            meridian_ir::resolve_for(&document, &self.options.data, &secrets, &escapes_for);
         let fetches = fetch
             && self.mode != Mode::Compile
             && !document.secrets().is_empty()
@@ -1701,7 +1743,9 @@ impl Run<'_> {
                 Ok(())
             });
             resolution = match fetched {
-                Ok(()) => meridian_ir::resolve_with(&document, &self.options.data, &secrets),
+                Ok(()) => {
+                    meridian_ir::resolve_for(&document, &self.options.data, &secrets, &escapes_for)
+                }
                 Err(why) => Err(meridian_ir::Error {
                     pos: document.position().clone(),
                     path: "spec.secrets".to_owned(),
@@ -1715,19 +1759,82 @@ impl Run<'_> {
             Err(e) => return Read::Failed(e.to_string()),
         };
 
-        // A secret in a param. A read that fetched nothing writes what
-        // stands for it. `plan` and `apply` hold it, and must hand it to the
-        // tool by a channel that is not the compiled files; until a target
-        // has one, the stage stops here instead of writing a secret into a
-        // file or dropping it silently.
+        // A secret in a param. A target that declares it takes one is handed
+        // the secret as such: its emitter writes a reference to it into the
+        // artifact, and `plan` and `apply` hand its runner the value by a
+        // channel that is not the compiled files. For any other target, a
+        // read that fetched nothing writes what stands for the secret, and a
+        // read that fetched it stops here instead of writing a secret into
+        // a file or dropping it silently.
         if let Some((resource, param)) = secrets::first_in_params(&document) {
-            if !fetches {
+            let takes_secrets = self
+                .registry
+                .target(document.target())
+                .is_some_and(|target| target.info().capabilities.secrets);
+            if takes_secrets {
+                // Kept as it is: `Value::Secret`, which the plugin names.
+            } else if !fetches {
                 secrets::describe_in_params(&mut document, secrets.table());
             } else {
+                let takers: Vec<&str> = self
+                    .registry
+                    .names()
+                    .into_iter()
+                    .filter(|name| {
+                        self.registry
+                            .target(name)
+                            .is_some_and(|t| t.info().capabilities.secrets)
+                    })
+                    .collect();
+                let takers = if takers.is_empty() {
+                    "no loaded target does".to_owned()
+                } else {
+                    format!("targets that do: {}", takers.join(", "))
+                };
                 return Read::Failed(format!(
-                    "resource {resource:?}: {param} holds a secret, and target {:?} cannot \
-                     be handed a secret yet. A secret can decide a when today; handing one \
-                     to a tool arrives with secret delivery for each target",
+                    "resource {resource:?}: {param} holds a secret, and target {:?} does not \
+                     take one: it has no private channel to hand a secret to its tool, so the \
+                     value would be written into a file or dropped. A secret can still decide \
+                     a when for it; {takers}",
+                    document.target()
+                ));
+            }
+        }
+        // A credential named for the host. Only a target that declares it
+        // takes one is handed it, in every mode: the artifact of any other
+        // target would be run as whoever the tool is configured to be, which
+        // is not what the document says.
+        if let Some(name) = document
+            .as_resource_set()
+            .and_then(|d| d.spec.target_host.as_ref())
+            .map(|th| th.credential.as_str())
+            .filter(|name| !name.is_empty())
+        {
+            let takes_credentials = self
+                .registry
+                .target(document.target())
+                .is_some_and(|target| target.info().capabilities.credentials);
+            if !takes_credentials {
+                let takers: Vec<&str> = self
+                    .registry
+                    .names()
+                    .into_iter()
+                    .filter(|name| {
+                        self.registry
+                            .target(name)
+                            .is_some_and(|t| t.info().capabilities.credentials)
+                    })
+                    .collect();
+                let takers = if takers.is_empty() {
+                    "no loaded target does".to_owned()
+                } else {
+                    format!("targets that do: {}", takers.join(", "))
+                };
+                return Read::Failed(format!(
+                    "spec.targetHost names the credential {name:?}, and target {:?} does not \
+                     take one: it has no way to reach its host as that identity, so the \
+                     document would be applied as whoever the tool is configured to be. \
+                     Leave the credential out to use the tool's own; {takers}",
                     document.target()
                 ));
             }
@@ -1740,7 +1847,11 @@ impl Run<'_> {
     }
 
     /// Compiles a document that has been [read](Run::read).
-    fn compile(&mut self, stage: Stage<'_>) -> Result<Compiled, Stop> {
+    fn compile(
+        &mut self,
+        stage: Stage<'_>,
+        declared_secrets: &[(String, SecretRef)],
+    ) -> Result<Compiled, Stop> {
         let id = stage.id();
         let refuse = |reason: &'static str, why: String| Stop::Failed {
             reason,
@@ -1835,7 +1946,12 @@ impl Run<'_> {
             }
         };
 
-        let graph = to_sdk(&graph);
+        let credential = graph.credential.clone();
+        let mut graph = to_sdk(&graph);
+        // A secret in a param reaches the plugin by name, so the plugin can
+        // write a reference the operator recognises. Only a target that
+        // takes secrets is read with any (see `read`).
+        name_secrets(&mut graph, declared_secrets);
         let failed =
             |reason: &'static str, why: String, host: String| Stop::Failed { reason, why, host };
         match target.emit(&graph, &options.data) {
@@ -1844,6 +1960,7 @@ impl Run<'_> {
                 emitted,
                 host,
                 inputs,
+                credential,
             }),
             Err(EmitError::Refused(e)) => Err(failed(REASON_COMPILE_REFUSED, e.to_string(), host)),
             Err(EmitError::Plugin(e)) => Err(failed(REASON_PLUGIN_FAILED, e.to_string(), host)),
@@ -1863,7 +1980,7 @@ impl Run<'_> {
         }
         // Nothing of this document runs here, so nothing of it is read from
         // a provider.
-        let (document, _secrets) = match self.read(stage, false) {
+        let (document, secrets) = match self.read(stage, false) {
             Read::Kept {
                 document, secrets, ..
             } => (document, secrets),
@@ -1882,7 +1999,7 @@ impl Run<'_> {
                 })
             }
         };
-        let compiled = self.compile(Stage::of(&document))?;
+        let compiled = self.compile(Stage::of(&document), &secrets.names())?;
         self.artifacts.insert(id, compiled.emitted.artifact.clone());
         Ok(compiled.emitted.artifact)
     }
@@ -2072,6 +2189,14 @@ impl Run<'_> {
                 output.value.describe()
             )));
         };
+        // The output is whatever the tool or the cloud returned. It is
+        // about to be handed to ssh, an inventory or a manifest, so it is
+        // held to what a host name can be before any tool sees it.
+        if let Err(why) = meridian_sdk::check_host(host) {
+            return Err(Halt::Failed(format!(
+                "output {wanted:?} of {source} cannot be this document's target host: {why}"
+            )));
+        }
         let inputs = outputs
             .iter()
             .map(|o| (o.name.clone(), o.value.clone()))
@@ -2093,7 +2218,14 @@ impl Run<'_> {
         if !target.info().operations.outputs {
             return;
         }
-        let Ok(context) = self.context(source, &doc.spec.target, "", Data::new()) else {
+        let Ok(context) = self.context(
+            source,
+            &doc.spec.target,
+            "",
+            Data::new(),
+            meridian_sdk::Secrets::none(),
+            None,
+        ) else {
             return;
         };
         if let Ok(outputs) = target.outputs(&context) {
@@ -2140,7 +2272,18 @@ impl Run<'_> {
         target: &str,
         host: &str,
         inputs: Data,
+        secrets: meridian_sdk::Secrets,
+        credential: Option<meridian_sdk::HeldCredential>,
     ) -> Result<RunContext, String> {
+        // The bundle was validated, which refuses a name that is not one
+        // path segment; this keeps a caller that skipped it inside the
+        // state directory all the same.
+        if !meridian_ir::is_document_name(&id.name) {
+            return Err(format!(
+                "{:?} is not a safe directory name; run `meridian validate`",
+                id.name
+            ));
+        }
         let work_dir = work_dir(&self.options.state_dir, id, target);
         std::fs::create_dir_all(&work_dir)
             .map_err(|e| format!("creating the work directory {}: {e}", work_dir.display()))?;
@@ -2152,6 +2295,8 @@ impl Run<'_> {
             host: host.to_owned(),
             work_dir,
             inputs,
+            secrets,
+            credential,
         })
     }
 

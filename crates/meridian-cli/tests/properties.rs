@@ -416,6 +416,20 @@ proptest! {
         };
         read_without_panicking(text.as_bytes())?;
     }
+
+    /// A long chain of operators is refused or read; it does not overflow
+    /// the stack either.
+    #[test]
+    fn the_reader_survives_long_operator_chains(length in 1usize..12_000, which in 0u8..3) {
+        let chain = match which {
+            0 => format!("{}true", "true || ".repeat(length)),
+            1 => format!("${{{{ {}1 }}}}", "1 + ".repeat(length)),
+            _ => format!("${{{{ data{} }}}}", ".a".repeat(length)),
+        };
+        let text = VALID.replace("data.env == 'prod'", &chain);
+        prop_assert!(text != VALID, "the fuzzer's document has no when to replace");
+        read_without_panicking(text.as_bytes())?;
+    }
 }
 
 #[test]

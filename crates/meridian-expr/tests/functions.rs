@@ -753,6 +753,11 @@ fn paths_are_worked_on_as_text() {
         ("dirname('/etc/nginx/nginx.conf')", "\"/etc/nginx\""),
         ("dirname('nginx.conf')", "\".\""),
         ("dirname('/nginx.conf')", "\"/\""),
+        ("dirname('/etc')", "\"/\""),
+        ("dirname('/etc/')", "\"/\""),
+        ("dirname('/')", "\"/\""),
+        ("dirname('//')", "\"/\""),
+        ("dirname('')", "\".\""),
         (
             "joinPath('/etc', 'nginx', 'nginx.conf')",
             "\"/etc/nginx/nginx.conf\"",
@@ -899,4 +904,39 @@ fn every_function_is_in_the_reference() {
         missing.is_empty(),
         "docs/reference/dsl/expressions.md does not document: {missing:?}"
     );
+}
+
+#[test]
+fn every_function_is_documented_and_the_reference_lists_it() {
+    let docs = meridian_expr::functions();
+    assert_eq!(docs.len(), meridian_expr::function_names().len());
+    for f in &docs {
+        assert!(
+            !f.gives.is_empty() && !f.category.is_empty() && f.signature.starts_with(f.name),
+            "{} has no documentation in FUNCTION_DOCS",
+            f.name
+        );
+        assert!(f.min_args <= f.max_args);
+    }
+    assert_eq!(meridian_expr::function("upper").unwrap().category, "Text");
+    assert!(meridian_expr::function("nothing").is_none());
+    let reference = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/reference/dsl/expressions.md"
+    ))
+    .unwrap();
+    for f in &docs {
+        let called = format!("`{}(", f.name);
+        assert!(
+            reference.contains(&called),
+            "{} is not in docs/reference/dsl/expressions.md",
+            f.name
+        );
+        assert!(
+            reference.contains(f.gives),
+            "the words for {} in FUNCTION_DOCS are not the reference's: {:?}",
+            f.name,
+            f.gives
+        );
+    }
 }

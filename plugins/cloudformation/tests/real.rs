@@ -163,6 +163,7 @@ fn recorded() -> Result<String, String> {
     .map(|value| value.trim().to_owned())
 }
 
+#[ignore = "needs a real aws and CloudFormation; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_stack_is_previewed_created_read_back_changed_and_trimmed() {
     if !service() {
@@ -263,6 +264,7 @@ fn second_without_the_topic(text: &str) -> String {
     trimmed
 }
 
+#[ignore = "needs a real aws and CloudFormation; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_template_cloudformation_rejects_fails_the_plan_and_leaves_no_stack() {
     if !service() {

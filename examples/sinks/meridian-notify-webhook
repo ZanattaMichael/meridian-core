@@ -1,0 +1,47 @@
+#!/bin/sh
+# Posts every event to an HTTP endpoint, as JSON, one request per event.
+#
+#   meridian apply site.yaml --sink webhook \
+#       --sink-config webhook.url=https://example.com/meridian \
+#       --sink-config webhook.on='run.*,step.failed'
+#
+# Settings:
+#   url      where to POST. Required.
+#   secret   when set, each request carries
+#            X-Meridian-Signature: sha256=<hex HMAC-SHA256 of the body>,
+#            so the receiver can check the event came from you. Prefer the
+#            environment variable MERIDIAN_NOTIFY_SECRET over --sink-config,
+#            which puts the secret in your shell history.
+#   timeout  seconds to allow each request. 10 by default.
+#
+# Needs curl, and openssl when a secret is set. A request that fails is
+# retried three times; the sink exits 1 if any event could not be delivered.
+set -eu
+
+if [ "${MERIDIAN_NOTIFY_PROTOCOL:-}" != "1" ]; then
+    echo "meridian-notify-webhook speaks protocol 1, not ${MERIDIAN_NOTIFY_PROTOCOL:-none}" >&2
+    exit 1
+fi
+url="${MERIDIAN_NOTIFY_URL:-}"
+if [ -z "$url" ]; then
+    echo "set where to post: --sink-config webhook.url=URL" >&2
+    exit 1
+fi
+timeout="${MERIDIAN_NOTIFY_TIMEOUT:-10}"
+failed=0
+
+while IFS= read -r event; do
+    set -- --silent --show-error --fail --max-time "$timeout" --retry 3 \
+        --header 'Content-Type: application/json' \
+        --header 'User-Agent: meridian-notify-webhook/1'
+    if [ -n "${MERIDIAN_NOTIFY_SECRET:-}" ]; then
+        signature=$(printf '%s' "$event" |
+            openssl dgst -sha256 -hmac "$MERIDIAN_NOTIFY_SECRET" -r | cut -d' ' -f1)
+        set -- "$@" --header "X-Meridian-Signature: sha256=$signature"
+    fi
+    if ! printf '%s' "$event" | curl "$@" --data-binary @- --output /dev/null "$url"; then
+        failed=1
+    fi
+done
+
+exit "$failed"

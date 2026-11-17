@@ -93,6 +93,96 @@
         }
       }
     },
+    "SecretSource": {
+      "description": "Another place a secret is looked for, when the places before it have nothing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from"
+      ],
+      "properties": {
+        "from": {
+          "description": "The provider the value is fetched from.",
+          "type": "string",
+          "oneOf": [
+            {
+              "const": "env",
+              "description": "An environment variable, named by `key`."
+            },
+            {
+              "const": "file",
+              "description": "A file, named by `path`."
+            },
+            {
+              "const": "exec",
+              "description": "The output of a program, given by `command`. No shell reads it."
+            },
+            {
+              "const": "keyring",
+              "description": "A key in the Linux kernel keyring, found by its description, `key`."
+            },
+            {
+              "const": "systemd-creds",
+              "description": "A credential systemd passed to this unit, named by `key`."
+            },
+            {
+              "const": "secret-service",
+              "description": "An item in the freedesktop Secret Service (GNOME Keyring, KWallet), found by its `attributes`."
+            },
+            {
+              "const": "keychain",
+              "description": "A generic password in the macOS keychain, found by `service` and `account`."
+            }
+          ]
+        },
+        "key": {
+          "description": "With `from: env`: the environment variable that holds the value. With `from: keyring`: the description of the key. With `from: systemd-creds`: the name of the credential.",
+          "type": "string"
+        },
+        "path": {
+          "description": "With `from: file`: the file that holds the value.",
+          "type": "string"
+        },
+        "command": {
+          "description": "With `from: exec`: the program and its arguments, as a list. No shell reads them.",
+          "type": "array",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        },
+        "service": {
+          "description": "With `from: keychain`: the service of the keychain item.",
+          "type": "string"
+        },
+        "account": {
+          "description": "With `from: keychain`: the account of the keychain item.",
+          "type": "string"
+        },
+        "attributes": {
+          "description": "With `from: secret-service`: the attributes the item is found by. They are not secret.",
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        },
+        "allowWideMode": {
+          "description": "With `from: file`: read the file even though others can read it as well.",
+          "type": "boolean"
+        },
+        "keepTrailingNewline": {
+          "description": "With `from: file` and `from: systemd-creds`: keep the value's last line ending.",
+          "type": "boolean"
+        }
+      }
+    },
     "Secret": {
       "description": "A secret's name and where it comes from. Its value is never written in a document.",
       "type": "object",
@@ -122,11 +212,27 @@
             {
               "const": "exec",
               "description": "The output of a program, given by `command`. No shell reads it."
+            },
+            {
+              "const": "keyring",
+              "description": "A key in the Linux kernel keyring, found by its description, `key`."
+            },
+            {
+              "const": "systemd-creds",
+              "description": "A credential systemd passed to this unit, named by `key`."
+            },
+            {
+              "const": "secret-service",
+              "description": "An item in the freedesktop Secret Service (GNOME Keyring, KWallet), found by its `attributes`."
+            },
+            {
+              "const": "keychain",
+              "description": "A generic password in the macOS keychain, found by `service` and `account`."
             }
           ]
         },
         "key": {
-          "description": "With `from: env`: the environment variable that holds the value.",
+          "description": "With `from: env`: the environment variable that holds the value. With `from: keyring`: the description of the key. With `from: systemd-creds`: the name of the credential.",
           "type": "string"
         },
         "path": {
@@ -144,17 +250,219 @@
             ]
           }
         },
-        "optional": {
-          "description": "A secret that cannot be found is `null` instead of an error.",
-          "type": "boolean"
+        "service": {
+          "description": "With `from: keychain`: the service of the keychain item.",
+          "type": "string"
+        },
+        "account": {
+          "description": "With `from: keychain`: the account of the keychain item.",
+          "type": "string"
+        },
+        "attributes": {
+          "description": "With `from: secret-service`: the attributes the item is found by. They are not secret.",
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
         },
         "allowWideMode": {
           "description": "With `from: file`: read the file even though others can read it as well.",
           "type": "boolean"
         },
         "keepTrailingNewline": {
-          "description": "With `from: file` and `from: exec`: keep the value's last line ending.",
+          "description": "With `from: file` and `from: systemd-creds`: keep the value's last line ending.",
           "type": "boolean"
+        },
+        "optional": {
+          "description": "A secret that cannot be found is `null` instead of an error.",
+          "type": "boolean"
+        },
+        "fallback": {
+          "description": "The places to look next, in order, when the first has nothing or cannot be used on this machine.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SecretSource"
+          }
+        }
+      }
+    },
+    "Credential": {
+      "description": "An identity, by name and type: how to prove who you are to a host, a tool or a service. A field that holds secret material reads a declared secret, as `${{ secret.<name> }}`; a value written there is refused.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "type"
+      ],
+      "properties": {
+        "name": {
+          "description": "The name the credential is used by, such as in `targetHost.credential`.",
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "description": "What kind of identity it is. The type fixes which fields it takes.",
+          "type": "string",
+          "oneOf": [
+            {
+              "const": "aws",
+              "description": "An AWS identity: `accessKeyId` and `secretAccessKey`, or a `profile`, or a `roleArn`, with a `region`."
+            },
+            {
+              "const": "azure",
+              "description": "An Azure identity: `tenantId` and `clientId` with a `clientSecret` or a `certificate`, or `managedIdentity: true`, with a `subscriptionId`."
+            },
+            {
+              "const": "certificate",
+              "description": "A certificate and its private key, for mutual TLS, with the `ca` that signed it."
+            },
+            {
+              "const": "gcp",
+              "description": "A Google Cloud identity: a `serviceAccountKey`, or an account to `impersonate`, with a `project`."
+            },
+            {
+              "const": "kubeconfig",
+              "description": "A cluster login: a whole `kubeconfig`, or a `token` with the `server` and its `ca`, and the `context` to use."
+            },
+            {
+              "const": "registry",
+              "description": "A login to an image or module registry: `server`, `user` and `password`."
+            },
+            {
+              "const": "ssh",
+              "description": "An SSH login: `user` with a `privateKey`, a `password`, or `agent: true`; a `passphrase` for the key and a `certificate` for it."
+            },
+            {
+              "const": "token",
+              "description": "A bearer token, with the `scheme` it is sent under."
+            },
+            {
+              "const": "usernamePassword",
+              "description": "A `user` and `password`, with a `domain` where the host needs one."
+            }
+          ]
+        },
+        "from": {
+          "description": "`ambient`: the tool finds the credential for itself, so no secret field is needed.",
+          "type": "string",
+          "oneOf": [
+            {
+              "const": "ambient",
+              "description": "The tool finds the credential for itself: its environment, its profile, its agent. The declaration names and types the identity without Meridian holding any of it."
+            }
+          ]
+        },
+        "user": {
+          "description": "With `ssh`, `usernamePassword` and `registry`: the user name.",
+          "type": "string"
+        },
+        "password": {
+          "description": "With `ssh`, `usernamePassword` and `registry`: the password, as `${{ secret.<name> }}`.",
+          "type": "string"
+        },
+        "privateKey": {
+          "description": "With `ssh`: the private key, as `${{ secret.<name> }}`. With `certificate`: the certificate's private key.",
+          "type": "string"
+        },
+        "passphrase": {
+          "description": "With `ssh`: the passphrase of the private key, as `${{ secret.<name> }}`.",
+          "type": "string"
+        },
+        "agent": {
+          "description": "With `ssh`: the key is in the SSH agent, so none is given here.",
+          "type": "boolean"
+        },
+        "certificate": {
+          "description": "With `ssh`: the certificate signed for the key. With `certificate`: the certificate, in PEM form.",
+          "type": "string"
+        },
+        "ca": {
+          "description": "With `certificate` and `kubeconfig`: the certificate authority to trust, in PEM form.",
+          "type": "string"
+        },
+        "domain": {
+          "description": "With `usernamePassword`: the Windows domain of the user.",
+          "type": "string"
+        },
+        "token": {
+          "description": "With `token` and `kubeconfig`: the token, as `${{ secret.<name> }}`.",
+          "type": "string"
+        },
+        "scheme": {
+          "description": "With `token`: the scheme the token is sent under, such as `Bearer`.",
+          "type": "string"
+        },
+        "server": {
+          "description": "With `registry`: the registry's host. With `kubeconfig`: the API server.",
+          "type": "string"
+        },
+        "kubeconfig": {
+          "description": "With `kubeconfig`: the whole kubeconfig file, as `${{ secret.<name> }}`.",
+          "type": "string"
+        },
+        "context": {
+          "description": "With `kubeconfig`: the context to use.",
+          "type": "string"
+        },
+        "accessKeyId": {
+          "description": "With `aws`: the access key id, which goes with `secretAccessKey`.",
+          "type": "string"
+        },
+        "secretAccessKey": {
+          "description": "With `aws`: the secret access key, as `${{ secret.<name> }}`.",
+          "type": "string"
+        },
+        "sessionToken": {
+          "description": "With `aws`: the session token of temporary keys, as `${{ secret.<name> }}`.",
+          "type": "string"
+        },
+        "profile": {
+          "description": "With `aws`: a profile of the AWS configuration to use.",
+          "type": "string"
+        },
+        "roleArn": {
+          "description": "With `aws`: a role to assume.",
+          "type": "string"
+        },
+        "region": {
+          "description": "With `aws`: the region.",
+          "type": "string"
+        },
+        "tenantId": {
+          "description": "With `azure`: the tenant.",
+          "type": "string"
+        },
+        "clientId": {
+          "description": "With `azure`: the application's client id.",
+          "type": "string"
+        },
+        "clientSecret": {
+          "description": "With `azure`: the application's client secret, as `${{ secret.<name> }}`. A `certificate` (as `${{ secret.<name> }}`, since it holds the key) stands in for it.",
+          "type": "string"
+        },
+        "managedIdentity": {
+          "description": "With `azure`: use the managed identity of the machine this runs on.",
+          "type": "boolean"
+        },
+        "subscriptionId": {
+          "description": "With `azure`: the subscription.",
+          "type": "string"
+        },
+        "serviceAccountKey": {
+          "description": "With `gcp`: the service account's key file, as `${{ secret.<name> }}`.",
+          "type": "string"
+        },
+        "impersonate": {
+          "description": "With `gcp`: a service account to impersonate.",
+          "type": "string"
+        },
+        "project": {
+          "description": "With `gcp`: the project.",
+          "type": "string"
         }
       }
     },
@@ -486,6 +794,13 @@
           "type": "array",
           "items": {
             "$ref": "#/definitions/Secret"
+          }
+        },
+        "credentials": {
+          "description": "The identities the document names, each a name, a type and the type's fields, used by name wherever a credential is asked for, such as `targetHost.credential`.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Credential"
           }
         },
         "imports": {
@@ -978,6 +1293,10 @@
         "output": {
           "description": "The output of that document that holds the host. Required with `from: infrastructure`.",
           "type": "string"
+        },
+        "credential": {
+          "description": "The credential the host is reached with, by the name `spec.credentials` declares it under: one of type `ssh` or `usernamePassword`. Left out, the tool connects as it is configured to.",
+          "type": "string"
         }
       }
     },
@@ -1101,6 +1420,13 @@
           "type": "array",
           "items": {
             "$ref": "#/definitions/Secret"
+          }
+        },
+        "credentials": {
+          "description": "The identities the document names, each a name, a type and the type's fields, used by name wherever a credential is asked for, such as `targetHost.credential`.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Credential"
           }
         },
         "targetHost": {

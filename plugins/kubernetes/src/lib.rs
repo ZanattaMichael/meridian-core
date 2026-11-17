@@ -41,6 +41,7 @@
 mod emit;
 mod import;
 mod runner;
+mod schemas;
 mod sort;
 mod transform;
 mod validate;
@@ -55,6 +56,7 @@ use meridian_sdk::{
 pub use emit::{CLUSTER_PATH, MANIFESTS_PATH};
 pub use import::KubernetesImporter;
 pub use runner::KubernetesRunner;
+pub use schemas::KubernetesSchemas;
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "kubernetes";
@@ -175,6 +177,8 @@ impl Emitter for Kubernetes {
             native_notify: false,
             synthetic_notify: true,
             runtime_condition: false,
+            secrets: false,
+            credentials: false,
         }
     }
 

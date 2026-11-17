@@ -1,7 +1,7 @@
 //! The engine against a real `opa`, through a whole Meridian run.
 //!
 //! These need Open Policy Agent, so they do nothing unless
-//! `MERIDIAN_TEST_OPA` names its program. The `opa` workflow runs them.
+//! `MERIDIAN_TEST_REAL_OPA` names its program. The `opa` workflow runs them.
 
 #![cfg(unix)]
 
@@ -60,7 +60,7 @@ fn site() -> StageId {
 /// The run's options with this policy, or `None` when there is no `opa` to
 /// test against.
 fn options(test: &str, policy: &Path) -> Option<Options> {
-    let opa = std::env::var("MERIDIAN_TEST_OPA")
+    let opa = std::env::var("MERIDIAN_TEST_REAL_OPA")
         .ok()
         .filter(|v| !v.is_empty())?;
     // The engine reads MERIDIAN_OPA; every test sets it to the same value.
@@ -114,6 +114,7 @@ fn failed_with(report: &RunReport) -> &str {
     }
 }
 
+#[ignore = "needs a real opa; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn the_example_policy_allows_a_create_and_denies_a_delete_in_prod() {
     let Some(options) = options("example", &example()) else {
@@ -142,6 +143,7 @@ fn the_example_policy_allows_a_create_and_denies_a_delete_in_prod() {
     assert!(failed_with(&plan).contains("would be a delete in prod"));
 }
 
+#[ignore = "needs a real opa; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn the_example_policy_warns_about_a_stage_with_no_environment() {
     let Some(options) = options("warn", &example()) else {
@@ -165,6 +167,7 @@ fn the_example_policy_warns_about_a_stage_with_no_environment() {
     assert_eq!(on_disk(&options, "index").as_deref(), Some("hello"));
 }
 
+#[ignore = "needs a real opa; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_policy_reads_the_resources_and_may_answer_with_objects() {
     let policy = written(
@@ -196,6 +199,7 @@ deny contains {"msg": msg} if {
     assert_eq!(on_disk(&options, "index"), None);
 }
 
+#[ignore = "needs a real opa; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_policy_that_does_not_parse_or_names_another_package_is_a_denial() {
     let broken = written("broken", "package meridian\n\ndeny contains msg if {\n");

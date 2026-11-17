@@ -53,7 +53,9 @@
 mod credential;
 mod deliver;
 mod mask;
+mod prompt;
 mod provider;
+mod stores;
 mod sys;
 mod table;
 
@@ -61,14 +63,17 @@ use std::fmt;
 use std::io::Read;
 
 pub use credential::{
-    resolve_credential, Credential, CredentialDeclaration, CredentialError, CredentialField,
-    FieldSource, CREDENTIAL_TYPES,
+    credential_type, credential_types, resolve_credential, Credential, CredentialDeclaration,
+    CredentialError, CredentialField, CredentialType, FieldSource, CREDENTIAL_TYPES,
 };
 pub use deliver::{sweep_stale, Part, SecretFile};
 pub use mask::Masker;
+pub use prompt::read_from_stdin;
 pub use provider::{
-    from_env, from_exec, from_file, FetchError, FileOptions, Probe, Source, PROVIDERS,
+    fetch_first, from_env, from_exec, from_file, probe_first, store_first, FetchError, FileOptions,
+    Probe, Source, PROVIDERS,
 };
+pub use stores::{from_keychain, from_keyring, from_secret_service, from_systemd_credential};
 pub use sys::Protection;
 pub use table::{Piece, SecretTable, TableError, Transform};
 

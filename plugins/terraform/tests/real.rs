@@ -1,4 +1,5 @@
-//! The whole plugin against a real `terraform`: compile, plan, apply, outputs.
+//! The whole plugin against a real `terraform`: compile, plan, apply, outputs,
+//! and the schema export an editor reads.
 //!
 //! Everything here uses `terraform_data`, which is built into Terraform, or
 //! the `hashicorp/local` provider, which needs no account, so the tests create
@@ -26,11 +27,13 @@ use std::process::{Command, Stdio};
 
 use meridian_plugin_host::{Client, RunFailure, StartOptions};
 use meridian_plugin_testkit::{
-    graph_from_file, graph_from_text, plugin_binary, repo_root, scratch,
+    graph_from_file, graph_from_text, plugin_binary, repo_root, scratch, secret_in_param, secrets,
 };
 use meridian_sdk::{
-    Applied, Artifact, Change, ChangeAction, Data, LogLine, Output, Plan, RunContext, Value,
+    Applied, Artifact, Change, ChangeAction, Data, LogLine, Output, Plan, RunContext,
+    SchemaRequest, Value,
 };
+use meridian_target_terraform::PROBE_PATH;
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
 const DOCUMENT: &str = "plugins/terraform/tests/documents/local-state.yaml";
@@ -146,6 +149,7 @@ fn output<'a>(outputs: &'a [Output], name: &str) -> &'a Value {
         .value
 }
 
+#[ignore = "needs a real terraform; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_document_is_planned_applied_read_back_and_changed() {
     let Some(program) = terraform() else { return };
@@ -240,6 +244,7 @@ fn a_document_is_planned_applied_read_back_and_changed() {
     client.close().expect("the plugin exits cleanly");
 }
 
+#[ignore = "needs a real terraform; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_configuration_terraform_rejects_fails_the_plan_with_its_reason() {
     let Some(program) = terraform() else { return };
@@ -260,6 +265,7 @@ fn a_configuration_terraform_rejects_fails_the_plan_with_its_reason() {
     }
 }
 
+#[ignore = "needs a real terraform; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_provider_from_the_registry_writes_a_real_file() {
     let Some(program) = terraform() else { return };
@@ -306,4 +312,153 @@ fn a_provider_from_the_registry_writes_a_real_file() {
     fs::remove_file(&file).unwrap();
     let (plan, _) = plan_ok("the plan after drift", &client, &context, &second);
     assert_eq!(changes(&plan.changes), [(ChangeAction::Create, "motd")]);
+}
+
+#[ignore = "needs a real terraform; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_secret_reaches_terraform_through_a_private_variables_file_and_is_in_nothing_it_prints() {
+    let Some(program) = terraform() else { return };
+    let dir = scratch(TMP, "real-secret");
+    const VALUE: &str = "s3cr3t-not-a-real-password-Q9";
+    let client = start(&program);
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: secret\nspec:\n  target: terraform\n  resources:\n    - id: token\n      type: terraform_data\n      params:\n        input: placeholder\n";
+    let mut graph = graph_from_text("secret.yaml", text, "terraform");
+    let slot = secret_in_param(&mut graph, "token", "input", "api_token");
+    let artifact = client
+        .emit(&graph, &Data::new())
+        .expect("the document compiles")
+        .artifact;
+    let config = &artifact.files["main.tf.json"];
+    assert!(
+        config.contains("\"${var.meridian_secret_api_token}\""),
+        "{config}"
+    );
+    assert!(!config.contains(VALUE));
+    let mut context = context(&dir, "secret");
+    context.secrets = secrets(&[(slot, "api_token", VALUE)]);
+
+    let (plan, printed) = plan_ok("the plan", &client, &context, &artifact);
+    assert_eq!(changes(&plan.changes), [(ChangeAction::Create, "token")]);
+    assert!(
+        !printed.iter().any(|line| line.contains(VALUE)),
+        "terraform printed the secret: {printed:?}"
+    );
+    assert!(
+        !context.work_dir.join("meridian.tfplan").exists(),
+        "the saved plan, which holds every variable, was left behind"
+    );
+
+    let mut printed = Vec::new();
+    client
+        .apply(&context, &artifact, &mut |line: LogLine| {
+            printed.push(line.text)
+        })
+        .unwrap_or_else(|e| panic!("{}", explain("the apply", &e, &printed)));
+    assert!(
+        !printed.iter().any(|line| line.contains(VALUE)),
+        "terraform printed the secret: {printed:?}"
+    );
+    assert!(!context.work_dir.join("meridian.tfplan").exists());
+    // The value reached Terraform: it is in the state Terraform keeps for
+    // its own resource, which is the tool's own business and the reason a
+    // document that holds secrets should declare a backend that protects
+    // them.
+    let state = fs::read_to_string(context.work_dir.join("terraform.tfstate")).unwrap();
+    assert!(state.contains(VALUE), "the value did not reach terraform");
+    assert!(!fs::read_to_string(context.work_dir.join("main.tf.json"))
+        .unwrap()
+        .contains(VALUE));
+}
+
+#[ignore = "needs a real terraform; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn the_providers_schemas_are_exported_for_an_editor() {
+    let Some(program) = terraform() else { return };
+    let dir = scratch(TMP, "real-schemas");
+    let client = start(&program);
+    assert!(
+        client.info().exports_schemas,
+        "the plugin says it exports schemas"
+    );
+
+    // The built-in provider needs no download, so this part runs offline.
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_file(DOCUMENT, "terraform")],
+    );
+    let export = client
+        .export_schemas(&request)
+        .unwrap_or_else(|e| panic!("{}", explain("exporting schemas", &e, &[])));
+    assert_eq!(export.tool, "terraform");
+    assert!(
+        export
+            .tool_version
+            .starts_with(|c: char| c.is_ascii_digit()),
+        "{:?}",
+        export.tool_version
+    );
+    let data = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "terraform_data")
+        .unwrap_or_else(|| panic!("terraform_data is described: {:?}", export.notes));
+    assert!(data.find_param("input").is_some_and(|p| !p.computed));
+    assert!(data.find_param("output").is_some_and(|p| p.computed));
+    assert!(data.find_param("triggers_replace").is_some());
+    assert!(data.find_param("lifecycle").is_some());
+    assert!(dir.join("schemas").join(PROBE_PATH).is_file());
+
+    if std::env::var_os("MERIDIAN_TEST_REAL_TERRAFORM_NETWORK").is_none() {
+        eprintln!("skipped the registry part: MERIDIAN_TEST_REAL_TERRAFORM_NETWORK is not set");
+        return;
+    }
+    // A provider from the registry is fetched into the work directory, its
+    // version is pinned, and every one of its types is described.
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: provider\nspec:\n  target: terraform\n  resources:\n    - id: local\n      type: provider\n      params:\n        source: hashicorp/local\n        version: \">= 2.5.0\"\n    - id: motd\n      type: local_file\n      params:\n        filename: motd\n        content: hello\n";
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_text("provider.yaml", text, "terraform")],
+    );
+    let export = client
+        .export_schemas(&request)
+        .unwrap_or_else(|e| panic!("{}", explain("exporting the registry provider", &e, &[])));
+    let pinned = export
+        .pins
+        .get("hashicorp/local")
+        .unwrap_or_else(|| panic!("hashicorp/local is pinned: {:?}", export.pins));
+    assert!(pinned.starts_with("2."), "{pinned}");
+    let types: Vec<&str> = export.schemas.iter().map(|s| s.r#type.as_str()).collect();
+    assert!(types.contains(&"local_file"), "{types:?}");
+    assert!(
+        types.contains(&"local_sensitive_file"),
+        "every type is listed: {types:?}"
+    );
+    assert!(types.contains(&"data.local_file"), "{types:?}");
+    let file = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "local_file")
+        .unwrap();
+    assert_eq!(file.source, format!("hashicorp/local {pinned}"));
+    assert!(file.find_param("filename").is_some_and(|p| p.required));
+    assert!(file
+        .find_param("content_sha256")
+        .is_some_and(|p| p.computed));
+    assert!(!file.open);
+    // A type the document does not use is known by name until it is used.
+    let other = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "local_sensitive_file")
+        .unwrap();
+    assert!(other.open && other.params.is_empty());
+    assert!(
+        export
+            .notes
+            .iter()
+            .any(|n| n.contains("listed by name only")),
+        "{:?}",
+        export.notes
+    );
+    client.close().expect("the plugin exits cleanly");
 }

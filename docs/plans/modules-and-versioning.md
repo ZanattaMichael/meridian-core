@@ -1,8 +1,13 @@
 # Modules and Versioning
 
-> Status: **proposed**. Extends [release and versioning](release-and-versioning.md); where
-> the two differ, that plan wins until this one is accepted.
-> Amend by pull request against this file.
+> Status: **built**: modules, enforced versioning and module signing landed as pull
+> requests 62, 67, 83 and 85, and registry credentials as 131, all merged 2026-11-17. The
+> [modules reference](../reference/modules.md) describes what is built; where this note
+> and the reference differ, the reference describes the code. The owner has not reviewed
+> the choices made while building; the ones a user sees are
+> [decision records](../decisions/README.md). Extends
+> [release and versioning](release-and-versioning.md). Amend by pull request against
+> this file.
 
 This note designs two things that belong together because each needs the other to be
 safe:
@@ -129,7 +134,9 @@ spec:
   which means an organisation's existing registry, with its existing access control, is
   already a Meridian module registry. **Meridian does not run, and this design does not
   need, a hosted registry service.** Credentials are read from the Docker configuration
-  file (`~/.docker/config.json`, or `$DOCKER_CONFIG/config.json`), `auths` entries only.
+  file (`~/.docker/config.json`, or `$DOCKER_CONFIG/config.json`), `auths` entries only,
+  unless the requirement names a credential the project's manifest declares
+  ([registry logins](../reference/modules.md#registry-logins)).
 
 There is no central index and no short names that resolve through one. A requirement
 says where the module comes from. A central index is a service someone must run, secure
@@ -375,12 +382,17 @@ code and checked by a test, so it cannot drift:
   (section 1.6). Open: verifying registry artifacts with cosign/Sigstore as well, which
   would be new work with a new dependency; a project-level statement of which key may
   sign which module; and revocation, which today means removing a key file.
-- **Credentials for registries.** Only `auths` entries of the Docker configuration are read
-  at first. Decided: a module source will also be able to name a credential declared in
-  the language's model ([language expansion §12](language-expansion.md#12-credentials),
-  the `registry`, `usernamePassword` and `token` types), with the Docker configuration as
-  the ambient default. Secrets and credentials are a design and not yet code, so this
-  waits for them; [issue 69](https://github.com/ZanattaMichael/meridian-core/issues/69).
+- **Credentials for registries.** Built
+  ([issue 69](https://github.com/ZanattaMichael/meridian-core/issues/69)): an `oci`
+  requirement can name a credential declared in `spec.credentials` of the project's
+  `meridian.yaml`, in the language's model
+  ([language expansion §12](language-expansion.md#12-credentials); the `registry` and
+  `usernamePassword` types, with the `env`, `file` and `exec` secret providers), and
+  `module push --credential` does the same for publishing. The Docker configuration
+  stays the ambient default. Only the project's own manifest can have a credential
+  sent. Open: Docker credential helpers, the operating system's secret stores as
+  providers (they arrive with the secrets work), and credentials for git sources, which
+  stay with git's own helpers.
 - **Removed-field messages** ([release and versioning §6](release-and-versioning.md#6-deprecation-policy))
   need a table of removed fields per `apiVersion`. It has no entries until something is
   removed, so it lands with the first removal.

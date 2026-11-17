@@ -9,9 +9,9 @@ repository.workspace = true
 [dependencies]
 meridian-secret = { path = "../meridian-secret" }
 meridian-value = { path = "../meridian-value" }
-base64 = "0.22"
-regex = "1"
-sha2 = "0.10"
+base64 = { workspace = true }
+regex = { workspace = true }
+sha2 = { workspace = true }
 
 [lints]
 workspace = true

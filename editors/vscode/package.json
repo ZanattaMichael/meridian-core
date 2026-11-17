@@ -46,6 +46,11 @@
         "command": "meridian.showOutput",
         "title": "Show Language Server Output",
         "category": "Meridian"
+      },
+      {
+        "command": "meridian.syncSchemas",
+        "title": "Sync Tool Schemas",
+        "category": "Meridian"
       }
     ],
     "configuration": {
@@ -65,6 +70,11 @@
           "default": [],
           "scope": "machine-overridable",
           "markdownDescription": "Directories to load target plugins (`meridian-target-<name>`) from. They are searched before the directory the `meridian` command is in. `${workspaceFolder}` stands for the first workspace folder."
+        },
+        "meridian.stateDir": {
+          "type": "string",
+          "default": ".meridian",
+          "markdownDescription": "Meridian's state directory, where `meridian schema sync` caches the schemas of each tool's own resource types. Relative to the workspace folder. The server reads the cache; it never runs a tool."
         },
         "meridian.lint.enabled": {
           "type": "boolean",

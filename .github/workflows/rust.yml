@@ -8,15 +8,20 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request replaces the run in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     name: fmt, clippy and test
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the stable toolchain
-        run: rustup toolchain install stable --profile minimal --component clippy,rustfmt --no-self-update && rustup default stable
+      - uses: ./.github/actions/setup-rust
 
       - name: Check formatting
         run: cargo fmt --all --check
@@ -25,8 +30,21 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      # Every failure in one run: without --no-fail-fast cargo stops at the
+      # first test binary that fails, and the rest is only learnt on the
+      # next push.
       - name: Test
-        run: cargo test --workspace --locked
+        run: |
+          set -o pipefail
+          cargo test --workspace --locked --no-fail-fast 2>&1 | tee test.log
+
+      - name: Show only what failed
+        if: failure()
+        run: |
+          grep -aE "panicked at|^  left:|^ right:|^error(\[|:)|assertion|^Test failed|minimal failing input" test.log \
+            | grep -av '"reason":' | cut -c1-400 | tail -n 150 || true
+          echo "== failed tests =="
+          grep -aE "^test .* FAILED|^    \`-p " test.log | cut -c1-200 || true
 
   # The same suite on the other systems Meridian is released for. Formatting
   # is checked once, above; clippy runs again here because code behind
@@ -34,6 +52,7 @@ jobs:
   platforms:
     name: clippy and test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -41,10 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the stable toolchain
-        run: rustup toolchain install stable --profile minimal --component clippy --no-self-update && rustup default stable
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup-rust
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -67,3 +83,40 @@ jobs:
             | grep -av '"reason":' | cut -c1-400 | tail -n 150 || true
           echo "== failed tests =="
           grep -aE "^test .* FAILED|^    \`-p " test.log | cut -c1-200 || true
+
+  # The oldest Rust the workspace promises to build with (`rust-version` in
+  # Cargo.toml). A newer feature used by accident fails here, and the fix is
+  # either not using it or raising `rust-version` on purpose.
+  minimum-rust:
+    name: build with the minimum Rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the minimum version
+        id: msrv
+        run: echo "version=$(grep -m1 '^rust-version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Install it
+        run: rustup toolchain install ${{ steps.msrv.outputs.version }} --profile minimal --no-self-update
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: minimum-rust
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Check every crate and test
+        run: cargo +${{ steps.msrv.outputs.version }} check --workspace --all-targets --locked
+
+  # Advisories, licences and sources of every dependency, as deny.toml says.
+  dependencies:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check

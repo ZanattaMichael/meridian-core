@@ -327,6 +327,25 @@ state directory as you would a Terraform state file, or set a passphrase or a
 The stack is created the first time it is planned or applied. `secretsProvider` is used
 only then; Pulumi does not change an existing stack's provider this way.
 
+## Editor schemas
+
+`meridian schema sync` reads each package's schema with `pulumi package
+get-schema <package>`, fetching the provider plugin if it is not installed,
+so an editor completes and checks a resource's properties
+([Tool schemas](../tooling/schema-sync.md)). The packages are the ones the
+documents' type tokens and `pulumi:providers:<package>` resources name; a
+`resourceOptions.version` chooses the package version asked for.
+
+| | |
+|---|---|
+| Described in full | the resource types and `invoke.<function>` calls the documents use: the input properties with which are required, secret or deprecated, the output-only properties as set by Pulumi, and `resourceOptions` or `invokeOptions` with every option Pulumi takes |
+| Listed by name | every other resource and function of those packages, with the first paragraph of its description |
+| Pinned | each package's version |
+
+A token is matched by meaning, so `random:index:RandomPet`,
+`random:RandomPet` and `random:index/randomPet:RandomPet` are one type
+however the document writes it.
+
 ## Running
 
 | Meridian | The plugin runs, in the work directory |
@@ -402,7 +421,7 @@ Every refusal carries a rule and, where it is about one resource, that resource 
   the plugin protocol, as the `meridian` command does.
 - `plugins/pulumi/tests/real.rs` plans, applies, changes and reads outputs with the real
   `pulumi` and its random provider. It runs in the `pulumi` workflow, or locally with
-  `MERIDIAN_REAL_PULUMI=1 cargo test -p meridian-target-pulumi --test real`.
+  `MERIDIAN_TEST_REAL_PULUMI=1 cargo test -p meridian-target-pulumi --test real`.
 
 To record the golden files again after an intended change:
 `UPDATE_GOLDEN=1 cargo test -p meridian-target-pulumi`.

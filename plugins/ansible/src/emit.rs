@@ -31,10 +31,18 @@ pub(crate) fn serialise(playbook: &Playbook) -> BTreeMap<String, String> {
             format!("---\n{}", meridian_yaml::write(&document)),
         ),
         // Meridian resolves the host itself, so the inventory is a literal
-        // and not a lookup.
+        // and not a lookup. A credential's user goes after it.
         (
             INVENTORY_PATH.to_owned(),
-            format!("[meridian]\n{}\n", playbook.hosts),
+            format!(
+                "[meridian]\n{}{}\n",
+                playbook.hosts,
+                playbook
+                    .inventory_vars
+                    .iter()
+                    .map(|(k, v)| format!(" {k}={v}"))
+                    .collect::<String>()
+            ),
         ),
     ])
 }
@@ -65,7 +73,22 @@ fn task_node(task: &Task) -> Yaml {
     if !task.when.is_empty() {
         pairs.push(("when".to_owned(), Yaml::str(&task.when)));
     }
+    // A task handed a secret is not allowed to print its arguments, its
+    // diff or its result, however the run was asked for them.
+    if task.args.values().any(holds_secret) {
+        pairs.push(("no_log".to_owned(), Yaml::Bool(true)));
+    }
     Yaml::Map(pairs)
+}
+
+/// Whether a value refers to a secret the runner hands over.
+fn holds_secret(value: &Value) -> bool {
+    match value {
+        Value::String(s) => s.contains(crate::SECRET_VARIABLE_PREFIX),
+        Value::List(items) => items.iter().any(holds_secret),
+        Value::Map(map) => map.values().any(holds_secret),
+        _ => false,
+    }
 }
 
 /// Renders a param value. Map keys arrive sorted, so a value serialises

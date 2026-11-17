@@ -143,34 +143,130 @@ pub struct Output {
 pub struct Secret {
     /// The name it is read by, as `secret.<name>`.
     pub name: String,
-    /// The provider: `env`, `file` or `exec`.
+    /// The provider, such as `env`, `file`, `exec` or `keyring`.
     pub from: String,
-    /// `from: env`: the environment variable.
+    /// `from: env`: the environment variable. `from: keyring`: the key's
+    /// description. `from: systemd-creds`: the credential's name.
     pub key: String,
     /// `from: file`: the file.
     pub path: String,
     /// `from: exec`: the program and its arguments. No shell reads them.
     pub command: Vec<String>,
+    /// `from: keychain`: the item's service.
+    pub service: String,
+    /// `from: keychain`: the item's account.
+    pub account: String,
+    /// `from: secret-service`: the attributes the item is found by.
+    pub attributes: BTreeMap<String, String>,
     /// A secret that cannot be found is null instead of an error.
     pub optional: bool,
     /// `from: file`: read a file that others can read as well.
     pub allow_wide_mode: bool,
-    /// `from: file` and `from: exec`: keep the value's last line ending.
+    /// `from: file`, `from: systemd-creds`: keep the value's last line
+    /// ending.
     pub keep_trailing_newline: bool,
+    /// The places to look next, in order, when the first has nothing or
+    /// cannot be used on this machine.
+    pub fallback: Vec<meridian_secret::Source>,
     pub pos: Position,
 }
 
 impl Secret {
-    /// Where the secret comes from, as the secrets crate reads it.
+    /// Where the secret comes from first, as the secrets crate reads it.
     pub fn source(&self) -> meridian_secret::Source {
         meridian_secret::Source {
             from: self.from.clone(),
             key: self.key.clone(),
             path: self.path.clone(),
             command: self.command.clone(),
+            service: self.service.clone(),
+            account: self.account.clone(),
+            attributes: self.attributes.clone(),
             allow_wide_mode: self.allow_wide_mode,
             keep_trailing_newline: self.keep_trailing_newline,
         }
+    }
+
+    /// Every place the secret is looked for, in order: the first, then
+    /// each `fallback`.
+    pub fn sources(&self) -> Vec<meridian_secret::Source> {
+        std::iter::once(self.source())
+            .chain(self.fallback.iter().cloned())
+            .collect()
+    }
+}
+
+/// `spec.credentials[].from`: the tool finds the credential for itself, in
+/// its own environment, profile or agent, as it does when no credential is
+/// named.
+pub const CREDENTIAL_FROM_AMBIENT: &str = "ambient";
+
+/// One entry of `spec.credentials`: an identity, declared by name and type,
+/// for use wherever one is asked for. A field that holds secret material is
+/// a reference to a declared secret, as `${{ secret.<name> }}`, and never a
+/// value.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Credential {
+    /// The name it is used by.
+    pub name: String,
+    /// Its type: one of [`meridian_secret::credential_types`].
+    pub r#type: String,
+    /// Empty, or [`CREDENTIAL_FROM_AMBIENT`].
+    pub from: String,
+    /// The type's fields, as written: text for a plain field, a yes or a no
+    /// for a flag, and for a secret field the reference as written, which
+    /// resolving turns into the secret itself.
+    pub fields: BTreeMap<String, Value>,
+    pub pos: Position,
+}
+
+impl Credential {
+    /// The type, when it is one the language has.
+    pub fn kind(&self) -> Option<&'static meridian_secret::CredentialType> {
+        meridian_secret::credential_type(&self.r#type)
+    }
+
+    /// Whether the tool finds the credential for itself.
+    pub fn is_ambient(&self) -> bool {
+        self.from == CREDENTIAL_FROM_AMBIENT
+    }
+
+    /// A field that is text, when it is there.
+    pub fn text(&self, field: &str) -> Option<&str> {
+        match self.fields.get(field) {
+            Some(Value::String(text)) => Some(text),
+            _ => None,
+        }
+    }
+
+    /// A flag, which is no when it is left out.
+    pub fn flag(&self, field: &str) -> bool {
+        matches!(self.fields.get(field), Some(Value::Bool(true)))
+    }
+
+    /// The fields that hold secret material, with the slot each stands for
+    /// once the document is resolved.
+    pub fn secrets(&self) -> Vec<(&str, meridian_value::SecretRef)> {
+        self.fields
+            .iter()
+            .filter_map(|(name, value)| match value {
+                Value::Secret(at) => Some((name.as_str(), *at)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The credential in a few words, for a plan: `deploy (ssh, user
+    /// deploy)`, never any part of a secret.
+    pub fn summary(&self) -> String {
+        let mut what = self.r#type.clone();
+        if let Some(user) = self.text("user") {
+            what.push_str(&format!(", user {user}"));
+        }
+        if self.is_ambient() {
+            what.push_str(", ambient");
+        }
+        format!("{} ({what})", self.name)
     }
 }
 
@@ -182,6 +278,9 @@ pub struct TargetHost {
     pub r#ref: String,
     pub output: String,
     pub host: String,
+    /// The credential the host is reached with, by the name
+    /// `spec.credentials` declares it under; empty for the tool's own.
+    pub credential: String,
     pub pos: Position,
 }
 
@@ -223,6 +322,8 @@ pub struct InfrastructureSpec {
     pub conditions: BTreeMap<String, String>,
     /// `spec.secrets`: the secrets the document reads, as `secret.<name>`.
     pub secrets: Vec<Secret>,
+    /// `spec.credentials`: the identities the document names.
+    pub credentials: Vec<Credential>,
     pub imports: Vec<Import>,
     pub resources: Vec<Resource>,
     pub outputs: Vec<Output>,
@@ -258,6 +359,8 @@ pub struct ResourceSetSpec {
     pub conditions: BTreeMap<String, String>,
     /// `spec.secrets`: the secrets the document reads, as `secret.<name>`.
     pub secrets: Vec<Secret>,
+    /// `spec.credentials`: the identities the document names.
+    pub credentials: Vec<Credential>,
     pub target_host: Option<TargetHost>,
     pub imports: Vec<Import>,
     pub resources: Vec<Resource>,
@@ -364,6 +467,19 @@ impl Document {
             Document::Infrastructure(d) => &d.spec.secrets,
             Document::ResourceSet(d) => &d.spec.secrets,
         }
+    }
+
+    /// `spec.credentials`.
+    pub fn credentials(&self) -> &[Credential] {
+        match self {
+            Document::Infrastructure(d) => &d.spec.credentials,
+            Document::ResourceSet(d) => &d.spec.credentials,
+        }
+    }
+
+    /// The credential declared as `name`, if there is one.
+    pub fn credential(&self, name: &str) -> Option<&Credential> {
+        self.credentials().iter().find(|c| c.name == name)
     }
 
     /// `spec.outputs`; a ResourceSet declares none.

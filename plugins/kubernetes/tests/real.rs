@@ -1,5 +1,6 @@
-//! The plugin against a real cluster: plan, apply, outputs and the restart a
-//! notify promises, with nothing standing in for `kubectl`.
+//! The plugin against a real cluster: plan, apply, outputs, the restart a
+//! notify promises and the schema export an editor reads, with nothing
+//! standing in for `kubectl`.
 //!
 //! The tests run when `MERIDIAN_TEST_REAL_KUBECTL=1`, against whatever
 //! cluster the current kubeconfig context names. A `kind` cluster is enough,
@@ -23,9 +24,10 @@ use std::path::Path;
 use meridian_plugin_testkit::{graph_from_text, repo_root, scratch, KeptLog};
 use meridian_sdk::tool::Tool;
 use meridian_sdk::{
-    Applied, Artifact, Change, ChangeAction, Data, Emitter, NoLog, Output, Plan, RunContext, Runner,
+    Applied, Artifact, Change, ChangeAction, Data, Emitter, NoLog, Output, ParamKind, Plan,
+    RunContext, Runner, SchemaRequest, SchemaSource,
 };
-use meridian_target_kubernetes::{Kubernetes, KubernetesRunner};
+use meridian_target_kubernetes::{Kubernetes, KubernetesRunner, KubernetesSchemas};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
 const DOCUMENT: &str = "plugins/kubernetes/tests/documents/workload.yaml";
@@ -163,6 +165,7 @@ fn pods_once_rolled_out() -> Vec<String> {
     pods
 }
 
+#[ignore = "needs a real kubectl and a cluster; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_workload_is_planned_applied_read_back_and_restarted_by_a_notify() {
     if !cluster() {
@@ -260,6 +263,7 @@ fn a_workload_is_planned_applied_read_back_and_restarted_by_a_notify() {
     assert_eq!(pods_once_rolled_out(), after);
 }
 
+#[ignore = "needs a real kubectl and a cluster; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn what_the_api_server_refuses_fails_the_plan_with_its_reason() {
     if !cluster() {
@@ -287,4 +291,76 @@ fn what_the_api_server_refuses_fails_the_plan_with_its_reason() {
         .is_err(),
         "nothing was stored"
     );
+}
+
+#[ignore = "needs a real kubectl; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn the_api_servers_kinds_are_exported_for_an_editor() {
+    if !cluster() {
+        return;
+    }
+    let dir = scratch(TMP, "real-schemas");
+    let text = fs::read_to_string(repo_root().join(DOCUMENT)).unwrap();
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_text(DOCUMENT, &text, "kubernetes")],
+    );
+    let log = KeptLog::default();
+    let export = KubernetesSchemas::from_env()
+        .export(&request, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(export.tool, "kubectl");
+    assert!(
+        export
+            .pins
+            .get("server")
+            .is_some_and(|v| v.starts_with(|c: char| c.is_ascii_digit())),
+        "the server's version is pinned: {:?}",
+        export.pins
+    );
+
+    // The kinds the document uses are described field by field, with what
+    // the API server says about them.
+    let deployment = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "apps/v1/Deployment")
+        .unwrap_or_else(|| panic!("apps/v1/Deployment is described: {:?}", export.notes));
+    assert!(!deployment.description.is_empty());
+    assert!(
+        deployment.find_param("apiVersion").is_none(),
+        "given by the type"
+    );
+    let spec = deployment.find_param("spec").unwrap();
+    assert!(spec
+        .find_param("replicas")
+        .is_some_and(|p| p.kind == ParamKind::Integer));
+    assert!(spec.find_param("template").is_some_and(|p| p.required));
+    assert!(deployment.find_param("status").is_some_and(|p| p.computed));
+    let namespace = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "v1/Namespace")
+        .unwrap();
+    assert!(namespace
+        .find_param("metadata")
+        .unwrap()
+        .find_param("name")
+        .is_some());
+
+    // Every other kind the server knows is offered by name.
+    let service = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "v1/Service")
+        .unwrap();
+    assert!(service.open && service.params.is_empty());
+    assert!(
+        export
+            .schemas
+            .iter()
+            .any(|s| s.r#type == "rbac.authorization.k8s.io/v1/Role"),
+        "a kind of another group is listed"
+    );
+    assert!(!export.schemas.iter().any(|s| s.r#type.ends_with("List")));
 }

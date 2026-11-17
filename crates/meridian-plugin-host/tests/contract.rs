@@ -40,6 +40,8 @@ const TARGETS: &[Target] = &[
             native_notify: true,
             synthetic_notify: false,
             runtime_condition: true,
+            secrets: true,
+            credentials: true,
         },
     },
     Target {
@@ -50,6 +52,8 @@ const TARGETS: &[Target] = &[
             native_notify: true,
             synthetic_notify: false,
             runtime_condition: false,
+            secrets: false,
+            credentials: false,
         },
     },
 ];

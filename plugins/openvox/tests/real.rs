@@ -2,13 +2,13 @@
 //!
 //! These tests run `puppet` for real: they parse what the plugin compiles,
 //! and plan and apply manifests that manage files under a scratch directory,
-//! which needs no root. They run when `MERIDIAN_TEST_OPENVOX` is set, as it
+//! which needs no root. They run when `MERIDIAN_TEST_REAL_OPENVOX` is set, as it
 //! is in CI where the workflow installs OpenVox first, and are skipped
 //! otherwise so a machine without it still passes `cargo test`.
 //!
 //! ```text
 //! gem install openvox
-//! MERIDIAN_TEST_OPENVOX=1 cargo test -p meridian-target-openvox --test real
+//! MERIDIAN_TEST_REAL_OPENVOX=1 cargo test -p meridian-target-openvox --test real
 //! ```
 
 // Left out on Windows: this file drives the real tool, and the workflow that
@@ -33,8 +33,8 @@ const TMP: &str = env!("CARGO_TARGET_TMPDIR");
 
 /// The real `puppet`, or `None` when these tests are not asked for.
 fn openvox() -> Option<String> {
-    if std::env::var_os("MERIDIAN_TEST_OPENVOX").is_none() {
-        eprintln!("skipped: set MERIDIAN_TEST_OPENVOX=1 to run against the real OpenVox");
+    if std::env::var_os("MERIDIAN_TEST_REAL_OPENVOX").is_none() {
+        eprintln!("skipped: set MERIDIAN_TEST_REAL_OPENVOX=1 to run against the real OpenVox");
         return None;
     }
     Some(
@@ -51,6 +51,12 @@ fn isolated(dir: &Path) -> Vec<String> {
     vec![
         format!("--confdir={}", dir.join("puppet/conf").display()),
         format!("--vardir={}", dir.join("puppet/var").display()),
+        // The code and log directories are not under confdir by default
+        // (they are ~/.puppetlabs/etc/code and ~/.puppetlabs/var/log), and
+        // two tests creating them at once trip over each other.
+        format!("--codedir={}", dir.join("puppet/code").display()),
+        format!("--logdir={}", dir.join("puppet/log").display()),
+        format!("--rundir={}", dir.join("puppet/run").display()),
     ]
 }
 
@@ -98,6 +104,7 @@ fn resources(plan: &Plan) -> Vec<(&str, ChangeAction)> {
         .collect()
 }
 
+#[ignore = "needs a real OpenVox; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn everything_the_plugin_compiles_is_a_manifest_openvox_parses() {
     let Some(puppet) = openvox() else { return };
@@ -133,6 +140,7 @@ fn everything_the_plugin_compiles_is_a_manifest_openvox_parses() {
     }
 }
 
+#[ignore = "needs a real OpenVox; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_plan_changes_nothing_an_apply_converges_and_a_second_plan_is_in_sync() {
     let Some(puppet) = openvox() else { return };
@@ -210,6 +218,7 @@ fn a_plan_changes_nothing_an_apply_converges_and_a_second_plan_is_in_sync() {
     assert_eq!(fs::read_to_string(&conf).unwrap(), "workers = 8\n");
 }
 
+#[ignore = "needs a real OpenVox; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn state_absent_removes_what_an_earlier_apply_created() {
     let Some(puppet) = openvox() else { return };
@@ -239,6 +248,7 @@ fn state_absent_removes_what_an_earlier_apply_created() {
     assert!(!path.exists());
 }
 
+#[ignore = "needs a real OpenVox; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_change_refreshes_the_command_it_notifies() {
     let Some(puppet) = openvox() else { return };
@@ -268,6 +278,7 @@ fn a_change_refreshes_the_command_it_notifies() {
     assert_eq!(fs::read_to_string(dir.join("runs")).unwrap(), "run\nrun\n");
 }
 
+#[ignore = "needs a real OpenVox; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_failed_resource_fails_the_apply_and_keeps_what_was_already_done() {
     let Some(puppet) = openvox() else { return };
@@ -298,6 +309,7 @@ fn a_failed_resource_fails_the_apply_and_keeps_what_was_already_done() {
     assert!(!dir.join("after.conf").exists());
 }
 
+#[ignore = "needs a real OpenVox; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_manifest_openvox_rejects_is_a_failed_run_with_its_explanation() {
     let Some(puppet) = openvox() else { return };
@@ -325,6 +337,7 @@ fn a_manifest_openvox_rejects_is_a_failed_run_with_its_explanation() {
     assert!(err.changes.is_empty());
 }
 
+#[ignore = "needs a real OpenVox; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn the_plugin_binary_plans_and_applies_with_the_real_tool() {
     let Some(puppet) = openvox() else { return };

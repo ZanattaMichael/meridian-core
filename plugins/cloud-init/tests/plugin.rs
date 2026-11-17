@@ -123,6 +123,8 @@ fn the_host_learns_what_the_plugin_is_from_the_plugin() {
             native_notify: false,
             synthetic_notify: true,
             runtime_condition: false,
+            secrets: false,
+            credentials: false,
         }
     );
     assert!(

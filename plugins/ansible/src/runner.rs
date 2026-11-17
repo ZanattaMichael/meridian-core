@@ -3,8 +3,8 @@
 
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
-    Applied, Artifact, Change, ChangeAction, Log, LogLine, Operations, Plan, RunContext, RunError,
-    Runner,
+    Applied, Artifact, Change, ChangeAction, Log, LogLine, Operations, Part, Plan, RunContext,
+    RunError, Runner, SecretFile, Value,
 };
 
 use crate::{INVENTORY_PATH, PLAYBOOK_PATH};
@@ -70,6 +70,23 @@ impl AnsibleRunner {
         if check {
             tool = tool.args(["--check", "--diff"]);
         }
+        // Secrets reach ansible-playbook as extra variables read from a file
+        // only the user can read, named on the command line by its path and
+        // nothing more. A credential's password goes in the same file, and
+        // its private key in a file of its own, named by `--private-key`.
+        // The files live until the run is over.
+        let secrets = extra_vars_file(context)?;
+        if let Some(file) = &secrets {
+            tool = tool
+                .arg("--extra-vars")
+                .arg(format!("@{}", file.path().display()));
+        }
+        let key = private_key_file(context)?;
+        if let Some(file) = &key {
+            tool = tool
+                .arg("--private-key")
+                .arg(file.path().to_string_lossy().into_owned());
+        }
         tool = tool
             .args(self.extra_args.iter().cloned())
             .arg(PLAYBOOK_PATH);
@@ -80,6 +97,8 @@ impl AnsibleRunner {
             check,
         };
         let finished = tool.run(&reader)?;
+        drop(secrets);
+        drop(key);
         let report = reader
             .report
             .into_inner()
@@ -98,6 +117,65 @@ impl AnsibleRunner {
         }
         Err(error)
     }
+}
+
+/// The extra-vars file: every secret of the document under its variable's
+/// name, and the credential's password as `ansible_password`. `None` when
+/// there is nothing to hand over.
+fn extra_vars_file(context: &RunContext) -> Result<Option<SecretFile>, RunError> {
+    let mut entries: Vec<(String, &meridian_sdk::SecretValue)> = context
+        .secrets
+        .iter()
+        .map(|(name, value)| {
+            (
+                Value::String(crate::secret_variable(name)).canonical(),
+                value,
+            )
+        })
+        .collect();
+    if let Some(password) = context
+        .credential
+        .as_ref()
+        .and_then(|c| c.secret("password"))
+    {
+        entries.push((
+            Value::String(crate::PASSWORD_VARIABLE.to_owned()).canonical(),
+            password,
+        ));
+    }
+    if entries.is_empty() {
+        return Ok(None);
+    }
+    let mut parts = vec![Part::Text("{")];
+    for (i, (key, value)) in entries.iter().enumerate() {
+        if i > 0 {
+            parts.push(Part::Text(","));
+        }
+        parts.push(Part::Text(key));
+        parts.push(Part::Text(":\""));
+        parts.push(Part::JsonString(value));
+        parts.push(Part::Text("\""));
+    }
+    parts.push(Part::Text("}\n"));
+    let file = SecretFile::create("extra-vars.json", &parts)
+        .map_err(|e| RunError::new(format!("writing the extra-vars file: {e}")))?;
+    Ok(Some(file))
+}
+
+/// The credential's private key in a file only the user can read, for
+/// `--private-key`. `None` when the credential has none.
+fn private_key_file(context: &RunContext) -> Result<Option<SecretFile>, RunError> {
+    let Some(key) = context
+        .credential
+        .as_ref()
+        .and_then(|c| c.secret("privateKey"))
+    else {
+        return Ok(None);
+    };
+    // OpenSSH wants the key to end in a line break; one more is harmless.
+    let file = SecretFile::create("private-key", &[Part::Secret(key), Part::Text("\n")])
+        .map_err(|e| RunError::new(format!("writing the private key file: {e}")))?;
+    Ok(Some(file))
 }
 
 impl Runner for AnsibleRunner {

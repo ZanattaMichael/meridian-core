@@ -14,10 +14,28 @@ prove, and how to run it yourself.
 
 ## How they are switched on
 
-A real-tool test is skipped unless an environment variable asks for it, so
-`cargo test --workspace` needs nothing but Rust. Each has a workflow of its own under
-`.github/workflows/` that installs the tool, sets the variable and runs the one test
-file. The workflows are limited by `paths:` to the plugin and the crates it depends on.
+A real-tool test is marked `#[ignore]`, so `cargo test --workspace` needs nothing but
+Rust and reports the test as ignored rather than as passed. It is run with
+`-- --ignored`, and switched on by one variable per tool, `MERIDIAN_TEST_REAL_<TOOL>`,
+read through `meridian_plugin_testkit::real_tool_asked`: unset, empty or `0` means no,
+and the test says `skipped: set MERIDIAN_TEST_REAL_<TOOL>=1` and returns. A few switches
+carry a value instead of `1`, listed in the table. Where the tool is not on `PATH`,
+`MERIDIAN_<TOOL>` names it, as it does for a user.
+
+Each has a workflow of its own under `.github/workflows/` that installs the tool, sets
+the variable and runs the one test file with `-- --ignored`. A test that reads its
+switch through `real_tool_asked` also honours `MERIDIAN_TEST_REAL_REQUIRED`: with it
+set, a missing switch fails the test instead of skipping it, so a workflow that forgets
+its variable goes red. `puppet.yml` sets it; the older tests read their switch
+themselves and should move to the helper when they are next touched. The workflows are
+limited by `paths:` to the plugin and the crates it depends on. A test in
+`crates/meridian-all-targets` fails when a plugin has an ignored test and no workflow.
+
+To run one yourself:
+
+```
+MERIDIAN_TEST_REAL_ANSIBLE=1 cargo test -p meridian-target-ansible --test real -- --ignored --nocapture
+```
 
 Two rules keep a green job honest:
 
@@ -37,20 +55,24 @@ Two rules keep a green job honest:
 | `chef` | `chef.yml` | Cinc Client 18 in local mode, as the user and as root | `MERIDIAN_TEST_REAL_CHEF=1` |
 | `cloud-init` | `cloud-init.yml` | `cloud-init schema` | `MERIDIAN_TEST_REAL_CLOUD_INIT=1` |
 | `cloudformation` | `cloudformation.yml` | the `aws` command against [LocalStack](#cloudformation) | `MERIDIAN_TEST_REAL_CLOUDFORMATION=1` |
-| `docker` | `docker.yml` | the Docker daemon and Compose | `MERIDIAN_REAL_DOCKER=1` |
+| `docker` | `docker.yml` | the Docker daemon and Compose | `MERIDIAN_TEST_REAL_DOCKER=1` |
 | `dsc` | `dsc.yml` | PowerShell, DscPipelineRunner and DSC v3 on Linux; the plugin's runner with DSC v2 and DSC v3, and real Windows resources, [on Windows](#dsc) | `MERIDIAN_TEST_REAL_DSC=1` |
-| `helm` | `helm.yml` | `helm`, `kustomize` and a kind cluster | `-- --ignored` |
+| `helm` | `helm.yml` | `helm`, `kustomize` and a kind cluster | none: `-- --ignored` alone runs them |
 | `kubernetes` | `kubernetes.yml` | `kubectl` and a kind cluster | `MERIDIAN_TEST_REAL_KUBECTL=1` |
-| `opentofu` | `opentofu.yml` | `tofu` | `MERIDIAN_TEST_TOFU=tofu` |
-| `openvox` | `openvox.yml` | `puppet` from the OpenVox gem | `MERIDIAN_TEST_OPENVOX=1` |
-| `packer` | `packer.yml` | `packer` | `-- --ignored` |
-| `podman` | `podman.yml` | Podman and systemd | `MERIDIAN_TEST_PODMAN=system` |
-| `pulumi` | `pulumi.yml` | `pulumi` with a local backend | `MERIDIAN_REAL_PULUMI=1` |
-| `puppet` | none yet | stand-ins only; the `openvox` target shares its compiler and is tested for real | |
-| `salt` | `salt.yml` | `salt-call` and `salt-ssh` | `MERIDIAN_TEST_SALT_CALL=<program>` |
+| `opentofu` | `opentofu.yml` | `tofu` | `MERIDIAN_TEST_REAL_TOFU=tofu` |
+| `openvox` | `openvox.yml` | `puppet` from the OpenVox gem | `MERIDIAN_TEST_REAL_OPENVOX=1` |
+| `packer` | `packer.yml` | `packer` | none: `-- --ignored` alone runs them |
+| `podman` | `podman.yml` | Podman and systemd | `MERIDIAN_TEST_REAL_PODMAN=system` |
+| `pulumi` | `pulumi.yml` | `pulumi` with a local backend | `MERIDIAN_TEST_REAL_PULUMI=1` |
+| `puppet` | `puppet.yml` | `puppet` from the gem, applying on the machine itself; Bolt has only met a stand-in | `MERIDIAN_TEST_REAL_PUPPET=1` |
+| `salt` | `salt.yml` | `salt-call` and `salt-ssh` | `MERIDIAN_TEST_REAL_SALT_CALL=<program>` |
 | `terraform` | `terraform.yml` | `terraform`, and the same tests again with `tofu` | `MERIDIAN_TEST_REAL_TERRAFORM=1` |
 
 Each target's page says, under its running section, what its real-tool test covers.
+A target that exports [tool schemas](../tooling/schema-sync.md) (terraform,
+opentofu, kubernetes, pulumi, dsc) has a schema export test in the same file,
+switched on by the same variable, that runs the export against the installed
+tool and checks a type it knows.
 
 ## What a real-tool test should do
 

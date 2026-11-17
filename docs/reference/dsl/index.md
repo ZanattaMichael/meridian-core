@@ -49,6 +49,7 @@ flowchart TD
 | [Expressions and functions](expressions.md) | the language a `when` and an interpolation are written in: values, operators, every function, every error |
 | [Interpolation, variables and named conditions](interpolation.md) | an expression inside a value, `spec.variables`, `spec.conditions`, and what is decided in which order |
 | [Secrets](secrets.md) | `spec.secrets`: declaring a secret by where it comes from, reading it as `secret.<name>`, what an expression may do with one, and when it is fetched |
+| [Credentials](credentials.md) | `spec.credentials`: an identity declared by name and type, its secret fields, and reaching a host as one with `targetHost.credential` |
 | [References](references.md) | `${...}`: syntax, how each target rewrites it, what can be read where |
 | [Outputs and hand-offs](outputs-and-hand-offs.md) | `outputs`, `targetHost` and `imports`: the ties between documents |
 | The four flavour pages above | how all of it is written for each segment |
@@ -193,7 +194,7 @@ The check needs the plugin, so `compile`, `plan` and `apply` make it and
 
 | Field | Required | Value |
 |---|---|---|
-| `name` | yes | the document's name. It must be unique among the documents of the same kind given to one command. Other documents refer to it (`targetHost.ref`), compiled files are written under it, and state is kept under it |
+| `name` | yes | the document's name. It must be unique among the documents of the same kind given to one command. Other documents refer to it (`targetHost.ref`), compiled files are written under it, and state is kept under it. It must start with a letter or a digit, hold only letters, digits, `.`, `_` and `-`, and be at most 128 characters; `validate` refuses any other name, because the name becomes one directory name under `--out` and under the state directory |
 | `labels` | no | a mapping of text to text, for choosing which documents a command runs. See [labels and selectors](#labels-and-selectors) |
 
 Some targets build a name in their own files from `metadata.name`, and are
@@ -253,6 +254,7 @@ every `-l` given. Rules:
 | `variables` | no | a mapping of named values, read as `var.<name>`. See [variables](interpolation.md#variables) |
 | `conditions` | no | a mapping of named conditions, read as `cond.<name>`. See [named conditions](interpolation.md#named-conditions) |
 | `secrets` | no | a list of secrets, each a name and where it comes from, read as `secret.<name>`. See [secrets](secrets.md) |
+| `credentials` | no | a list of credentials, each a name, a type and the type's fields, used by name. See [credentials](credentials.md) |
 | `imports` | no | a list of [imports](#imports): values handed to this document from others |
 | `resources` | yes | a list of at least one [resource](#resources) |
 | `outputs` | no | a list of [outputs](#outputs) |
@@ -269,7 +271,8 @@ every `-l` given. Rules:
 | `variables` | no | a mapping of named values, read as `var.<name>`. See [variables](interpolation.md#variables) |
 | `conditions` | no | a mapping of named conditions, read as `cond.<name>`. See [named conditions](interpolation.md#named-conditions) |
 | `secrets` | no | a list of secrets, each a name and where it comes from, read as `secret.<name>`. See [secrets](secrets.md) |
-| `targetHost` | yes, to compile | the machine. See [`targetHost`](#targethost) |
+| `credentials` | no | a list of credentials, each a name, a type and the type's fields, used by name. See [credentials](credentials.md) |
+| `targetHost` | yes, to compile | the machine, and the credential it is reached as. See [`targetHost`](#targethost) |
 | `imports` | no | a list of [imports](#imports): values handed to this document from others |
 | `resources` | yes | a list of at least one [resource](#resources) |
 
@@ -342,6 +345,7 @@ targetHost:
 | `host` | required with `from: inline`: a host name or address, as the tool would be given it |
 | `ref` | required with `from: infrastructure`: the name of an Infrastructure document given to the same command |
 | `output` | required with `from: infrastructure`: the name of an output that document declares |
+| `credential` | optional, with either form: the name of a credential in `spec.credentials` the host is reached as, of type `ssh` or `usernamePassword`, for a target that takes one. Left out, the tool reaches the host as its own identity. See [Credentials](credentials.md#reaching-a-host-as-a-credential) |
 
 With `from: infrastructure`, the document and the output must exist, and
 `meridian validate` checks that. The value is only known once the Infrastructure

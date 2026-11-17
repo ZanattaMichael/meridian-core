@@ -22,8 +22,26 @@ const ALLOWED: &[(&str, &str)] = &[
         "a secret file is written from the bytes",
     ),
     (
+        "crates/meridian-module/src/oci.rs",
+        "a registry login's password is encoded into the Authorization header it is sent in",
+    ),
+    (
         "crates/meridian-secret/src/table.rs",
         "secrets are joined and encoded into new protected memory",
+    ),
+    (
+        "crates/meridian-sdk/src/wire.rs",
+        "a secret's bytes are copied into the plan or apply request a plugin is sent over its \
+         private socket; the one copy outside protected memory on its way to a plugin",
+    ),
+    (
+        "crates/meridian-sdk/src/tool.rs",
+        "a secret is written from the bytes into a tool's standard input",
+    ),
+    (
+        "crates/meridian-secret/src/stores.rs",
+        "meridian secret set hands the bytes to the kernel keyring, or to secret-tool on its \
+         standard input",
     ),
 ];
 

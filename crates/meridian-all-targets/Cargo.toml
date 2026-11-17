@@ -1,0 +1,38 @@
+[package]
+name = "meridian-all-targets"
+description = "Every target plugin the workspace ships, in one list, for tests and generated documentation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# A new plugin is added here once. Everything that needs "every target"
+# reads this crate, and the test in tests/complete.rs fails when a directory
+# under plugins/ is missing from it.
+[dependencies]
+meridian-sdk = { path = "../meridian-sdk" }
+meridian-target-ansible = { path = "../../plugins/ansible" }
+meridian-target-arm = { path = "../../plugins/arm" }
+meridian-target-bicep = { path = "../../plugins/bicep" }
+meridian-target-chef = { path = "../../plugins/chef" }
+meridian-target-cloud-init = { path = "../../plugins/cloud-init" }
+meridian-target-cloudformation = { path = "../../plugins/cloudformation" }
+meridian-target-docker = { path = "../../plugins/docker" }
+meridian-target-dsc = { path = "../../plugins/dsc" }
+meridian-target-helm = { path = "../../plugins/helm" }
+meridian-target-kubernetes = { path = "../../plugins/kubernetes" }
+meridian-target-opentofu = { path = "../../plugins/opentofu" }
+meridian-target-openvox = { path = "../../plugins/openvox" }
+meridian-target-packer = { path = "../../plugins/packer" }
+meridian-target-podman = { path = "../../plugins/podman" }
+meridian-target-pulumi = { path = "../../plugins/pulumi" }
+meridian-target-puppet = { path = "../../plugins/puppet" }
+meridian-target-salt = { path = "../../plugins/salt" }
+meridian-target-terraform = { path = "../../plugins/terraform" }
+
+[dev-dependencies]
+meridian-plugin-testkit = { path = "../meridian-plugin-testkit" }
+
+[lints]
+workspace = true

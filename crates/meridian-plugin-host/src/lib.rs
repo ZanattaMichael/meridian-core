@@ -28,7 +28,8 @@ pub mod signature {
 use std::fmt;
 
 use meridian_sdk::{
-    Capabilities, Category, CompileError, ImportError, ImportFormat, Operations, RunError,
+    Capabilities, Category, CompileError, ImportError, ImportFormat, Operations, PlacedEscape,
+    RunError, SecretRef, Value,
 };
 
 pub use client::{Client, StartOptions, HANDSHAKE_TIMEOUT};
@@ -52,6 +53,9 @@ pub struct Info {
     /// Every IR resource type the target maps.
     pub resource_types: Vec<String>,
     pub capabilities: Capabilities,
+    /// The openings of the tool's own expression syntax that a value placed
+    /// from data must not form, and how each is written as literal text.
+    pub placed_text: Vec<PlacedEscape>,
     /// The kind of tool the target drives.
     pub category: Category,
     /// What the target can do beyond compiling.
@@ -68,6 +72,9 @@ pub struct Info {
     /// The kinds of existing configuration the target can turn into Meridian
     /// documents; empty when it does not import.
     pub import_formats: Vec<ImportFormat>,
+    /// Whether the target can ask its installed tool for the schemas of the
+    /// tool's own resource types, for `meridian schema sync`.
+    pub exports_schemas: bool,
     /// The binary the plugin was loaded from; empty for an in-process emitter.
     pub path: String,
     /// What checking the binary's signature found, before it was started.
@@ -238,5 +245,82 @@ pub fn to_sdk(graph: &meridian_ast::ResourceGraph) -> meridian_sdk::ResourceGrap
                 pos: position(&o.pos),
             })
             .collect(),
+        secrets: Vec::new(),
+        credential: graph.credential.as_ref().map(|c| {
+            // A field is secret by the type's say-so, not by what it holds:
+            // before the document is resolved it holds the reference as
+            // written, and that is not text a plugin may read either.
+            let is_secret = |field: &str| c.kind().is_some_and(|kind| kind.is_secret(field));
+            let mut secret_fields: Vec<String> = c
+                .fields
+                .iter()
+                .filter(|(k, v)| is_secret(k) || matches!(v, Value::Secret(_)))
+                .map(|(k, _)| k.clone())
+                .collect();
+            secret_fields.sort_unstable();
+            meridian_sdk::Credential {
+                name: c.name.clone(),
+                kind: c.r#type.clone(),
+                ambient: c.is_ambient(),
+                text: c
+                    .fields
+                    .iter()
+                    .filter(|(k, _)| !is_secret(k))
+                    .filter_map(|(k, v)| match v {
+                        Value::String(text) => Some((k.clone(), text.clone())),
+                        _ => None,
+                    })
+                    .collect(),
+                flags: c
+                    .fields
+                    .iter()
+                    .filter_map(|(k, v)| match v {
+                        Value::Bool(b) => Some((k.clone(), *b)),
+                        _ => None,
+                    })
+                    .collect(),
+                secret_fields,
+            }
+        }),
     }
+}
+
+/// Names every secret the graph's params refer to, in the order they are
+/// met, so a plugin can write a reference to each: by the name the document
+/// declared it under, or, for one made from a declared secret by an
+/// expression (a secret joined with text, say), `derived_1`, `derived_2`
+/// and so on, since no name of the document's is its own.
+pub fn name_secrets(graph: &mut meridian_sdk::ResourceGraph, declared: &[(String, SecretRef)]) {
+    fn walk(value: &Value, found: &mut Vec<SecretRef>) {
+        match value {
+            Value::Secret(at) => {
+                if !found.contains(at) {
+                    found.push(*at);
+                }
+            }
+            Value::List(items) => items.iter().for_each(|item| walk(item, found)),
+            Value::Map(entries) => entries.values().for_each(|item| walk(item, found)),
+            _ => {}
+        }
+    }
+    let mut used = Vec::new();
+    for resource in &graph.resources {
+        for value in resource.params.values() {
+            walk(value, &mut used);
+        }
+    }
+    let mut derived = 0;
+    graph.secrets = used
+        .into_iter()
+        .map(|secret| {
+            let name = match declared.iter().find(|(_, at)| *at == secret) {
+                Some((name, _)) => name.clone(),
+                None => {
+                    derived += 1;
+                    format!("derived_{derived}")
+                }
+            };
+            meridian_sdk::SecretName { secret, name }
+        })
+        .collect();
 }

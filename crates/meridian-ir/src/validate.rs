@@ -4,6 +4,7 @@ use std::path::Path;
 use crate::error::{Error, ErrorList, Position};
 use crate::parse::parse_file;
 use crate::types::*;
+use meridian_value::Value;
 
 /// A set of documents loaded together. Cross-document references
 /// (`targetHost.from: infrastructure`) resolve within a bundle and nowhere else.
@@ -363,6 +364,13 @@ impl Bundle {
             TARGET_HOST_FROM_INLINE => {
                 if th.host.is_empty() {
                     fail("spec.targetHost.host", "missing required field for from: inline".into());
+                } else if !meridian_expr::has_interpolation(&th.host) {
+                    // A host is handed to ssh, an inventory, a manifest: it
+                    // has to be a name, and nothing a tool reads as more.
+                    // One an interpolation places is checked once placed.
+                    if let Err(why) = meridian_value::host::check(&th.host) {
+                        fail("spec.targetHost.host", why);
+                    }
                 }
             }
             TARGET_HOST_FROM_INFRASTRUCTURE => {
@@ -386,6 +394,7 @@ impl Bundle {
                 ),
             ),
         }
+        validate_host_credential(rs, th, errs);
     }
 
     fn lookup_target_host(&self, th: &TargetHost) -> Result<(&Infrastructure, &Output), Error> {
@@ -439,6 +448,22 @@ fn is_variable_name(name: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// The longest `metadata.name` accepted: it becomes one path segment, and
+/// every common file system takes 255 bytes in one.
+pub const MAX_DOCUMENT_NAME: usize = 128;
+
+/// Whether `name` can be `metadata.name`: one path segment that stays where
+/// it is put. Letters, digits, `.`, `_` and `-`, starting with a letter or a
+/// digit, at most [`MAX_DOCUMENT_NAME`] bytes. The name becomes a directory
+/// under `--out` and under the state directory, so `/`, `\`, `..`, a leading
+/// `.` and anything a shell or a tool would read specially are all refused.
+pub fn is_document_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && name.len() <= MAX_DOCUMENT_NAME
+}
+
 fn validate_document(doc: &Document, errs: &mut ErrorList) {
     let pos = doc.position();
     let mut fail =
@@ -446,6 +471,18 @@ fn validate_document(doc: &Document, errs: &mut ErrorList) {
 
     if doc.name().is_empty() {
         fail(pos, "metadata.name".into(), "missing required field".into());
+    } else if !is_document_name(doc.name()) {
+        fail(
+            pos,
+            "metadata.name".into(),
+            format!(
+                "{:?} cannot name a document: it becomes a directory under the output and \
+                 state directories, so it must start with a letter or a digit, hold only \
+                 letters, digits, `.`, `_` and `-`, and be at most {MAX_DOCUMENT_NAME} \
+                 characters",
+                doc.name()
+            ),
+        );
     }
     if doc.target().is_empty() {
         fail(pos, "spec.target".into(), "missing required field".into());
@@ -597,7 +634,244 @@ fn validate_document(doc: &Document, errs: &mut ErrorList) {
         }
     }
 
+    validate_credentials(doc, &mut fail);
     crate::resolve::check(doc, errs);
+}
+
+/// What is wrong with the credential a `targetHost` names, if it names one.
+fn validate_host_credential(rs: &ResourceSet, th: &TargetHost, errs: &mut ErrorList) {
+    if th.credential.is_empty() {
+        return;
+    }
+    let mut fail = |path: &str, msg: String| errs.push(Error::new(th.pos.clone(), path, msg));
+    if meridian_expr::has_interpolation(&th.credential) {
+        fail(
+            "spec.targetHost.credential",
+            "a credential is named as written, so that which identity reaches the \
+             host can be read off the document; it is not interpolated"
+                .into(),
+        );
+        return;
+    }
+    let Some(credential) = rs.spec.credentials.iter().find(|c| c.name == th.credential) else {
+        let declared: Vec<&str> = rs
+            .spec
+            .credentials
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        fail(
+            "spec.targetHost.credential",
+            format!(
+                "no credential named {:?} is declared in spec.credentials{}",
+                th.credential,
+                if declared.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (declared: {})", declared.join(", "))
+                }
+            ),
+        );
+        return;
+    };
+    if !HOST_CREDENTIAL_TYPES.contains(&credential.r#type.as_str()) && credential.kind().is_some() {
+        fail(
+            "spec.targetHost.credential",
+            format!(
+                "a host takes {} credential; {:?} is {}",
+                describe_types(HOST_CREDENTIAL_TYPES),
+                credential.name,
+                credential.r#type
+            ),
+        );
+    }
+}
+
+/// The credential types a host is reached with.
+pub const HOST_CREDENTIAL_TYPES: &[&str] = &["ssh", "usernamePassword"];
+
+/// Credential types as a sentence names them: `an ssh or usernamePassword`.
+fn describe_types(types: &[&str]) -> String {
+    format!(
+        "{} {}",
+        article(types.first().copied().unwrap_or("")),
+        types.join(" or ")
+    )
+}
+
+/// `an` or `a`, by how a type's name is said: `an aws`, `an ssh`, `a
+/// usernamePassword`.
+fn article(name: &str) -> &'static str {
+    let mut letters = name.chars();
+    match (letters.next(), letters.next()) {
+        (Some('a' | 'e' | 'i' | 'o'), _) => "an",
+        (Some('s'), Some(next)) if !"aeiouy".contains(next) => "an",
+        _ => "a",
+    }
+}
+
+/// The secret a field of a credential reads, when the field is exactly
+/// `${{ secret.<name> }}` and nothing more.
+pub fn secret_reference(text: &str) -> Option<&str> {
+    let inner = text.trim().strip_prefix("${{")?.strip_suffix("}}")?.trim();
+    let name = inner.strip_prefix("secret.")?;
+    is_variable_name(name).then_some(name)
+}
+
+/// What is wrong with each entry of `spec.credentials`: the structure of a
+/// declaration, which is settled by its type. What an interpolation in a
+/// plain field reads is checked with the rest of the document's text.
+fn validate_credentials(doc: &Document, fail: &mut impl FnMut(&Position, String, String)) {
+    let types: Vec<&str> = meridian_secret::credential_types()
+        .iter()
+        .map(|t| t.name)
+        .collect();
+    let declared_secrets: Vec<&str> = doc.secrets().iter().map(|s| s.name.as_str()).collect();
+    let mut seen: HashMap<&str, &Position> = HashMap::new();
+    for (i, credential) in doc.credentials().iter().enumerate() {
+        let path = format!("spec.credentials[{i}]");
+        let pos = &credential.pos;
+        if credential.name.is_empty() {
+            fail(
+                pos,
+                format!("{path}.name"),
+                "a credential needs a name; it is used by that name".into(),
+            );
+        } else if !is_variable_name(&credential.name) {
+            fail(
+                pos,
+                format!("{path}.name"),
+                format!(
+                    "{:?} is not a usable name: a credential is used by name, so its name is \
+                     a letter or an underscore, then letters, digits and underscores",
+                    credential.name
+                ),
+            );
+        } else if let Some(first) = seen.get(credential.name.as_str()) {
+            fail(
+                pos,
+                format!("{path}.name"),
+                format!(
+                    "the credential {:?} is declared twice (first at {first})",
+                    credential.name
+                ),
+            );
+        } else {
+            seen.insert(&credential.name, pos);
+        }
+        if !credential.from.is_empty() && !credential.is_ambient() {
+            fail(
+                pos,
+                format!("{path}.from"),
+                format!(
+                    "from is {CREDENTIAL_FROM_AMBIENT}, or left out: ambient means the tool \
+                     finds the credential for itself, as it does when none is named"
+                ),
+            );
+        }
+        let Some(kind) = credential.kind() else {
+            let why = if credential.r#type.is_empty() {
+                format!("a credential needs a type: one of {}", types.join(", "))
+            } else {
+                format!(
+                    "{:?} is not a credential type this version has; type is one of {}",
+                    credential.r#type,
+                    types.join(", ")
+                )
+            };
+            fail(pos, format!("{path}.type"), why);
+            continue;
+        };
+        for (field, value) in &credential.fields {
+            let at = format!("{path}.{field}");
+            if !kind.has(field) {
+                fail(
+                    pos,
+                    at,
+                    format!(
+                        "{field} is not a field of {} {} credential; its fields are {}",
+                        describe_types(&[kind.name])
+                            .split(' ')
+                            .next()
+                            .unwrap_or("a"),
+                        kind.name,
+                        kind.fields().join(", ")
+                    ),
+                );
+            } else if kind.is_secret(field) {
+                match value {
+                    Value::String(text) => match secret_reference(text) {
+                        Some(name) if declared_secrets.contains(&name) => {}
+                        Some(name) => fail(
+                            pos,
+                            at,
+                            format!(
+                                "{field} reads secret.{name}, which spec.secrets does not \
+                                 declare{}",
+                                if declared_secrets.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(" (declared: {})", declared_secrets.join(", "))
+                                }
+                            ),
+                        ),
+                        None if meridian_expr::has_interpolation(text) => fail(
+                            pos,
+                            at,
+                            format!(
+                                "{field} is one declared secret, read as it is: \
+                                 ${{{{ secret.<name> }}}} and nothing more, so that the whole \
+                                 of it is protected"
+                            ),
+                        ),
+                        None => fail(
+                            pos,
+                            at,
+                            format!(
+                                "a {field} is written in the document; declare a secret and \
+                                 read it with ${{{{ secret.<name> }}}}"
+                            ),
+                        ),
+                    },
+                    _ => fail(
+                        pos,
+                        at,
+                        format!(
+                            "a {field} is written in the document; declare a secret and read \
+                             it with ${{{{ secret.<name> }}}}"
+                        ),
+                    ),
+                }
+            } else if kind.is_flag(field) {
+                if !matches!(value, Value::Bool(_)) {
+                    fail(pos, at, format!("{field} is true or false"));
+                }
+            } else if !matches!(value, Value::String(_)) {
+                fail(
+                    pos,
+                    at,
+                    format!("{field} is text, found {}", value.describe()),
+                );
+            }
+        }
+        if !credential.is_ambient() && !kind.complete(|field| credential.fields.contains_key(field))
+        {
+            fail(
+                pos,
+                path.clone(),
+                format!(
+                    "{} {} credential needs {}; or from: {CREDENTIAL_FROM_AMBIENT}, for one \
+                     the tool finds itself",
+                    describe_types(&[kind.name])
+                        .split(' ')
+                        .next()
+                        .unwrap_or("a"),
+                    kind.name,
+                    kind.needs()
+                ),
+            );
+        }
+    }
 }
 
 fn check_if_missing(
