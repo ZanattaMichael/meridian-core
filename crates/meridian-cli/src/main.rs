@@ -4,6 +4,25 @@
 //! orchestrator reports. Stdout carries results, stderr carries the tools'
 //! own output and errors, and the exit status says whether everything asked
 //! for was done.
+//!
+//! Everything written to stdout goes through [`Stdout`], so that a reader
+//! which stops early (`meridian plugins | head`) ends the printing, not the
+//! command: what remains to be done is done, and the exit status is the
+//! command's own.
+
+/// Prints a line to stdout; see [`Stdout`].
+macro_rules! outln {
+    ($($arg:tt)*) => {
+        $crate::Stdout.line(format_args!($($arg)*))
+    };
+}
+
+/// Prints to stdout without a newline; see [`Stdout`].
+macro_rules! out {
+    ($($arg:tt)*) => {
+        $crate::Stdout.text(format_args!($($arg)*))
+    };
+}
 
 mod tools;
 
@@ -70,7 +89,7 @@ static TRUSTED_KEYS: OnceLock<TrustedKeys> = OnceLock::new();
 static MODULE_SIGNATURES: OnceLock<meridian_module::Verification> = OnceLock::new();
 
 /// Every key to trust: the release's own, then the ones named.
-fn trusted_keys() -> Result<Vec<PublicKey>, Failure> {
+pub(crate) fn trusted_keys() -> Result<Vec<PublicKey>, Failure> {
     match TRUSTED_KEYS.get() {
         Some(keys) => keys.read(),
         None => TrustedKeys::default().read(),
@@ -126,8 +145,16 @@ enum Command {
         workflow: Workflow,
         /// Continue an apply that failed or was interrupted: stages it
         /// already applied, from documents that have not changed since, are
-        /// left alone. With no value, the last apply; or a run id
-        #[arg(long, value_name = "RUN", num_args = 0..=1, default_missing_value = "last")]
+        /// left alone. `--resume` continues the last apply; `--resume=RUN`
+        /// a run by its id (with `=`, so that a file is never taken for a
+        /// run)
+        #[arg(
+            long,
+            value_name = "RUN",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "last"
+        )]
         resume: Option<String>,
         /// What to do when a stage fails: stop, leaving what was applied in
         /// place, or rollback, putting every stage this run changed back to
@@ -315,6 +342,10 @@ enum ModuleCommand {
         /// Talk plain HTTP. For a registry on a trusted network only
         #[arg(long)]
         insecure: bool,
+        /// Log in with this credential from spec.credentials in
+        /// meridian.yaml, instead of a login from the Docker configuration
+        #[arg(long, value_name = "NAME")]
+        credential: Option<String>,
     },
 }
 
@@ -593,6 +624,25 @@ enum SecretCommand {
         )]
         state_dir: PathBuf,
     },
+    /// Store a value in the first place a declared secret names that
+    /// meridian can write (the kernel keyring, the Secret Service). The
+    /// value is read from standard input, or typed at a prompt that does
+    /// not show it; never from an argument
+    Set {
+        /// The secret's name, as the documents declare it
+        name: String,
+        /// The documents that declare it
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Where fetched modules are kept, for a file written @module:path
+        #[arg(
+            long,
+            value_name = "DIR",
+            env = "MERIDIAN_STATE_DIR",
+            default_value = ".meridian"
+        )]
+        state_dir: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -603,12 +653,20 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let outcome = settle(cli.trust).and_then(|()| match cli.command {
         Command::Validate { files, state_dir } => load(&files, &state_dir).map(|bundle| {
-            println!("{} valid", count(bundle.documents.len(), "document"));
+            outln!("{} valid", count(bundle.documents.len(), "document"));
         }),
         Command::Module { command, state_dir } => module(command, &state_dir),
         Command::Secret {
             command: SecretCommand::Check { files, state_dir },
         } => check_secrets(&files, &state_dir),
+        Command::Secret {
+            command:
+                SecretCommand::Set {
+                    name,
+                    files,
+                    state_dir,
+                },
+        } => set_secret(&name, &files, &state_dir),
         Command::Compile { workflow, out } => orchestrate(
             &workflow,
             Mode::Compile,
@@ -688,7 +746,7 @@ fn main() -> ExitCode {
         ),
         Command::Migrate { files, to, check } => migrate(&files, to.as_deref(), check),
         Command::Version => {
-            print!("{}", versions());
+            out!("{}", versions());
             Ok(())
         }
         Command::Fmt(args) => tools::format(&args),
@@ -697,7 +755,11 @@ fn main() -> ExitCode {
         Command::Lsp(args) => tools::lsp(&args),
         Command::Signing { command } => signing(command),
     });
+    // What stdout holds is the command's result, so a result that could not
+    // be written (other than to a reader that went away) is a failure.
+    let _ = Stdout.flush();
     match outcome {
+        Ok(()) if Stdout::failed() => ExitCode::FAILURE,
         Ok(()) => ExitCode::SUCCESS,
         Err(Failure::Reported) => ExitCode::FAILURE,
         Err(Failure::Drifted) => ExitCode::from(2),
@@ -705,6 +767,69 @@ fn main() -> ExitCode {
             eprintln!("error: {msg}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Where results are printed. It is the process's stdout until a write fails;
+/// from then on everything written to it is dropped, so a command keeps
+/// running to its own end and exits with its own status.
+///
+/// A reader that closed the pipe (`| head`) is the usual cause, and is no
+/// fault of the command: nothing is said. Any other failure, such as a full
+/// disk behind a redirect, is reported once on stderr and fails the command.
+pub(crate) struct Stdout;
+
+static STDOUT_CLOSED: AtomicBool = AtomicBool::new(false);
+static STDOUT_FAILED: AtomicBool = AtomicBool::new(false);
+
+impl Stdout {
+    pub(crate) fn line(mut self, args: std::fmt::Arguments<'_>) {
+        let _ = self.write_fmt(args).and_then(|()| self.write_all(b"\n"));
+    }
+
+    pub(crate) fn text(mut self, args: std::fmt::Arguments<'_>) {
+        let _ = self.write_fmt(args);
+    }
+
+    /// Whether a write to stdout failed for a reason other than a closed
+    /// pipe, which the command's exit status must say.
+    pub(crate) fn failed() -> bool {
+        STDOUT_FAILED.load(Ordering::Relaxed)
+    }
+
+    fn note(error: std::io::Error) {
+        if STDOUT_CLOSED.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        if error.kind() != std::io::ErrorKind::BrokenPipe {
+            STDOUT_FAILED.store(true, Ordering::Relaxed);
+            eprintln!("error: writing to standard output: {error}");
+        }
+    }
+}
+
+impl Write for Stdout {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if STDOUT_CLOSED.load(Ordering::Relaxed) {
+            return Ok(buf.len());
+        }
+        match std::io::stdout().lock().write(buf) {
+            Ok(n) => Ok(n),
+            Err(e) => {
+                Stdout::note(e);
+                Ok(buf.len())
+            }
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if STDOUT_CLOSED.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        if let Err(e) = std::io::stdout().lock().flush() {
+            Stdout::note(e);
+        }
+        Ok(())
     }
 }
 
@@ -793,13 +918,13 @@ fn migrate(files: &[PathBuf], to: Option<&str>, check: bool) -> Result<(), Failu
             }
         };
         match meridian_ir::migrate(&table, meridian_ir::STEPS, &text, target.number) {
-            Ok(Migrated::Unchanged) => println!("{name}: already at {}", target.name()),
+            Ok(Migrated::Unchanged) => outln!("{name}: already at {}", target.name()),
             Ok(Migrated::Rewritten(_)) if check => {
                 would_change += 1;
-                println!("{name}: would be migrated to {}", target.name());
+                outln!("{name}: would be migrated to {}", target.name());
             }
             Ok(Migrated::Rewritten(new)) => match replace_file(file, &new) {
-                Ok(()) => println!("{name}: migrated to {}", target.name()),
+                Ok(()) => outln!("{name}: migrated to {}", target.name()),
                 Err(e) => {
                     eprintln!("error: {name}: cannot write file: {e}");
                     failed = true;
@@ -911,29 +1036,29 @@ fn module(command: ModuleCommand, state_dir: &Path) -> Result<(), Failure> {
         ModuleCommand::Verify => {
             let checks = meridian_module::verify(&project).map_err(module_failure)?;
             if checks.is_empty() {
-                println!("no modules are pinned");
+                outln!("no modules are pinned");
             }
             let mut failed = 0;
             for check in &checks {
                 match &check.problem {
                     None => match &check.signature {
-                        Signature::NotChecked => println!("ok      {}", named(&check.module)),
+                        Signature::NotChecked => outln!("ok      {}", named(&check.module)),
                         Signature::Verified { key_id } => {
-                            println!("ok      {}  signed by key {key_id}", named(&check.module))
+                            outln!("ok      {}  signed by key {key_id}", named(&check.module))
                         }
                         Signature::Unsigned => {
-                            println!("ok      {}  not signed", named(&check.module))
+                            outln!("ok      {}  not signed", named(&check.module))
                         }
-                        Signature::Invalid(why) => println!(
+                        Signature::Invalid(why) => outln!(
                             "ok      {}  signature does not pass: {why}",
                             named(&check.module)
                         ),
                     },
                     Some(problem) => {
                         failed += 1;
-                        println!("FAILED  {}", named(&check.module));
+                        outln!("FAILED  {}", named(&check.module));
                         for line in problem.lines() {
-                            println!("    {line}");
+                            outln!("    {line}");
                         }
                     }
                 }
@@ -952,7 +1077,7 @@ fn module(command: ModuleCommand, state_dir: &Path) -> Result<(), Failure> {
                 .map_err(module_failure)?
                 .unwrap_or_default();
             if lock.modules.is_empty() {
-                println!("no modules are pinned");
+                outln!("no modules are pinned");
             }
             let width = |f: fn(&meridian_module::Locked) -> usize| {
                 lock.modules.iter().map(f).max().unwrap_or(0)
@@ -964,14 +1089,14 @@ fn module(command: ModuleCommand, state_dir: &Path) -> Result<(), Failure> {
                 } else {
                     &m.version
                 };
-                println!("{:<names$}  {version:<versions$}  {}", m.name, m.source);
+                outln!("{:<names$}  {version:<versions$}  {}", m.name, m.source);
             }
             return Ok(());
         }
         ModuleCommand::Sign { key } => {
             let key = SecretKey::read(&key).map_err(Failure::Message)?;
             let signed = meridian_module::sign(project.dir, &key).map_err(module_failure)?;
-            println!(
+            outln!(
                 "signed {}{} with key {}",
                 signed.name,
                 if signed.version.is_empty() {
@@ -981,15 +1106,16 @@ fn module(command: ModuleCommand, state_dir: &Path) -> Result<(), Failure> {
                 },
                 signed.key_id
             );
-            println!("  integrity: {}", signed.integrity);
-            println!("  wrote:     {}", meridian_module::SIGNATURE_FILE);
+            outln!("  integrity: {}", signed.integrity);
+            outln!("  wrote:     {}", meridian_module::SIGNATURE_FILE);
             return Ok(());
         }
         ModuleCommand::Pack { out } => return pack_module(&project, out),
         ModuleCommand::Push {
             repository,
             insecure,
-        } => return push_module(&project, &repository, insecure),
+            credential,
+        } => return push_module(&project, &repository, insecure, credential.as_deref()),
     };
 
     let report = meridian_module::install(&project, mode).map_err(module_failure)?;
@@ -997,24 +1123,24 @@ fn module(command: ModuleCommand, state_dir: &Path) -> Result<(), Failure> {
     let mut unchanged = 0;
     for (m, change) in &report.changes {
         match change {
-            Change::Added => println!("+ {} ({})", named(m), m.source),
+            Change::Added => outln!("+ {} ({})", named(m), m.source),
             Change::Updated { from } if *from != m.version && !m.version.is_empty() => {
-                println!("~ {} {from} -> {}", m.name, m.version)
+                outln!("~ {} {from} -> {}", m.name, m.version)
             }
-            Change::Updated { from } => println!("~ {} (was {from})", named(m)),
-            Change::Removed => println!("- {}", named(m)),
+            Change::Updated { from } => outln!("~ {} (was {from})", named(m)),
+            Change::Removed => outln!("- {}", named(m)),
             Change::Unchanged => unchanged += 1,
         }
     }
     if unchanged > 0 {
-        println!("{} unchanged", count(unchanged, "module"));
+        outln!("{} unchanged", count(unchanged, "module"));
     }
     if report.wrote_lock {
-        println!("wrote {LOCK_FILE}");
+        outln!("wrote {LOCK_FILE}");
     } else if report.lock.modules.is_empty() {
-        println!("the project requires no modules");
+        outln!("the project requires no modules");
     } else {
-        println!("{LOCK_FILE} is up to date");
+        outln!("{LOCK_FILE} is up to date");
     }
     Ok(())
 }
@@ -1047,10 +1173,10 @@ fn pack_module(
     if let Err(e) = written {
         return Err(Failure::Message(format!("writing {}: {e}", out.display())));
     }
-    println!("packed {} {version} into {}", manifest.name, out.display());
-    println!("  size:       {} bytes", archive.len());
-    println!("  integrity:  {integrity}");
-    println!("  media type: {}", meridian_module::LAYER_MEDIA_TYPE);
+    outln!("packed {} {version} into {}", manifest.name, out.display());
+    outln!("  size:       {} bytes", archive.len());
+    outln!("  integrity:  {integrity}");
+    outln!("  media type: {}", meridian_module::LAYER_MEDIA_TYPE);
     Ok(())
 }
 
@@ -1058,8 +1184,13 @@ fn push_module(
     project: &meridian_module::Project<'_>,
     repository: &str,
     insecure: bool,
+    credential: Option<&str>,
 ) -> Result<(), Failure> {
     let manifest = meridian_module::Manifest::load(project.dir).map_err(module_failure)?;
+    let login = credential
+        .map(|name| meridian_module::resolve_login(&manifest, name))
+        .transpose()
+        .map_err(module_failure)?;
     let Some(version) = &manifest.version else {
         return Err(Failure::Message(format!(
             "{} has no metadata.version, and a module is published as a version",
@@ -1070,6 +1201,7 @@ fn push_module(
     let pushed = meridian_module::push(
         repository,
         insecure,
+        login.as_ref(),
         &manifest.name,
         version,
         &manifest.description,
@@ -1077,19 +1209,20 @@ fn push_module(
     )
     .map_err(module_failure)?;
     if pushed.already_published {
-        println!(
+        outln!(
             "{} {version} is already published in {repository}, with this content",
             manifest.name
         );
     } else {
-        println!(
+        outln!(
             "published {} {version} to {repository}:{}",
-            manifest.name, pushed.tag
+            manifest.name,
+            pushed.tag
         );
     }
-    println!("  digest:     {}", pushed.digest);
+    outln!("  digest:     {}", pushed.digest);
     let integrity = meridian_module::hash_dir(project.dir).map_err(module_failure)?;
-    println!("  integrity:  {integrity}");
+    outln!("  integrity:  {integrity}");
     Ok(())
 }
 
@@ -1170,19 +1303,19 @@ fn check_rules(
     let checked = meridian_rules::check_files(&files, &scope, &command_line)
         .map_err(|refusal| Failure::Message(refusal.to_string()))?;
     let Some((path, rules)) = &checked.rules else {
-        println!(
+        outln!(
             "no rules file ({} beside {}): nothing was checked",
             meridian_rules::RULES_FILE,
             files.hierarchy.display()
         );
         return Ok(());
     };
-    println!(
+    outln!(
         "rules: {} ({})",
         path.display(),
         count(rules.rules.len(), "rule")
     );
-    println!("layers, least specific first:");
+    outln!("layers, least specific first:");
     let width = checked
         .groups
         .iter()
@@ -1191,12 +1324,12 @@ fn check_rules(
         .unwrap_or(0);
     for (layer, group) in &checked.groups {
         if rules.groups.is_empty() {
-            println!("  {layer}");
+            outln!("  {layer}");
         } else {
-            println!("  {layer:width$}  {group}");
+            outln!("  {layer:width$}  {group}");
         }
     }
-    println!("no violations");
+    outln!("no violations");
     Ok(())
 }
 
@@ -1324,9 +1457,9 @@ fn signing(command: SigningCommand) -> Result<(), Failure> {
             write_secret(&secret, &format!("{}\n", key.to_text()))
                 .and_then(|()| std::fs::write(&public, format!("{}\n", key.public().to_text())))
                 .map_err(|e| Failure::Message(format!("writing the key pair: {e}")))?;
-            println!("key {}", key.public().id());
-            println!("  secret: {}", secret.display());
-            println!("  public: {}", public.display());
+            outln!("key {}", key.public().id());
+            outln!("  secret: {}", secret.display());
+            outln!("  public: {}", public.display());
             Ok(())
         }
         SigningCommand::Sign { key, binaries } => {
@@ -1336,7 +1469,7 @@ fn signing(command: SigningCommand) -> Result<(), Failure> {
                 let path = signature_path(&binary);
                 std::fs::write(&path, text)
                     .map_err(|e| Failure::Message(format!("writing {}: {e}", path.display())))?;
-                println!("signed {} with key {}", binary.display(), key.public().id());
+                outln!("signed {} with key {}", binary.display(), key.public().id());
             }
             Ok(())
         }
@@ -1346,7 +1479,7 @@ fn signing(command: SigningCommand) -> Result<(), Failure> {
             for binary in binaries {
                 let found = meridian_plugin_host::signature::verify_file(&binary, &trusted);
                 failed |= !matches!(found, Signature::Verified { .. });
-                println!("{}: {found}", binary.display());
+                outln!("{}: {found}", binary.display());
             }
             if failed {
                 Err(Failure::Reported)
@@ -1394,7 +1527,7 @@ fn list_plugins(plugins: &PluginDirs) -> Result<(), Failure> {
     let registry = registry(plugins)?;
     let names = registry.names();
     if names.is_empty() {
-        println!("no plugins found");
+        outln!("no plugins found");
         return Ok(());
     }
     for name in names {
@@ -1421,30 +1554,67 @@ fn list_plugins(plugins: &PluginDirs) -> Result<(), Failure> {
         if info.exports_schemas {
             can.push("schemas");
         }
-        println!("{name}");
-        println!("  category:  {}", info.category);
-        println!("  can:       {}", can.join(", "));
-        println!("  resources: {}", info.resource_types.join(", "));
+        outln!("{name}");
+        outln!("  category:  {}", info.category);
+        outln!("  can:       {}", can.join(", "));
+        outln!("  resources: {}", info.resource_types.join(", "));
         if !info.target_versions.is_empty() {
-            println!("  versions:  {}", info.target_versions.join(", "));
+            outln!("  versions:  {}", info.target_versions.join(", "));
         }
         for format in &info.import_formats {
-            println!(
+            outln!(
                 "  imports:   {} ({})",
                 format.description,
                 format.patterns.join(", ")
             );
         }
-        println!(
+        outln!(
             "  sdk:       {} (protocol {})",
-            info.sdk_version, info.protocol_version
+            info.sdk_version,
+            info.protocol_version
         );
-        println!("  binary:    {}", info.path);
-        println!("  signature: {}", info.signature);
+        outln!("  binary:    {}", info.path);
+        outln!("  signature: {}", info.signature);
     }
     registry
         .close()
         .map_err(|e| Failure::Message(e.to_string()))
+}
+
+/// Stores a value for a declared secret in the first place it names that
+/// meridian can write. The value goes from standard input to protected
+/// memory to the store, and is in nothing this prints.
+fn set_secret(name: &str, files: &[PathBuf], state_dir: &Path) -> Result<(), Failure> {
+    let bundle = load(files, state_dir)?;
+    let Some(places) = meridian_orchestrator::places_declared(&bundle.documents, name) else {
+        let known = meridian_orchestrator::names_declared(&bundle.documents);
+        return Err(Failure::Message(if known.is_empty() {
+            format!("{name:?} is not declared: these documents declare no secret")
+        } else {
+            format!("{name:?} is not declared (declared: {})", known.join(", "))
+        }));
+    };
+    if !places.iter().any(|place| place.writable()) {
+        let named: Vec<String> = places.iter().map(|place| place.place()).collect();
+        return Err(Failure::Message(format!(
+            "{name:?} names no place meridian can write. It is looked for in {}. meridian \
+             writes the kernel keyring (from: keyring) and the Secret Service (from: \
+             secret-service); every other place is written with its own tool",
+            named.join(", then in ")
+        )));
+    }
+    let value = meridian_secret::read_from_stdin(&format!("Value for {name} (not shown): "))
+        .map_err(|e| Failure::Message(format!("reading the value: {e}")))?;
+    if value.is_empty() {
+        return Err(Failure::Message(
+            "no value was given, so nothing was stored".to_owned(),
+        ));
+    }
+    let at = meridian_secret::store_first(&places, &format!("Meridian: {name}"), &value)
+        .map_err(|e| Failure::Message(format!("{name:?} was not stored: {e}")))?;
+    let place = &places[at];
+    outln!("stored {name} in {}", place.place());
+    Ok(())
 }
 
 /// Says where each declared secret comes from and whether that place would
@@ -1460,8 +1630,14 @@ fn check_secrets(files: &[PathBuf], state_dir: &Path) -> Result<(), Failure> {
         if rows.is_empty() {
             continue;
         }
-        println!("{} ({})", doc.name(), doc.position().file);
+        outln!("{} ({})", doc.name(), doc.position().file);
         let width = rows.iter().map(|row| row.name.len()).max().unwrap_or(0);
+        let provider = rows
+            .iter()
+            .map(|row| row.from.len())
+            .max()
+            .unwrap_or(0)
+            .max(5);
         // Each row is a declaration and what a probe found. No value is
         // read by this command.
         for row in &rows {
@@ -1472,12 +1648,13 @@ fn check_secrets(files: &[PathBuf], state_dir: &Path) -> Result<(), Failure> {
                 (Probe::Absent(_), true) => "absent, optional",
                 (Probe::Absent(_), false) => "MISSING",
                 (Probe::Refused(_), _) => "REFUSED",
+                (Probe::Unavailable(_), _) => "UNAVAILABLE",
             };
             if row.unanswered() {
                 unanswered += 1;
             }
-            println!(
-                "  {:width$}  {:5}  {state}: {}",
+            outln!(
+                "  {:width$}  {:provider$}  {state}: {}",
                 row.name,
                 row.from,
                 row.probe.words()
@@ -1485,7 +1662,7 @@ fn check_secrets(files: &[PathBuf], state_dir: &Path) -> Result<(), Failure> {
         }
     }
     if declared == 0 {
-        println!("no secret is declared");
+        outln!("no secret is declared");
     }
     if unanswered == 0 {
         Ok(())
@@ -1532,8 +1709,10 @@ fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Result<(), Fai
     for text in &workflow.selector {
         command.push(format!("-l {text}"));
     }
-    if resume.is_some() {
-        command.push("--resume".to_owned());
+    match resume {
+        None => {}
+        Some("last") => command.push("--resume".to_owned()),
+        Some(run) => command.push(format!("--resume={run}")),
     }
     if how.rollback_on_failure {
         command.push("--on-failure rollback".to_owned());
@@ -1618,7 +1797,7 @@ fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Result<(), Fai
         if workflow.events.is_some() {
             eprintln!("{line}");
         } else {
-            println!("{line}");
+            outln!("{line}");
         }
     }
     if !report.succeeded() {
@@ -1638,10 +1817,23 @@ fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Result<(), Fai
                 report.run_id
             );
         } else if mode == Mode::Apply && report.rollbacks.is_empty() {
+            // A line that can be pasted: the same documents and selection.
+            let files: Vec<String> = workflow
+                .files
+                .iter()
+                .map(|f| f.display().to_string())
+                .collect();
+            let selectors: Vec<String> = workflow
+                .selector
+                .iter()
+                .map(|text| format!(" -l {text}"))
+                .collect();
             eprintln!(
-                "run {} failed. Once the cause is fixed, `meridian apply --resume` with the \
-                 same documents continues from the stage that failed",
-                report.run_id
+                "run {} failed. Once the cause is fixed, `meridian apply --resume {}{}` \
+                 continues from the stage that failed",
+                report.run_id,
+                files.join(" "),
+                selectors.join("")
             );
         }
         return Err(Failure::Reported);
@@ -1658,12 +1850,12 @@ fn status(state: &State) -> Result<(), Failure> {
     let backend = backend.as_ref();
     let held = lock::holder(backend).map_err(Failure::Message)?;
     match record::last_run(backend, None).map_err(Failure::Message)? {
-        None => println!("no run has been recorded in {}", backend.describe()),
+        None => outln!("no run has been recorded in {}", backend.describe()),
         Some(run) => print_run(&run, held.as_ref().is_some_and(|lock| lock.id == run.id)),
     }
     match held {
-        Some(lock) => println!("locked: {lock}"),
-        None => println!("not locked"),
+        Some(lock) => outln!("locked: {lock}"),
+        None => outln!("not locked"),
     }
     Ok(())
 }
@@ -1675,9 +1867,9 @@ fn print_run(run: &RunRecord, holds_lock: bool) {
         }
         (status, _) => status.as_str(),
     };
-    println!("run {}: {}, {status}", run.id, run.mode);
+    outln!("run {}: {}, {status}", run.id, run.mode);
     if !run.command.is_empty() {
-        println!("  command:  meridian {}", run.command);
+        outln!("  command:  meridian {}", run.command);
     }
     let by = match (run.user.as_str(), run.host.as_str()) {
         ("", "") => String::new(),
@@ -1687,12 +1879,12 @@ fn print_run(run: &RunRecord, holds_lock: bool) {
             if host.is_empty() { "?" } else { host }
         ),
     };
-    println!("  started:  {}{by}", run.started);
+    outln!("  started:  {}{by}", run.started);
     if !run.finished.is_empty() {
-        println!("  finished: {}", run.finished);
+        outln!("  finished: {}", run.finished);
     }
     if !run.resumes.is_empty() {
-        println!("  resumes:  {}", run.resumes);
+        outln!("  resumes:  {}", run.resumes);
     }
     for step in &run.steps {
         let on = if step.endpoint.is_empty() {
@@ -1713,7 +1905,7 @@ fn print_run(run: &RunRecord, holds_lock: bool) {
         if step.changes > 0 {
             line.push_str(&format!(", {}", count(step.changes as usize, "change")));
         }
-        println!("{line}");
+        outln!("{line}");
     }
 }
 
@@ -1723,7 +1915,7 @@ fn runs(state: &State) -> Result<(), Failure> {
     let backend = backend.as_ref();
     let ids = record::list_runs(backend).map_err(Failure::Message)?;
     if ids.is_empty() {
-        println!("no run has been recorded in {}", backend.describe());
+        outln!("no run has been recorded in {}", backend.describe());
         return Ok(());
     }
     for id in ids {
@@ -1748,7 +1940,7 @@ fn runs(state: &State) -> Result<(), Failure> {
         if !run.resumes.is_empty() {
             line.push_str(&format!(", resumes {}", run.resumes));
         }
-        println!("{line}");
+        outln!("{line}");
     }
     Ok(())
 }
@@ -1780,7 +1972,7 @@ fn events(state: &State, run: Option<&str>, types: &[String]) -> Result<(), Fail
             }
         },
     };
-    let mut out = std::io::stdout().lock();
+    let mut out = Stdout;
     for event in record::load_events(backend, &id).map_err(Failure::Message)? {
         if types.is_empty() || types.iter().any(|pattern| event.matches(pattern)) {
             let _ = writeln!(out, "{}", event.to_json());
@@ -1793,7 +1985,7 @@ fn events(state: &State, run: Option<&str>, types: &[String]) -> Result<(), Fail
 fn unlock(state: &State, id: &str) -> Result<(), Failure> {
     let backend = backend(state)?;
     let removed = lock::force_unlock(backend.as_ref(), id).map_err(Failure::Message)?;
-    println!("removed {removed}");
+    outln!("removed {removed}");
     Ok(())
 }
 
@@ -1821,13 +2013,13 @@ impl Observer for Printer<'_> {
         if self.events {
             let _ = self.print(&mut std::io::stderr().lock(), report);
         } else {
-            let _ = self.print(&mut std::io::stdout().lock(), report);
+            let _ = self.print(&mut Stdout, report);
         }
     }
 
     fn event(&mut self, event: &Event) {
         if self.events {
-            let _ = writeln!(std::io::stdout().lock(), "{}", event.to_json());
+            let _ = writeln!(Stdout, "{}", event.to_json());
         }
     }
 
@@ -1835,7 +2027,7 @@ impl Observer for Printer<'_> {
         if self.events {
             let _ = print_rollback(&mut std::io::stderr().lock(), report);
         } else {
-            let _ = print_rollback(&mut std::io::stdout().lock(), report);
+            let _ = print_rollback(&mut Stdout, report);
         }
     }
 }
@@ -1939,7 +2131,17 @@ impl Printer<'_> {
                 match (self.mode, self.out) {
                     (Mode::Compile, Some(dir)) => {
                         let dir = dir.join(&report.id.name);
-                        match write_artifact(&dir, report) {
+                        let written = if meridian_ir::is_document_name(&report.id.name) {
+                            write_artifact(&dir, report)
+                        } else {
+                            // Validation refuses such a name; this is the
+                            // last line of defence for the output directory.
+                            Err(std::io::Error::new(
+                                std::io::ErrorKind::InvalidInput,
+                                format!("{:?} is not a safe directory name", report.id.name),
+                            ))
+                        };
+                        match written {
                             Ok(()) => writeln!(
                                 out,
                                 "  compiled {} into {}",

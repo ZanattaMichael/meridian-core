@@ -28,7 +28,8 @@ pub mod signature {
 use std::fmt;
 
 use meridian_sdk::{
-    Capabilities, Category, CompileError, ImportError, ImportFormat, Operations, RunError,
+    Capabilities, Category, CompileError, ImportError, ImportFormat, Operations, PlacedEscape,
+    RunError,
 };
 
 pub use client::{Client, StartOptions, HANDSHAKE_TIMEOUT};
@@ -52,6 +53,9 @@ pub struct Info {
     /// Every IR resource type the target maps.
     pub resource_types: Vec<String>,
     pub capabilities: Capabilities,
+    /// The openings of the tool's own expression syntax that a value placed
+    /// from data must not form, and how each is written as literal text.
+    pub placed_text: Vec<PlacedEscape>,
     /// The kind of tool the target drives.
     pub category: Category,
     /// What the target can do beyond compiling.

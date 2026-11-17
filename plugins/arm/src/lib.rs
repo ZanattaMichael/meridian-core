@@ -40,8 +40,8 @@ mod validate;
 use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, Value,
+    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, PlacedEscape, Position,
+    Resource, ResourceGraph, Value,
 };
 
 pub use emit::{DEPLOYMENT_PATH, TEMPLATE_PATH};
@@ -155,6 +155,16 @@ impl Emitter for Arm {
     /// not from the state of what it deploys to.
     fn capabilities(&self) -> Capabilities {
         Capabilities::default()
+    }
+
+    /// A template string that starts with `[` and ends with `]` is an
+    /// expression Resource Manager evaluates, so a value placed from data
+    /// that opens with `[` is handed over opening with `[[`, which this
+    /// plugin and Resource Manager both read as a literal `[`. What the
+    /// author wrote in square brackets is passed through, as the target's
+    /// page says.
+    fn placed_text(&self) -> Vec<PlacedEscape> {
+        vec![PlacedEscape::at_start("[", "[[")]
     }
 
     fn category(&self) -> Category {

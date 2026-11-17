@@ -1297,6 +1297,7 @@ dependencies = [
  "base64 0.22.1",
  "flate2",
  "meridian-ir",
+ "meridian-secret",
  "meridian-signing",
  "semver",
  "serde_json",

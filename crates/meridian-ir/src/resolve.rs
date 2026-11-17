@@ -18,11 +18,11 @@ use std::sync::Arc;
 
 use meridian_expr::{has_interpolation, Expr, Names, Scope, Template};
 use meridian_secret::{Masker, SecretTable, SecretValue};
-use meridian_value::Value;
+use meridian_value::{PlacedEscape, Value};
 
 use crate::condition::{self, Data};
 use crate::error::{Error, ErrorList, Position};
-use crate::types::{Document, Output, Secret};
+use crate::types::{Document, Output, Secret, TARGET_HOST_FROM_INLINE};
 
 /// Something a false condition took out of a document.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -310,32 +310,48 @@ fn secret_problems(secret: &Secret, path: &str) -> Vec<(String, String)> {
         );
     }
 
-    let written: Vec<(&str, &str)> = [
-        ("name", secret.name.as_str()),
-        ("from", secret.from.as_str()),
-        ("key", secret.key.as_str()),
-        ("path", secret.path.as_str()),
-    ]
-    .into_iter()
-    .chain(secret.command.iter().map(|arg| ("command", arg.as_str())))
-    .collect();
-    for (field, text) in written {
-        if has_interpolation(text) {
-            fail(
-                field,
-                "where a secret comes from is written out, so that it can be read without any \
-                 data; it cannot be interpolated"
-                    .to_owned(),
-            );
-        }
+    if has_interpolation(&secret.name) {
+        fail("name", NOT_INTERPOLATED.to_owned());
     }
-
-    // What the provider needs, and the fields that mean nothing to it.
-    for (field, why) in secret.source().problems() {
-        fail(field, why);
+    // Each place it is looked for: what is written out, what the provider
+    // needs, and the fields that mean nothing to it.
+    for (at, source) in secret.sources().iter().enumerate() {
+        let under = match at {
+            0 => String::new(),
+            n => format!("fallback[{}].", n - 1),
+        };
+        let written = [
+            ("from", source.from.as_str()),
+            ("key", source.key.as_str()),
+            ("path", source.path.as_str()),
+            ("service", source.service.as_str()),
+            ("account", source.account.as_str()),
+        ]
+        .into_iter()
+        .chain(source.command.iter().map(|arg| ("command", arg.as_str())))
+        .chain(
+            source
+                .attributes
+                .iter()
+                .flat_map(|(name, value)| [("attributes", name.as_str()), ("attributes", value)]),
+        );
+        let mut seen = Vec::new();
+        for (field, text) in written {
+            if has_interpolation(text) && !seen.contains(&field) {
+                seen.push(field);
+                fail(&format!("{under}{field}"), NOT_INTERPOLATED.to_owned());
+            }
+        }
+        for (field, why) in source.problems() {
+            fail(&format!("{under}{field}"), why);
+        }
     }
     found
 }
+
+/// Why a secret's declaration takes no interpolation.
+const NOT_INTERPOLATED: &str = "where a secret comes from is written out, so that it can be \
+                                read without any data; it cannot be interpolated";
 
 /// Visits every piece of text inside a value, with the path to it. A mapping
 /// key is visited too, with `is_key` set.
@@ -739,16 +755,15 @@ pub(crate) fn check(doc: &Document, errs: &mut ErrorList) {
 fn place(
     value: &Value,
     scope: &Scope,
-    literal: bool,
+    literal: Option<&[PlacedEscape]>,
     path: &str,
 ) -> Result<Value, (String, String)> {
     Ok(match value {
         Value::String(text) if has_interpolation(text) => {
             let template = Template::parse(text).map_err(|why| (path.to_owned(), why))?;
-            let decided = if literal {
-                template.eval_literal(scope)
-            } else {
-                template.eval(scope)
+            let decided = match literal {
+                Some(escapes) => template.eval_literal_with(scope, escapes),
+                None => template.eval(scope),
             };
             decided.map_err(|why| (path.to_owned(), why))?
         }
@@ -781,15 +796,18 @@ const NOT_FOR_SECRETS: &str = "a secret cannot be used here: this field is shown
                                in a resource's params";
 
 /// Places the interpolations of a field that is text, such as `state`.
-fn place_text(text: &mut String, scope: &Scope, literal: bool) -> Result<(), String> {
+fn place_text(
+    text: &mut String,
+    scope: &Scope,
+    literal: Option<&[PlacedEscape]>,
+) -> Result<(), String> {
     if !has_interpolation(text) {
         return Ok(());
     }
     let template = Template::parse(text)?;
-    let decided = if literal {
-        template.eval_literal(scope)
-    } else {
-        template.eval(scope)
+    let decided = match literal {
+        Some(escapes) => template.eval_literal_with(scope, escapes),
+        None => template.eval(scope),
     }?;
     *text = match decided {
         Value::String(s) => s,
@@ -854,7 +872,7 @@ fn declarations(
             let value = &doc.variables()[&decl.name];
             let body =
                 variable_body(value).map_err(|why| Error::new(pos.clone(), path.clone(), why))?;
-            let value = place(body, &scope, false, &path)
+            let value = place(body, &scope, None, &path)
                 .map_err(|(at, why)| Error::new(pos.clone(), at, why))?;
             vars.insert(decl.name, value);
         } else {
@@ -891,6 +909,20 @@ pub fn resolve(doc: &Document, data: &Data) -> Result<Resolution, Error> {
 /// fetched. The resolved document's params hold only which secret is meant;
 /// `secrets` must outlive every use of them.
 pub fn resolve_with(doc: &Document, data: &Data, secrets: &Secrets) -> Result<Resolution, Error> {
+    resolve_for(doc, data, secrets, &|_| Vec::new())
+}
+
+/// [`resolve_with`], for the target the document turns out to name.
+/// `escapes_for` gives, by target name, the openings of that tool's own
+/// expression syntax that a placed value must not form (what its plugin
+/// declares); the target is decided first, and every value placed after it
+/// is made literal for that tool as well as for Meridian's `${`.
+pub fn resolve_for(
+    doc: &Document,
+    data: &Data,
+    secrets: &Secrets,
+    escapes_for: &dyn Fn(&str) -> Vec<PlacedEscape>,
+) -> Result<Resolution, Error> {
     let pos = doc.position().clone();
 
     if !doc.when().is_empty() {
@@ -905,6 +937,25 @@ pub fn resolve_with(doc: &Document, data: &Data, secrets: &Secrets) -> Result<Re
     }
     let scope = declarations(doc, data, secrets, None)?;
 
+    // The target first: what the tool's own expressions look like depends
+    // on it, and every value placed below is made literal for that tool.
+    let mut document = doc.clone();
+    let placed = |text: &mut String, path: &str| {
+        place_text(text, &scope, None).map_err(|why| Error::new(pos.clone(), path, why))
+    };
+    match &mut document {
+        Document::Infrastructure(d) => placed(&mut d.spec.target, "spec.target")?,
+        Document::ResourceSet(d) => placed(&mut d.spec.target, "spec.target")?,
+    }
+    if document.target().is_empty() {
+        return Err(Error::new(
+            pos.clone(),
+            "spec.target",
+            "the interpolation gives empty text, and a document needs a target",
+        ));
+    }
+    let escapes = escapes_for(document.target());
+
     let mut removed = Vec::new();
     let mut resources = condition::prune_in(doc.resources(), &scope, &mut removed)?;
     for r in &mut resources {
@@ -913,27 +964,22 @@ pub fn resolve_with(doc: &Document, data: &Data, secrets: &Secrets) -> Result<Re
         let fail = |at: String, why: String| {
             Error::new(r.pos.clone(), at, format!("resource {:?}: {why}", r.id))
         };
-        place_text(&mut r.state, &scope, false)
-            .map_err(|why| fail(format!("{path}.state"), why))?;
+        place_text(&mut r.state, &scope, None).map_err(|why| fail(format!("{path}.state"), why))?;
         let mut params = BTreeMap::new();
         for (name, value) in &r.params {
             let at = format!("{path}.params.{name}");
-            let value = place(value, &scope, true, &at).map_err(|(at, why)| fail(at, why))?;
+            let value =
+                place(value, &scope, Some(&escapes), &at).map_err(|(at, why)| fail(at, why))?;
             params.insert(name.clone(), value);
         }
         r.params = params;
     }
 
-    let mut document = doc.clone();
-    let placed = |text: &mut String, path: &str| {
-        place_text(text, &scope, false).map_err(|why| Error::new(pos.clone(), path, why))
-    };
     match &mut document {
         Document::Infrastructure(d) => {
-            placed(&mut d.spec.target, "spec.target")?;
             placed(&mut d.spec.target_version, "spec.targetVersion")?;
             d.spec.resources = resources;
-            d.spec.outputs = outputs(&d.spec.outputs, &scope, &mut removed)?;
+            d.spec.outputs = outputs(&d.spec.outputs, &scope, &escapes, &mut removed)?;
             clear(
                 &mut d.spec.when,
                 &mut d.spec.variables,
@@ -943,12 +989,18 @@ pub fn resolve_with(doc: &Document, data: &Data, secrets: &Secrets) -> Result<Re
             labels(&mut d.metadata.labels, &scope, &pos)?;
         }
         Document::ResourceSet(d) => {
-            placed(&mut d.spec.target, "spec.target")?;
             placed(&mut d.spec.target_version, "spec.targetVersion")?;
             d.spec.resources = resources;
             if let Some(th) = &mut d.spec.target_host {
-                place_text(&mut th.host, &scope, false)
+                place_text(&mut th.host, &scope, None)
                     .map_err(|why| Error::new(th.pos.clone(), "spec.targetHost.host", why))?;
+                // A host written inline was checked by validate; one that
+                // an interpolation placed is checked now, before any tool is
+                // pointed at it.
+                if th.from == TARGET_HOST_FROM_INLINE {
+                    meridian_value::host::check(&th.host)
+                        .map_err(|why| Error::new(th.pos.clone(), "spec.targetHost.host", why))?;
+                }
             }
             clear(
                 &mut d.spec.when,
@@ -958,13 +1010,6 @@ pub fn resolve_with(doc: &Document, data: &Data, secrets: &Secrets) -> Result<Re
             d.spec.secrets.clear();
             labels(&mut d.metadata.labels, &scope, &pos)?;
         }
-    }
-    if document.target().is_empty() {
-        return Err(Error::new(
-            pos.clone(),
-            "spec.target",
-            "the interpolation gives empty text, and a document needs a target",
-        ));
     }
     Ok(Resolution::Kept {
         document: Box::new(document),
@@ -989,7 +1034,7 @@ fn labels(
     pos: &Position,
 ) -> Result<(), Error> {
     for (key, value) in labels.iter_mut() {
-        place_text(value, scope, false)
+        place_text(value, scope, None)
             .map_err(|why| Error::new(pos.clone(), format!("metadata.labels.{key}"), why))?;
     }
     Ok(())
@@ -1009,6 +1054,7 @@ fn clear(
 fn outputs(
     outputs: &[Output],
     scope: &Scope,
+    escapes: &[PlacedEscape],
     removed: &mut Vec<Removed>,
 ) -> Result<Vec<Output>, Error> {
     let mut kept = Vec::with_capacity(outputs.len());
@@ -1029,7 +1075,8 @@ fn outputs(
         }
         let mut o = o.clone();
         o.when.clear();
-        place_text(&mut o.value, scope, true).map_err(|why| fail(format!("{path}.value"), why))?;
+        place_text(&mut o.value, scope, Some(escapes))
+            .map_err(|why| fail(format!("{path}.value"), why))?;
         kept.push(o);
     }
     Ok(kept)

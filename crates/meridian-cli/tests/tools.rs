@@ -512,6 +512,217 @@ fn lsp_serves_an_editor_over_standard_io_with_a_real_plugin() {
     assert!(client.child.wait().unwrap().success());
 }
 
+/// A copy of the `meridian` binary in an empty directory of its own, so the
+/// directory beside the binary, which the server also searches, holds no
+/// plugins; and a copy of the Ansible plugin in a second directory, which
+/// is the one each test points the server at.
+fn isolated(test: &str) -> (PathBuf, PathBuf) {
+    let dir = scratch(test);
+    let exe = Path::new(env!("CARGO_BIN_EXE_meridian"));
+    let bin = dir.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let meridian = bin.join(exe.file_name().unwrap());
+    fs::copy(exe, &meridian).unwrap();
+    let plugins = dir.join("plugins");
+    fs::create_dir_all(&plugins).unwrap();
+    let built = plugin_binary("meridian-target-ansible");
+    fs::copy(&built, plugins.join(built.file_name().unwrap())).unwrap();
+    (meridian, plugins)
+}
+
+/// Starts `meridian lsp` from `exe` with `args`, initializes it with
+/// `options`, and returns the client and every `window/showMessage` the
+/// server sent while starting.
+fn lsp(exe: &Path, args: &[&str], options: Value) -> (Client, Vec<String>) {
+    let mut child = Command::new(exe)
+        .arg("lsp")
+        .args(args)
+        .env_remove("MERIDIAN_PLUGIN_DIR")
+        .env_remove("MERIDIAN_PLUGIN_SIGNATURES")
+        .env_remove("MERIDIAN_TRUSTED_KEYS")
+        .env_remove("MERIDIAN_LSP_TRUST_EDITOR_PLUGIN_DIRS")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let mut client = Client {
+        input: child.stdin.take().unwrap(),
+        output: BufReader::new(child.stdout.take().unwrap()),
+        child,
+    };
+    client.send(json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": { "capabilities": {}, "initializationOptions": options }
+    }));
+    let reply = client.until(|m| m["id"] == 1);
+    assert_eq!(reply["result"]["serverInfo"]["name"], "meridian");
+    client.send(json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }));
+    // Opening a document makes the server publish diagnostics, which come
+    // after every message it showed while starting. The document has a
+    // resource type only the plugin can find fault with.
+    let text = WEB.replace("type: package", "type: pakage");
+    client.send(json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didOpen",
+        "params": { "textDocument": { "uri": "file:///work/web.yaml", "languageId": "yaml", "version": 1, "text": text } }
+    }));
+    let mut shown = Vec::new();
+    loop {
+        let message = client.receive();
+        if message["method"] == "window/showMessage" {
+            shown.push(message["params"]["message"].as_str().unwrap().to_owned());
+        } else if message["method"] == "textDocument/publishDiagnostics" {
+            let codes: Vec<&str> = message["params"]["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|d| d["code"].as_str())
+                .collect();
+            shown.push(format!("diagnostics: {}", codes.join(" ")));
+            return (client, shown);
+        }
+    }
+}
+
+/// Whether the Ansible target was loaded: only the plugin knows that
+/// `pakage` is not one of its resource types.
+fn loaded_ansible(shown: &[String]) -> bool {
+    let diagnostics = shown.last().unwrap();
+    assert!(diagnostics.starts_with("diagnostics:"), "{shown:?}");
+    diagnostics.contains("unsupported-resource-type")
+}
+
+fn stop(mut client: Client) {
+    client.send(json!({ "jsonrpc": "2.0", "id": 9, "method": "shutdown", "params": null }));
+    client.until(|m| m["id"] == 9);
+    client.send(json!({ "jsonrpc": "2.0", "method": "exit", "params": null }));
+    assert!(client.child.wait().unwrap().success());
+}
+
+fn keygen(exe: &Path, dir: &Path) -> (PathBuf, PathBuf) {
+    let secret = dir.join("test.key");
+    let public = dir.join("test.pub");
+    let made = Command::new(exe)
+        .args(["signing", "keygen", "--secret"])
+        .arg(&secret)
+        .arg("--public")
+        .arg(&public)
+        .output()
+        .unwrap();
+    assert!(made.status.success(), "{}", stderr(&made));
+    (secret, public)
+}
+
+fn sign(exe: &Path, secret: &Path, plugins: &Path) {
+    let binary = plugins.join(
+        plugin_binary("meridian-target-ansible")
+            .file_name()
+            .unwrap(),
+    );
+    let signed = Command::new(exe)
+        .args(["signing", "sign", "--key"])
+        .arg(secret)
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(signed.status.success(), "{}", stderr(&signed));
+}
+
+/// `meridian lsp` checks plugin signatures the way `lint` does: the same
+/// `--plugin-signatures` policy, the same trusted keys, and a plugin that
+/// does not pass is reported to the editor instead of started.
+#[test]
+fn lsp_checks_plugin_signatures_under_the_same_policy_as_lint() {
+    let (exe, plugins) = isolated("lsp_signatures");
+    let dir = plugins.to_str().unwrap();
+
+    let (client, shown) = lsp(
+        &exe,
+        &["--plugin-dir", dir, "--plugin-signatures", "require"],
+        json!({}),
+    );
+    assert!(!loaded_ansible(&shown), "{shown:?}");
+    assert!(shown.iter().any(|m| m.contains("not signed")), "{shown:?}");
+    stop(client);
+
+    let (client, shown) = lsp(
+        &exe,
+        &["--plugin-dir", dir, "--plugin-signatures", "warn"],
+        json!({}),
+    );
+    assert!(loaded_ansible(&shown), "{shown:?}");
+    assert!(shown.iter().any(|m| m.contains("not signed")), "{shown:?}");
+    stop(client);
+
+    let (secret, public) = keygen(&exe, plugins.parent().unwrap());
+    sign(&exe, &secret, &plugins);
+    let (client, shown) = lsp(
+        &exe,
+        &[
+            "--plugin-dir",
+            dir,
+            "--plugin-signatures",
+            "require",
+            "--trusted-key",
+            public.to_str().unwrap(),
+        ],
+        json!({}),
+    );
+    assert!(loaded_ansible(&shown), "{shown:?}");
+    assert!(!shown.iter().any(|m| m.contains("signed")), "{shown:?}");
+    stop(client);
+}
+
+/// A plugin directory the editor names in its settings is not the user's
+/// own command line, so plugins in it must be signed by a trusted key,
+/// whatever the policy, unless the server was started trusting the editor.
+#[test]
+fn lsp_loads_plugins_from_editor_directories_only_when_signed_or_trusted() {
+    let (exe, plugins) = isolated("lsp_editor_dirs");
+    let options = json!({ "pluginDirs": [plugins.to_str().unwrap()] });
+
+    let (client, shown) = lsp(&exe, &[], options.clone());
+    assert!(!loaded_ansible(&shown), "{shown:?}");
+    assert!(
+        shown
+            .iter()
+            .any(|m| m.contains("not signed") && m.contains("--trust-editor-plugin-dirs")),
+        "{shown:?}"
+    );
+    stop(client);
+
+    let (client, shown) = lsp(&exe, &["--plugin-signatures", "off"], options.clone());
+    assert!(!loaded_ansible(&shown), "{shown:?}");
+    stop(client);
+
+    let (client, shown) = lsp(&exe, &["--trust-editor-plugin-dirs"], options.clone());
+    assert!(loaded_ansible(&shown), "{shown:?}");
+    stop(client);
+
+    let (secret, public) = keygen(&exe, plugins.parent().unwrap());
+    sign(&exe, &secret, &plugins);
+    let (client, shown) = lsp(
+        &exe,
+        &["--trusted-key", public.to_str().unwrap()],
+        options.clone(),
+    );
+    assert!(loaded_ansible(&shown), "{shown:?}");
+    assert!(!shown.iter().any(|m| m.contains("signed")), "{shown:?}");
+    stop(client);
+
+    // A key the server was not told to trust is no better than no signature.
+    let (client, shown) = lsp(&exe, &[], options);
+    assert!(!loaded_ansible(&shown), "{shown:?}");
+    assert!(
+        shown
+            .iter()
+            .any(|m| m.contains("--trust-editor-plugin-dirs")),
+        "{shown:?}"
+    );
+    stop(client);
+}
+
 /// The schema checked in under `schemas/` is the one `meridian schema`
 /// writes with every plugin loaded, so an editor can be pointed at the file
 /// on GitHub. Record it again with `UPDATE_GOLDEN=1` after the language or a
@@ -548,6 +759,32 @@ fn fmt_leaves_yaml_that_is_not_meridian_alone() {
     );
     let out = meridian(&dir, &["fmt", "--check", "workflow.yml"]);
     assert!(out.status.success(), "{}", stderr(&out));
+}
+
+#[test]
+fn fmt_and_lint_read_a_file_that_starts_with_a_byte_order_mark() {
+    let dir = scratch("fmt-bom");
+    let marked = format!(
+        "\u{feff}{}",
+        WEB.replace("\n  resources:", "\n  resources:   ")
+    );
+    fs::write(dir.join("web.yaml"), &marked).unwrap();
+    let out = meridian(&dir, &["fmt", "--check", "web.yaml"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "web.yaml\n");
+    assert!(!stderr(&out).contains("skipped"), "{}", stderr(&out));
+    // One standard layout: the mark goes with the rest of the layout.
+    let out = meridian(&dir, &["fmt", "web.yaml"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(fs::read_to_string(dir.join("web.yaml")).unwrap(), WEB);
+
+    fs::write(dir.join("web.yaml"), format!("\u{feff}{WEB}")).unwrap();
+    let out = meridian(&dir, &["lint", "web.yaml"]);
+    assert!(out.status.success(), "{}{}", stdout(&out), stderr(&out));
+    assert_eq!(
+        stdout(&out),
+        "1 document in 1 file checked, nothing to report\n"
+    );
 }
 
 /// The examples are what people copy, so they are kept in the standard

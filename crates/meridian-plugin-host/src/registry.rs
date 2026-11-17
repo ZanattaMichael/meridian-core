@@ -186,6 +186,7 @@ impl Registry {
             name: name.clone(),
             resource_types: emitter.supported_resource_types(),
             capabilities: emitter.capabilities(),
+            placed_text: emitter.placed_text(),
             category: emitter.category(),
             target_versions: emitter.target_versions(),
             resource_schemas: emitter.resource_schemas(),

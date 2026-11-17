@@ -121,6 +121,13 @@ The server found no plugin for the target. Plugins are looked for in
 `meridian` binary is in. `meridian plugins` in a terminal lists what is found
 and where.
 
+**"A plugin directory named in the editor's settings only loads plugins
+signed by a trusted key."** A plugin in a `meridian.pluginDirs` directory is
+started only when it is signed, since those settings can come with a project.
+Sign it, or trust the directory by starting the server with
+`MERIDIAN_LSP_TRUST_EDITOR_PLUGIN_DIRS=true` in VS Code's environment;
+[the language server](language-server.md#plugin-signatures) explains.
+
 **Params are not completed for a Terraform or Kubernetes resource.** Those
 targets take their tool's own types, and do not list params.
 [What a target describes](index.md#what-a-target-describes) says which do.

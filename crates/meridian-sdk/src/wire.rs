@@ -4,7 +4,7 @@
 //! one place to break, and neither an emitter nor a host ever handles a
 //! generated type.
 
-use meridian_value::{canonical_map, decode_map, decode_value};
+use meridian_value::{canonical_map, decode_map, decode_value, PlacedEscape};
 
 use crate::import::*;
 use crate::pb;
@@ -148,6 +148,28 @@ pub fn capabilities_to_wire(c: Capabilities) -> pb::Capabilities {
         synthetic_notify: c.synthetic_notify,
         runtime_condition: c.runtime_condition,
     }
+}
+
+pub fn placed_text_to_wire(escapes: &[PlacedEscape]) -> Vec<pb::PlacedEscape> {
+    escapes
+        .iter()
+        .map(|e| pb::PlacedEscape {
+            text: e.text.clone(),
+            written: e.written.clone(),
+            only_at_start: e.only_at_start,
+        })
+        .collect()
+}
+
+pub fn placed_text_from_wire(escapes: Vec<pb::PlacedEscape>) -> Vec<PlacedEscape> {
+    escapes
+        .into_iter()
+        .map(|e| PlacedEscape {
+            text: e.text,
+            written: e.written,
+            only_at_start: e.only_at_start,
+        })
+        .collect()
 }
 
 pub fn capabilities_from_wire(c: Option<pb::Capabilities>) -> Capabilities {

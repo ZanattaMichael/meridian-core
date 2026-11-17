@@ -391,6 +391,23 @@ pub const SECRET_FROM: &[Choice] = &[
         "exec",
         "The output of a program, given by `command`. No shell reads it.",
     ),
+    choice(
+        "keyring",
+        "A key in the Linux kernel keyring, found by its description, `key`.",
+    ),
+    choice(
+        "systemd-creds",
+        "A credential systemd passed to this unit, named by `key`.",
+    ),
+    choice(
+        "secret-service",
+        "An item in the freedesktop Secret Service (GNOME Keyring, KWallet), found by its \
+         `attributes`.",
+    ),
+    choice(
+        "keychain",
+        "A generic password in the macOS keychain, found by `service` and `account`.",
+    ),
 ];
 
 const fn flag(name: &'static str, doc: &'static str) -> Field {
@@ -402,6 +419,71 @@ const fn flag(name: &'static str, doc: &'static str) -> Field {
         role: Role::None,
     }
 }
+
+/// One entry of a secret's `fallback`: another place to look.
+pub const SECRET_SOURCE: Shape = Shape {
+    name: "SecretSource",
+    doc: "Another place a secret is looked for, when the places before it have nothing.",
+    fields: &[
+        Field {
+            name: "from",
+            doc: "The provider the value is fetched from.",
+            required: true,
+            ty: Type::Enum(SECRET_FROM),
+            role: Role::None,
+        },
+        text(
+            "key",
+            false,
+            Role::None,
+            "With `from: env`: the environment variable that holds the value. With \
+             `from: keyring`: the description of the key. With `from: systemd-creds`: the \
+             name of the credential.",
+        ),
+        text(
+            "path",
+            false,
+            Role::None,
+            "With `from: file`: the file that holds the value.",
+        ),
+        Field {
+            name: "command",
+            doc: "With `from: exec`: the program and its arguments, as a list. No shell \
+                  reads them.",
+            required: false,
+            ty: Type::StringList,
+            role: Role::None,
+        },
+        text(
+            "service",
+            false,
+            Role::None,
+            "With `from: keychain`: the service of the keychain item.",
+        ),
+        text(
+            "account",
+            false,
+            Role::None,
+            "With `from: keychain`: the account of the keychain item.",
+        ),
+        Field {
+            name: "attributes",
+            doc: "With `from: secret-service`: the attributes the item is found by. They \
+                  are not secret.",
+            required: false,
+            ty: Type::StringMap,
+            role: Role::None,
+        },
+        flag(
+            "allowWideMode",
+            "With `from: file`: read the file even though others can read it as well.",
+        ),
+        flag(
+            "keepTrailingNewline",
+            "With `from: file` and `from: systemd-creds`: keep the value's last line ending.",
+        ),
+    ],
+};
 
 /// One entry of `spec.secrets`.
 pub const SECRET: Shape = Shape {
@@ -425,7 +507,9 @@ pub const SECRET: Shape = Shape {
             "key",
             false,
             Role::None,
-            "With `from: env`: the environment variable that holds the value.",
+            "With `from: env`: the environment variable that holds the value. With \
+             `from: keyring`: the description of the key. With `from: systemd-creds`: the \
+             name of the credential.",
         ),
         text(
             "path",
@@ -441,18 +525,46 @@ pub const SECRET: Shape = Shape {
             ty: Type::StringList,
             role: Role::None,
         },
-        flag(
-            "optional",
-            "A secret that cannot be found is `null` instead of an error.",
+        text(
+            "service",
+            false,
+            Role::None,
+            "With `from: keychain`: the service of the keychain item.",
         ),
+        text(
+            "account",
+            false,
+            Role::None,
+            "With `from: keychain`: the account of the keychain item.",
+        ),
+        Field {
+            name: "attributes",
+            doc: "With `from: secret-service`: the attributes the item is found by. They \
+                  are not secret.",
+            required: false,
+            ty: Type::StringMap,
+            role: Role::None,
+        },
         flag(
             "allowWideMode",
             "With `from: file`: read the file even though others can read it as well.",
         ),
         flag(
             "keepTrailingNewline",
-            "With `from: file` and `from: exec`: keep the value's last line ending.",
+            "With `from: file` and `from: systemd-creds`: keep the value's last line ending.",
         ),
+        flag(
+            "optional",
+            "A secret that cannot be found is `null` instead of an error.",
+        ),
+        Field {
+            name: "fallback",
+            doc: "The places to look next, in order, when the first has nothing or cannot \
+                  be used on this machine.",
+            required: false,
+            ty: Type::List(&SECRET_SOURCE),
+            role: Role::None,
+        },
     ],
 };
 

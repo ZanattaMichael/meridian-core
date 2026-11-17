@@ -7,13 +7,14 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use clap::{Args, Subcommand};
-use meridian_plugin_host::Registry;
+use meridian_lsp::Discovery;
+use meridian_plugin_host::{Policy as SignaturePolicy, Registry, StartOptions, Verification};
 use meridian_tooling::catalog::Catalog;
 use meridian_tooling::check::{self, Diagnostic, Env, Severity, Source, Workspace};
 use meridian_tooling::schemas::{self, Cached, Freshness, Store};
 use meridian_tooling::{fmt, jsonschema, lint};
 
-use crate::{apply_sets, count, read_data, registry, Failure, PluginDirs};
+use crate::{apply_sets, count, read_data, registry, trusted_keys, Failure, PluginDirs};
 
 #[derive(Args)]
 pub struct FmtArgs {
@@ -160,6 +161,12 @@ pub enum SchemaCommand {
 pub struct LspArgs {
     #[command(flatten)]
     plugins: PluginDirs,
+    /// Load plugins from the directories the editor names in its settings
+    /// under the same --plugin-signatures policy as the rest. Without this,
+    /// a plugin in such a directory is started only when it is signed by a
+    /// trusted key, since an editor's settings can come with a project
+    #[arg(long, env = "MERIDIAN_LSP_TRUST_EDITOR_PLUGIN_DIRS")]
+    trust_editor_plugin_dirs: bool,
 }
 
 /// Whether a path names a YAML or JSON file by its extension.
@@ -232,8 +239,7 @@ pub fn format(args: &FmtArgs) -> Result<(), Failure> {
                 ))
             };
         }
-        // A reader that stops early, such as `head`, is not an error.
-        let _ = std::io::stdout().write_all(formatted.as_bytes());
+        let _ = crate::Stdout.write_all(formatted.as_bytes());
         return Ok(());
     }
 
@@ -254,11 +260,11 @@ pub fn format(args: &FmtArgs) -> Result<(), Failure> {
             Ok(formatted) => {
                 changed += 1;
                 if args.check {
-                    println!("{name}");
+                    outln!("{name}");
                 } else {
                     std::fs::write(path, formatted)
                         .map_err(|e| Failure::Message(format!("writing {name}: {e}")))?;
-                    println!("formatted {name}");
+                    outln!("formatted {name}");
                 }
             }
             Err(e) => {
@@ -276,10 +282,10 @@ pub fn format(args: &FmtArgs) -> Result<(), Failure> {
                 count(changed, "file")
             );
         } else if failed == 0 {
-            println!("{} formatted", count(checked, "file"));
+            outln!("{} formatted", count(checked, "file"));
         }
     } else if failed == 0 {
-        println!(
+        outln!(
             "{} formatted, {} already formatted",
             count(changed, "file"),
             unchanged
@@ -295,10 +301,7 @@ pub fn format(args: &FmtArgs) -> Result<(), Failure> {
 fn workspace(files: &[(PathBuf, String)]) -> Workspace {
     let sources: Vec<Source> = files
         .iter()
-        .map(|(path, text)| Source {
-            name: path.to_string_lossy().into_owned(),
-            text: text.clone(),
-        })
+        .map(|(path, text)| Source::new(path.to_string_lossy(), text))
         .collect();
     Workspace::new(&sources)
 }
@@ -370,7 +373,7 @@ pub fn lint(args: &LintArgs) -> Result<(), Failure> {
         eprintln!("warning: {e}");
     }
 
-    let mut out = std::io::stdout().lock();
+    let mut out = crate::Stdout;
     for d in &found {
         let _ = if args.json {
             writeln!(out, "{}", to_json(d))
@@ -487,7 +490,7 @@ pub fn schema(args: &SchemaArgs) -> Result<(), Failure> {
         Some(path) => std::fs::write(path, text)
             .map_err(|e| Failure::Message(format!("writing {}: {e}", path.display()))),
         None => {
-            let _ = std::io::stdout().write_all(text.as_bytes());
+            let _ = crate::Stdout.write_all(text.as_bytes());
             Ok(())
         }
     }
@@ -502,7 +505,27 @@ pub fn lsp(args: &LspArgs) -> Result<(), Failure> {
             .ok()
             .and_then(|exe| exe.parent().map(Path::to_path_buf)),
     );
-    meridian_lsp::run_stdio(dirs).map_err(|e| Failure::Message(e.to_string()))
+    let options = StartOptions {
+        verification: args.plugins.verification()?,
+        ..StartOptions::default()
+    };
+    let editor_options = if args.trust_editor_plugin_dirs {
+        options.clone()
+    } else {
+        StartOptions {
+            verification: Verification {
+                policy: SignaturePolicy::Require,
+                trusted: trusted_keys()?,
+            },
+            ..StartOptions::default()
+        }
+    };
+    meridian_lsp::run_stdio(Discovery {
+        dirs,
+        options,
+        editor_options,
+    })
+    .map_err(|e| Failure::Message(e.to_string()))
 }
 
 struct SyncArgs<'a> {

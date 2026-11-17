@@ -143,34 +143,56 @@ pub struct Output {
 pub struct Secret {
     /// The name it is read by, as `secret.<name>`.
     pub name: String,
-    /// The provider: `env`, `file` or `exec`.
+    /// The provider, such as `env`, `file`, `exec` or `keyring`.
     pub from: String,
-    /// `from: env`: the environment variable.
+    /// `from: env`: the environment variable. `from: keyring`: the key's
+    /// description. `from: systemd-creds`: the credential's name.
     pub key: String,
     /// `from: file`: the file.
     pub path: String,
     /// `from: exec`: the program and its arguments. No shell reads them.
     pub command: Vec<String>,
+    /// `from: keychain`: the item's service.
+    pub service: String,
+    /// `from: keychain`: the item's account.
+    pub account: String,
+    /// `from: secret-service`: the attributes the item is found by.
+    pub attributes: BTreeMap<String, String>,
     /// A secret that cannot be found is null instead of an error.
     pub optional: bool,
     /// `from: file`: read a file that others can read as well.
     pub allow_wide_mode: bool,
-    /// `from: file` and `from: exec`: keep the value's last line ending.
+    /// `from: file`, `from: systemd-creds`: keep the value's last line
+    /// ending.
     pub keep_trailing_newline: bool,
+    /// The places to look next, in order, when the first has nothing or
+    /// cannot be used on this machine.
+    pub fallback: Vec<meridian_secret::Source>,
     pub pos: Position,
 }
 
 impl Secret {
-    /// Where the secret comes from, as the secrets crate reads it.
+    /// Where the secret comes from first, as the secrets crate reads it.
     pub fn source(&self) -> meridian_secret::Source {
         meridian_secret::Source {
             from: self.from.clone(),
             key: self.key.clone(),
             path: self.path.clone(),
             command: self.command.clone(),
+            service: self.service.clone(),
+            account: self.account.clone(),
+            attributes: self.attributes.clone(),
             allow_wide_mode: self.allow_wide_mode,
             keep_trailing_newline: self.keep_trailing_newline,
         }
+    }
+
+    /// Every place the secret is looked for, in order: the first, then
+    /// each `fallback`.
+    pub fn sources(&self) -> Vec<meridian_secret::Source> {
+        std::iter::once(self.source())
+            .chain(self.fallback.iter().cloned())
+            .collect()
     }
 }
 

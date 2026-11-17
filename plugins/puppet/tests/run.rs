@@ -189,3 +189,22 @@ fn an_artifact_from_another_plugin_is_refused() {
         .msg
         .starts_with("the artifact has no manifests/init.pp and site.pp"));
 }
+
+#[test]
+fn a_target_bolt_would_read_as_an_option_is_refused_before_it_runs() {
+    // Issue 134: the core refuses such a host first; the runner is the last
+    // thing between it and the command line.
+    let dir = scratch(TMP, "hostile-host");
+    let err = runner(&dir, "exit 9", BOLT_REPORT)
+        .apply(
+            &context(&dir, "-oProxyCommand=touch /tmp/pwned"),
+            &compiled(),
+            &KeptLog::default(),
+        )
+        .expect_err("refused");
+    assert!(
+        err.to_string().contains("bolt cannot be given this target"),
+        "{err}"
+    );
+    assert!(!dir.join("bolt.args").exists());
+}

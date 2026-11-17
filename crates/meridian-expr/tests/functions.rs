@@ -753,6 +753,11 @@ fn paths_are_worked_on_as_text() {
         ("dirname('/etc/nginx/nginx.conf')", "\"/etc/nginx\""),
         ("dirname('nginx.conf')", "\".\""),
         ("dirname('/nginx.conf')", "\"/\""),
+        ("dirname('/etc')", "\"/\""),
+        ("dirname('/etc/')", "\"/\""),
+        ("dirname('/')", "\"/\""),
+        ("dirname('//')", "\"/\""),
+        ("dirname('')", "\".\""),
         (
             "joinPath('/etc', 'nginx', 'nginx.conf')",
             "\"/etc/nginx/nginx.conf\"",

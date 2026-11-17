@@ -37,8 +37,13 @@ pub use manifest::{valid_name, Manifest, Requirement, Source, MANIFEST_FILE};
 pub use oci::{push, Pushed, ARTIFACT_TYPE, LAYER_MEDIA_TYPE};
 pub use pack::{pack, unpack, MAX_UNPACKED_BYTES};
 pub use project::{
-    install, verify, Change, Check, Mode, Modules, Project, Report, MODULE_REFERENCE_PREFIX,
+    install, resolve_login, verify, Change, Check, Mode, Modules, Project, Report,
+    MODULE_REFERENCE_PREFIX,
 };
+
+/// A resolved credential and what a project declares one as, re-exported for
+/// callers of [`push`] and readers of [`Manifest::credentials`].
+pub use meridian_secret::{Credential, CredentialDeclaration};
 pub use signature::{sign, Signed, NO_SIGNATURES, SIGNATURE_FILE};
 
 /// The signing mechanism modules share with plugins, re-exported so a caller

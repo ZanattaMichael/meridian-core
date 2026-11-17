@@ -348,7 +348,7 @@ pub(crate) fn run(registry: &Registry, request: &Request) -> Result<(), Failure>
 /// where each one went, in order; empty when they were printed.
 fn write_documents(rendered: &[Rendered], request: &Request) -> Result<Vec<PathBuf>, Failure> {
     let Some(dir) = request.out else {
-        let mut out = std::io::stdout().lock();
+        let mut out = crate::Stdout;
         for (index, document) in rendered.iter().enumerate() {
             if index > 0 {
                 let _ = writeln!(out, "---");

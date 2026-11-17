@@ -48,6 +48,40 @@ fn rejects_self_reference() {
 }
 
 #[test]
+fn rejects_a_document_name_that_is_not_one_directory_name() {
+    // Issue 133: the name becomes a directory under `--out` and under the
+    // state directory, so it must be one plain path segment.
+    let v = "apiVersion: meridian/v1\nkind: ResourceSet\n";
+    let doc = |name: &str| {
+        format!(
+            "{v}metadata:\n  name: {name:?}\nspec:\n  target: ansible\n  resources:\n    - \
+             {{id: a, type: package}}\n"
+        )
+    };
+    for bad in [
+        "../../esc",
+        "a/b",
+        "a\\b",
+        "a b;c",
+        ".hidden",
+        "..",
+        "-flag",
+        "caf\u{e9}",
+        "a\nb",
+        &"x".repeat(129),
+    ] {
+        let err = validate(&parse_one(&doc(bad))).unwrap_err().to_string();
+        assert!(
+            err.contains("metadata.name") && err.contains("cannot name a document"),
+            "{bad:?}: {err}"
+        );
+    }
+    for good in ["web", "web-vm_1.2", "0", "A.B", &"x".repeat(128)] {
+        validate(&parse_one(&doc(good))).unwrap_or_else(|e| panic!("{good:?}: {e}"));
+    }
+}
+
+#[test]
 fn rejects_missing_required_fields() {
     let v = "apiVersion: meridian/v1\nkind: ResourceSet\n";
     for (name, doc, want) in [
@@ -162,6 +196,45 @@ fn a_bundle_validates_target_host_from_inline() {
         err.contains("targetHost.host: missing required field"),
         "{err}"
     );
+}
+
+#[test]
+fn a_host_that_is_not_a_name_is_refused_before_any_tool_sees_it() {
+    // Issue 134: the host goes to ssh, an inventory and a manifest raw, so a
+    // host that would be read as an option, a host variable or Puppet code
+    // is refused by validate.
+    for (host, says) in [
+        ("\"-oProxyCommand=touch /tmp/pwned\"", "starts with \"-\""),
+        ("\"web01 ansible_connection=local\"", "whitespace"),
+        ("\"web01\\n[all:vars]\\nx=y\"", "whitespace"),
+        ("\"x' { } node 'y\"", "'\\''"),
+    ] {
+        let doc = format!(
+            "{HEAD}  targetHost:\n    from: inline\n    host: {host}\n  resources:\n    - {{id: a, type: package}}\n"
+        );
+        let err = Bundle::new([parse_one(&doc)])
+            .validate()
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("spec.targetHost.host") && err.contains(says),
+            "{host}: {err}"
+        );
+    }
+    // A name, an address and user@host pass, as before.
+    for host in [
+        "web01",
+        "10.0.0.5",
+        "\"[fe80::1%eth0]\"",
+        "deploy@web01.example.com",
+    ] {
+        let doc = format!(
+            "{HEAD}  targetHost:\n    from: inline\n    host: {host}\n  resources:\n    - {{id: a, type: package}}\n"
+        );
+        Bundle::new([parse_one(&doc)])
+            .validate()
+            .unwrap_or_else(|e| panic!("{host}: {e}"));
+    }
 }
 
 #[test]

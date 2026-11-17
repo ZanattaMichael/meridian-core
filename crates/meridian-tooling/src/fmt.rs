@@ -72,6 +72,7 @@ pub fn format(name: &str, text: &str, options: Options) -> Result<String, Error>
         out: Vec::new(),
         options,
         prefix: None,
+        kept: 0,
     };
     for doc in &file.docs {
         writer.doc(doc);
@@ -116,11 +117,22 @@ struct Writer<'a> {
     /// Text the next content line starts with in place of its indentation:
     /// the `- ` of a list item whose first field sits on the dash's line.
     prefix: Option<String>,
+    /// How many lines of `out` belong to a keep-chomping block scalar
+    /// (`|+`, `>+`), blank lines included: those are its value, so the end
+    /// of the file is not tidied past them.
+    kept: usize,
 }
 
 impl Writer<'_> {
     fn finish(mut self) -> String {
-        while self.out.last().is_some_and(String::is_empty) {
+        let mut kept = self.kept;
+        if kept > 0 && kept == self.out.len() && self.lines.last().is_some_and(String::is_empty) {
+            // The file ends in a kept scalar, and the line after its final
+            // newline is no line of the value.
+            self.out.pop();
+            kept -= 1;
+        }
+        while self.out.len() > kept && self.out.last().is_some_and(String::is_empty) {
             self.out.pop();
         }
         let mut text = self.out.join("\n");
@@ -281,17 +293,17 @@ impl Writer<'_> {
     /// Writes the lines a multi-line scalar runs on over. The least
     /// indented of them goes one step in from the line that opened the
     /// scalar and the rest keep their distance from it, so text inside a
-    /// block keeps its own indentation.
+    /// block keeps its own indentation. The lines of a block scalar (`|`,
+    /// `>`) are otherwise kept byte for byte: trailing spaces there are
+    /// part of the value.
     fn continuation(&mut self, value: &Node, old: usize, new: usize) {
         let body = value.line + 1..value.end_line;
         let header = &self.lines[value.line][value.indent..];
+        let block = matches!(value.scalar().map(|s| s.style), Some(syntax::Style::Block));
+        let indicator = header.split_whitespace().next().unwrap_or("");
         // `|2` fixes the body's indent relative to its parent, so such a
         // body may only move as far as the parent does.
-        let explicit = matches!(value.scalar().map(|s| s.style), Some(syntax::Style::Block))
-            && header
-                .split_whitespace()
-                .next()
-                .is_some_and(|h| h.chars().any(|c| c.is_ascii_digit()));
+        let explicit = block && indicator.chars().any(|c| c.is_ascii_digit());
         let least = body
             .clone()
             .map(|l| self.lines[l].as_str())
@@ -300,8 +312,11 @@ impl Writer<'_> {
             .min()
             .unwrap_or(0);
         for l in body {
-            let text = self.lines[l].trim_end();
-            if text.is_empty() {
+            let line = self.lines[l].as_str();
+            let text = if block { line } else { line.trim_end() };
+            // A line of spaces up to the body's indentation is a blank
+            // line of the value; one that goes past it carries its spaces.
+            if text.is_empty() || (text.trim().is_empty() && (!block || indent_of(text) <= least)) {
                 self.out.push(String::new());
                 continue;
             }
@@ -310,8 +325,15 @@ impl Writer<'_> {
             } else {
                 indent_of(text) - least + new + STEP
             };
-            self.out
-                .push(format!("{}{}", " ".repeat(indent), text.trim_start()));
+            let rest = if block {
+                &text[indent_of(text)..]
+            } else {
+                text.trim_start()
+            };
+            self.out.push(format!("{}{rest}", " ".repeat(indent)));
+        }
+        if block && indicator.contains('+') {
+            self.kept = self.out.len();
         }
     }
 }
@@ -508,6 +530,24 @@ a:
         // An explicit indentation indicator pins the body to its parent.
         let pinned = "a:\n    b: |2\n        two more\n";
         assert_eq!(fmt(pinned), "a:\n  b: |2\n      two more\n");
+    }
+
+    #[test]
+    fn block_scalars_keep_trailing_spaces_and_the_blank_lines_a_kept_one_ends_with() {
+        // Two spaces follow `keep`: they are part of the value.
+        let spaces = "spec:\n    content: |\n        keep  \n        \n          \n        more\n";
+        assert_eq!(
+            fmt(spaces),
+            "spec:\n  content: |\n    keep  \n\n      \n    more\n"
+        );
+        // A kept scalar at the end of the file owns the blank lines after it.
+        let kept = "spec:\n    content: |+\n        keep\n\n\n";
+        assert_eq!(fmt(kept), "spec:\n  content: |+\n    keep\n\n\n");
+        let folded = "spec:\n    content: >+\n        keep\n\n";
+        assert_eq!(fmt(folded), "spec:\n  content: >+\n    keep\n\n");
+        // Blank lines after anything else are still tidied away.
+        let plain = "spec:\n    content: |\n        keep\n\n\n";
+        assert_eq!(fmt(plain), "spec:\n  content: |\n    keep\n");
     }
 
     #[test]

@@ -1,9 +1,11 @@
 //! A project's modules: resolving what its manifest requires, fetching it,
 //! pinning it, and opening the pinned modules for use.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use semver::{Version, VersionReq};
@@ -11,6 +13,7 @@ use semver::{Version, VersionReq};
 use crate::integrity::hash_dir;
 use crate::lock::{Lock, Locked, LOCK_FILE};
 use crate::manifest::{safe_relative, Manifest, Source, MANIFEST_FILE};
+use meridian_secret::Credential;
 use meridian_signing::{Signature, Verification};
 
 use crate::{git, oci, signature, Error};
@@ -107,7 +110,7 @@ fn label(locked: &Locked) -> String {
 
 /// Resolves `.` and `..` in a path without touching the disk, with `/`
 /// between the parts.
-fn normalize(path: &Path) -> String {
+pub(crate) fn normalize(path: &Path) -> String {
     let mut parts: Vec<String> = Vec::new();
     let mut prefix = String::new();
     for component in path.components() {
@@ -147,6 +150,19 @@ fn store_dir(state_dir: &Path, locked: &Locked) -> PathBuf {
         // `+` and build metadata are fine in a directory name.
         locked.version.clone()
     };
+    // Every part is one plain path segment: the name is checked by
+    // `Lock::parse` and the manifest reader, and a version or a `ref-` leaf
+    // cannot hold a separator. Anything else would leave `<state>/modules`.
+    let segment = |s: &str| {
+        !s.is_empty()
+            && s != "."
+            && s != ".."
+            && !s.contains(|c: char| matches!(c, '/' | '\\') || c.is_control())
+    };
+    assert!(
+        locked.name.split('/').all(segment) && segment(&leaf),
+        "a module's store directory is built from a name and version that were not checked"
+    );
     let mut dir = state_dir.join("modules");
     dir.extend(locked.name.split('/'));
     dir.join(leaf)
@@ -182,11 +198,38 @@ struct Resolver<'a> {
     refresh: Option<BTreeSet<String>>,
     chosen: BTreeMap<String, Node>,
     listings: HashMap<String, BTreeMap<Version, String>>,
+    /// The credentials resolved so far, by name: each is fetched once, the
+    /// first time a registry is about to be asked, and wiped with this.
+    logins: RefCell<HashMap<String, Rc<Credential>>>,
 }
 
 static SCRATCH: AtomicUsize = AtomicUsize::new(0);
 
 impl Resolver<'_> {
+    /// The credential the project names for the module `name`, resolved.
+    /// Only the project's own manifest is asked: what a fetched module's
+    /// manifest says about credentials is never acted on, so a module cannot
+    /// have the project's login sent to a registry of its choosing.
+    fn login(&self, name: &str) -> Result<Option<Rc<Credential>>, Error> {
+        let Some(wanted) = self
+            .root
+            .modules
+            .iter()
+            .find(|m| m.name == name)
+            .and_then(|m| m.credential.as_deref())
+        else {
+            return Ok(None);
+        };
+        if let Some(known) = self.logins.borrow().get(wanted) {
+            return Ok(Some(Rc::clone(known)));
+        }
+        let resolved = Rc::new(resolve_login(&self.root, wanted)?);
+        self.logins
+            .borrow_mut()
+            .insert(wanted.to_owned(), Rc::clone(&resolved));
+        Ok(Some(resolved))
+    }
+
     fn reuse_pin(&self, name: &str) -> bool {
         match &self.refresh {
             None => false,
@@ -469,7 +512,10 @@ impl Resolver<'_> {
                             Source::Oci {
                                 repository,
                                 insecure,
-                            } => oci::versions(repository, *insecure)?,
+                            } => {
+                                let login = self.login(name)?;
+                                oci::versions(repository, *insecure, login.as_deref())?
+                            }
                             Source::Path(_) => unreachable!("a path module was handled above"),
                         };
                         self.listings.insert(first.locator.clone(), listing.clone());
@@ -561,7 +607,10 @@ impl Resolver<'_> {
                 Source::Oci {
                     repository,
                     insecure,
-                } => oci::fetch(repository, *insecure, reference, &out)?,
+                } => {
+                    let login = self.login(&wanted.name)?;
+                    oci::fetch(repository, *insecure, login.as_deref(), reference, &out)?
+                }
                 Source::Path(_) => unreachable!("a path module is never fetched"),
             };
             let locked = Locked {
@@ -607,6 +656,15 @@ fn write_atomically(path: &Path, content: &str) -> Result<(), Error> {
     })
 }
 
+/// Resolves the credential `name` of those `manifest` declares: fetches its
+/// secret fields into protected memory, where they stay until the returned
+/// value is dropped. For a registry login outside [`install`], such as a
+/// push.
+pub fn resolve_login(manifest: &Manifest, name: &str) -> Result<Credential, Error> {
+    meridian_secret::resolve_credential(&manifest.credentials, name)
+        .map_err(|e| Error::new(format!("the credential {name}: {e}")))
+}
+
 /// Resolves what the project's manifest requires, fetches what is missing,
 /// and writes `meridian.lock`.
 pub fn install(project: &Project<'_>, mode: Mode) -> Result<Report, Error> {
@@ -638,6 +696,7 @@ pub fn install(project: &Project<'_>, mode: Mode) -> Result<Report, Error> {
         refresh,
         chosen: BTreeMap::new(),
         listings: HashMap::new(),
+        logins: RefCell::new(HashMap::new()),
     };
     let lock = resolver.resolve()?;
 
@@ -719,6 +778,15 @@ pub fn install(project: &Project<'_>, mode: Mode) -> Result<Report, Error> {
 /// if anything is.
 fn locate(project: &Project<'_>, module: &Locked) -> Result<(PathBuf, Signature), String> {
     if let Some(path) = module.source.strip_prefix("path+") {
+        // `Lock::parse` holds the path to what `normalize` writes; a `Locked`
+        // built by hand is held to the same.
+        if path.is_empty() || path != normalize(Path::new(path)) {
+            return Err(format!(
+                "{} is required from {:?}, which is not a path as `meridian module install` \
+                 writes it",
+                module.name, module.source
+            ));
+        }
         let dir = project.dir.join(path);
         return if dir.join(MANIFEST_FILE).is_file() {
             Ok((dir, Signature::NotChecked))

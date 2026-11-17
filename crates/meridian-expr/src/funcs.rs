@@ -1154,10 +1154,13 @@ pub(crate) fn call(name: &str, values: &[Value], scope: &Scope) -> Result<Value,
             text(path.rsplit('/').next().unwrap_or(path))
         }
         "dirname" => {
-            let path = args.text(0)?.trim_end_matches('/');
+            let whole = args.text(0)?;
+            let path = whole.trim_end_matches('/');
             match path.rsplit_once('/') {
                 Some(("", _)) => text("/"),
                 Some((dir, _)) => text(dir),
+                // The root's parent is the root, as POSIX dirname has it.
+                None if path.is_empty() && whole.starts_with('/') => text("/"),
                 None => text("."),
             }
         }

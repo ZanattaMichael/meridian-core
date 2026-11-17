@@ -149,6 +149,22 @@ to `meridian lsp` and in `MERIDIAN_PLUGIN_DIR`, and in the directory the
 `meridian` binary is in. A plugin that fails to load is reported once as a
 warning and the rest are used.
 
+### Plugin signatures
+
+The server checks [plugin signatures](../reference/plugin-signatures.md) the
+way `lint` and every other command does: `--plugin-signatures` and
+`--trusted-key` (or `MERIDIAN_PLUGIN_SIGNATURES` and `MERIDIAN_TRUSTED_KEYS`)
+apply to `meridian lsp` too, with the same defaults, and a plugin that does not
+pass is reported to the editor instead of started.
+
+Directories in `pluginDirs` are held to a stricter rule. They come from the
+editor's settings, which a project can carry with it, so a plugin found there
+is started only when it is signed by a trusted key, whatever the policy. To
+load any plugin from those directories, such as one you are building yourself,
+start the server with `meridian lsp --trust-editor-plugin-dirs` (or set
+`MERIDIAN_LSP_TRUST_EDITOR_PLUGIN_DIRS=true` in its environment); the
+command-line policy then applies to them as well.
+
 The server loads plugins when it starts. After installing or rebuilding one,
 run the `meridian.reloadPlugins` command (in VS Code, **Meridian: Reload Target
 Plugins**) or restart the server.

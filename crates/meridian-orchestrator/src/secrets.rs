@@ -14,14 +14,17 @@ use meridian_secret::{FetchError, Probe, SecretTable};
 /// found reads as null.
 pub(crate) fn fetch(doc: &Document, secrets: &mut Secrets) -> Result<(), String> {
     for secret in doc.secrets() {
-        match secret.source().fetch() {
-            Ok(value) => secrets.hold(&secret.name, value),
+        let sources = secret.sources();
+        match meridian_secret::fetch_first(&sources) {
+            Ok((_, value)) => secrets.hold(&secret.name, value),
             Err(FetchError::Missing(_)) if secret.optional => secrets.absent(&secret.name),
             Err(e) => {
+                let from: Vec<&str> = sources.iter().map(|s| s.from.as_str()).collect();
                 return Err(format!(
                     "secret {:?} (from: {}): {e}",
-                    secret.name, secret.from
-                ))
+                    secret.name,
+                    from.join(", then ")
+                ));
             }
         }
     }
@@ -103,7 +106,8 @@ pub(crate) fn named(names: &[String]) -> String {
 pub struct Declared {
     /// The name the document reads it by.
     pub name: String,
-    /// Its provider.
+    /// The provider of the place that would answer, or of the last place
+    /// looked at when none would.
     pub from: String,
     /// Whether nothing being there is allowed.
     pub optional: bool,
@@ -117,21 +121,49 @@ impl Declared {
         match self.probe {
             Probe::Present(_) | Probe::Unknown(_) => false,
             Probe::Absent(_) => !self.optional,
-            Probe::Refused(_) => true,
+            // No place the secret names can be used on this machine, so
+            // nothing can say it is merely absent.
+            Probe::Refused(_) | Probe::Unavailable(_) => true,
         }
     }
 }
 
 /// Looks at where each declaration of the document says its value comes
-/// from, without fetching: a file is not opened and a command is not run.
+/// from, without fetching: a file is not opened and a command is not run. A
+/// declaration with a `fallback` is answered by the first place that would.
 pub fn check_declared(doc: &Document) -> Vec<Declared> {
     doc.secrets()
         .iter()
-        .map(|entry| Declared {
-            name: entry.name.clone(),
-            from: entry.from.clone(),
-            optional: entry.optional,
-            probe: entry.source().probe(),
+        .map(|entry| {
+            let sources = entry.sources();
+            let (at, probe) = meridian_secret::probe_first(&sources);
+            Declared {
+                name: entry.name.clone(),
+                from: sources[at].from.clone(),
+                optional: entry.optional,
+                probe,
+            }
         })
         .collect()
+}
+
+/// Every place the secret `name` is looked for, in order, as the first
+/// document that declares it says. `None` when no document declares it.
+pub fn places_declared(documents: &[Document], name: &str) -> Option<Vec<meridian_secret::Source>> {
+    documents
+        .iter()
+        .flat_map(|doc| doc.secrets())
+        .find(|entry| entry.name == name)
+        .map(|entry| entry.sources())
+}
+
+/// The names the documents declare, each once, in order.
+pub fn names_declared(documents: &[Document]) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for entry in documents.iter().flat_map(|doc| doc.secrets()) {
+        if !names.contains(&entry.name) {
+            names.push(entry.name.clone());
+        }
+    }
+    names
 }

@@ -1717,15 +1717,24 @@ spec:
 ```
 
 A secret may list several sources, tried in order, so one document works on a
-laptop and in CI:
+laptop and in CI. As built, the first place is `from` and its fields, and the
+rest are a `fallback` list of places written the same way (the schema has no
+field that is either text or a list, and `from` stays the one word that says
+the provider everywhere else):
 
 ```yaml
     - name: api_token
-      from:
-        - {provider: keychain, service: meridian, account: api}
-        - {provider: secret-service, attributes: {app: meridian, name: api}}
-        - {provider: env, key: API_TOKEN}
+      from: keychain
+      service: meridian
+      account: api
+      fallback:
+        - {from: secret-service, attributes: {app: meridian, name: api}}
+        - {from: env, key: API_TOKEN}
 ```
+
+The first place that has the secret answers. A place that has nothing, or
+that this machine does not have at all, is passed over; a place that is
+there and refuses stops the run.
 
 `meridian secret set <name>` stores a value in the first writable store a
 secret names, reading it from standard input or a prompt with echo off, never
@@ -2289,7 +2298,7 @@ green before the next starts.
 | 5a | `Data`: layers per endpoint on the existing merge engine, the strategies, `final` keys, the in-data directives, `meridian explain`; the compile-rules hook after layers load | 5 |
 | 5b | `Composite`, `include`, `extends`, the configuration type (`segment`, `targets`) | 5 |
 | 6 | `Inventory`, endpoint types, `spec.endpoints`, one instance per endpoint, `--endpoint`, sources from outputs | 4, 5 |
-| 6a | `meridian-secret`: the locked, wiped-on-drop value, process hardening, the secret handle in `Value` and how the mark spreads, the output filter, the delivery helpers (standard input, user-only files), `spec.secrets` with the `env`, `file`, `exec` and operating-system store providers, `meridian secret set` and `check`, `resolve_credential`, and the tests of [11.9](#119-what-is-tested). **Built so far:** the crate, the handle and the mark, `spec.secrets` with `env`, `file` and `exec`, fetched per stage and wiped after it, `--strict-secrets` and the warning when memory cannot be locked, `meridian secret check`, and `resolve_credential` for the `registry`, `usernamePassword` and `token` types ([reference](../reference/dsl/secrets.md), [how it is held](../concepts/secrets-in-memory.md)). **Still to come:** the operating-system stores, several sources for one secret, `meridian secret set` | 2 |
+| 6a | `meridian-secret`: the locked, wiped-on-drop value, process hardening, the secret handle in `Value` and how the mark spreads, the output filter, the delivery helpers (standard input, user-only files), `spec.secrets` with the `env`, `file`, `exec` and operating-system store providers, `meridian secret set` and `check`, `resolve_credential`, and the tests of [11.9](#119-what-is-tested). **Built so far:** the crate, the handle and the mark, `spec.secrets` with `env`, `file` and `exec`, fetched per stage and wiped after it, `--strict-secrets` and the warning when memory cannot be locked, `meridian secret check`, and `resolve_credential` for the `registry`, `usernamePassword` and `token` types ([reference](../reference/dsl/secrets.md), [how it is held](../concepts/secrets-in-memory.md)). Then the `keyring`, `systemd-creds`, `secret-service` and `keychain` stores, `fallback` places for one secret, and `meridian secret set` into the keyring and the Secret Service. **Still to come:** `credential-manager` on Windows, writing the keychain, the `tpm` plugin | 2 |
 | 7 | secrets and credentials on targets: credential types, sealed references and the secret stream in the protocol, delivery on every target by its channel of [11.6](#116-handing-a-secret-to-a-tool), the plugin contract suite with the recording tool | 6, 6a |
 | 7a | events and the run record: the event stream, `status`, `runs`, `events`, locking, `--events json` | 4 |
 | 8 | `Workflow`: steps, order from needs, `with`, `assign` from data, fan-out strategies, gates, failure handling, resume | 5a, 6, 7a |

@@ -227,3 +227,45 @@ fn a_reference_is_settled_from_the_document_or_refused() {
     assert_eq!(err.resource, "page");
     assert!(err.msg.contains("does not declare"), "{}", err.msg);
 }
+
+#[test]
+fn a_host_that_is_not_a_name_is_refused_rather_than_written_into_the_inventory() {
+    // Issue 134: a space in the host would add a host variable to
+    // inventory.ini, and a line break a section. The core refuses such a
+    // host first; this is the plugin's own line of defence.
+    let text = "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: ansible\n  targetHost:\n    from: inline\n    host: web01\n  resources:\n    - id: a\n      type: package\n      params: {name: nginx}\n";
+    let mut graph = graph_from_text("site.yaml", text, "ansible");
+    graph.host = "web01 ansible_connection=local\n[all:vars]\nansible_python_interpreter=/tmp/evil"
+        .to_owned();
+    let refused = emit(&graph).expect_err("refused");
+    assert_eq!(refused.rule, "invalid-host");
+    assert!(
+        refused.msg.contains("inventory") && refused.msg.contains("whitespace"),
+        "{refused}"
+    );
+}
+
+#[test]
+fn the_plugin_declares_jinjas_openings_so_placed_text_stays_text() {
+    // Issue 135: Ansible renders every task argument through Jinja, so the
+    // core is told what to escape in a value placed from data. What the
+    // escape is written as must be an expression that yields the opening.
+    let declared = Ansible.placed_text();
+    let texts: Vec<&str> = declared.iter().map(|e| e.text.as_str()).collect();
+    assert_eq!(texts, ["{{", "{%", "{#"]);
+    for escape in &declared {
+        assert!(!escape.only_at_start);
+        assert_eq!(escape.written, format!("{{{{ '{}' }}}}", escape.text));
+    }
+    // And what the core hands over is written as it is: the playbook holds
+    // the escaped form, which Jinja renders back to the data's text.
+    let emitted = compile(
+        "    - id: motd\n      type: file\n      params:\n        path: /etc/motd\n        content: \"hello {{ '{{' }} lookup('pipe','id') }}\"\n",
+    )
+    .unwrap();
+    assert!(
+        emitted.artifact.files["playbook.yml"].contains("{{ '{{' }} lookup"),
+        "{}",
+        emitted.artifact.files["playbook.yml"]
+    );
+}

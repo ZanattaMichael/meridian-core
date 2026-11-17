@@ -216,6 +216,18 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Manifest, CompileError>
     for declaration in &mut resources {
         declaration.notify = notify.remove(&declaration.resource_id).unwrap_or_default();
     }
+    // The core holds a host to what a name can be before a plugin sees it.
+    // This is the plugin's own line of defence, for a tree that did not
+    // come through the core.
+    if !graph.host.is_empty() {
+        meridian_sdk::check_host(&graph.host).map_err(|why| CompileError {
+            target: NAME.to_owned(),
+            resource: String::new(),
+            rule: "invalid-host".to_owned(),
+            msg: format!("the target host cannot be written into site.pp: {why}"),
+            pos: Default::default(),
+        })?;
+    }
     Ok(Manifest {
         class,
         host: graph.host.clone(),
