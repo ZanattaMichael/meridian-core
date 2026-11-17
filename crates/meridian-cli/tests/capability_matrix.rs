@@ -31,6 +31,10 @@ compiled, with the reason. Each target's own page says how it does what it can.
 - **inputs** says the target hands its tool the values a document's
   `spec.imports` brings from other documents, as the tool's own variables or
   parameters.
+- **secrets** says a param may hold a secret: the target compiles a
+  reference to it, never the value, and hands the value to its tool by a
+  private channel when it runs. See
+  [Secrets](dsl/secrets.md#handing-a-secret-to-a-tool).
 - **import** is what `meridian import` can read of the tool's existing
   configuration and turn into a document for the target. See
   [Importing existing configuration](../operations/importing.md).
@@ -62,7 +66,7 @@ fn row(emitter: &dyn Emitter, runner: &dyn Runner, importer: Option<&dyn Importe
         None => "no".to_owned(),
     };
     format!(
-        "| [{name}](../targets/{name}.md) | {category} | {types} | {notifies} | {runtime} | {plan} | {apply} | {outputs} | {inputs} | {import} |\n",
+        "| [{name}](../targets/{name}.md) | {category} | {types} | {notifies} | {runtime} | {plan} | {apply} | {outputs} | {inputs} | {secrets} | {import} |\n",
         name = emitter.name(),
         category = emitter.category(),
         types = types.join(", "),
@@ -71,6 +75,7 @@ fn row(emitter: &dyn Emitter, runner: &dyn Runner, importer: Option<&dyn Importe
         apply = yes(operations.apply),
         outputs = yes(operations.outputs),
         inputs = yes(runner.accepts_inputs()),
+        secrets = yes(capabilities.secrets),
     )
 }
 
@@ -169,7 +174,7 @@ fn matrix() -> String {
     ];
     rows.sort();
     format!(
-        "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | apply | outputs | inputs | import |\n|---|---|---|---|---|---|---|---|---|---|\n{}",
+        "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | apply | outputs | inputs | secrets | import |\n|---|---|---|---|---|---|---|---|---|---|---|\n{}",
         rows.concat()
     )
 }

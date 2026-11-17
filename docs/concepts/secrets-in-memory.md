@@ -201,6 +201,42 @@ A secret or a line shorter than four bytes is not searched for: masking every
 Masking is a second line of defence. The first is not handing a tool's output
 anything to print: the delivery channels above.
 
+## Across the plugin boundary
+
+A target plugin is a separate process, so a secret handed to its tool
+crosses one boundary on the way. What crosses, and when:
+
+- **At compile, a name.** A resource's params reach the plugin with
+  `Value::Secret` where a secret stands, and the graph names each one
+  (`ResourceGraph::secrets`). The plugin writes a reference by that name into
+  its artifact (`secrets_written_as`) and nothing else: it has no value to
+  write. The message carries `(sensitive)` where the secret is and, beside
+  it, the path to that place and the secret's slot, so the mask is put back
+  as a `Value::Secret` on the other side.
+- **At plan and apply, the value.** The run context carries the value of
+  each secret the params refer to, over the plugin's private socket and
+  nowhere else, and only to a target that declared it takes secrets. On the
+  plugin's side the SDK takes each value straight into protected memory and
+  wipes the message's bytes (`SecretValue::take_from`); on the host's side
+  the message is the one copy outside protected memory a secret passes
+  through, dropped as soon as it is sent. `outputs` is sent none.
+- **For the length of the call.** The plugin's `RunContext::secrets` holds
+  the values, each a `SecretValue` with the same missing `Debug` and
+  `Display`, and they are wiped when the call's context is dropped.
+- **To the tool by a private channel.** `Secrets::json_file` writes every
+  value into one `SecretFile` under the names the artifact uses, for a tool
+  that reads variables from a file; `Tool::stdin_secret` pipes one into a
+  tool's standard input. Neither the command line nor the environment is a
+  channel the SDK offers.
+- **Rollback fetches again.** The run keeps nothing of a stage's secrets once
+  the stage ends; a rollback at the end of a failed run, or `meridian
+  rollback` later, fetches the document's secrets at the stage's turn.
+
+What is not claimed: a plugin given a secret can do anything with it. The
+defences are the ones for any code you run, a signed plugin from a named
+publisher, and the plugin is given only the secrets of the resources it
+compiles.
+
 ## What is tested
 
 In `crates/meridian-secret/tests`:
@@ -215,7 +251,7 @@ In `crates/meridian-secret/tests`:
 | `mask.rs` | every form is masked, in text and in bytes |
 | `credential.rs` | a credential resolves with its secret fields in protected memory; only the one asked for is fetched; a secret written out is refused; no error or debug form holds a value |
 | `stores.rs` | the kernel keyring gives back every byte stored in it, or says it is shut off; a unit credential is one name and never a path; the Secret Service is reached through its tool with the value on standard input and never in an argument, and is unavailable without a bus or the tool; the keychain is unavailable off macOS and read from a keychain made for the test on it; with several places the first that has the secret answers, an unavailable store is passed over, a refusal stops the search, and every reason is given when none answers |
-| `expose_is_rare.rs` | `expose` and `unsafe` appear only where expected |
+| `expose_is_rare.rs` | `expose` and `unsafe` appear only where expected; the SDK's wire conversion and standard-input channel are the two places added for handing a secret to a plugin and its tool |
 
 Across the other crates:
 
@@ -225,4 +261,8 @@ Across the other crates:
 | `meridian-expr/tests/secrets.rs` | an expression holds a reference; joins and placements stay secret; a comparison is a plain answer; every other function and operator refuses; no error holds a value |
 | `meridian-ir/tests/secrets.rs` | every rule of a declaration; every place a secret is refused; a resolved document, its debug form and its encoding hold only `(sensitive)`; the secrets are wiped when their holder is dropped |
 | `meridian-cli/tests/secret_stores.rs` | through the real command: `secret set` stores a value from standard input and a run reads it back from the keyring and the Secret Service; the value reaches the store's tool on its standard input and never as an argument; a store this machine does not have is passed over for the next place and every reason is given when none has it; the value is in nothing printed or written |
-| `meridian-cli/tests/secrets.rs` | through the real command: the value is in nothing `plan` and `apply` print and in no file of the state directory or of `compile --out`; a failed fetch repeats neither the value, a command's output nor its arguments; a secret read from the environment is not inherited by a program started afterwards; a secret that cannot be locked is warned about once, or refused with `--strict-secrets`; `secret check` reads no value and runs no command |
+| `meridian-cli/tests/secrets.rs` | through the real command: the value is in nothing `plan` and `apply` print and in no file of the state directory or of `compile --out`; a failed fetch repeats neither the value, a command's output nor its arguments; a secret read from the environment is not inherited by a program started afterwards; a secret that cannot be locked is warned about once, or refused with `--strict-secrets`; `secret check` reads no value and runs no command; a secret in a param is compiled as a reference and handed to the tool in a file only the user can read, which the tool reads back whole, and is in nothing else the run prints, applies or keeps; a target that takes none stops the stage and names the ones that do |
+| `meridian-sdk/src/wire.rs`, `src/secrets.rs`, `src/tool.rs` | a secret in a param crosses the wire as a place and a slot and never a value, and a place that does not hold the mask is refused; a run context carries its values into protected memory and `outputs` carries none; `Secrets` prints only names; a JSON variables file holds every value escaped under its key and refuses a secret that is not text; a secret on standard input reaches the tool and is not on its command line |
+| `meridian-plugin-host/tests/runner.rs` | through the real plugin process: a secret in a param reaches the plugin by name at compile and by value when it runs, and the tool is handed it in a private file; a plugin that takes no secrets says so |
+| `plugins/ansible/tests/run.rs`, `plugins/terraform/tests/run.rs`, `plugins/opentofu/tests/run.rs` | against a stand-in for the tool: the value reaches it in a file of mode `0600`, under the variable's name; the command line names the file and nothing more; the environment holds nothing; the file is gone when the run is over; Terraform's saved plan, which holds every variable, is scrubbed |
+| `plugins/ansible/tests/real.rs`, `plugins/terraform/tests/real.rs`, `plugins/opentofu/tests/real.rs` | against the real tools in CI: the value reaches the play and the configuration and is in nothing the tool prints, in check mode with diff included, and in no file the plugin wrote |

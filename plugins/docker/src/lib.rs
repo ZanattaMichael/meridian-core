@@ -207,6 +207,7 @@ impl Emitter for Docker {
             native_notify: true,
             synthetic_notify: true,
             runtime_condition: false,
+            secrets: false,
         }
     }
 

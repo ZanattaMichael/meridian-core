@@ -118,11 +118,22 @@ Changes are read from Ansible's own report (`changed:` per task and handler). A
 failed task or an unreachable host fails the stage, with the end of Ansible's
 output.
 
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a
+resource's params is compiled as `{{ meridian_secret_<name> }}`, and the task
+that holds one is marked `no_log: true`, so Ansible prints neither its
+arguments, its diff nor its result. When the stage runs, the values are
+written into an extra-vars file only the user can read, held in memory where
+the system allows, and passed as `--extra-vars @<path>`; the file is removed
+when the run ends. The value is never on the command line and never in
+Ansible's environment.
+
 The runner is tested against a real `ansible-playbook` (ansible-core 2.19) on
 every pull request that touches it, over the `local` connection: a check-mode
 plan that creates nothing, a play checked on disk, a second plan that is in
 sync, drift put right, a handler that runs only when its notifier changed, a
 `runtimeWhen` answered by the host's facts, a command check mode cannot
-preview, and a failed task. Reaching another machine over SSH, and the
+preview, a failed task, and a secret that reaches the play through the
+extra-vars file and is in nothing Ansible prints, check mode with diff
+included. Reaching another machine over SSH, and the
 package, service, user and group modules, have only met stand-ins. See
 [Real-tool tests](../contributing/real-tool-tests.md).

@@ -8,8 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use meridian_plugin_testkit::{artifact, scratch, stand_in, KeptLog};
-use meridian_sdk::{Artifact, ChangeAction, RunContext, Runner, Value};
+use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
+use meridian_sdk::{Artifact, ChangeAction, RunContext, Runner, SecretRef, Value};
 use meridian_target_opentofu::OpenTofuRunner;
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -318,4 +318,63 @@ fn a_missing_program_says_what_was_looked_for() {
         .unwrap_err();
     assert!(err.command.contains("no-such-tofu"), "{err:?}");
     assert_eq!(err.exit_code, None);
+}
+
+/// Answers like `HAPPY`, keeps a copy of the variables file a plan is
+/// pointed at, and saves a plan file as the real tool would.
+fn keeping_secrets(dir: &Path) -> String {
+    format!(
+        "init) echo initialised ;;\n\
+         plan) for a in \"$@\"; do case \"$a\" in -var-file=*) cp \"${{a#-var-file=}}\" \"{dir}/vars\";; esac; done; echo PLANDATA > meridian.tfplan; echo 'Plan: 1 to add, 0 to change, 0 to destroy.' ;;\n\
+         show) echo '{{\"resource_changes\":[]}}' ;;\n\
+         apply) echo applied ;;\n\
+         output) echo '{{}}' ;;",
+        dir = dir.display()
+    )
+}
+
+#[test]
+fn secrets_reach_the_tool_in_a_private_variables_file_and_the_saved_plan_is_scrubbed() {
+    let (dir, _alone) = scratch_alone("secrets");
+    let runner = runner(&dir, &keeping_secrets(&dir));
+    let mut context = context(&dir);
+    context.secrets = secrets(&[(SecretRef::new(1), "db_password", "hunter2")]);
+    let log = KeptLog::default();
+    runner.plan(&context, &compiled(), &log).unwrap();
+    // The tool read the value from the file, under the variable's name,
+    // and was told the file's path and nothing more.
+    assert_eq!(
+        fs::read_to_string(dir.join("vars")).unwrap(),
+        "{\"meridian_secret_db_password\":\"hunter2\"}\n"
+    );
+    let made = calls(&dir);
+    assert!(
+        made[1].starts_with("plan -input=false -no-color -out=meridian.tfplan -var-file="),
+        "{made:?}"
+    );
+    assert!(!made.iter().any(|c| c.contains("hunter2")), "{made:?}");
+    let path = made[1]
+        .split_whitespace()
+        .find_map(|a| a.strip_prefix("-var-file="))
+        .unwrap();
+    assert!(!Path::new(path).exists(), "{path} was left behind");
+    // The saved plan holds every variable's value, so it does not outlive
+    // its use.
+    assert!(!dir.join("work").join("meridian.tfplan").exists());
+    assert!(!log.text().iter().any(|l| l.contains("hunter2")));
+
+    runner.apply(&context, &compiled(), &log).unwrap();
+    assert!(calls(&dir).iter().any(|c| c.starts_with("apply ")));
+    assert!(!dir.join("work").join("meridian.tfplan").exists());
+}
+
+#[test]
+fn a_run_without_secrets_keeps_its_saved_plan_and_passes_no_variables_file() {
+    let (dir, _alone) = scratch_alone("no-secrets");
+    let runner = runner(&dir, &keeping_secrets(&dir));
+    runner
+        .plan(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert!(!calls(&dir).iter().any(|c| c.contains("-var-file")));
+    assert!(dir.join("work").join("meridian.tfplan").exists());
 }

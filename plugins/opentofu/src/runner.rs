@@ -73,16 +73,65 @@ impl OpenTofuRunner {
         self.tool(context)
             .args(["init", "-input=false", "-no-color"])
             .run_ok("tofu init failed", log)?;
-        self.tool(context)
+        // Secrets reach tofu as input variables read from a file only the
+        // user can read, named on the command line by its path and nothing
+        // more. The file lives until the plan is saved. The saved plan holds
+        // the values too, as every tofu plan file does, so it is scrubbed
+        // as soon as it has been used (see `scrub`).
+        let secrets = if context.secrets.is_empty() {
+            None
+        } else {
+            Some(
+                context
+                    .secrets
+                    .json_file("secrets.auto.tfvars.json", crate::secret_variable)
+                    .map_err(|e| RunError::new(format!("writing the variables file: {e}")))?,
+            )
+        };
+        let mut plan = self
+            .tool(context)
             .args(["plan", "-input=false", "-no-color"])
-            .arg(format!("-out={PLAN_FILE}"))
-            .run_ok("tofu plan failed", log)?;
+            .arg(format!("-out={PLAN_FILE}"));
+        if let Some(file) = &secrets {
+            plan = plan.arg(format!("-var-file={}", file.path().display()));
+        }
+        let planned = plan.run_ok("tofu plan failed", log);
+        drop(secrets);
+        planned?;
         let shown = self
             .tool(context)
             .args(["show", "-json", PLAN_FILE])
             .capture_stdout()
             .run_ok("tofu could not show the plan it saved", log)?;
         read_plan(&shown.stdout)
+    }
+
+    /// Removes the saved plan once it has served, when the run handed over
+    /// secrets: a plan file holds the value of every variable, sensitive
+    /// ones included, and the work directory is not the place to keep one.
+    fn scrub(&self, context: &RunContext) {
+        if context.secrets.is_empty() {
+            return;
+        }
+        let path = context.work_dir.join(PLAN_FILE);
+        if let Ok(meta) = std::fs::metadata(&path) {
+            if let Ok(mut file) = std::fs::OpenOptions::new().write(true).open(&path) {
+                use std::io::Write as _;
+                let zeroes = vec![0u8; 64 * 1024];
+                let mut left = meta.len();
+                while left > 0 {
+                    let n = usize::try_from(left)
+                        .unwrap_or(usize::MAX)
+                        .min(zeroes.len());
+                    if file.write_all(&zeroes[..n]).is_err() {
+                        break;
+                    }
+                    left -= n as u64;
+                }
+                let _ = file.sync_all();
+            }
+        }
+        let _ = std::fs::remove_file(&path);
     }
 
     fn read_outputs(&self, context: &RunContext, log: &dyn Log) -> Result<Vec<Output>, RunError> {
@@ -110,8 +159,10 @@ impl Runner for OpenTofuRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
+        let prepared = self.prepare(context, artifact, log);
+        self.scrub(context);
         Ok(Plan {
-            changes: self.prepare(context, artifact, log)?,
+            changes: prepared?,
             unknown: false,
         })
     }
@@ -122,12 +173,21 @@ impl Runner for OpenTofuRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
-        let changes = self.prepare(context, artifact, log)?;
+        let changes = match self.prepare(context, artifact, log) {
+            Ok(changes) => changes,
+            Err(e) => {
+                self.scrub(context);
+                return Err(e);
+            }
+        };
         // The saved plan is applied, so nothing changes that was not just
         // reported. A plan file is its own approval.
-        self.tool(context)
+        let applied = self
+            .tool(context)
             .args(["apply", "-input=false", "-no-color", PLAN_FILE])
-            .run_ok("tofu apply failed", log)?;
+            .run_ok("tofu apply failed", log);
+        self.scrub(context);
+        applied?;
         Ok(Applied {
             changes,
             outputs: self.read_outputs(context, log)?,

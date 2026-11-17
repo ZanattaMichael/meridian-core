@@ -57,6 +57,37 @@ pub use runner::TerraformRunner;
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "terraform";
 
+/// The name of the input variable the secret `name` is handed over as:
+/// `meridian_secret_<name>`.
+pub fn secret_variable(name: &str) -> String {
+    format!("meridian_secret_{name}")
+}
+
+/// How a secret is written in the configuration: a reference to its
+/// variable.
+pub fn secret_reference(name: &str) -> String {
+    format!("${{var.{}}}", secret_variable(name))
+}
+
+/// Declares the sensitive input variable each of the graph's secrets is
+/// handed over as, so the configuration is complete on its own and the
+/// value is marked sensitive wherever terraform shows it.
+fn secret_variables(graph: &ResourceGraph, config: &mut Config) {
+    for secret in &graph.secrets {
+        config.blocks.push(Block {
+            kind: Kind::Variable,
+            r#type: String::new(),
+            name: secret_variable(&secret.name),
+            body: BTreeMap::from([
+                ("type".to_owned(), Value::from("string")),
+                ("sensitive".to_owned(), Value::Bool(true)),
+            ]),
+            refs: BTreeSet::new(),
+            pos: Position::default(),
+        });
+    }
+}
+
 /// What kind of block a resource became.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -190,6 +221,7 @@ impl Emitter for Terraform {
             native_notify: false,
             synthetic_notify: true,
             runtime_condition: false,
+            secrets: true,
         }
     }
 
@@ -198,7 +230,11 @@ impl Emitter for Terraform {
     }
 
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        // A secret in a param is written as a reference to a sensitive input
+        // variable, which the runner gives its value from a private file.
+        let graph = &graph.secrets_written_as(secret_reference);
         let mut config = transform::transform(graph)?;
+        secret_variables(graph, &mut config);
         let warnings = sort::apply_ordering(graph, &mut config)?;
         validate::validate(&config)?;
         Ok(Emitted {

@@ -4,12 +4,14 @@
 //! one place to break, and neither an emitter nor a host ever handles a
 //! generated type.
 
-use meridian_value::{canonical_map, decode_map, decode_value};
+use meridian_secret::SecretValue;
+use meridian_value::{canonical_map, decode_map, decode_value, SecretRef, Value, SENSITIVE};
 
 use crate::import::*;
 use crate::pb;
 use crate::run::*;
 use crate::schema::{ParamKind, ParamSchema, ResourceSchema};
+use crate::secrets::{SecretName, Secrets};
 use crate::types::*;
 
 fn to_i32(n: usize) -> i32 {
@@ -57,6 +59,15 @@ pub fn graph_to_wire(g: &ResourceGraph) -> pb::ResourceGraph {
                 runtime_when: r.runtime_when.clone(),
                 index: to_i32(r.index),
                 pos: Some(position_to_wire(&r.pos)),
+                secret_params: secret_params_of(&r.params),
+            })
+            .collect(),
+        secrets: g
+            .secrets
+            .iter()
+            .map(|s| pb::SecretName {
+                slot: slot_to_wire(s.secret),
+                name: s.name.clone(),
             })
             .collect(),
         edges: g
@@ -107,8 +118,21 @@ pub fn graph_from_wire(g: pb::ResourceGraph) -> Result<ResourceGraph, String> {
             .collect(),
         ..ResourceGraph::default()
     };
+    out.secrets = g
+        .secrets
+        .into_iter()
+        .map(|s| SecretName {
+            secret: SecretRef::new(u64::from(s.slot)),
+            name: s.name,
+        })
+        .collect();
     for r in g.resources {
-        let params = decode_map(&r.params_json).map_err(|e| format!("resource {:?}: {e}", r.id))?;
+        let mut params =
+            decode_map(&r.params_json).map_err(|e| format!("resource {:?}: {e}", r.id))?;
+        for at in &r.secret_params {
+            place_secret(&mut params, &at.path, SecretRef::new(u64::from(at.slot)))
+                .map_err(|e| format!("resource {:?}: {e}", r.id))?;
+        }
         out.resources.push(Resource {
             id: r.id,
             r#type: r.r#type,
@@ -141,11 +165,100 @@ pub fn graph_from_wire(g: pb::ResourceGraph) -> Result<ResourceGraph, String> {
     Ok(out)
 }
 
+/// A slot on the wire. A slot is an index into one run's table, so one too
+/// big for the wire's integer would mean a run with billions of secrets.
+fn slot_to_wire(secret: SecretRef) -> u32 {
+    u32::try_from(secret.slot()).expect("a run has fewer secrets than u32::MAX")
+}
+
+/// Where in `params` a secret stands: the path of keys (and list indexes,
+/// as decimal text) to each `Value::Secret`, with its slot. `canonical_map`
+/// writes the mask in each of those places.
+fn secret_params_of(params: &std::collections::BTreeMap<String, Value>) -> Vec<pb::SecretParam> {
+    fn walk(value: &Value, path: &mut Vec<String>, found: &mut Vec<pb::SecretParam>) {
+        match value {
+            Value::Secret(at) => found.push(pb::SecretParam {
+                path: path.clone(),
+                slot: slot_to_wire(*at),
+            }),
+            Value::List(items) => {
+                for (i, item) in items.iter().enumerate() {
+                    path.push(i.to_string());
+                    walk(item, path, found);
+                    path.pop();
+                }
+            }
+            Value::Map(entries) => {
+                for (key, item) in entries {
+                    path.push(key.clone());
+                    walk(item, path, found);
+                    path.pop();
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    let mut path = Vec::new();
+    for (key, value) in params {
+        path.push(key.clone());
+        walk(value, &mut path, &mut found);
+        path.pop();
+    }
+    found
+}
+
+/// Puts a `Value::Secret` back where the sender said one stands. The place
+/// must exist and hold the mask, or the message does not describe its own
+/// params and is refused.
+fn place_secret(
+    params: &mut std::collections::BTreeMap<String, Value>,
+    path: &[String],
+    secret: SecretRef,
+) -> Result<(), String> {
+    let shown = || path.join(".");
+    let (first, rest) = path
+        .split_first()
+        .ok_or_else(|| "a secret param has an empty path".to_owned())?;
+    let mut at = params
+        .get_mut(first)
+        .ok_or_else(|| format!("secret param {}: no such param", shown()))?;
+    for step in rest {
+        at = match at {
+            Value::List(items) => step
+                .parse::<usize>()
+                .ok()
+                .and_then(|i| items.get_mut(i))
+                .ok_or_else(|| format!("secret param {}: no such list item", shown()))?,
+            Value::Map(entries) => entries
+                .get_mut(step)
+                .ok_or_else(|| format!("secret param {}: no such key", shown()))?,
+            _ => {
+                return Err(format!(
+                    "secret param {}: not inside a list or map",
+                    shown()
+                ))
+            }
+        };
+    }
+    match at {
+        Value::String(s) if s == SENSITIVE => {
+            *at = Value::Secret(secret);
+            Ok(())
+        }
+        _ => Err(format!(
+            "secret param {}: the params do not hold a secret's mask there",
+            shown()
+        )),
+    }
+}
+
 pub fn capabilities_to_wire(c: Capabilities) -> pb::Capabilities {
     pb::Capabilities {
         native_notify: c.native_notify,
         synthetic_notify: c.synthetic_notify,
         runtime_condition: c.runtime_condition,
+        secrets: c.secrets,
     }
 }
 
@@ -154,6 +267,7 @@ pub fn capabilities_from_wire(c: Option<pb::Capabilities>) -> Capabilities {
         native_notify: c.native_notify,
         synthetic_notify: c.synthetic_notify,
         runtime_condition: c.runtime_condition,
+        secrets: c.secrets,
     })
     .unwrap_or_default()
 }
@@ -339,22 +453,59 @@ pub fn artifact_from_wire(a: Option<pb::Artifact>) -> Artifact {
     }
 }
 
+/// Converts a run context, with its secrets. The bytes of each secret are
+/// copied into the message, which is sent over the plugin's private socket
+/// and dropped: the one place outside protected memory a secret passes
+/// through on its way to a plugin.
 pub fn context_to_wire(c: &RunContext) -> pb::RunContext {
     pb::RunContext {
         document: c.document.clone(),
         host: c.host.clone(),
         work_dir: c.work_dir.to_string_lossy().into_owned(),
         inputs_json: canonical_map(&c.inputs).into_bytes(),
+        secrets: c
+            .secrets
+            .slots()
+            .map(|(secret, name, value)| pb::Secret {
+                slot: slot_to_wire(secret),
+                name: name.to_owned(),
+                value: value.expose(<[u8]>::to_vec),
+            })
+            .collect(),
     }
 }
 
+/// Converts a run context without its secrets, for a call that needs none.
+pub fn context_to_wire_without_secrets(c: &RunContext) -> pb::RunContext {
+    pb::RunContext {
+        document: c.document.clone(),
+        host: c.host.clone(),
+        work_dir: c.work_dir.to_string_lossy().into_owned(),
+        inputs_json: canonical_map(&c.inputs).into_bytes(),
+        secrets: Vec::new(),
+    }
+}
+
+/// Converts a run context back. Each secret is taken into protected memory
+/// and its bytes in the message are wiped on the way.
 pub fn context_from_wire(c: Option<pb::RunContext>) -> Result<RunContext, String> {
-    let c = c.ok_or("received no run context")?;
+    let mut c = c.ok_or("received no run context")?;
+    let mut secrets = Vec::with_capacity(c.secrets.len());
+    for secret in &mut c.secrets {
+        let value = SecretValue::take_from(&mut secret.value)
+            .map_err(|e| format!("holding the secret {:?}: {e}", secret.name))?;
+        secrets.push((
+            SecretRef::new(u64::from(secret.slot)),
+            std::mem::take(&mut secret.name),
+            value,
+        ));
+    }
     Ok(RunContext {
         document: c.document,
         host: c.host,
         work_dir: c.work_dir.into(),
         inputs: decode_map(&c.inputs_json).map_err(|e| format!("reading the inputs: {e}"))?,
+        secrets: Secrets::from_values(secrets),
     })
 }
 
@@ -747,4 +898,131 @@ pub fn import_response_from_wire(
         });
     }
     Ok(Ok(imported))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn secret(text: &str) -> SecretValue {
+        SecretValue::from_reader(text.as_bytes(), 64).unwrap()
+    }
+
+    #[test]
+    fn a_secret_in_a_param_crosses_the_wire_as_a_place_and_a_slot_and_never_a_value() {
+        let graph = ResourceGraph {
+            resources: vec![Resource {
+                id: "db".to_owned(),
+                params: BTreeMap::from([
+                    ("password".to_owned(), Value::Secret(SecretRef::new(3))),
+                    (
+                        "users".to_owned(),
+                        Value::List(vec![Value::Map(BTreeMap::from([(
+                            "token".to_owned(),
+                            Value::Secret(SecretRef::new(5)),
+                        )]))]),
+                    ),
+                ]),
+                ..Resource::default()
+            }],
+            secrets: vec![
+                SecretName {
+                    secret: SecretRef::new(3),
+                    name: "db_password".to_owned(),
+                },
+                SecretName {
+                    secret: SecretRef::new(5),
+                    name: "api_token".to_owned(),
+                },
+            ],
+            ..ResourceGraph::default()
+        };
+        let wire = graph_to_wire(&graph);
+        let resource = &wire.resources[0];
+        assert_eq!(
+            String::from_utf8(resource.params_json.clone()).unwrap(),
+            "{\"password\":\"(sensitive)\",\"users\":[{\"token\":\"(sensitive)\"}]}"
+        );
+        let places: Vec<(Vec<String>, u32)> = resource
+            .secret_params
+            .iter()
+            .map(|p| (p.path.clone(), p.slot))
+            .collect();
+        assert_eq!(
+            places,
+            [
+                (vec!["password".to_owned()], 3),
+                (
+                    vec!["users".to_owned(), "0".to_owned(), "token".to_owned()],
+                    5
+                )
+            ]
+        );
+        assert_eq!(graph_from_wire(wire).unwrap(), graph);
+    }
+
+    #[test]
+    fn a_secret_param_that_does_not_point_at_the_mask_is_refused() {
+        let mut wire = graph_to_wire(&ResourceGraph {
+            resources: vec![Resource {
+                id: "db".to_owned(),
+                params: BTreeMap::from([("password".to_owned(), Value::from("plain"))]),
+                ..Resource::default()
+            }],
+            ..ResourceGraph::default()
+        });
+        wire.resources[0].secret_params.push(pb::SecretParam {
+            path: vec!["password".to_owned()],
+            slot: 1,
+        });
+        let err = graph_from_wire(wire.clone()).unwrap_err();
+        assert_eq!(
+            err,
+            "resource \"db\": secret param password: the params do not hold a secret's mask there"
+        );
+        wire.resources[0].secret_params[0].path = vec!["nothing".to_owned()];
+        assert_eq!(
+            graph_from_wire(wire).unwrap_err(),
+            "resource \"db\": secret param nothing: no such param"
+        );
+    }
+
+    #[test]
+    fn a_run_context_carries_its_secrets_into_protected_memory_and_outputs_carry_none() {
+        let context = RunContext {
+            document: "web".to_owned(),
+            secrets: Secrets::from_values(vec![(
+                SecretRef::new(3),
+                "db_password".to_owned(),
+                secret("hunter2"),
+            )]),
+            ..RunContext::default()
+        };
+        let wire = context_to_wire(&context);
+        assert_eq!(wire.secrets.len(), 1);
+        assert_eq!(wire.secrets[0].name, "db_password");
+        assert_eq!(wire.secrets[0].slot, 3);
+        assert_eq!(wire.secrets[0].value, b"hunter2");
+        let back = context_from_wire(Some(wire)).unwrap();
+        assert_eq!(back, context);
+        assert!(back
+            .secrets
+            .of(SecretRef::new(3))
+            .unwrap()
+            .expose(|b| b == b"hunter2"));
+        assert!(context_to_wire_without_secrets(&context).secrets.is_empty());
+    }
+
+    #[test]
+    fn capabilities_keep_their_secrets_flag_across_the_wire() {
+        let all = Capabilities {
+            native_notify: true,
+            synthetic_notify: false,
+            runtime_condition: true,
+            secrets: true,
+        };
+        assert_eq!(capabilities_from_wire(Some(capabilities_to_wire(all))), all);
+        assert!(!capabilities_from_wire(None).secrets);
+    }
 }

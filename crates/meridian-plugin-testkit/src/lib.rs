@@ -15,7 +15,7 @@ use meridian_import::Rendered;
 use meridian_ir::{Bundle, Document};
 use meridian_sdk::{
     Artifact, Data, Emitted, Emitter, ImportSource, Imported, Importer, LogLine, Position,
-    ResourceGraph, Value,
+    ResourceGraph, SecretName, SecretRef, SecretValue, Secrets, Value,
 };
 
 /// The repository root.
@@ -272,6 +272,41 @@ pub fn notes_text(imported: &Imported) -> String {
             format!("{}{about}: {n}\n", n.level)
         })
         .collect()
+}
+
+/// Puts a secret called `name` in the param `param` of resource `id`, as
+/// the host does for a target that takes secrets: the param becomes a
+/// [`Value::Secret`] and the graph names it. Returns the secret's slot, for
+/// a run context made with [`secrets`].
+pub fn secret_in_param(graph: &mut ResourceGraph, id: &str, param: &str, name: &str) -> SecretRef {
+    let slot = SecretRef::new(graph.secrets.len() as u64 + 40);
+    let resource = graph
+        .resources
+        .iter_mut()
+        .find(|r| r.id == id)
+        .unwrap_or_else(|| panic!("no resource {id:?} in the graph"));
+    resource
+        .params
+        .insert(param.to_owned(), Value::Secret(slot));
+    graph.secrets.push(SecretName {
+        secret: slot,
+        name: name.to_owned(),
+    });
+    slot
+}
+
+/// The secrets a run context hands a runner, from slot, name and value.
+pub fn secrets(values: &[(SecretRef, &str, &str)]) -> Secrets {
+    Secrets::from_values(
+        values
+            .iter()
+            .map(|(slot, name, value)| {
+                let value = SecretValue::from_reader(value.as_bytes(), 64 * 1024)
+                    .expect("a secret fits in memory");
+                (*slot, (*name).to_owned(), value)
+            })
+            .collect(),
+    )
 }
 
 /// An artifact from path and content pairs.

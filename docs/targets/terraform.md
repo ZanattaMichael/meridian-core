@@ -211,10 +211,24 @@ directory, so keep that directory.
 
 An output Terraform marks sensitive is reported as sensitive and never printed.
 
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a
+resource's params is compiled as `${var.meridian_secret_<name>}`, with the
+variable declared `sensitive`, so Terraform shows `(sensitive value)` wherever
+it would print it. When the stage runs, the values are written into a
+variables file only the user can read, held in memory where the system
+allows, and passed to `terraform plan` as `-var-file=<path>`; the file is
+removed once the plan is saved. The saved plan holds every variable's value,
+as every Terraform plan file does, so it is overwritten and removed as soon as
+it has been applied or shown. The value is never on the command line and never
+in Terraform's environment. Terraform writes a resource's arguments into its
+state whichever variable they came from, so a document that hands it a secret
+should declare a `backend` that protects its state.
+
 The runner is tested against the real `terraform` command (1.13) on every pull
 request that touches it, and the same tests run again with `tofu`: a plan that
 creates nothing, an apply checked on disk, a second plan that is in sync, an
-update, a replacement, outputs including a sensitive one, and a configuration
-Terraform refuses. They use `terraform_data` and a local state file, so a
+update, a replacement, outputs including a sensitive one, a configuration
+Terraform refuses, and a secret that reaches a resource through the variables
+file and is in nothing Terraform prints. They use `terraform_data` and a local state file, so a
 provider that talks to a cloud has not been run this way. See
 [Real-tool tests](../contributing/real-tool-tests.md).

@@ -37,6 +37,20 @@ pub use transform::supported_resource_types;
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "ansible";
 
+/// What every variable a secret is handed over as starts with.
+pub const SECRET_VARIABLE_PREFIX: &str = "meridian_secret_";
+
+/// The name of the Ansible variable the secret `name` is handed over as:
+/// `meridian_secret_<name>`.
+pub fn secret_variable(name: &str) -> String {
+    format!("{SECRET_VARIABLE_PREFIX}{name}")
+}
+
+/// How a secret is written in a playbook: a Jinja reference to its variable.
+pub fn secret_reference(name: &str) -> String {
+    format!("{{{{ {} }}}}", secret_variable(name))
+}
+
 /// One native Ansible task or handler: the module to run, its arguments, and
 /// the structural keys around it. It is the native tree the transform stage
 /// produces and the emit stage serialises.
@@ -106,6 +120,7 @@ impl Emitter for Ansible {
             native_notify: true,
             synthetic_notify: false,
             runtime_condition: true,
+            secrets: true,
         }
     }
 
@@ -120,7 +135,10 @@ impl Emitter for Ansible {
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
         // A resource here has nothing to read at apply time, so a reference
         // is settled now, from what the document declares, or refused.
-        let graph = &meridian_sdk::expr::resolve_declared(graph, NAME)?;
+        // A secret in a param is written as the variable the runner hands
+        // ansible-playbook in a private extra-vars file; never as a value.
+        let graph = graph.secrets_written_as(secret_reference);
+        let graph = &meridian_sdk::expr::resolve_declared(&graph, NAME)?;
         let playbook = transform::transform(graph)?;
         let warnings = sort::check_order(graph)?;
         validate::validate(&playbook)?;

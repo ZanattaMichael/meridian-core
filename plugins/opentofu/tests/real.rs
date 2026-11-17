@@ -24,7 +24,9 @@ use std::fs;
 use std::path::Path;
 
 use meridian_plugin_host::{Client, RunFailure, StartOptions};
-use meridian_plugin_testkit::{graph_from_file, graph_from_text, plugin_binary, scratch};
+use meridian_plugin_testkit::{
+    graph_from_file, graph_from_text, plugin_binary, scratch, secret_in_param, secrets,
+};
 use meridian_sdk::{
     Applied, Artifact, Change, ChangeAction, Data, LogLine, Output, Plan, ResourceGraph,
     RunContext, Value,
@@ -420,4 +422,54 @@ fn a_provider_from_the_registry_and_an_ephemeral_resource_work() {
     // An ephemeral value is in no state.
     let state = fs::read_to_string(context.work_dir.join("terraform.tfstate")).unwrap();
     assert!(!state.contains("random_password"), "{state}");
+}
+
+#[test]
+fn a_secret_reaches_tofu_through_a_private_variables_file_and_is_in_nothing_it_prints() {
+    let Some(program) = tofu() else { return };
+    let dir = scratch(TMP, "real-secret");
+    const VALUE: &str = "s3cr3t-not-a-real-password-Q9";
+    let client = start(&program);
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: secret\nspec:\n  target: opentofu\n  resources:\n    - id: token\n      type: terraform_data\n      params:\n        input: placeholder\n";
+    let mut graph = graph_from_text("secret.yaml", text, "opentofu");
+    let slot = secret_in_param(&mut graph, "token", "input", "api_token");
+    let artifact = compile(&client, &graph);
+    let config = &artifact.files["main.tofu.json"];
+    assert!(
+        config.contains("\"${var.meridian_secret_api_token}\""),
+        "{config}"
+    );
+    assert!(!config.contains(VALUE));
+    let mut context = context(&dir, "secret", &[]);
+    context.secrets = secrets(&[(slot, "api_token", VALUE)]);
+
+    let mut printed = Vec::new();
+    let plan = client
+        .plan(&context, &artifact, &mut |line: LogLine| {
+            printed.push(line.text)
+        })
+        .unwrap_or_else(|e| panic!("{}", explain("the plan", &e, &printed)));
+    assert_eq!(changes(&plan.changes), [(ChangeAction::Create, "token")]);
+    assert!(
+        !printed.iter().any(|line| line.contains(VALUE)),
+        "tofu printed the secret: {printed:?}"
+    );
+    assert!(
+        !context.work_dir.join("meridian.tfplan").exists(),
+        "the saved plan, which holds every variable, was left behind"
+    );
+
+    let mut printed = Vec::new();
+    client
+        .apply(&context, &artifact, &mut |line: LogLine| {
+            printed.push(line.text)
+        })
+        .unwrap_or_else(|e| panic!("{}", explain("the apply", &e, &printed)));
+    assert!(
+        !printed.iter().any(|line| line.contains(VALUE)),
+        "tofu printed the secret: {printed:?}"
+    );
+    assert!(!context.work_dir.join("meridian.tfplan").exists());
+    let state = fs::read_to_string(context.work_dir.join("terraform.tfstate")).unwrap();
+    assert!(state.contains(VALUE), "the value did not reach tofu");
 }

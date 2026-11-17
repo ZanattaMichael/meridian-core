@@ -8,7 +8,9 @@
 
 use std::path::Path;
 
-use meridian_plugin_testkit::{assert_golden, fixture, graph_from_text, without_positions};
+use meridian_plugin_testkit::{
+    assert_golden, fixture, graph_from_text, secret_in_param, without_positions,
+};
 use meridian_sdk::{CompileError, Data, Emitted, Emitter, Position, ResourceGraph, Value};
 use meridian_target_ansible::Ansible;
 
@@ -226,4 +228,24 @@ fn a_reference_is_settled_from_the_document_or_refused() {
     assert_eq!(err.rule, "invalid-reference");
     assert_eq!(err.resource, "page");
     assert!(err.msg.contains("does not declare"), "{}", err.msg);
+}
+
+#[test]
+fn a_secret_in_a_param_is_written_as_the_variable_the_runner_hands_over() {
+    let text = "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: ansible\n  targetHost:\n    from: inline\n    host: web01.example.com\n  resources:\n    - id: env_file\n      type: file\n      params:\n        path: /etc/app/env\n        content: placeholder\n";
+    let mut graph = graph_from_text("site.yaml", text, "ansible");
+    secret_in_param(&mut graph, "env_file", "content", "db_password");
+    let playbook = emit(&graph).unwrap().artifact.files["playbook.yml"].clone();
+    assert!(
+        playbook.contains("content: '{{ meridian_secret_db_password }}'"),
+        "{playbook}"
+    );
+    assert!(!playbook.contains("(sensitive)"), "{playbook}");
+    // The task is not allowed to print what it was handed.
+    assert!(playbook.contains("    no_log: true\n"), "{playbook}");
+    assert_eq!(playbook.matches("no_log").count(), 1, "{playbook}");
+    assert_eq!(
+        meridian_target_ansible::secret_variable("db_password"),
+        "meridian_secret_db_password"
+    );
 }

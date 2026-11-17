@@ -175,6 +175,7 @@ impl Emitter for Kubernetes {
             native_notify: false,
             synthetic_notify: true,
             runtime_condition: false,
+            secrets: false,
         }
     }
 
