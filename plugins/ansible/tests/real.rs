@@ -366,7 +366,7 @@ fn a_credential_names_the_user_in_the_inventory_and_its_key_reaches_ansible_priv
         .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
     assert_eq!(
         changes(&applied.changes),
-        [("marker", ChangeAction::Create)]
+        [("marker", ChangeAction::Update)]
     );
     assert_eq!(fs::read_to_string(dir.join("marker")).unwrap(), "reached\n");
     assert!(
