@@ -113,6 +113,7 @@ spec:
 | `metadata.description` | no | One line saying what the module is for |
 | `spec.meridian` | no | The releases of `meridian` the module works with, as a [version requirement](#version-requirements). A release outside it refuses the module by name |
 | `spec.modules` | no | The modules this one needs. See [requiring a module](#requiring-a-module) |
+| `spec.credentials` | no | Logins for registries, each naming where its password comes from. See [registry logins](#registry-logins) |
 
 A field that is not in this table is an error, not something silently ignored.
 Write versions and requirements in quotes when they could be read as a number:
@@ -211,9 +212,95 @@ Logins are read from the Docker configuration file: `~/.docker/config.json`, or
 `config.json` in the directory `DOCKER_CONFIG` names. So `docker login
 registry.example.com` (or `podman login`, `oras login`) is how you give access.
 Only logins stored in the file's `auths` section are read; credential helpers
-are not run. Token and basic authentication are supported. Naming a declared
-credential for a registry, so that a login can come from a secret provider, is
-planned ([issue 69](https://github.com/ZanattaMichael/meridian-core/issues/69)).
+are not run. Token and basic authentication are supported.
+
+When the login should come from somewhere else, such as a variable your CI
+sets or a password manager, declare a credential in the manifest and name it
+on the requirement with `credential`. See [registry logins](#registry-logins).
+
+## Registry logins
+
+Without anything said, a registry is logged in to with what the Docker
+configuration file holds for it. A project can instead declare a credential in
+`meridian.yaml` and name it for a module. The password is never in the file:
+the credential says where it comes from, and it is fetched when it is needed.
+
+```yaml
+apiVersion: meridian/v1
+kind: Module
+metadata:
+  name: site
+spec:
+  modules:
+    - name: acme/postgres
+      version: "~3.2"
+      oci: registry.example.com/acme/meridian-postgres
+      credential: internal-registry
+  credentials:
+    - name: internal-registry
+      type: registry
+      server: registry.example.com
+      user: ci-reader
+      password:
+        from: env
+        key: REGISTRY_PASSWORD
+```
+
+```
+$ REGISTRY_PASSWORD=… meridian module install
++ acme/postgres 3.2.4 (oci:registry.example.com/acme/meridian-postgres)
+```
+
+These are the same credentials, with the same types, fields and secret
+providers, as [the language's credentials](../concepts/secrets-in-memory.md#a-credential-outside-a-run).
+A registry takes two of the types:
+
+| `type` | Fields | Use it when |
+|---|---|---|
+| `registry` | `server`, `user`, `password` | The login is for one registry. `server` is the registry's host as it is written in `oci` (`registry.example.com`, `localhost:5000`), and the login is only ever sent to that host |
+| `usernamePassword` | `user`, `password` (`domain` is not used) | One login serves several registries. It is sent to the registry of every requirement that names it |
+
+A `token` credential is not a registry login, and naming one is refused.
+For a registry that issues access tokens, such as GitHub's or GitLab's, use a
+`registry` credential with the token as its `password` and the user name the
+registry documents.
+
+`password` is always a mapping that says where the secret is:
+
+| `from` | Also | The secret is |
+|---|---|---|
+| `env` | `key: NAME` | The value of the environment variable `NAME` |
+| `file` | `path: FILE`, and optionally `allowWideMode: true`, `keepTrailingNewline: true` | The contents of `FILE`, without its final newline. The file must be readable by its owner only (mode `0600`) unless `allowWideMode` is set |
+| `exec` | `command: [PROGRAM, ARG, …]` | What the program prints, without its final newline. This is how a password manager or a cloud's token command is used: `command: [pass, show, registry/ci]` |
+
+The rules, each of which is checked:
+
+- **A password written in the manifest is refused**, and the message does not
+  repeat it. `user` and `server` are plain text.
+- **`credential` must name a credential declared in the same file**, and only
+  goes with `oci`. Git sources use git's own credentials.
+- **Only the project's own manifest is acted on.** A module you fetch may
+  declare credentials and name them, for when it is a project itself; when it
+  is fetched as a dependency they are ignored, so a published module cannot
+  have your logins sent anywhere. To give a login to a module that one of your
+  modules requires, require it in your own `meridian.yaml` with `credential`.
+- **A named credential is the only login tried** for that module. The Docker
+  configuration is not also looked in.
+- **A secret is fetched only when a registry is about to be contacted** for a
+  module that names it: by `module install`, `module update` and
+  `module push --credential`. A run, `module verify` and `module list` never
+  fetch one. It is fetched once per command, however many modules name it.
+- **Nothing of a login is written down.** Not in `meridian.lock`, not in the
+  module store, not in output. The password is held in
+  [locked memory](../concepts/secrets-in-memory.md) and wiped when the command
+  ends. An error names the credential and the provider, never a value.
+
+To publish with a declared credential, name it on the command; the module
+being pushed declares it:
+
+```
+$ meridian module push registry.example.com/acme/meridian-nginx --credential internal-registry
+```
 
 ## Version requirements
 
@@ -559,7 +646,9 @@ published acme/nginx 1.4.2 to registry.example.com/acme/meridian-nginx:1.4.2
 
 `REPOSITORY` is written as in a requirement's `oci`: no scheme and no tag.
 `--insecure` uses plain HTTP. The login comes from the Docker configuration
-file, as it does for fetching.
+file, as it does for fetching. `--credential NAME` logs in with the credential
+`NAME` from this module's `spec.credentials` instead; see
+[registry logins](#registry-logins).
 
 A version is published once:
 
@@ -654,7 +743,12 @@ committed. Do not edit files in it: the next command will refuse the module.
 | `the version X of … holds a manifest that says Y` | A tag and the module's `metadata.version` disagree | Fix it in the module and release a new version |
 | `… needs meridian >=X, and this is meridian Y` | The module's `spec.meridian` excludes this release | Upgrade `meridian`, or use an older version of the module |
 | `… requires … by path, which only works between modules on disk` | A fetched module names a `path` source | The module must name a `git` or `oci` source |
-| `the registry … did not allow reading …` or `writing to …` | No login, or a refused one | `docker login` for that registry |
+| `the registry … did not allow reading …` or `writing to …` | No login, or a refused one | `docker login` for that registry, or [name a credential](#registry-logins) for it. `the credential X was refused` means the registry did not accept that user and password |
+| `the credential X is for the registry A, and … is on B; it was not sent` | A `registry` credential's `server` is not the host in `oci` | Fix `server`, or declare a credential for that registry |
+| `the credential X is a token credential; …` | A registry is logged in to with a user and a password | Declare it as `registry`, with the token as `password` |
+| `spec.modules[N].credential: no credential named X is declared in spec.credentials` | The requirement names a credential the file does not declare | Declare it under `spec.credentials`, or fix the name |
+| `spec.credentials[N].password: a password is written in the file; …` | The secret itself is in `meridian.yaml` | Replace it with where it comes from, such as `{from: env, key: NAME}`, and change the password that was written down |
+| `the credential X: …` | The secret could not be fetched: a variable that is not set, a file that is missing or readable by others, a command that failed | The rest of the message names the provider and what went wrong |
 | `… is already published in … with different content` | A push of a version that exists, with other files | Raise `metadata.version` and push again |
 | `… is not a Meridian module: it has no layer of type …` | The registry tag holds something else, such as a container image | Check the repository; see [publishing to a registry](#to-a-registry) |
 | `… is not signed: it holds no meridian.sig` | Signatures are required and this version was published without one | Ask the publisher to sign a release, pin a signed version, or use `--module-signatures warn` |

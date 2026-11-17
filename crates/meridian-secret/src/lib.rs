@@ -50,6 +50,7 @@
 //! let same = a == b;
 //! ```
 
+mod credential;
 mod deliver;
 mod mask;
 mod provider;
@@ -59,9 +60,15 @@ mod table;
 use std::fmt;
 use std::io::Read;
 
+pub use credential::{
+    resolve_credential, Credential, CredentialDeclaration, CredentialError, CredentialField,
+    FieldSource, CREDENTIAL_TYPES,
+};
 pub use deliver::{sweep_stale, Part, SecretFile};
 pub use mask::Masker;
-pub use provider::{from_env, from_exec, from_file, FetchError, FileOptions};
+pub use provider::{
+    from_env, from_exec, from_file, FetchError, FileOptions, Probe, Source, PROVIDERS,
+};
 pub use sys::Protection;
 pub use table::{Piece, SecretTable, TableError, Transform};
 

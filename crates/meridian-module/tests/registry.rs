@@ -4,6 +4,7 @@
 
 #![cfg(unix)]
 
+use base64::Engine as _;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -435,7 +436,8 @@ fn a_private_registry_is_read_with_the_login_docker_already_has() {
         run(&project, Mode::Install).unwrap_err(),
         format!(
             "the registry {host} did not allow reading {host}/acme/private: no login for it \
-             was found in the Docker configuration file; run `docker login` for that registry",
+             was found in the Docker configuration file; run `docker login` for that registry, \
+             or name a credential for it in meridian.yaml",
             host = locked_out.host
         )
     );
@@ -566,6 +568,7 @@ fn publish(
     push(
         &format!("{}/{repository}", registry.host),
         true,
+        None,
         &manifest.name,
         manifest.version.as_ref().unwrap(),
         &manifest.description,
@@ -648,8 +651,260 @@ fn a_pushed_module_installs_and_a_version_is_published_once() {
         publish(&locked_out, "acme/private", &secret).unwrap_err(),
         format!(
             "the registry {host} did not allow writing to {host}/acme/private: no login for it \
-             was found in the Docker configuration file; run `docker login` for that registry",
+             was found in the Docker configuration file; run `docker login` for that registry, \
+             or name a credential for it in meridian.yaml",
             host = locked_out.host
         )
+    );
+}
+
+/// A file only its owner can read, holding the password the private
+/// registry's login is made of.
+fn login_file(root: &Path) -> PathBuf {
+    let login = String::from_utf8(
+        base64::engine::general_purpose::STANDARD
+            .decode(LOGIN)
+            .unwrap(),
+    )
+    .unwrap();
+    let path = root.join("registry-login");
+    fs::write(&path, format!("{}\n", login.split_once(':').unwrap().1)).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    path
+}
+
+/// A `spec.credentials` list with one credential, named `registry`.
+fn declared(kind: &str, fields: &str, held_in: &Path) -> String {
+    format!(
+        "  credentials:\n    - name: registry\n      type: {kind}\n{fields}      password:\n        \
+         from: file\n        path: {}\n",
+        held_in.display()
+    )
+}
+
+/// An `oci` requirement that names the credential `registry`.
+fn entry_with_login(name: &str, registry: &Registry, repository: &str, req: &str) -> String {
+    format!(
+        "{}      credential: registry\n",
+        entry(name, registry, repository, req)
+    )
+}
+
+#[test]
+fn a_registry_is_read_with_a_credential_the_project_declares() {
+    let root = scratch("declared");
+    let _ = registries();
+    // A private registry the Docker configuration has no login for.
+    let locked = Registry::start(true);
+    let dir = module(&root, "acme/private", "1.0.0", "behind a declared login");
+    locked.publish("acme/private", "1.0.0", &dir);
+    locked.tags("acme/private", &["1.0.0"]);
+    let kept = login_file(&root);
+    let wanted = entry_with_login("acme/private", &locked, "acme/private", "1");
+
+    // The server the credential is for is the registry: it is sent.
+    let server = format!("      server: {}\n      user: reader\n", locked.host);
+    let project = site(
+        &root,
+        &format!("{wanted}{}", declared("registry", &server, &kept)),
+    );
+    let report = run(&project, Mode::Install).unwrap();
+    assert_eq!(report.lock.modules[0].version, "1.0.0");
+    assert!(project
+        .join(".meridian/modules/acme/private/1.0.0/documents/db.yaml")
+        .is_file());
+    // Nothing of the login is written down.
+    let lock = fs::read_to_string(project.join(LOCK_FILE)).unwrap();
+    let held = fs::read_to_string(&kept).unwrap();
+    assert!(!lock.contains(held.trim()) && !lock.contains("reader"));
+
+    // A usernamePassword credential names no server, and logs in too.
+    let _ = fs::remove_dir_all(project.join(".meridian"));
+    let _ = fs::remove_file(project.join(LOCK_FILE));
+    site(
+        &root,
+        &format!(
+            "{wanted}{}",
+            declared("usernamePassword", "      user: reader\n", &kept)
+        ),
+    );
+    assert_eq!(
+        run(&project, Mode::Install).unwrap().lock.modules[0].version,
+        "1.0.0"
+    );
+}
+
+#[test]
+fn a_declared_credential_goes_only_where_it_was_declared_for() {
+    let root = scratch("declared-refused");
+    let _ = registries();
+    let locked = Registry::start(true);
+    let dir = module(&root, "acme/private", "1.0.0", "behind a declared login");
+    locked.publish("acme/private", "1.0.0", &dir);
+    locked.tags("acme/private", &["1.0.0"]);
+    let kept = login_file(&root);
+    let wanted = entry_with_login("acme/private", &locked, "acme/private", "1");
+    let host = &locked.host;
+    let install = |credentials: String| {
+        let project = site(&root, &format!("{wanted}{credentials}"));
+        let _ = fs::remove_file(project.join(LOCK_FILE));
+        run(&project, Mode::Install).unwrap_err()
+    };
+
+    // A login for another registry is not sent to this one.
+    let before = locked.content.lock().unwrap().log.len();
+    assert_eq!(
+        install(declared(
+            "registry",
+            "      server: registry.example.com\n      user: reader\n",
+            &kept
+        )),
+        format!(
+            "the credential registry is for the registry registry.example.com, and \
+             {host}/acme/private is on {host}; it was not sent"
+        )
+    );
+    assert_eq!(locked.content.lock().unwrap().log.len(), before);
+
+    // A login the registry does not accept is named, and not shown.
+    let refused = install(declared(
+        "registry",
+        &format!("      server: {host}\n      user: someone-else\n"),
+        &kept,
+    ));
+    assert_eq!(
+        refused,
+        format!(
+            "the registry {host} did not allow reading {host}/acme/private: the credential \
+             registry was refused"
+        )
+    );
+
+    // A token is not a registry login.
+    let token = root.join("token");
+    fs::copy(&kept, &token).unwrap();
+    assert_eq!(
+        install(format!(
+            "  credentials:\n    - name: registry\n      type: token\n      token:\n        \
+             from: file\n        path: {}\n",
+            token.display()
+        )),
+        "the credential registry is a token credential; a registry is logged in to with a \
+         registry or a usernamePassword credential"
+    );
+
+    // A secret that cannot be read stops the install, and says which.
+    let missing = install(declared(
+        "registry",
+        &format!("      server: {host}\n      user: reader\n"),
+        &root.join("not-there"),
+    ));
+    assert!(
+        missing.starts_with("the credential registry: ") && missing.contains("does not exist"),
+        "{missing}"
+    );
+}
+
+#[test]
+fn a_fetched_module_cannot_have_a_credential_sent() {
+    let root = scratch("declared-transitive");
+    let (open, _) = registries();
+    let locked = Registry::start(true);
+    let inner = module(&root, "acme/private", "1.0.0", "behind a declared login");
+    locked.publish("acme/private", "1.0.0", &inner);
+    locked.tags("acme/private", &["1.0.0"]);
+    let kept = login_file(&root);
+
+    // A published module that declares a credential and names it for one of
+    // its own requirements. Only the project's manifest is acted on.
+    let outer = module(&root, "acme/outer", "1.0.0", "asks for a login");
+    let mut manifest = fs::read_to_string(outer.join("meridian.yaml")).unwrap();
+    manifest.push_str(&format!(
+        "spec:\n  modules:\n{}{}",
+        entry_with_login("acme/private", &locked, "acme/private", "1"),
+        declared(
+            "registry",
+            &format!("      server: {}\n      user: reader\n", locked.host),
+            &kept
+        )
+    ));
+    fs::write(outer.join("meridian.yaml"), manifest).unwrap();
+    open.publish("acme/outer-login", "1.0.0", &outer);
+    open.tags("acme/outer-login", &["1.0.0"]);
+
+    let project = site(&root, &entry("acme/outer", open, "acme/outer-login", "1"));
+    assert_eq!(
+        run(&project, Mode::Install).unwrap_err(),
+        format!(
+            "the registry {host} did not allow reading {host}/acme/private: no login for it \
+             was found in the Docker configuration file; run `docker login` for that registry, \
+             or name a credential for it in meridian.yaml",
+            host = locked.host
+        )
+    );
+
+    // The project names the login for that module itself, and it is used.
+    site(
+        &root,
+        &format!(
+            "{}{}{}",
+            entry("acme/outer", open, "acme/outer-login", "1"),
+            entry_with_login("acme/private", &locked, "acme/private", "1"),
+            declared(
+                "registry",
+                &format!("      server: {}\n      user: reader\n", locked.host),
+                &kept
+            )
+        ),
+    );
+    let report = run(&project, Mode::Install).unwrap();
+    assert_eq!(report.lock.modules.len(), 2);
+}
+
+#[test]
+fn a_module_is_pushed_with_a_declared_credential() {
+    let root = scratch("declared-push");
+    let _ = registries();
+    let locked = Registry::start(true);
+    let kept = login_file(&root);
+    let dir = module(
+        &root,
+        "acme/private",
+        "3.0.0",
+        "pushed with a declared login",
+    );
+    let mut text = fs::read_to_string(dir.join("meridian.yaml")).unwrap();
+    text.push_str(&format!(
+        "spec:\n{}",
+        declared(
+            "registry",
+            &format!("      server: {}\n      user: reader\n", locked.host),
+            &kept
+        )
+    ));
+    fs::write(dir.join("meridian.yaml"), text).unwrap();
+
+    let manifest = Manifest::load(&dir).unwrap();
+    let login = meridian_module::resolve_login(&manifest, "registry").unwrap();
+    let pushed = push(
+        &format!("{}/acme/private", locked.host),
+        true,
+        Some(&login),
+        &manifest.name,
+        manifest.version.as_ref().unwrap(),
+        &manifest.description,
+        &pack(&dir).unwrap(),
+    )
+    .unwrap();
+    assert!(!pushed.already_published);
+    assert_eq!(
+        meridian_module::resolve_login(&manifest, "other")
+            .unwrap_err()
+            .to_string(),
+        "the credential other: it is not declared (declared: registry)"
     );
 }

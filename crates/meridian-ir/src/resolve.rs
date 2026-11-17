@@ -91,6 +91,22 @@ impl Secrets {
         self.values.insert(name.to_owned(), Value::Null);
     }
 
+    /// The names of the fetched secrets whose memory the operating system
+    /// would not lock, so that they may reach swap. Usually none.
+    pub fn unlocked(&self) -> Vec<String> {
+        self.values
+            .iter()
+            .filter(|(_, value)| match value {
+                Value::Secret(at) => self
+                    .table
+                    .with(*at, |held| !held.protection().locked)
+                    .unwrap_or(false),
+                _ => false,
+            })
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
     /// A filter for what a tool prints, holding every secret fetched so far
     /// in each form a tool is likely to print it. A secret too short to
     /// search for is left out.
@@ -162,19 +178,31 @@ fn scope_with(data: &Data, secrets: &Secrets) -> Scope {
 
 /// Reads a condition. It is written bare; wrapped in an interpolation it
 /// means the same.
+///
+/// Only a condition that starts with the opening is read as wrapped. One
+/// that holds the opening further in holds it inside a quoted text, as in
+/// `data.motd == '${{'`, where it is three characters like any others.
 pub(crate) fn condition(text: &str) -> Result<Expr, String> {
-    if has_interpolation(text) {
-        let template = Template::parse(text.trim())?;
-        return match template.sole_source() {
-            Some(source) => Expr::parse_condition(source),
-            None => Err(
-                "a condition is one expression, written bare; an interpolation cannot be mixed \
-                 with other text here"
-                    .to_owned(),
-            ),
-        };
+    let wrapped = |text: &str| match Template::parse(text.trim())?.sole_source() {
+        Some(source) => Expr::parse_condition(source),
+        None => Err(
+            "a condition is one expression, written bare; an interpolation cannot be mixed \
+             with other text here"
+                .to_owned(),
+        ),
+    };
+    if text.trim_start().starts_with("${{") {
+        return wrapped(text);
     }
-    Expr::parse_condition(text)
+    // One that does not read as an expression and holds an interpolation
+    // was most likely meant as one: say that, not what the parser tripped on.
+    Expr::parse_condition(text).or_else(|bare| {
+        if has_interpolation(text) {
+            wrapped(text).and(Err(bare))
+        } else {
+            Err(bare)
+        }
+    })
 }
 
 /// Whether `text` is a usable name after `var.` or `cond.`.
@@ -261,9 +289,6 @@ fn declared(reads: &BTreeSet<(String, Option<String>)>, doc: &Document) -> Resul
     Ok(())
 }
 
-/// The providers a secret can come from.
-const PROVIDERS: &[&str] = &["env", "exec", "file"];
-
 /// What is wrong with one entry of `spec.secrets`, with where.
 fn secret_problems(secret: &Secret, path: &str) -> Vec<(String, String)> {
     let mut found = Vec::new();
@@ -305,66 +330,9 @@ fn secret_problems(secret: &Secret, path: &str) -> Vec<(String, String)> {
         }
     }
 
-    // What each provider needs, and the fields that mean nothing to it.
-    let has = |field: &str| match field {
-        "key" => !secret.key.is_empty(),
-        "path" => !secret.path.is_empty(),
-        "command" => !secret.command.is_empty(),
-        "allowWideMode" => secret.allow_wide_mode,
-        "keepTrailingNewline" => secret.keep_trailing_newline,
-        _ => false,
-    };
-    let (needs, takes): (&str, &[&str]) = match secret.from.as_str() {
-        "env" => ("key", &[]),
-        "file" => ("path", &["allowWideMode", "keepTrailingNewline"]),
-        "exec" => ("command", &[]),
-        "" => {
-            fail(
-                "from",
-                format!(
-                    "a secret needs a provider: from is one of {}",
-                    PROVIDERS.join(", ")
-                ),
-            );
-            return found;
-        }
-        other => {
-            fail(
-                "from",
-                format!(
-                    "{other:?} is not a provider this version has; from is one of {}",
-                    PROVIDERS.join(", ")
-                ),
-            );
-            return found;
-        }
-    };
-    let what = match needs {
-        "key" => "key, the environment variable to read",
-        "path" => "path, the file to read",
-        _ => "command, the program to run and its arguments, as a list",
-    };
-    if !has(needs) {
-        fail(needs, format!("from: {} needs {what}", secret.from));
-    } else if needs == "command" && secret.command[0].is_empty() {
-        fail(
-            needs,
-            "the first item of command is the program to run".to_owned(),
-        );
-    }
-    for field in [
-        "key",
-        "path",
-        "command",
-        "allowWideMode",
-        "keepTrailingNewline",
-    ] {
-        if field != needs && !takes.contains(&field) && has(field) {
-            fail(
-                field,
-                format!("{field} means nothing to from: {}; remove it", secret.from),
-            );
-        }
+    // What the provider needs, and the fields that mean nothing to it.
+    for (field, why) in secret.source().problems() {
+        fail(field, why);
     }
     found
 }

@@ -3,8 +3,8 @@
 ```
 meridian validate <files>...
 meridian compile  <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--out DIR]
-meridian plan     <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE]
-meridian apply    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--resume [RUN]] [--on-failure stop|rollback]
+meridian plan     <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets]
+meridian apply    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets] [--resume [RUN]] [--on-failure stop|rollback]
 meridian drift    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE]
 meridian rollback <files>... [--run RUN]
 meridian status
@@ -16,6 +16,7 @@ meridian import   <paths>... [--from TARGET] [--name NAME] [-o DIR] [-r] [--forc
 meridian migrate  <files>... [--to APIVERSION] [--check]
 meridian version
 meridian module   install [--locked] | update [NAME]... | verify | list | sign --key FILE | pack [--out FILE] | push REPOSITORY
+meridian secret check <files>...
 meridian rules check --hierarchy FILE [--rules FILE] [--require-rules] [--data FILE] [--set KEY=VALUE]
 meridian fmt      <paths>... [--check] [--keep-order]
 meridian lint     <paths>... [--data FILE] [--set KEY=VALUE] [--state-dir DIR] [--fix] [--strict] [--json]
@@ -370,6 +371,33 @@ merged over the hierarchy, `--set` last. Each is checked as a layer of the
 group `(command line)`, and a layer path's `%{KEY}` reads the `--set` value. [The reference](compile-rules.md#running-the-check) has the options
 and the output in full.
 
+### `secret check`
+
+Says, for every [secret](dsl/secrets.md) the documents declare, where it comes
+from and whether that place would answer. It reads no value: a file is looked
+at and not opened, a command is found and not run.
+
+```
+$ meridian secret check site.yaml
+site (site.yaml)
+  db_password   env    ok: the environment variable SITE_DB_PASSWORD is set
+  deploy_token  file   REFUSED: the file /run/secrets/deploy-token has mode 0644, which lets others than its owner read it; make it 0600, or set allowWideMode: true on the secret if that is intended
+  vault_token   exec   not checked: the command vault is there, and is only run by plan and apply
+  extra         env    absent, optional: the environment variable SITE_EXTRA is not set
+error: 1 secret would not be found by plan or apply
+```
+
+| State | Meaning | Fails the check |
+|---|---|---|
+| `ok` | the place holds something a fetch would read | no |
+| `not checked` | the command exists; only running it tells what it prints | no |
+| `absent, optional` | nothing is there, and the secret is `optional: true`, so it reads as `null` | no |
+| `MISSING` | nothing is there | yes |
+| `REFUSED` | the place is there and a fetch would refuse it, or the command was not found | yes |
+
+It takes `--state-dir`, for a file written `@<module>:<path>`, and loads no
+plugin.
+
 ### `fmt`
 
 Rewrites documents in the one standard layout: two-space indentation, the
@@ -456,6 +484,7 @@ meridian signing verify --trusted-key acme.pub meridian-target-acme
 | `--out DIR` | | | `compile` only: where to write the compiled files |
 | `-l SELECTOR`, `--selector SELECTOR` | | every document | `compile`, `plan`, `apply`: run only the documents whose `metadata.labels` match, as in `tier=web,env!=prod`. May be repeated; every requirement must hold. [Labels and selectors](dsl/index.md#labels-and-selectors) |
 | `--data FILE` | | no data | `compile`, `plan`, `apply`: a YAML or JSON mapping of values that [`when`](dsl/index.md#when-and-runtimewhen) conditions and [interpolations](dsl/interpolation.md) read as `data.<key>`. May be repeated; a later file's key replaces an earlier file's |
+| `--strict-secrets` | `MERIDIAN_STRICT_SECRETS` | off | `plan`, `apply`: stop a stage whose secret cannot be [locked in memory](#secrets), instead of warning once and going on |
 | `--set KEY=VALUE` | | | `compile`, `plan`, `apply`: one value for `when` conditions and interpolations, applied after every `--data` file, so it wins. `KEY` may be dotted to set one key inside a mapping (`region.name=eu-west-1`). The value is typed as YAML types it. May be repeated. See [giving the data](dsl/conditions.md#giving-the-data) |
 
 ### Running part of a workflow
@@ -509,6 +538,19 @@ errors and the run's state show `(sensitive)`. The process also turns off its
 own core dumps before it reads anything
 ([how a secret is held](../concepts/secrets-in-memory.md)).
 
+A secret is locked in memory so that it cannot be written to swap. Where the
+machine does not allow that (the limit on locked memory, `ulimit -l`, is too
+small), the run says so once and goes on:
+
+```
+site (ResourceSet, target ansible on web01)
+  warning: secrets: the secret "db_password" could not be locked in memory and may reach swap. Raise the limit on locked memory (ulimit -l, or LimitMEMLOCK= for a service). --strict-secrets makes this an error
+```
+
+With `--strict-secrets` the stage stops instead, before its tool is run.
+[`meridian secret check`](#secret-check) says where each declared secret
+comes from and whether it would be found, without reading any.
+
 ### `module`
 
 Fetches, pins and checks the [modules](modules.md) that the `meridian.yaml` in
@@ -522,7 +564,7 @@ the current directory requires.
 | `meridian module list` | Lists the pinned modules, their versions and sources |
 | `meridian module sign --key FILE` | Signs the module in the current directory, writing `meridian.sig` in it |
 | `meridian module pack [--out FILE]` | Writes the module in the current directory as the archive a registry stores |
-| `meridian module push REPOSITORY [--insecure]` | Publishes the module in the current directory to an OCI registry under its version. A version that is already published is never replaced with other content |
+| `meridian module push REPOSITORY [--insecure] [--credential NAME]` | Publishes the module in the current directory to an OCI registry under its version. A version that is already published is never replaced with other content. `--credential` logs in with a [credential the manifest declares](modules.md#registry-logins) instead of the Docker configuration |
 
 Only `install`, `update` and `push` use the network. Each command, its output and its
 errors are described in [Modules](modules.md#commands).

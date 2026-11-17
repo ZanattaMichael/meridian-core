@@ -358,3 +358,24 @@ fn what_a_condition_keeps_does_not_depend_on_the_target() {
         }
     }
 }
+
+#[test]
+fn the_opening_of_an_interpolation_inside_a_quoted_text_is_only_text() {
+    // Found by the property tests: a condition that compares with a text
+    // holding the opening is a bare condition, not an unclosed interpolation.
+    assert!(Condition::parse("null && '${{' || null").is_ok());
+    assert_eq!(decide("false && '${{' == 'x' || false"), Ok(false));
+    assert_eq!(decide("'${{' == '${{'"), Ok(true));
+    assert_eq!(decide("'a ${{ b }} c' != 'x'"), Ok(true));
+    assert_eq!(decide("data.env == 'prod' && '${{ x' != ''"), Ok(true));
+    // Wrapped, a condition means what it means bare.
+    assert_eq!(decide("${{ data.env == 'prod' }}"), Ok(true));
+    assert_eq!(decide("  ${{ '${{' == '${{' }}  "), Ok(true));
+    // Mixed with other text it is refused, and says how to write it.
+    let mixed = decide("${{ data.env == 'prod' }} && true").unwrap_err();
+    assert!(mixed.contains("written bare"), "{mixed}");
+    let unclosed = decide("${{ data.env == 'prod'").unwrap_err();
+    assert!(unclosed.contains("never closed"), "{unclosed}");
+    let later = decide("true && ${{ data.env == 'prod' }}").unwrap_err();
+    assert!(later.contains("written bare"), "{later}");
+}

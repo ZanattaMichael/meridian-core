@@ -241,6 +241,11 @@ enum Command {
     /// Show every version this build carries: core, language, SDK and
     /// plugin protocol
     Version,
+    /// Work with the secrets documents declare, without showing any
+    Secret {
+        #[command(subcommand)]
+        command: SecretCommand,
+    },
     /// Rewrite documents in the one standard layout, changing no value
     Fmt(tools::FmtArgs),
     /// Report errors, and things that compile but are probably mistakes
@@ -309,6 +314,10 @@ enum ModuleCommand {
         /// Talk plain HTTP. For a registry on a trusted network only
         #[arg(long)]
         insecure: bool,
+        /// Log in with this credential from spec.credentials in
+        /// meridian.yaml, instead of a login from the Docker configuration
+        #[arg(long, value_name = "NAME")]
+        credential: Option<String>,
     },
 }
 
@@ -564,6 +573,29 @@ struct Workflow {
     /// YAML would type it: true, 3 and null are not text, "3" is
     #[arg(long, value_name = "KEY=VALUE")]
     set: Vec<String>,
+    /// Refuse to run when a secret cannot be locked in memory, instead of
+    /// warning once and going on
+    #[arg(long, env = "MERIDIAN_STRICT_SECRETS")]
+    strict_secrets: bool,
+}
+
+#[derive(Subcommand)]
+enum SecretCommand {
+    /// Say, for every secret the documents declare, where it comes from and
+    /// whether that place would answer, without reading any value
+    Check {
+        /// The documents whose secrets to check
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Where fetched modules are kept, for a file written @module:path
+        #[arg(
+            long,
+            value_name = "DIR",
+            env = "MERIDIAN_STATE_DIR",
+            default_value = ".meridian"
+        )]
+        state_dir: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -577,6 +609,9 @@ fn main() -> ExitCode {
             println!("{} valid", count(bundle.documents.len(), "document"));
         }),
         Command::Module { command, state_dir } => module(command, &state_dir),
+        Command::Secret {
+            command: SecretCommand::Check { files, state_dir },
+        } => check_secrets(&files, &state_dir),
         Command::Compile { workflow, out } => orchestrate(
             &workflow,
             Mode::Compile,
@@ -957,7 +992,8 @@ fn module(command: ModuleCommand, state_dir: &Path) -> Result<(), Failure> {
         ModuleCommand::Push {
             repository,
             insecure,
-        } => return push_module(&project, &repository, insecure),
+            credential,
+        } => return push_module(&project, &repository, insecure, credential.as_deref()),
     };
 
     let report = meridian_module::install(&project, mode).map_err(module_failure)?;
@@ -1026,8 +1062,13 @@ fn push_module(
     project: &meridian_module::Project<'_>,
     repository: &str,
     insecure: bool,
+    credential: Option<&str>,
 ) -> Result<(), Failure> {
     let manifest = meridian_module::Manifest::load(project.dir).map_err(module_failure)?;
+    let login = credential
+        .map(|name| meridian_module::resolve_login(&manifest, name))
+        .transpose()
+        .map_err(module_failure)?;
     let Some(version) = &manifest.version else {
         return Err(Failure::Message(format!(
             "{} has no metadata.version, and a module is published as a version",
@@ -1038,6 +1079,7 @@ fn push_module(
     let pushed = meridian_module::push(
         repository,
         insecure,
+        login.as_ref(),
         &manifest.name,
         version,
         &manifest.description,
@@ -1412,6 +1454,56 @@ fn list_plugins(plugins: &PluginDirs) -> Result<(), Failure> {
         .map_err(|e| Failure::Message(e.to_string()))
 }
 
+/// Says where each declared secret comes from and whether that place would
+/// answer. Nothing is fetched: a file is looked at and not read, a command is
+/// found and not run. Fails when a secret that is not optional has no answer.
+fn check_secrets(files: &[PathBuf], state_dir: &Path) -> Result<(), Failure> {
+    use meridian_orchestrator::check_declared;
+    use meridian_secret::Probe;
+    let bundle = load(files, state_dir)?;
+    let (mut declared, mut unanswered) = (0, 0);
+    for doc in &bundle.documents {
+        let rows = check_declared(doc);
+        if rows.is_empty() {
+            continue;
+        }
+        println!("{} ({})", doc.name(), doc.position().file);
+        let width = rows.iter().map(|row| row.name.len()).max().unwrap_or(0);
+        // Each row is a declaration and what a probe found. No value is
+        // read by this command.
+        for row in &rows {
+            declared += 1;
+            let state = match (&row.probe, row.optional) {
+                (Probe::Present(_), _) => "ok",
+                (Probe::Unknown(_), _) => "not checked",
+                (Probe::Absent(_), true) => "absent, optional",
+                (Probe::Absent(_), false) => "MISSING",
+                (Probe::Refused(_), _) => "REFUSED",
+            };
+            if row.unanswered() {
+                unanswered += 1;
+            }
+            println!(
+                "  {:width$}  {:5}  {state}: {}",
+                row.name,
+                row.from,
+                row.probe.words()
+            );
+        }
+    }
+    if declared == 0 {
+        println!("no secret is declared");
+    }
+    if unanswered == 0 {
+        Ok(())
+    } else {
+        Err(Failure::Message(format!(
+            "{} would not be found by plan or apply",
+            count(unanswered, "secret")
+        )))
+    }
+}
+
 /// What a command adds to the workflow it runs.
 #[derive(Default)]
 struct How<'a> {
@@ -1500,6 +1592,7 @@ fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Result<(), Fai
             Some(id) => Resume::Run(id.to_owned()),
         },
         policy,
+        strict_secrets: workflow.strict_secrets,
         ..Options::new(&workflow.state.state_dir)
     };
     let registry = registry(&workflow.state.plugins)?;

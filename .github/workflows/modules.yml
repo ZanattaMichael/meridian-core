@@ -12,6 +12,7 @@ on:
     paths:
       - 'crates/meridian-module/**'
       - 'crates/meridian-signing/**'
+      - 'crates/meridian-secret/**'
       - 'crates/meridian-cli/**'
       - 'crates/meridian-ir/**'
       - 'examples/modules/**'

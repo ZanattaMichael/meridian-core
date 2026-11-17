@@ -70,6 +70,7 @@ pub use lock::{LockError, LockInfo};
 pub use policy::{Decisions, Policy};
 pub use record::{RunRecord, RunStatus, StepRecord, StepStatus};
 pub use rollback::{RollbackOutcome, RollbackReport};
+pub use secrets::{check_declared, Declared};
 pub use select::Selector;
 pub use state::{artifact_hash, stage_key, RunState, StageRecord, STATE_KEY};
 
@@ -329,6 +330,9 @@ pub struct Options {
     /// The data `when` conditions are decided against, also handed to every
     /// target when it compiles.
     pub data: Data,
+    /// Fail a stage whose secrets cannot be locked in memory, instead of
+    /// warning once and going on.
+    pub strict_secrets: bool,
     /// Where the run's record, the run-state and the lock are kept. `None`
     /// is the state directory itself. A tool's working directory is always
     /// under `state_dir`, whatever this is.
@@ -382,6 +386,7 @@ impl Options {
             on_failure: OnFailure::Stop,
             rollback_of: Resume::Last,
             policy: None,
+            strict_secrets: false,
         }
     }
 
@@ -564,6 +569,8 @@ pub fn run_selected(
         artifacts: BTreeMap::new(),
         preflight: false,
         masker: Masker::new(),
+        unlocked: Vec::new(),
+        warned_unlocked: false,
     };
     let mut failed: Option<StageId> = None;
 
@@ -1305,6 +1312,10 @@ struct Run<'a> {
     /// The filter for the secrets the stage now running fetched, for what is
     /// said about a failure. Empty between stages.
     masker: Masker,
+    /// The secrets of the stage now running that could not be locked in
+    /// memory, and whether the run has already said so.
+    unlocked: Vec<String>,
+    warned_unlocked: bool,
 }
 
 /// A stage, compiled.
@@ -1358,7 +1369,22 @@ enum Halt {
 
 impl Run<'_> {
     fn stage(&mut self, stage: Stage<'_>, observer: &mut dyn Observer) -> StageReport {
-        let report = self.stage_with_secrets(stage, observer);
+        let mut report = self.stage_with_secrets(stage, observer);
+        // Said once in a run: the reason is the machine's, not the stage's.
+        let unlocked = std::mem::take(&mut self.unlocked);
+        if !unlocked.is_empty() && !self.warned_unlocked {
+            self.warned_unlocked = true;
+            report.warnings.push(Warning {
+                target: "secrets".to_owned(),
+                resource: String::new(),
+                msg: format!(
+                    "{} could not be locked in memory and may reach swap. {} \
+                     --strict-secrets makes this an error",
+                    secrets::named(&unlocked),
+                    secrets::RAISE_THE_LIMIT
+                ),
+            });
+        }
         // The stage is over: its secrets are wiped now, not at the end of
         // the run, and so is the filter that held their forms.
         self.masker = Masker::new();
@@ -1405,6 +1431,7 @@ impl Run<'_> {
             } => {
                 report.removed = removed;
                 report.target = document.target().to_owned();
+                self.unlocked = secrets.unlocked();
                 (document, secrets)
             }
             Read::LeftOut { condition } => {
@@ -1673,7 +1700,19 @@ impl Run<'_> {
             && !document.secrets().is_empty()
             && !matches!(resolution, Ok(Resolution::Skipped { .. }));
         if fetches {
-            resolution = match secrets::fetch(&document, &mut secrets) {
+            let fetched = secrets::fetch(&document, &mut secrets).and_then(|()| {
+                let unlocked = secrets.unlocked();
+                if self.options.strict_secrets && !unlocked.is_empty() {
+                    return Err(format!(
+                        "{} could not be locked in memory and may reach swap, and \
+                         --strict-secrets is set. {}",
+                        secrets::named(&unlocked),
+                        secrets::RAISE_THE_LIMIT
+                    ));
+                }
+                Ok(())
+            });
+            resolution = match fetched {
                 Ok(()) => {
                     meridian_ir::resolve_for(&document, &self.options.data, &secrets, &escapes_for)
                 }

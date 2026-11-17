@@ -452,3 +452,219 @@ fn what_a_tool_prints_is_searched_for_the_secrets_of_its_stage() {
     // The address, which is no secret, is still there to read.
     assert!(echoed[0].contains("10.0.0.5"), "{log}");
 }
+
+/// Whether this test runs as root, which may lock memory whatever the limit
+/// says, so the tests of memory that cannot be locked have nothing to see.
+fn is_root() -> bool {
+    let id = Command::new("id").arg("-u").output().expect("id runs");
+    String::from_utf8_lossy(&id.stdout).trim() == "0"
+}
+
+/// Runs the command with the limit on locked memory at nothing, as on a
+/// machine where `ulimit -l` is 0.
+fn meridian_unlockable(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
+    let mut command = Command::new("sh");
+    command
+        .args(["-c", "ulimit -l 0 && exec \"$0\" \"$@\""])
+        .arg(env!("CARGO_BIN_EXE_meridian"))
+        .args(args)
+        .current_dir(dir)
+        .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())
+        .env_remove("MERIDIAN_STATE_DIR")
+        .env_remove("MERIDIAN_STRICT_SECRETS")
+        .env("SITE_DB_PASSWORD", PASSWORD);
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    command.output().expect("sh runs")
+}
+
+/// Two documents, each with a secret of its own.
+fn two_stages(test: &str) -> PathBuf {
+    let dir = by_secret(test);
+    let second = BY_SECRET.replace("name: site", "name: second");
+    fs::write(dir.join("second.yaml"), second).unwrap();
+    dir
+}
+
+#[test]
+fn a_secret_that_cannot_be_locked_in_memory_is_warned_about_once_in_a_run() {
+    let dir = two_stages("unlocked");
+    let plan = meridian_unlockable(&dir, &["plan", "site.yaml", "second.yaml"], &[]);
+    assert!(plan.status.success(), "{}{}", stdout(&plan), stderr(&plan));
+    let text = stdout(&plan);
+    nothing_leaked(&plan, &dir, &["token.txt"]);
+    // Both stages ran: the second read the same environment variable as the
+    // first, which had by then been taken out of the environment.
+    assert_eq!(text.matches("+ create files/motd").count(), 2, "{text}");
+    if is_root() {
+        assert!(!text.contains("could not be locked"), "{text}");
+        return;
+    }
+    // Once, on the first stage that held one, and it names the secrets and
+    // what to do, never a value.
+    assert_eq!(
+        text.matches("could not be locked in memory").count(),
+        1,
+        "{text}"
+    );
+    assert!(text.contains("warning: secrets: the secrets "), "{text}");
+    assert!(text.contains("\"db_password\""), "{text}");
+    assert!(text.contains("ulimit -l"), "{text}");
+    assert!(text.contains("--strict-secrets"), "{text}");
+}
+
+#[test]
+fn strict_secrets_refuses_a_secret_that_cannot_be_locked_in_memory() {
+    let dir = two_stages("strict");
+    for (args, env) in [
+        (
+            vec!["apply", "--strict-secrets", "site.yaml", "second.yaml"],
+            vec![],
+        ),
+        (
+            vec!["apply", "site.yaml", "second.yaml"],
+            vec![("MERIDIAN_STRICT_SECRETS", "true")],
+        ),
+    ] {
+        let apply = meridian_unlockable(&dir, &args, &env);
+        nothing_leaked(&apply, &dir, &["token.txt"]);
+        let text = format!("{}{}", stdout(&apply), stderr(&apply));
+        if is_root() {
+            assert!(apply.status.success(), "{text}");
+            continue;
+        }
+        assert!(!apply.status.success(), "{text}");
+        assert!(text.contains("could not be locked in memory"), "{text}");
+        assert!(text.contains("--strict-secrets is set"), "{text}");
+        // Nothing was applied: the stage stopped before its tool was run.
+        assert!(!text.contains("applied"), "{text}");
+        assert!(!dir.join(".meridian/fake/site/files/motd").exists());
+    }
+}
+
+#[test]
+fn strict_secrets_changes_nothing_where_memory_can_be_locked() {
+    let dir = by_secret("strict-locked");
+    let plan = meridian(&dir, &["plan", "--strict-secrets", "site.yaml"]);
+    assert!(plan.status.success(), "{}{}", stdout(&plan), stderr(&plan));
+    assert!(
+        !stdout(&plan).contains("could not be locked"),
+        "{}",
+        stdout(&plan)
+    );
+}
+
+/// A document with a secret of every kind of answer a check can give.
+const TO_CHECK: &str = r#"apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: site
+spec:
+  target: fake
+  targetHost:
+    from: inline
+    host: web01
+  secrets:
+    - name: db_password
+      from: env
+      key: SITE_DB_PASSWORD
+    - name: token
+      from: file
+      path: token.txt
+    - name: flag
+      from: exec
+      command: [touch, the-command-was-run]
+    - name: extra
+      from: env
+      key: SITE_NOT_SET_ANYWHERE
+      optional: true
+  resources:
+    - id: motd
+      type: file
+      params:
+        content: "welcome\n"
+"#;
+
+#[test]
+fn secret_check_says_where_each_secret_comes_from_and_reads_none() {
+    let dir = by_secret("check");
+    fs::write(dir.join("site.yaml"), TO_CHECK).unwrap();
+    let check = meridian(&dir, &["secret", "check", "site.yaml"]);
+    assert!(
+        check.status.success(),
+        "{}{}",
+        stdout(&check),
+        stderr(&check)
+    );
+    let text = stdout(&check);
+    assert!(text.contains("site (site.yaml)"), "{text}");
+    assert!(
+        text.contains("db_password  env    ok: the environment variable SITE_DB_PASSWORD is set"),
+        "{text}"
+    );
+    assert!(
+        text.contains("token        file   ok: the file token.txt is there"),
+        "{text}"
+    );
+    assert!(
+        text.contains("flag         exec   not checked: the command touch is there"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "extra        env    absent, optional: the environment variable \
+             SITE_NOT_SET_ANYWHERE is not set"
+        ),
+        "{text}"
+    );
+    // A command is found, never run, and no value is shown.
+    assert!(!dir.join("the-command-was-run").exists());
+    nothing_leaked(&check, &dir, &["token.txt"]);
+    // Nothing was written either.
+    assert!(!dir.join(".meridian").exists());
+}
+
+#[test]
+fn secret_check_fails_when_a_secret_would_not_be_found_and_says_which() {
+    let dir = by_secret("check-fails");
+    let document = TO_CHECK.replace("[touch, the-command-was-run]", "[no-such-command-anywhere]");
+    fs::write(dir.join("site.yaml"), document).unwrap();
+    // A file others can read is refused by a fetch, so a check refuses it.
+    fs::set_permissions(dir.join("token.txt"), fs::Permissions::from_mode(0o644)).unwrap();
+    let check = meridian_with(&dir, &["secret", "check", "site.yaml"], &[]);
+    assert!(!check.status.success());
+    let text = stdout(&check);
+    assert!(
+        text.contains("MISSING: the environment variable SITE_DB_PASSWORD is not set"),
+        "{text}"
+    );
+    assert!(
+        text.contains("REFUSED: the file token.txt has mode 0644"),
+        "{text}"
+    );
+    assert!(text.contains("allowWideMode: true"), "{text}");
+    assert!(
+        text.contains("REFUSED: the command no-such-command-anywhere was not found"),
+        "{text}"
+    );
+    assert!(text.contains("absent, optional"), "{text}");
+    assert!(
+        stderr(&check).contains("error: 3 secrets would not be found by plan or apply"),
+        "{}",
+        stderr(&check)
+    );
+    nothing_leaked(&check, &dir, &["token.txt"]);
+}
+
+#[test]
+fn secret_check_of_documents_without_secrets_says_so() {
+    let dir = scratch("check-none");
+    let start = TO_CHECK.find("  secrets:").unwrap();
+    let end = TO_CHECK.find("  resources:").unwrap();
+    let document = format!("{}{}", &TO_CHECK[..start], &TO_CHECK[end..]);
+    fs::write(dir.join("site.yaml"), document).unwrap();
+    let check = meridian(&dir, &["secret", "check", "site.yaml"]);
+    assert!(check.status.success(), "{}", stderr(&check));
+    assert_eq!(stdout(&check), "no secret is declared\n");
+}

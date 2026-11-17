@@ -22,6 +22,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "a secret file is written from the bytes",
     ),
     (
+        "crates/meridian-module/src/oci.rs",
+        "a registry login's password is encoded into the Authorization header it is sent in",
+    ),
+    (
         "crates/meridian-secret/src/table.rs",
         "secrets are joined and encoded into new protected memory",
     ),

@@ -6,6 +6,7 @@ use std::fmt;
 use std::path::Path;
 
 use meridian_ir::{Value, VersionTable};
+use meridian_secret::{CredentialDeclaration, FieldSource};
 use semver::{Version, VersionReq};
 
 use crate::Error;
@@ -81,6 +82,11 @@ pub struct Requirement {
     /// where there is exactly one candidate.
     pub version: Option<VersionReq>,
     pub source: Source,
+    /// The credential, declared in the same manifest's `spec.credentials`,
+    /// to log in to an `oci` source with. It is honoured only in the
+    /// project's own manifest: a fetched module cannot make a project send
+    /// a login anywhere.
+    pub credential: Option<String>,
 }
 
 /// A parsed `meridian.yaml`.
@@ -92,6 +98,9 @@ pub struct Manifest {
     /// The core releases the module works with.
     pub meridian: Option<VersionReq>,
     pub modules: Vec<Requirement>,
+    /// The identities the project declares, for a registry that wants a
+    /// login. They say where each secret comes from and hold none.
+    pub credentials: Vec<CredentialDeclaration>,
 }
 
 /// Whether `name` is one to three segments of `a-z`, `0-9` and `-`.
@@ -171,7 +180,15 @@ impl Reader<'_> {
 
     fn requirement(&self, value: &Value, field: &str) -> Result<Requirement, Error> {
         let known = [
-            "name", "version", "path", "git", "ref", "subdir", "oci", "insecure",
+            "name",
+            "version",
+            "path",
+            "git",
+            "ref",
+            "subdir",
+            "oci",
+            "insecure",
+            "credential",
         ];
         let Some(map) = self.map(Some(value), field, &known)? else {
             return self.err(field, "expected a mapping");
@@ -201,6 +218,7 @@ impl Reader<'_> {
         let (path, git, oci) = (get("path")?, get("git")?, get("oci")?);
         let reference = get("ref")?;
         let subdir = get("subdir")?;
+        let credential = get("credential")?;
         let insecure = match map.get("insecure") {
             None | Some(Value::Null) => false,
             Some(Value::Bool(b)) => *b,
@@ -220,10 +238,12 @@ impl Reader<'_> {
                     only("ref", reference.is_some(), "git")?;
                     only("subdir", subdir.is_some(), "git")?;
                     only("insecure", insecure, "oci")?;
+                    only("credential", credential.is_some(), "oci")?;
                     Source::Path(path)
                 }
                 (None, Some(url), None) => {
                     only("insecure", insecure, "oci")?;
+                    only("credential", credential.is_some(), "oci")?;
                     // Both values end up as arguments to git.
                     if url.starts_with('-') {
                         return self.err(&at("git"), "is not a repository address");
@@ -285,6 +305,102 @@ impl Reader<'_> {
             name,
             version,
             source,
+            credential,
+        })
+    }
+
+    /// One entry of `spec.credentials`: a name, a type, and the type's
+    /// fields. A field that is not secret is text; a secret field is a
+    /// mapping that says where the secret comes from.
+    fn credential(&self, value: &Value, field: &str) -> Result<CredentialDeclaration, Error> {
+        let Value::Map(map) = value else {
+            return self.err(
+                field,
+                format!("expected a mapping, found {}", value.describe()),
+            );
+        };
+        let at = |key: &str| format!("{field}.{key}");
+        let mut declared = CredentialDeclaration {
+            name: self
+                .string(map.get("name"), &at("name"))?
+                .unwrap_or_default(),
+            kind: self
+                .string(map.get("type"), &at("type"))?
+                .unwrap_or_default(),
+            ..CredentialDeclaration::default()
+        };
+        for (key, value) in map {
+            if key == "name" || key == "type" {
+                continue;
+            }
+            let source = match value {
+                Value::Map(_) => FieldSource::Secret(self.secret_source(value, &at(key))?),
+                _ => match self.string(Some(value), &at(key))? {
+                    Some(text) => FieldSource::Text(text),
+                    None => continue,
+                },
+            };
+            declared.fields.insert(key.clone(), source);
+        }
+        // The first problem, at its field. What a field holds is never
+        // repeated: it may be a secret written where its source belongs.
+        if let Some((inner, why)) = declared.problems().into_iter().next() {
+            return self.err(&at(&inner), why);
+        }
+        Ok(declared)
+    }
+
+    /// Where a secret comes from: `{from: env, key: NAME}`, `{from: file,
+    /// path: FILE}` or `{from: exec, command: [PROGRAM, ARG...]}`.
+    fn secret_source(&self, value: &Value, field: &str) -> Result<meridian_secret::Source, Error> {
+        let known = [
+            "from",
+            "key",
+            "path",
+            "command",
+            "allowWideMode",
+            "keepTrailingNewline",
+        ];
+        let Some(map) = self.map(Some(value), field, &known)? else {
+            return self.err(field, "expected a mapping");
+        };
+        let at = |key: &str| format!("{field}.{key}");
+        let text = |key: &str| Ok(self.string(map.get(key), &at(key))?.unwrap_or_default());
+        let flag = |key: &str| match map.get(key) {
+            None | Some(Value::Null) => Ok(false),
+            Some(Value::Bool(b)) => Ok(*b),
+            Some(_) => self.err(&at(key), "expected true or false"),
+        };
+        let command = match map.get("command") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::List(items)) => {
+                let mut command = Vec::new();
+                for (i, item) in items.iter().enumerate() {
+                    let at = format!("{field}.command[{i}]");
+                    match self.string(Some(item), &at)? {
+                        Some(word) => command.push(word),
+                        None => return self.err(&at, "must not be empty"),
+                    }
+                }
+                command
+            }
+            Some(other) => {
+                return self.err(
+                    &at("command"),
+                    format!(
+                        "expected a list of the program and its arguments, found {}",
+                        other.describe()
+                    ),
+                )
+            }
+        };
+        Ok(meridian_secret::Source {
+            from: text("from")?,
+            key: text("key")?,
+            path: text("path")?,
+            command,
+            allow_wide_mode: flag("allowWideMode")?,
+            keep_trailing_newline: flag("keepTrailingNewline")?,
         })
     }
 }
@@ -370,7 +486,34 @@ impl Manifest {
             .string(metadata.get("description"), "metadata.description")?
             .unwrap_or_default();
 
-        let spec = r.map(top.get("spec"), "spec", &["meridian", "modules"])?;
+        let spec = r.map(
+            top.get("spec"),
+            "spec",
+            &["meridian", "modules", "credentials"],
+        )?;
+        let mut credentials: Vec<CredentialDeclaration> = Vec::new();
+        match spec.and_then(|s| s.get("credentials")) {
+            None | Some(Value::Null) => {}
+            Some(Value::List(items)) => {
+                for (i, item) in items.iter().enumerate() {
+                    let field = format!("spec.credentials[{i}]");
+                    let declared = r.credential(item, &field)?;
+                    if credentials.iter().any(|c| c.name == declared.name) {
+                        return r.err(
+                            &field,
+                            format!("{} is already declared above", declared.name),
+                        );
+                    }
+                    credentials.push(declared);
+                }
+            }
+            Some(other) => {
+                return r.err(
+                    "spec.credentials",
+                    format!("expected a list, found {}", other.describe()),
+                )
+            }
+        }
         let meridian = match spec.and_then(|s| s.get("meridian")) {
             None => None,
             some => match r.string(some, "spec.meridian")? {
@@ -402,6 +545,24 @@ impl Manifest {
                             format!("{} is already required above", requirement.name),
                         );
                     }
+                    if let Some(wanted) = &requirement.credential {
+                        if !credentials.iter().any(|c| c.name == *wanted) {
+                            let declared: Vec<&str> =
+                                credentials.iter().map(|c| c.name.as_str()).collect();
+                            return r.err(
+                                &format!("{field}.credential"),
+                                format!(
+                                    "no credential named {wanted} is declared in \
+                                     spec.credentials{}",
+                                    if declared.is_empty() {
+                                        String::new()
+                                    } else {
+                                        format!(" (declared: {})", declared.join(", "))
+                                    }
+                                ),
+                            );
+                        }
+                    }
                     modules.push(requirement);
                 }
             }
@@ -419,6 +580,7 @@ impl Manifest {
             description,
             meridian,
             modules,
+            credentials,
         })
     }
 }
@@ -608,5 +770,136 @@ spec:
             assert!(err.contains(want), "wanted {want:?} in {err:?}");
             assert!(err.starts_with("meridian.yaml: "), "{err}");
         }
+    }
+
+    const WITH_LOGIN: &str = r#"apiVersion: meridian/v1
+kind: Module
+metadata:
+  name: estate
+spec:
+  modules:
+    - name: acme/postgres
+      version: "~3.2"
+      oci: registry.example.com/acme/postgres
+      credential: internal
+  credentials:
+    - name: internal
+      type: registry
+      server: registry.example.com
+      user: ci
+      password:
+        from: env
+        key: REGISTRY_PASSWORD
+    - name: build
+      type: usernamePassword
+      user: builder
+      password:
+        from: file
+        path: /run/secrets/build
+        allowWideMode: true
+    - name: helper
+      type: registry
+      user: ci
+      password:
+        from: exec
+        command: [pass, show, registry]
+"#;
+
+    #[test]
+    fn credentials_are_declared_and_named_by_a_registry_source() {
+        let m = Manifest::parse("meridian.yaml", WITH_LOGIN.as_bytes()).unwrap();
+        assert_eq!(m.modules[0].credential.as_deref(), Some("internal"));
+        let names: Vec<&str> = m.credentials.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["internal", "build", "helper"]);
+        let internal = &m.credentials[0];
+        assert_eq!(internal.kind, "registry");
+        assert!(matches!(
+            internal.fields.get("server"),
+            Some(FieldSource::Text(server)) if server == "registry.example.com"
+        ));
+        assert!(matches!(
+            internal.fields.get("password"),
+            Some(FieldSource::Secret(source)) if source.from == "env" && source.key == "REGISTRY_PASSWORD"
+        ));
+        assert!(matches!(
+            m.credentials[1].fields.get("password"),
+            Some(FieldSource::Secret(source))
+                if source.from == "file" && source.path == "/run/secrets/build" && source.allow_wide_mode
+        ));
+        assert!(matches!(
+            m.credentials[2].fields.get("password"),
+            Some(FieldSource::Secret(source)) if source.command == ["pass", "show", "registry"]
+        ));
+    }
+
+    #[test]
+    fn every_mistake_in_a_credential_names_its_field() {
+        for (manifest, want) in [
+            (
+                WITH_LOGIN.replace("credential: internal", "credential: other"),
+                "spec.modules[0].credential: no credential named other is declared in \
+                 spec.credentials (declared: internal, build, helper)",
+            ),
+            (
+                WITH_LOGIN.replace(
+                    "oci: registry.example.com/acme/postgres",
+                    "path: ../postgres",
+                ),
+                "spec.modules[0].credential: only goes with `oci`",
+            ),
+            (
+                WITH_LOGIN.replace("name: build", "name: internal"),
+                "spec.credentials[1]: internal is already declared above",
+            ),
+            (
+                WITH_LOGIN.replace("type: usernamePassword", "type: password"),
+                "spec.credentials[1].type: \"password\" is not a credential type this version has",
+            ),
+            (
+                WITH_LOGIN.replace(
+                    "      user: builder\n",
+                    "      user: builder\n      host: x\n",
+                ),
+                "spec.credentials[1].host: host is not a field of a usernamePassword credential",
+            ),
+            (
+                WITH_LOGIN.replace("from: env", "from: vault"),
+                "spec.credentials[0].password",
+            ),
+            (
+                WITH_LOGIN.replace("key: REGISTRY_PASSWORD", "name: REGISTRY_PASSWORD"),
+                "spec.credentials[0].password.name: unknown field",
+            ),
+            (
+                WITH_LOGIN.replace(
+                    "command: [pass, show, registry]",
+                    "command: pass show registry",
+                ),
+                "spec.credentials[2].password.command: expected a list of the program and its \
+                 arguments",
+            ),
+            (
+                WITH_LOGIN.replace("  credentials:\n", "  credentials:\n    - internal\n"),
+                "spec.credentials[0]: expected a mapping",
+            ),
+        ] {
+            let err = refused(&manifest);
+            assert!(err.contains(want), "wanted {want:?} in {err:?}");
+            assert!(err.starts_with("meridian.yaml: "), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_secret_written_into_the_manifest_is_refused_and_not_repeated() {
+        let written = WITH_LOGIN.replace(
+            "      password:\n        from: env\n        key: REGISTRY_PASSWORD\n",
+            "      password: written-in-the-file\n",
+        );
+        let err = refused(&written);
+        assert!(
+            err.contains("spec.credentials[0].password: a password is written in the file"),
+            "{err}"
+        );
+        assert!(!err.contains("written-in-the-file"), "{err}");
     }
 }
