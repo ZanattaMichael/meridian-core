@@ -9,7 +9,8 @@
 use std::path::Path;
 
 use meridian_plugin_testkit::{
-    assert_golden, fixture, graph_from_file, graph_from_text, repo_root, without_positions,
+    assert_golden, fixture, graph_from_file, graph_from_text, repo_root, secret_in_param,
+    without_positions,
 };
 use meridian_sdk::{
     Capabilities, Category, CompileError, Data, Edge, EdgeKind, Emitted, Emitter, Position,
@@ -146,7 +147,7 @@ fn the_plugin_says_what_it_is() {
             native_notify: true,
             synthetic_notify: false,
             runtime_condition: true,
-            secrets: false,
+            secrets: true,
             credentials: false,
         }
     );
@@ -761,4 +762,75 @@ fn a_reference_is_settled_from_the_document_or_refused() {
     assert_eq!(err.rule, "invalid-reference");
     assert_eq!(err.resource, "page");
     assert!(err.msg.contains("does not declare"), "{}", err.msg);
+}
+
+// ---- secrets ------------------------------------------------------------
+
+/// A file and a command, with a secret in the param named for each.
+fn with_secrets(resources: &str, places: &[(&str, &str, &str)]) -> ResourceGraph {
+    let mut graph = graph_from_text("site.yaml", &document(resources), "salt");
+    for (id, param, name) in places {
+        secret_in_param(&mut graph, id, param, name);
+    }
+    graph
+}
+
+#[test]
+fn a_secret_in_a_param_is_read_from_the_pillar_and_the_state_shows_no_change() {
+    let graph = with_secrets(
+        "    - id: env_file\n      type: file\n      params: {path: /etc/app/env, content: \"a={x}\\n\", mode: \"0600\"}\n",
+        &[("env_file", "content", "db_password")],
+    );
+    let text = emit(&graph).unwrap().artifact.files[SLS].clone();
+    assert!(text.starts_with("#!jinja|yaml\n"), "{text}");
+    assert!(
+        text.contains(
+            "    - contents: {{ pillar['meridian_secret_db_password'] | yaml_encode }}\n"
+        ),
+        "{text}"
+    );
+    assert!(text.contains("    - show_changes: false\n"), "{text}");
+    assert!(!text.contains("a={x}"), "{text}");
+    assert_eq!(
+        meridian_target_salt::secret_reference("db_password"),
+        "{{ pillar['meridian_secret_db_password'] | yaml_encode }}"
+    );
+    assert_eq!(
+        meridian_target_salt::secret_key("db_password"),
+        "meridian_secret_db_password"
+    );
+    assert!(Salt.capabilities().secrets);
+}
+
+#[test]
+fn a_command_given_a_secret_logs_nothing_and_other_braces_in_the_file_stay_literal() {
+    let graph = with_secrets(
+        "    - id: literal\n      type: file\n      params: {path: /etc/app/tpl, content: \"{{ not jinja }}\\n\"}\n    - id: login\n      type: exec\n      params: {command: \"db-login --token placeholder\"}\n",
+        &[("login", "command", "api_token")],
+    );
+    let text = emit(&graph).unwrap().artifact.files[SLS].clone();
+    assert!(text.starts_with("#!jinja|yaml\n"), "{text}");
+    assert!(
+        text.contains("    - name: {{ pillar['meridian_secret_api_token'] | yaml_encode }}\n"),
+        "{text}"
+    );
+    assert!(text.contains("    - output_loglevel: quiet\n"), "{text}");
+    // The other file is rendered by Jinja now too, so its braces are
+    // escaped: Salt reads the same bytes the document wrote.
+    assert!(
+        !text.contains("- contents: |\n        {{ not jinja }}"),
+        "{text}"
+    );
+    assert!(text.contains("{{meridian_brace}}{ not jinja }}"), "{text}");
+}
+
+#[test]
+fn a_secret_the_graph_does_not_name_is_written_as_its_mask() {
+    let mut graph = with_secrets(
+        "    - id: env_file\n      type: file\n      params: {path: /etc/app/env, content: x}\n",
+        &[("env_file", "content", "db_password")],
+    );
+    graph.secrets.clear();
+    let text = emit(&graph).unwrap().artifact.files[SLS].clone();
+    assert!(!text.contains("pillar["), "{text}");
 }

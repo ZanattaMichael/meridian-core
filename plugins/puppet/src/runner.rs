@@ -6,10 +6,12 @@
 //! anywhere else, Bolt compiles the same manifest locally and applies it over
 //! SSH or WinRM. The runner picks by the document's host and can be told.
 
+use std::path::PathBuf;
+
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, LogLine, LogStream, Operations,
-    Plan, RunContext, RunError, Runner, Value,
+    Part, Plan, RunContext, RunError, Runner, SecretFile, Value,
 };
 
 use crate::{MANIFEST_PATH, SITE_PATH};
@@ -119,16 +121,26 @@ impl PuppetRunner {
         );
         write_artifact(&context.work_dir, &on_disk)?;
 
-        match self.transport_for(&context.host) {
-            Transport::Local => self.run_puppet(context, noop, log),
-            Transport::Bolt => self.run_bolt(context, noop, log),
-        }
+        // The document's secrets go to Puppet through Hiera: a data file
+        // only the user can read, named by a hiera.yaml beside it, both
+        // removed when the run ends. The manifest looks each up by name.
+        let hiera = hiera_files(context)?;
+        let config = hiera
+            .as_ref()
+            .map(|h| h.config.to_string_lossy().into_owned());
+        let report = match self.transport_for(&context.host) {
+            Transport::Local => self.run_puppet(context, noop, config.as_deref(), log),
+            Transport::Bolt => self.run_bolt(context, noop, config.as_deref(), log),
+        };
+        drop(hiera);
+        report
     }
 
     fn run_puppet(
         &self,
         context: &RunContext,
         noop: bool,
+        hiera_config: Option<&str>,
         log: &dyn Log,
     ) -> Result<Report, RunError> {
         let mut tool = Tool::new(&self.puppet)
@@ -136,6 +148,9 @@ impl PuppetRunner {
             .dir(&context.work_dir);
         if noop {
             tool = tool.arg("--noop");
+        }
+        if let Some(config) = hiera_config {
+            tool = tool.arg("--hiera_config").arg(config);
         }
         tool = tool.args(self.extra_args.iter().cloned()).arg(APPLY_PATH);
 
@@ -170,6 +185,7 @@ impl PuppetRunner {
         &self,
         context: &RunContext,
         noop: bool,
+        hiera_config: Option<&str>,
         log: &dyn Log,
     ) -> Result<Report, RunError> {
         // The core checked the host already; this runner is the last thing
@@ -183,6 +199,9 @@ impl PuppetRunner {
             .capture_stdout();
         if noop {
             tool = tool.arg("--noop");
+        }
+        if let Some(config) = hiera_config {
+            tool = tool.arg("--hiera-config").arg(config);
         }
         tool = tool.args(self.extra_args.iter().cloned());
 
@@ -203,6 +222,53 @@ impl PuppetRunner {
         }
         Err(error)
     }
+}
+
+/// The secrets as Hiera data: the data file, and the `hiera.yaml` that
+/// names it, in a directory of their own that only the user can enter.
+struct HieraFiles {
+    /// Dropping it removes the directory and both files.
+    _data: SecretFile,
+    config: PathBuf,
+}
+
+/// Writes the document's secrets for Hiera, each under its key, or `None`
+/// when the document has none. The data file is `common.yaml`: a YAML
+/// mapping whose values are written as JSON strings, which YAML reads the
+/// same. The value goes from protected memory to the file and nowhere else.
+fn hiera_files(context: &RunContext) -> Result<Option<HieraFiles>, RunError> {
+    if context.secrets.is_empty() {
+        return Ok(None);
+    }
+    let keys: Vec<String> = context
+        .secrets
+        .iter()
+        .map(|(name, _)| Value::String(crate::secret_key(name)).canonical())
+        .collect();
+    let mut parts = vec![Part::Text("---\n")];
+    for (key, (_, value)) in keys.iter().zip(context.secrets.iter()) {
+        parts.push(Part::Text(key));
+        parts.push(Part::Text(": \""));
+        parts.push(Part::JsonString(value));
+        parts.push(Part::Text("\"\n"));
+    }
+    let data = SecretFile::create("common.yaml", &parts)
+        .map_err(|e| RunError::new(format!("writing the Hiera data file: {e}")))?;
+    let datadir = Value::String(data.dir().to_string_lossy().into_owned()).canonical();
+    let config = data
+        .beside(
+            "hiera.yaml",
+            &format!(
+                "---\n# Written by Meridian for this run, and removed with it.\n\
+                 version: 5\ndefaults:\n  datadir: {datadir}\n  data_hash: yaml_data\n\
+                 hierarchy:\n  - name: \"Secrets handed over by Meridian\"\n    path: common.yaml\n"
+            ),
+        )
+        .map_err(|e| RunError::new(format!("writing hiera.yaml: {e}")))?;
+    Ok(Some(HieraFiles {
+        _data: data,
+        config,
+    }))
 }
 
 impl Runner for PuppetRunner {

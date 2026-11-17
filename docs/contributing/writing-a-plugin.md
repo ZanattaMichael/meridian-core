@@ -449,11 +449,20 @@ params: a password, a key. The host hands it to your plugin only if
      a directory of its own, in memory where the system allows, overwritten
      and removed when you drop it. Keep it until the tool has exited, and
      give the tool the path (`-var-file=<path>`, `--extra-vars @<path>`).
+     A tool that reads another format gets a `SecretFile::create` built from
+     `Part::Text` and `Part::JsonString` pieces (the Puppet plugin writes
+     Hiera YAML this way, the Salt plugin a pillar file), and a tool that
+     reaches the file only through a second one gets that second file from
+     `file.beside(name, text)`, in the same private directory: a `hiera.yaml`,
+     a pillar `top.sls`, a `client.rb`.
    - the tool's standard input, for a tool that reads a value from it.
      `Tool::stdin_secret(value)` pipes it straight from protected memory.
 
    Never an argument, which every user of the machine can read in `ps`, and
    never the environment, which the tool passes on to everything it starts.
+   A tool that takes a value no other way is refused it: return a `RunError`
+   that says so and names what to do instead, as the Chef plugin does for
+   `chef-run`.
    The value is a `SecretValue`: it cannot be printed, cloned or compared by
    accident, and it is wiped when the context is dropped. A tool that keeps
    what it was given (a saved plan, a state file) is your plugin's to clean

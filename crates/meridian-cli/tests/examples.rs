@@ -867,8 +867,8 @@ fn a_secret_in_a_setting_is_compiled_as_its_name_and_never_planned() {
     assert!(!succeeded, "{said}");
     assert!(
         said.contains(
-            "resource \"app_env\": params.content holds a secret, and target \"chef\" does \
-             not take one: it has no private channel to hand a secret to its tool"
+            "resource \"app_env\": params.content holds a secret, and target \"cloud-init\" \
+             does not take one: it has no private channel to hand a secret to its tool"
         ),
         "{said}"
     );

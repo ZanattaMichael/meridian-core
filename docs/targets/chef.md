@@ -16,6 +16,7 @@ and runs Chef on it.
 | `dependsOn` | Yes, as recipe order. A recipe runs top to bottom, so the dependency graph is flattened into one sequence |
 | `notifies` | Native: `notifies`, delayed to the end of the run. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec. The action is kept: a reload stays a reload |
 | `runtimeWhen` | Yes: one line of Ruby in an `only_if` guard |
+| Secrets | On this machine, yes: as node attributes from a JSON file only the user can read, with `sensitive true` on the resource. Through `chef-run`, no: it takes attributes on its command line only, so the apply stops. See [Secrets](#secrets) |
 | References | `${id.param}` is settled from the document when it is compiled; anything else in `${...}` is refused, and `$${` is a literal `${` ([rules](../reference/resource-types.md#references)) |
 | Plan | On this machine, yes: `--why-run`. For another machine, no: `chef-run` has no dry run, so the plan is reported as unknown |
 | Apply | Yes |
@@ -44,6 +45,7 @@ Contents: [Requirements](#requirements) ·
 [What a compile writes](#what-a-compile-writes) ·
 [Running](#running) ·
 [Settings](#settings) ·
+[Secrets](#secrets) ·
 [What is refused](#what-is-refused) ·
 [Troubleshooting](#troubleshooting) ·
 [How it is tested](#how-it-is-tested)
@@ -241,6 +243,77 @@ changes made before it.
 | `MERIDIAN_CHEF_RUN` | the program to run for another machine, when it is not `chef-run` on `PATH` |
 | `MERIDIAN_CHEF_TRANSPORT` | `local` or `remote`, to override the choice made from the host |
 | `MERIDIAN_CHEF_ARGS` | arguments added to every run, split on spaces: `--chef-license accept`, or `chef-run`'s `--user deploy --identity-file ~/.ssh/deploy` |
+
+## Secrets
+
+A [secret](../reference/dsl/secrets.md) in a resource's params reaches Chef
+as a node attribute, and through nothing else.
+
+```yaml
+spec:
+  target: chef
+  secrets:
+    - name: db_password
+      from: env
+      key: APP_DB_PASSWORD
+  resources:
+    - id: db_conf
+      type: file
+      params:
+        path: /etc/app/db.conf
+        mode: "0600"
+        content: ${{ secret.db_password }}
+```
+
+**What the compile writes.** The property reads the attribute under the
+secret's key, and the resource is marked `sensitive`, so Chef prints neither
+its diff nor its content, in a why-run or a converge:
+
+```ruby
+file 'db_conf' do
+  content node['meridian_secret_db_password']
+  mode '0600'
+  path '/etc/app/db.conf'
+  sensitive true
+  action :create
+end
+```
+
+The compiled recipe holds the key, never the value, so it can be reviewed and
+kept. A resource without a secret is not made sensitive: its diff still shows.
+
+**How the value reaches the tool.** On this machine, the runner writes an
+attributes file with each secret under its key into a directory only the user
+can enter (mode `0700`, the file `0600`, on a memory filesystem where the
+system has one) and passes it as `--json-attributes <dir>/attributes.json`.
+Local mode writes the node object, attributes and all, back to a `nodes`
+directory under the repository after every run, which would leave the value
+in the stage's work directory; so the run is also given a `client.rb` beside
+the attributes, `--config <dir>/client.rb`, that names the work directory as
+the repository and the private directory as `node_path`. Both files, and the
+node Chef wrote, are overwritten and removed when the run ends. Neither the
+command line nor the tool's environment ever holds the value, and nothing in
+the work directory does.
+
+**For another machine the apply stops.** `chef-run` takes attributes on its
+command line only (`--json-attributes` is not among its options, and `--attr`
+puts the value in `ps` for every user of this machine), so a document with a
+secret and a host that is not this machine fails before anything is started:
+
+```
+chef-run has no private way to hand a secret to web01.example.com: it takes attributes on its command line only, where every user of this machine could read them. Run chef-client on the host, with the local transport, or keep the secret out of this document
+```
+
+A plan for that host is reported as unknown, as every `chef-run` plan is, and
+runs nothing. To converge such a document, run Meridian on the node with
+`MERIDIAN_CHEF_TRANSPORT=local`.
+
+The handover is tested against a stand-in `chef-client` that keeps a copy of
+the attributes file, its mode, the configuration, its arguments and its
+environment, and against the real client in CI (`MERIDIAN_TEST_REAL_CHEF=1`),
+which converges a file whose content is a secret and whose value then appears
+in the file and in nothing Chef printed or the plugin wrote, the node file
+included.
 
 ## What is refused
 

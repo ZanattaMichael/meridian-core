@@ -147,6 +147,31 @@ impl SecretFile {
         &self.path
     }
 
+    /// The directory the file is in: made for it, enterable by the user
+    /// alone, and removed with it.
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// Writes `text`, which holds no secret, into a second file called
+    /// `name` beside the first, with the same protection, and returns its
+    /// path. It is for a tool that reads the secret file only through
+    /// another: a `hiera.yaml` naming its data directory, a pillar top file.
+    /// It is removed with the directory.
+    pub fn beside(&self, name: &str, text: &str) -> std::io::Result<PathBuf> {
+        if name.is_empty() || name.contains(['/', '\\']) || name == "." || name == ".." {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "a file beside a secret file has a file name, not a path",
+            ));
+        }
+        let path = self.dir.join(name);
+        let mut handle = private_file(&path)?;
+        handle.write_all(text.as_bytes())?;
+        handle.flush()?;
+        Ok(path)
+    }
+
     /// Whether the file is on a filesystem held in memory. When it is not,
     /// the secret touched a disk for the length of the run, which is worth
     /// telling the user.

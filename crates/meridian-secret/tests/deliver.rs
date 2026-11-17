@@ -147,3 +147,24 @@ fn what_a_killed_run_left_behind_is_removed_by_the_next() {
     assert!(!left.parent().unwrap().exists());
     assert!(mine.path().exists(), "the sweep removed a live run's file");
 }
+
+#[test]
+fn a_file_beside_the_secret_file_is_as_private_and_goes_with_it() {
+    let password = secret("p4ss");
+    let file = SecretFile::create("common.yaml", &[Part::Secret(&password)]).unwrap();
+    let dir = file.dir().to_path_buf();
+    assert_eq!(dir, file.path().parent().unwrap());
+    let config = file.beside("hiera.yaml", "version: 5\n").unwrap();
+    assert_eq!(config, dir.join("hiera.yaml"));
+    assert_eq!(fs::read_to_string(&config).unwrap(), "version: 5\n");
+    assert_eq!(mode(&config), 0o600);
+    assert_eq!(fs::read_dir(&dir).unwrap().count(), 2);
+    // A name is a name: nothing is written outside the directory.
+    for bad in ["", ".", "..", "a/b", "a\\b", "../escape"] {
+        let err = file.beside(bad, "x").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput, "{bad:?}");
+    }
+    drop(file);
+    assert!(!config.exists());
+    assert!(!dir.exists());
+}

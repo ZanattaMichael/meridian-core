@@ -33,6 +33,25 @@ pub use transform::supported_resource_types;
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "salt";
 
+/// The pillar key the secret `name` is handed over under:
+/// `meridian_secret_<name>`.
+pub fn secret_key(name: &str) -> String {
+    format!("meridian_secret_{name}")
+}
+
+/// How a secret is written in a state file: a Jinja read of its pillar key,
+/// which Salt renders before it reads the file as YAML. The value is passed
+/// through Salt's `yaml_encode` filter, so what Jinja writes in its place is
+/// one quoted YAML scalar whatever the value holds, and the reference is
+/// written unquoted, where YAML reads that scalar.
+pub fn secret_reference(name: &str) -> String {
+    format!("{{{{ pillar['{}'] | yaml_encode }}}}", secret_key(name))
+}
+
+/// The pillar file the runner writes the secrets into, and the name the
+/// pillar top file applies it by.
+pub const PILLAR_NAME: &str = "meridian";
+
 /// Another state, as a requisite names it: the state module and the state's
 /// ID, which Salt writes `- pkg: nginx_pkg`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -96,6 +115,8 @@ pub(crate) struct Sls {
     /// a reload, a start, a stop, a command run again. They follow every
     /// resource's state, sorted by ID.
     pub reactions: Vec<State>,
+    /// The secrets the states refer to, by slot and name.
+    pub secrets: Vec<meridian_sdk::SecretName>,
 }
 
 impl Sls {
@@ -142,7 +163,7 @@ impl Emitter for Salt {
             native_notify: true,
             synthetic_notify: false,
             runtime_condition: true,
-            secrets: false,
+            secrets: true,
             credentials: false,
         }
     }

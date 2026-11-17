@@ -45,8 +45,16 @@ pub(crate) fn serialise(sls: &Sls) -> BTreeMap<String, String> {
 /// file that does carry one needs Jinja, and there every string is written
 /// so that Jinja hands it on unchanged.
 fn state_file(sls: &Sls) -> String {
+    // A secret is read from the pillar through Jinja, so a file that holds
+    // one is rendered through Jinja too.
     let text = Text {
-        jinja: sls.all().any(|s| !s.when.is_empty()),
+        jinja: sls.all().any(|s| {
+            !s.when.is_empty()
+                || s.args
+                    .iter()
+                    .any(|(_, v)| crate::transform::holds_secret(v))
+        }),
+        secrets: &sls.secrets,
     };
     let mut out = String::new();
     if text.jinja {
@@ -81,12 +89,14 @@ fn top_file(sls: &Sls) -> String {
 }
 
 /// How strings are written into one file.
-struct Text {
+struct Text<'a> {
     /// Whether the file is rendered through Jinja before it is read as YAML.
     jinja: bool,
+    /// The names of the secrets the states refer to.
+    secrets: &'a [meridian_sdk::SecretName],
 }
 
-impl Text {
+impl Text<'_> {
     /// One state: its ID, its function, then the arguments and requisites as
     /// Salt's list of single-key mappings. Key order is part of the output's
     /// identity, so it is decided here once.
@@ -147,8 +157,16 @@ impl Text {
             Value::Uint(u) => Yaml::Uint(*u),
             Value::Float(f) => Yaml::Float(*f),
             Value::String(s) => Yaml::Str(self.escape(s)),
-            // A plugin is never sent a secret as a value; one would be written as its mask.
-            Value::Secret(_) => Yaml::Str(meridian_sdk::SENSITIVE.to_owned()),
+            // A secret is read from the pillar when the file is rendered: the
+            // reference is Jinja, written as it is, and what it renders to is
+            // the scalar YAML reads. One the graph does not name is written
+            // as its mask.
+            Value::Secret(at) => self
+                .secrets
+                .iter()
+                .find(|s| s.secret == *at)
+                .map(|s| Yaml::Raw(crate::secret_reference(&s.name)))
+                .unwrap_or_else(|| Yaml::str(meridian_sdk::SENSITIVE)),
             Value::List(items) => Yaml::Seq(items.iter().map(|v| self.value(v)).collect()),
             Value::Map(map) => Yaml::Map(
                 map.iter()
@@ -188,7 +206,10 @@ mod tests {
 
     #[test]
     fn a_plain_file_leaves_every_string_alone() {
-        let text = Text { jinja: false };
+        let text = Text {
+            jinja: false,
+            secrets: &[],
+        };
         assert_eq!(
             text.escape("{{ a }} {% b %} {# c #}"),
             "{{ a }} {% b %} {# c #}"
@@ -197,7 +218,10 @@ mod tests {
 
     #[test]
     fn a_rendered_file_replaces_the_brace_that_opens_a_tag() {
-        let text = Text { jinja: true };
+        let text = Text {
+            jinja: true,
+            secrets: &[],
+        };
         assert_eq!(text.escape("server {}"), "server {}");
         assert_eq!(text.escape("{\"a\": 1}"), "{\"a\": 1}");
         // Only a brace that opens a tag is replaced: the second of a pair

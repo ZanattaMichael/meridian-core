@@ -99,6 +99,7 @@ fn attribute(attr: &Attr, d: &Declaration) -> Result<String, CompileError> {
     match attr {
         Attr::Bare(word) => Ok((*word).to_owned()),
         Attr::Value(value) => literal(value, d),
+        Attr::Source(source) => Ok(source.clone()),
     }
 }
 

@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{artifact, scratch, stand_in, KeptLog};
-use meridian_sdk::{Artifact, RunContext, Runner};
+use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
+use meridian_sdk::{Artifact, RunContext, Runner, SecretRef};
 use meridian_target_puppet::{PuppetRunner, Transport};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -207,4 +207,120 @@ fn a_target_bolt_would_read_as_an_option_is_refused_before_it_runs() {
         "{err}"
     );
     assert!(!dir.join("bolt.args").exists());
+}
+
+// ---- secrets ------------------------------------------------------------
+
+/// A stand-in body that keeps what a tool given `--hiera_config` (or Bolt's
+/// `--hiera-config`) could read: the configuration, the data file beside it
+/// and its mode, and the environment, then prints `report`.
+fn keeping_hiera(dir: &Path, report: &str) -> String {
+    format!(
+        "env > \"{dir}/env\"
+while [ $# -gt 0 ]; do
+  case \"$1\" in
+    --hiera_config|--hiera-config)
+      echo \"$2\" > \"{dir}/config-path\"
+      cp \"$2\" \"{dir}/hiera.yaml\"
+      cp \"$(dirname \"$2\")/common.yaml\" \"{dir}/common.yaml\"
+      stat -c %a \"$(dirname \"$2\")/common.yaml\" > \"{dir}/mode\" 2>/dev/null || stat -f %Lp \"$(dirname \"$2\")/common.yaml\" > \"{dir}/mode\"
+      shift;;
+  esac
+  shift
+done
+{report}",
+        dir = dir.display()
+    )
+}
+
+fn with_secret(dir: &Path, host: &str) -> RunContext {
+    let mut context = context(dir, host);
+    context.secrets = secrets(&[(SecretRef::new(1), "db_password", "hunter2\"\\")]);
+    context
+}
+
+#[test]
+fn secrets_reach_puppet_apply_as_hiera_data_in_a_private_directory_and_nowhere_else() {
+    let dir = scratch(TMP, "secrets-local");
+    let log = KeptLog::default();
+    runner(&dir, &keeping_hiera(&dir, NOOP), "exit 9")
+        .apply(&with_secret(&dir, "localhost"), &compiled(), &log)
+        .unwrap();
+
+    // The data file holds the value under its key, as a JSON string, which
+    // YAML reads the same.
+    assert_eq!(
+        fs::read_to_string(dir.join("common.yaml")).unwrap(),
+        "---\n\"meridian_secret_db_password\": \"hunter2\\\"\\\\\"\n"
+    );
+    #[cfg(unix)]
+    assert_eq!(fs::read_to_string(dir.join("mode")).unwrap().trim(), "600");
+    // The configuration beside it names that directory and nothing else.
+    let config = fs::read_to_string(dir.join("hiera.yaml")).unwrap();
+    let config_path = fs::read_to_string(dir.join("config-path")).unwrap();
+    let private_dir = Path::new(config_path.trim()).parent().unwrap();
+    assert!(config.contains("version: 5\n"), "{config}");
+    assert!(
+        config.contains(&format!(
+            "datadir: {}\n",
+            meridian_sdk::Value::String(private_dir.to_string_lossy().into_owned()).canonical()
+        )),
+        "{config}"
+    );
+    assert!(config.contains("path: common.yaml\n"), "{config}");
+    assert!(!config.contains("hunter2"), "{config}");
+    // The command line named the configuration and nothing more, and the
+    // environment held nothing.
+    let args = fs::read_to_string(dir.join("puppet.args")).unwrap();
+    assert!(args.contains("--hiera_config "), "{args}");
+    assert!(!args.contains("hunter2"), "{args}");
+    assert!(!fs::read_to_string(dir.join("env"))
+        .unwrap()
+        .contains("hunter2"));
+    assert!(!log.text().iter().any(|l| l.contains("hunter2")));
+    // Neither the work directory nor the private one holds it now.
+    assert!(
+        !private_dir.exists(),
+        "{} was left behind",
+        private_dir.display()
+    );
+    assert!(!fs::read_to_string(dir.join("work/apply.pp"))
+        .unwrap()
+        .contains("hunter2"));
+}
+
+#[test]
+fn over_bolt_the_hiera_configuration_is_passed_as_bolt_spells_it() {
+    let dir = scratch(TMP, "secrets-bolt");
+    runner(&dir, "exit 9", &keeping_hiera(&dir, BOLT_REPORT))
+        .apply(
+            &with_secret(&dir, "web01"),
+            &compiled(),
+            &KeptLog::default(),
+        )
+        .unwrap();
+    let args = fs::read_to_string(dir.join("bolt.args")).unwrap();
+    assert!(args.contains("--hiera-config "), "{args}");
+    assert!(!args.contains("--hiera_config"), "{args}");
+    assert!(!args.contains("hunter2"), "{args}");
+    assert_eq!(
+        fs::read_to_string(dir.join("common.yaml")).unwrap(),
+        "---\n\"meridian_secret_db_password\": \"hunter2\\\"\\\\\"\n"
+    );
+    let config_path = fs::read_to_string(dir.join("config-path")).unwrap();
+    assert!(!Path::new(config_path.trim()).exists());
+}
+
+#[test]
+fn a_run_without_secrets_names_no_hiera_configuration() {
+    let dir = scratch(TMP, "no-secrets");
+    runner(&dir, NOOP, "exit 9")
+        .plan(
+            &context(&dir, "localhost"),
+            &compiled(),
+            &KeptLog::default(),
+        )
+        .unwrap();
+    let args = fs::read_to_string(dir.join("puppet.args")).unwrap();
+    assert!(!args.contains("hiera"), "{args}");
 }

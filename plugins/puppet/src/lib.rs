@@ -57,6 +57,20 @@ pub const NAME: &str = "puppet";
 pub(crate) enum Attr {
     Bare(&'static str),
     Value(Value),
+    /// Puppet source written as it is: a secret's `Sensitive(lookup(...))`.
+    Source(String),
+}
+
+/// The Hiera key the secret `name` is handed over under:
+/// `meridian_secret_<name>`.
+pub fn secret_key(name: &str) -> String {
+    format!("meridian_secret_{name}")
+}
+
+/// How a secret is written in the manifest: a lookup of its key, wrapped
+/// in `Sensitive` so Puppet redacts it from its own report and diff.
+pub fn secret_reference(name: &str) -> String {
+    format!("Sensitive(lookup('{}'))", secret_key(name))
 }
 
 /// A Puppet resource reference, written `Type['title']` with the type
@@ -154,7 +168,7 @@ impl Emitter for Puppet {
             native_notify: true,
             synthetic_notify: false,
             runtime_condition: false,
-            secrets: false,
+            secrets: true,
             credentials: false,
         }
     }

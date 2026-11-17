@@ -5,8 +5,8 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{artifact, scratch, stand_in, KeptLog};
-use meridian_sdk::{Artifact, ChangeAction, RunContext, Runner};
+use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
+use meridian_sdk::{Artifact, ChangeAction, RunContext, Runner, SecretRef};
 use meridian_target_salt::{SaltRunner, Transport};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -459,4 +459,109 @@ fn a_host_salt_ssh_would_read_as_an_option_is_refused_before_it_runs() {
         "{err}"
     );
     assert!(!dir.join("args").exists());
+}
+
+// ---- secrets ------------------------------------------------------------
+
+/// A stand-in body that keeps what a tool given `--pillar-root` could read:
+/// the pillar file and its mode, the top file beside it, and the
+/// environment, then prints `result`.
+fn keeping_pillar(dir: &Path, result: &str) -> String {
+    format!(
+        "env > \"{dir}/env\"
+while [ $# -gt 0 ]; do
+  case \"$1\" in
+    --pillar-root)
+      echo \"$2\" > \"{dir}/pillar-path\"
+      cp \"$2/meridian.sls\" \"{dir}/meridian.sls\"
+      cp \"$2/top.sls\" \"{dir}/top.sls\"
+      stat -c %a \"$2/meridian.sls\" > \"{dir}/mode\" 2>/dev/null || stat -f %Lp \"$2/meridian.sls\" > \"{dir}/mode\"
+      shift;;
+  esac
+  shift
+done
+{result}",
+        dir = dir.display()
+    )
+}
+
+fn with_secret(dir: &Path, host: &str) -> RunContext {
+    let mut context = context(dir, host);
+    context.secrets = secrets(&[(SecretRef::new(1), "db_password", "hunter2\"\\")]);
+    context
+}
+
+#[test]
+fn secrets_reach_salt_call_as_a_pillar_root_only_the_user_can_read_and_nowhere_else() {
+    let dir = scratch(TMP, "secrets-local");
+    let log = KeptLog::default();
+    runner(&dir, &keeping_pillar(&dir, &print(APPLIED)))
+        .apply(&with_secret(&dir, "localhost"), &compiled(), &log)
+        .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(dir.join("meridian.sls")).unwrap(),
+        "#!yaml\n\"meridian_secret_db_password\": \"hunter2\\\"\\\\\"\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("top.sls")).unwrap(),
+        "#!yaml\nbase:\n  '*':\n    - meridian\n"
+    );
+    #[cfg(unix)]
+    assert_eq!(fs::read_to_string(dir.join("mode")).unwrap().trim(), "600");
+    let args = args(&dir);
+    assert!(args.contains("--pillar-root "), "{args}");
+    assert!(!args.contains("hunter2"), "{args}");
+    assert!(!fs::read_to_string(dir.join("env"))
+        .unwrap()
+        .contains("hunter2"));
+    assert!(!log.text().iter().any(|l| l.contains("hunter2")));
+    let pillar_dir = fs::read_to_string(dir.join("pillar-path")).unwrap();
+    assert!(
+        !Path::new(pillar_dir.trim()).exists(),
+        "{pillar_dir} was left behind"
+    );
+}
+
+#[test]
+fn over_ssh_the_master_configuration_names_the_pillar_root_for_the_run() {
+    let dir = scratch(TMP, "secrets-ssh");
+    runner(&dir, &keeping_pillar(&dir, &print(r#"{"web01": {}}"#)))
+        .apply(
+            &with_secret(&dir, "web01"),
+            &compiled(),
+            &KeptLog::default(),
+        )
+        .unwrap();
+    // salt-ssh takes no --pillar-root; the master configuration in the work
+    // directory names the private directory instead, and that directory is
+    // gone now the run is over.
+    let args = args(&dir);
+    assert!(!args.contains("--pillar-root"), "{args}");
+    assert!(!args.contains("hunter2"), "{args}");
+    let master = fs::read_to_string(Path::new(&work(&dir)).join("ssh/master")).unwrap();
+    let roots = master
+        .split_once("pillar_roots:\n  base:\n    - ")
+        .map(|(_, rest)| rest.trim().trim_matches('"').replace("\\\\", "\\"))
+        .unwrap_or_else(|| panic!("{master}"));
+    assert!(!master.contains("hunter2"), "{master}");
+    assert!(!Path::new(&roots).exists(), "{roots} was left behind");
+}
+
+#[test]
+fn a_run_without_secrets_has_no_pillar_root() {
+    let dir = scratch(TMP, "no-secrets");
+    runner(&dir, &print(DRY_RUN))
+        .plan(
+            &context(&dir, "localhost"),
+            &compiled(),
+            &KeptLog::default(),
+        )
+        .unwrap();
+    assert!(!args(&dir).contains("pillar"), "{}", args(&dir));
+    let ssh = runner(&dir, &print(r#"{"web01": {}}"#));
+    ssh.plan(&context(&dir, "web01"), &compiled(), &KeptLog::default())
+        .unwrap();
+    let master = fs::read_to_string(Path::new(&work(&dir)).join("ssh/master")).unwrap();
+    assert!(!master.contains("pillar_roots"), "{master}");
 }

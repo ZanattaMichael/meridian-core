@@ -23,10 +23,11 @@ use std::process::Command;
 
 use meridian_plugin_host::{Client, StartOptions};
 use meridian_plugin_testkit::{
-    fixture, graph_from_file, graph_from_text, plugin_binary, scratch, KeptLog,
+    fixture, graph_from_file, graph_from_text, plugin_binary, scratch, secret_in_param, secrets,
+    KeptLog,
 };
 use meridian_sdk::tool::write_artifact;
-use meridian_sdk::{Artifact, ChangeAction, Data, Emitter, Plan, RunContext, Runner};
+use meridian_sdk::{Artifact, ChangeAction, Data, Emitter, Plan, RunContext, Runner, SecretRef};
 use meridian_target_openvox::{OpenVox, OpenVoxRunner, Verify, MANIFEST_PATH, SITE_PATH};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -392,4 +393,81 @@ fn the_plugin_binary_plans_and_applies_with_the_real_tool() {
     let plan = client.plan(&context(&dir), &artifact, &mut |_| {}).unwrap();
     assert!(plan.in_sync(), "{:?}", plan.changes);
     client.close().unwrap();
+}
+
+/// Nothing the plugin wrote to its work directory holds `value`.
+fn nothing_under_work_holds(dir: &Path, value: &str) {
+    fn walk(dir: &Path, value: &str) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, value);
+            } else if path.is_file() {
+                let bytes = fs::read(&path).unwrap();
+                assert!(
+                    !String::from_utf8_lossy(&bytes).contains(value),
+                    "{} holds the secret",
+                    path.display()
+                );
+            }
+        }
+    }
+    walk(&dir.join("work"), value);
+}
+
+const SECRET: &str = "s3cr3t-not-a-real-password-Q9";
+
+/// A file whose content is a secret, compiled with the secret in place.
+fn with_secret(dir: &Path) -> (Artifact, SecretRef) {
+    let root = dir.display();
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: site\nspec:\n  target: openvox\n  targetHost:\n    from: inline\n    host: localhost\n  resources:\n    - id: env_file\n      type: file\n      params:\n        path: {root}/app.env\n        content: placeholder\n        mode: \"0600\"\n"
+    );
+    let mut graph = graph_from_text("site.yaml", &text, "openvox");
+    let slot = secret_in_param(&mut graph, "env_file", "content", "db_password");
+    let artifact = OpenVox
+        .emit(&graph, &Data::new())
+        .unwrap_or_else(|e| panic!("{e}"))
+        .artifact;
+    assert!(!artifact.files[MANIFEST_PATH].contains(SECRET));
+    (artifact, slot)
+}
+
+#[ignore = "needs a real OpenVox; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_secret_reaches_openvox_through_hiera_and_is_in_nothing_it_prints_or_the_plugin_writes() {
+    let Some(puppet) = openvox() else { return };
+    let dir = scratch(TMP, "real-secret");
+    let runner = runner(&puppet, &dir);
+    let (artifact, slot) = with_secret(&dir);
+    let mut context = context(&dir);
+    context.secrets = secrets(&[(slot, "db_password", SECRET)]);
+
+    let log = KeptLog::default();
+    let plan = runner
+        .plan(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(resources(&plan), [("env_file", ChangeAction::Create)]);
+    assert!(
+        !log.text().iter().any(|line| line.contains(SECRET)),
+        "{:?}",
+        log.text()
+    );
+    assert!(!dir.join("app.env").exists(), "a plan creates nothing");
+
+    let log = KeptLog::default();
+    runner
+        .apply(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert!(
+        !log.text().iter().any(|line| line.contains(SECRET)),
+        "{:?}",
+        log.text()
+    );
+    assert_eq!(fs::read_to_string(dir.join("app.env")).unwrap(), SECRET);
+    nothing_under_work_holds(&dir, SECRET);
+    let plan = runner
+        .plan(&context, &artifact, &KeptLog::default())
+        .unwrap();
+    assert!(plan.in_sync(), "{:?}", plan.changes);
 }

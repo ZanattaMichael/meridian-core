@@ -280,6 +280,7 @@ mod tests {
                     ..state("file", "managed", "conf")
                 },
             ],
+            secrets: Vec::new(),
             reactions: vec![State {
                 watch: vec![to("file", "conf")],
                 ..state("service", "running", "svc")

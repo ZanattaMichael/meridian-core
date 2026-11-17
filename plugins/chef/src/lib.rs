@@ -41,6 +41,18 @@ pub use transform::supported_resource_types;
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "chef";
 
+/// The node attribute the secret `name` is handed over as:
+/// `meridian_secret_<name>`.
+pub fn secret_key(name: &str) -> String {
+    format!("meridian_secret_{name}")
+}
+
+/// How a secret is written in a recipe: a read of its node attribute, which
+/// the runner hands chef-client in a private attributes file.
+pub fn secret_reference(name: &str) -> String {
+    format!("node['{}']", secret_key(name))
+}
+
 /// One `notifies` line: the action, and the resource that takes it.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Notify {
@@ -76,6 +88,8 @@ pub(crate) struct Cookbook {
     /// The document's name, for the cookbook's description.
     pub document: String,
     pub blocks: Vec<Block>,
+    /// The secrets the blocks refer to, by slot and name.
+    pub secrets: Vec<meridian_sdk::SecretName>,
 }
 
 /// A refusal of one resource, stamped with this target.
@@ -119,7 +133,7 @@ impl Emitter for Chef {
             native_notify: true,
             synthetic_notify: false,
             runtime_condition: true,
-            secrets: false,
+            secrets: true,
             credentials: false,
         }
     }
