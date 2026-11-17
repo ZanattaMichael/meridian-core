@@ -27,6 +27,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request replaces the run in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   real-tools:
     name: real helm, kustomize and a kind cluster
@@ -35,8 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the stable toolchain
-        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: ./.github/actions/setup-rust
 
       - name: Show the tools
         run: |

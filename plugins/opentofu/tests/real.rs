@@ -4,15 +4,15 @@
 //! needs no account, so the tests create nothing outside their scratch
 //! directory.
 //!
-//! They run when `MERIDIAN_TEST_TOFU` names the program, as the `opentofu`
+//! They run when `MERIDIAN_TEST_REAL_TOFU` names the program, as the `opentofu`
 //! workflow does after installing it:
 //!
 //! ```sh
-//! MERIDIAN_TEST_TOFU=tofu cargo test -p meridian-target-opentofu --test real
+//! MERIDIAN_TEST_REAL_TOFU=tofu cargo test -p meridian-target-opentofu --test real
 //! ```
 //!
 //! Without it they pass without doing anything, so `cargo test` works on a
-//! machine that has no OpenTofu. Set `MERIDIAN_TEST_TOFU_NETWORK=1` as well to
+//! machine that has no OpenTofu. Set `MERIDIAN_TEST_REAL_TOFU_NETWORK=1` as well to
 //! include the test that downloads a provider from the registry.
 
 // Left out on Windows: this file drives the real tool, and the workflow that
@@ -35,7 +35,7 @@ const PASSPHRASE: &str = "correct-horse-battery-staple";
 
 /// The program to test against, or `None` to skip.
 fn tofu() -> Option<String> {
-    let program = std::env::var("MERIDIAN_TEST_TOFU").ok()?;
+    let program = std::env::var("MERIDIAN_TEST_REAL_TOFU").ok()?;
     (!program.trim().is_empty()).then_some(program)
 }
 
@@ -131,10 +131,11 @@ fn output<'a>(outputs: &'a [Output], name: &str) -> &'a Output {
         .unwrap_or_else(|| panic!("no output {name:?}"))
 }
 
+#[ignore = "needs a real tofu; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn an_encrypted_state_is_planned_applied_and_read_back() {
     let Some(program) = tofu() else {
-        eprintln!("skipped: MERIDIAN_TEST_TOFU is not set");
+        eprintln!("skipped: MERIDIAN_TEST_REAL_TOFU is not set");
         return;
     };
     let dir = scratch(TMP, "real-encrypted");
@@ -248,10 +249,11 @@ fn an_encrypted_state_is_planned_applied_and_read_back() {
     client.close().expect("the plugin exits cleanly");
 }
 
+#[ignore = "needs a real tofu; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_notify_replaces_the_notified_resource_when_its_source_changes() {
     let Some(program) = tofu() else {
-        eprintln!("skipped: MERIDIAN_TEST_TOFU is not set");
+        eprintln!("skipped: MERIDIAN_TEST_REAL_TOFU is not set");
         return;
     };
     let dir = scratch(TMP, "real-notify");
@@ -301,10 +303,11 @@ fn a_notify_replaces_the_notified_resource_when_its_source_changes() {
     assert_eq!(changes(&plan.changes), [(ChangeAction::Delete, "service")]);
 }
 
+#[ignore = "needs a real tofu; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_configuration_opentofu_rejects_fails_the_plan_with_its_reason() {
     let Some(program) = tofu() else {
-        eprintln!("skipped: MERIDIAN_TEST_TOFU is not set");
+        eprintln!("skipped: MERIDIAN_TEST_REAL_TOFU is not set");
         return;
     };
     let dir = scratch(TMP, "real-rejected");
@@ -323,10 +326,11 @@ fn a_configuration_opentofu_rejects_fails_the_plan_with_its_reason() {
     }
 }
 
+#[ignore = "needs a real tofu; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn variables_locals_and_validation_work_the_way_the_document_says() {
     let Some(program) = tofu() else {
-        eprintln!("skipped: MERIDIAN_TEST_TOFU is not set");
+        eprintln!("skipped: MERIDIAN_TEST_REAL_TOFU is not set");
         return;
     };
     let dir = scratch(TMP, "real-variables");
@@ -387,14 +391,15 @@ fn variables_locals_and_validation_work_the_way_the_document_says() {
     }
 }
 
+#[ignore = "needs a real tofu; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_provider_from_the_registry_and_an_ephemeral_resource_work() {
     let Some(program) = tofu() else {
-        eprintln!("skipped: MERIDIAN_TEST_TOFU is not set");
+        eprintln!("skipped: MERIDIAN_TEST_REAL_TOFU is not set");
         return;
     };
-    if std::env::var_os("MERIDIAN_TEST_TOFU_NETWORK").is_none() {
-        eprintln!("skipped: MERIDIAN_TEST_TOFU_NETWORK is not set");
+    if std::env::var_os("MERIDIAN_TEST_REAL_TOFU_NETWORK").is_none() {
+        eprintln!("skipped: MERIDIAN_TEST_REAL_TOFU_NETWORK is not set");
         return;
     }
     let dir = scratch(TMP, "real-provider");

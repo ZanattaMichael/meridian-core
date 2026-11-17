@@ -146,6 +146,7 @@ fn output<'a>(outputs: &'a [Output], name: &str) -> &'a Value {
         .value
 }
 
+#[ignore = "needs a real terraform; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_document_is_planned_applied_read_back_and_changed() {
     let Some(program) = terraform() else { return };
@@ -240,6 +241,7 @@ fn a_document_is_planned_applied_read_back_and_changed() {
     client.close().expect("the plugin exits cleanly");
 }
 
+#[ignore = "needs a real terraform; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_configuration_terraform_rejects_fails_the_plan_with_its_reason() {
     let Some(program) = terraform() else { return };
@@ -260,6 +262,7 @@ fn a_configuration_terraform_rejects_fails_the_plan_with_its_reason() {
     }
 }
 
+#[ignore = "needs a real terraform; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_provider_from_the_registry_writes_a_real_file() {
     let Some(program) = terraform() else { return };

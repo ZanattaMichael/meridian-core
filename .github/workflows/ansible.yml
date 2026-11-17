@@ -33,8 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the stable toolchain
-        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: ./.github/actions/setup-rust
 
       # The runner image ships an Ansible of its own; this one is pinned so
       # that the version under test is chosen here.
@@ -52,4 +51,4 @@ jobs:
       - name: Test against ansible-playbook
         env:
           MERIDIAN_TEST_REAL_ANSIBLE: '1'
-        run: cargo test -p meridian-target-ansible --locked --test real -- --nocapture
+        run: cargo test -p meridian-target-ansible --locked --test real -- --ignored --nocapture

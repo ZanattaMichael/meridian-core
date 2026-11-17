@@ -59,6 +59,7 @@ fn schema(program: &str, file: &Path) -> std::process::Output {
         .expect("cloud-init runs")
 }
 
+#[ignore = "needs a real cloud-init; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn cloud_init_accepts_every_recorded_user_data() {
     let Some(program) = cloud_init() else { return };
@@ -76,6 +77,7 @@ fn cloud_init_accepts_every_recorded_user_data() {
 
 /// The control: if cloud-init accepted anything at all, the test above would
 /// prove nothing.
+#[ignore = "needs a real cloud-init; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn cloud_init_rejects_user_data_that_is_wrong() {
     let Some(program) = cloud_init() else { return };
@@ -90,6 +92,7 @@ fn cloud_init_rejects_user_data_that_is_wrong() {
     );
 }
 
+#[ignore = "needs a real cloud-init; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn the_runner_checks_with_the_real_tool() {
     let Some(program) = cloud_init() else { return };

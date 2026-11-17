@@ -45,8 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the stable toolchain
-        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: ./.github/actions/setup-rust
 
       - name: Install the Bicep compiler
         run: |
@@ -59,12 +58,12 @@ jobs:
       - name: Build what the Bicep plugin compiles
         env:
           MERIDIAN_TEST_REAL_BICEP: '1'
-        run: cargo test -p meridian-target-bicep --locked --test real -- --nocapture
+        run: cargo test -p meridian-target-bicep --locked --test real -- --ignored --nocapture
 
       - name: Read what the ARM plugin compiles
         env:
           MERIDIAN_TEST_REAL_ARM: '1'
-        run: cargo test -p meridian-target-arm --locked --test real -- --nocapture
+        run: cargo test -p meridian-target-arm --locked --test real -- --ignored --nocapture
 
   subscription:
     name: what-if and deploy in a real subscription
@@ -82,8 +81,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the stable toolchain
-        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: ./.github/actions/setup-rust
 
       # Signs in with a short-lived token GitHub issues for this run. No
       # password or client secret is stored anywhere.
@@ -99,9 +97,9 @@ jobs:
       - name: Deploy with the Bicep plugin
         env:
           MERIDIAN_TEST_REAL_AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
-        run: cargo test -p meridian-target-bicep --locked --test real a_deployment -- --nocapture
+        run: cargo test -p meridian-target-bicep --locked --test real a_deployment -- --ignored --nocapture
 
       - name: Deploy with the ARM plugin
         env:
           MERIDIAN_TEST_REAL_AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
-        run: cargo test -p meridian-target-arm --locked --test real a_deployment -- --nocapture
+        run: cargo test -p meridian-target-arm --locked --test real a_deployment -- --ignored --nocapture

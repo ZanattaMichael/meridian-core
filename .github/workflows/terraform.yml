@@ -33,8 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the stable toolchain
-        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: ./.github/actions/setup-rust
 
       # The wrapper script the action can install rewrites terraform's output,
       # which would break reading its JSON.
@@ -52,7 +51,7 @@ jobs:
         env:
           MERIDIAN_TEST_REAL_TERRAFORM: '1'
           MERIDIAN_TEST_REAL_TERRAFORM_NETWORK: '1'
-        run: cargo test -p meridian-target-terraform --locked --test real -- --nocapture
+        run: cargo test -p meridian-target-terraform --locked --test real -- --ignored --nocapture
 
   tofu:
     name: the same tests with tofu
@@ -61,8 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the stable toolchain
-        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: ./.github/actions/setup-rust
 
       - uses: opentofu/setup-opentofu@v1
         with:
@@ -77,4 +75,4 @@ jobs:
           MERIDIAN_TEST_REAL_TERRAFORM: '1'
           MERIDIAN_TEST_REAL_TERRAFORM_NETWORK: '1'
           MERIDIAN_TERRAFORM: tofu
-        run: cargo test -p meridian-target-terraform --locked --test real -- --nocapture
+        run: cargo test -p meridian-target-terraform --locked --test real -- --ignored --nocapture

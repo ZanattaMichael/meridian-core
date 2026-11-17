@@ -20,15 +20,20 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request replaces the run in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   real:
     name: against the real pulumi
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the stable toolchain
-        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: ./.github/actions/setup-rust
 
       # The hosted runners ship Pulumi. Install it only where one does not.
       - name: Find or install pulumi
@@ -51,6 +56,6 @@ jobs:
 
       - name: Test against pulumi
         env:
-          MERIDIAN_REAL_PULUMI: '1'
+          MERIDIAN_TEST_REAL_PULUMI: '1'
           GITHUB_TOKEN: ${{ github.token }}
-        run: cargo test -p meridian-target-pulumi --locked --test real -- --nocapture
+        run: cargo test -p meridian-target-pulumi --locked --test real -- --ignored --nocapture

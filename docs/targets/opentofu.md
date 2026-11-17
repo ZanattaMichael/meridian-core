@@ -514,7 +514,7 @@ The plugin's tests are in [`plugins/opentofu/tests`](../../plugins/opentofu/test
 
 ```sh
 cargo test -p meridian-target-opentofu
-MERIDIAN_TEST_TOFU=tofu cargo test -p meridian-target-opentofu --test real
+MERIDIAN_TEST_REAL_TOFU=tofu cargo test -p meridian-target-opentofu --test real
 UPDATE_GOLDEN=1 cargo test -p meridian-target-opentofu    # re-record the golden files
 ```
 

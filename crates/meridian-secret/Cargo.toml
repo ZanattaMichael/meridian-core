@@ -7,12 +7,12 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-base64 = "0.22"
+base64 = { workspace = true }
 meridian-value = { path = "../meridian-value" }
-zeroize = "1"
+zeroize = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc = { workspace = true }
 
 # This crate is the one place in the workspace that may use `unsafe`: locking
 # and guarding pages cannot be done without it. It is confined to `sys.rs`,

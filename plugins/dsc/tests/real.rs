@@ -254,6 +254,7 @@ fn converge(version: &str) {
     assert!(!state.join("config.marker").exists());
 }
 
+#[ignore = "needs a real PowerShell and DscPipelineRunner; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_document_converges_through_dsc_v2() {
     if engine("2") {
@@ -261,6 +262,7 @@ fn a_document_converges_through_dsc_v2() {
     }
 }
 
+#[ignore = "needs a real PowerShell and DscPipelineRunner; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_document_converges_through_dsc_v3() {
     if engine("3") {
@@ -268,6 +270,7 @@ fn a_document_converges_through_dsc_v3() {
     }
 }
 
+#[ignore = "needs a real PowerShell and DscPipelineRunner; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_runtime_condition_is_evaluated_by_the_runner() {
     let Some(version) = any_engine() else { return };
@@ -296,6 +299,7 @@ fn a_runtime_condition_is_evaluated_by_the_runner() {
     );
 }
 
+#[ignore = "needs a real PowerShell and DscPipelineRunner; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_resource_dsc_does_not_have_fails_with_the_runners_reason() {
     let Some(version) = any_engine() else { return };

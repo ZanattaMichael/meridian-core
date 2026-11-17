@@ -104,10 +104,11 @@ plugins.
 | [Migration & adoption path](plans/migration-and-adoption.md) | Forward-compile scope decision, coexistence, pilot guidance |
 | [Observability, logging & diagnostics](plans/observability.md) | Log schema, plan output, fact provenance, telemetry, audit |
 | [Release, versioning & compatibility](plans/release-and-versioning.md) | apiVersion, SDK compatibility, run-state migration, channels |
-| [Modules and versioning](plans/modules-and-versioning.md) | Proposed, built: shareable modules (sources, lockfile, integrity), how `apiVersion` is enforced, protocol negotiation |
+| [Modules and versioning](plans/modules-and-versioning.md) | Built, awaiting the owner's review: shareable modules (sources, lockfile, integrity), how `apiVersion` is enforced, protocol negotiation |
 | [Security & secrets handling](plans/security.md) | Threat model, `secret: true` guarantees, disclosure process |
-| [Run safety](plans/run-safety.md) | State and locking, resume, rollback, drift, policy checks, values handed between stages |
-| [Language expansion](plans/language-expansion.md) (accepted, being built) | Expressions and functions, conditions, templating, configurations with inputs, endpoints and inventory, secrets, workflows |
+| [Run safety](plans/run-safety.md) | Built: state and locking, resume, rollback, drift, policy checks, values handed between stages |
+| [Language expansion](plans/language-expansion.md) (accepted; phases 1, 2 and most of 6a built) | Expressions and functions, conditions, templating, configurations with inputs, endpoints and inventory, secrets, workflows |
+| [Decision records](decisions/README.md) | Design choices made while building, one record each, with whether the owner has accepted them |
 
 ## Contributing
 

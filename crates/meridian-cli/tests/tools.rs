@@ -288,31 +288,10 @@ fn schema_is_generated_from_the_language_and_the_loaded_plugins() {
 
 /// Every plugin, compiled in, as a catalog.
 fn every_plugin() -> meridian_tooling::catalog::Catalog {
-    use meridian_plugin_host::Registry;
-    let mut registry = Registry::new();
-    macro_rules! register {
-        ($($emitter:expr),* $(,)?) => { $( registry.register(Box::new($emitter)).unwrap(); )* };
+    let mut registry = meridian_plugin_host::Registry::new();
+    for emitter in meridian_all_targets::emitters() {
+        registry.register(emitter).unwrap();
     }
-    register!(
-        meridian_target_ansible::Ansible,
-        meridian_target_arm::Arm,
-        meridian_target_bicep::Bicep,
-        meridian_target_chef::Chef,
-        meridian_target_cloud_init::CloudInit,
-        meridian_target_cloudformation::CloudFormation,
-        meridian_target_docker::Docker,
-        meridian_target_dsc::Dsc,
-        meridian_target_helm::Helm,
-        meridian_target_kubernetes::Kubernetes,
-        meridian_target_opentofu::OpenTofu,
-        meridian_target_openvox::OpenVox,
-        meridian_target_packer::Packer,
-        meridian_target_podman::Podman,
-        meridian_target_pulumi::Pulumi,
-        meridian_target_puppet::Puppet,
-        meridian_target_salt::Salt,
-        meridian_target_terraform::Terraform,
-    );
     meridian_tooling::catalog::Catalog::from_registry(&registry)
 }
 

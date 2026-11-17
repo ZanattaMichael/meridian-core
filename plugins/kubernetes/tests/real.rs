@@ -163,6 +163,7 @@ fn pods_once_rolled_out() -> Vec<String> {
     pods
 }
 
+#[ignore = "needs a real kubectl and a cluster; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_workload_is_planned_applied_read_back_and_restarted_by_a_notify() {
     if !cluster() {
@@ -260,6 +261,7 @@ fn a_workload_is_planned_applied_read_back_and_restarted_by_a_notify() {
     assert_eq!(pods_once_rolled_out(), after);
 }
 
+#[ignore = "needs a real kubectl and a cluster; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn what_the_api_server_refuses_fails_the_plan_with_its_reason() {
     if !cluster() {
