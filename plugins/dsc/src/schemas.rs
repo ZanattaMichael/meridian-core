@@ -4,7 +4,9 @@
 //! resources, which DSC v2 runs directly and DSC v3 runs through its
 //! PowerShell adapter, are read with `Get-DscResource -Module`, which lists
 //! every property with its type, whether it is mandatory and the values an
-//! enum property allows. A resource built for DSC v3 alone, such as
+//! enum property allows; where it lists nothing, as PSDesiredStateConfiguration
+//! on Linux does for a class-based module, the module's `[DscResource()]`
+//! classes are read through reflection instead. A resource built for DSC v3 alone, such as
 //! `Microsoft.Windows/Registry`, is read with `dsc resource schema`, which
 //! prints the JSON Schema its manifest declares; `dsc resource list` names
 //! every such resource, so completion can offer them.
@@ -160,6 +162,9 @@ impl SchemaSource for DscSchemas {
             for (module, version) in &read.versions {
                 export.pin(module, version);
             }
+            for problem in &read.problems {
+                export.note(format!("PowerShell: {problem}"));
+            }
             for module in &modules {
                 if !read.versions.contains_key(*module) {
                     export.note(format!(
@@ -239,20 +244,56 @@ fn module_script(modules: &BTreeSet<&str>) -> String {
         .map(|m| quote(m))
         .collect::<Vec<_>>()
         .join(", ");
-    format!(
-        "$ErrorActionPreference = 'Continue'; \
-         Import-Module PSDesiredStateConfiguration -ErrorAction SilentlyContinue; \
-         $found = @(foreach ($m in @({list})) {{ \
-           Get-DscResource -Module $m -ErrorAction SilentlyContinue | ForEach-Object {{ \
-             [pscustomobject]@{{ \
-               Name = [string]$_.Name; Module = [string]$_.ModuleName; Version = [string]$_.Version; \
-               Properties = @($_.Properties | ForEach-Object {{ \
-                 [pscustomobject]@{{ Name = [string]$_.Name; PropertyType = [string]$_.PropertyType; \
-                   IsMandatory = [bool]$_.IsMandatory; Values = @($_.Values | ForEach-Object {{ [string]$_ }}) }} }}) }} }} }}); \
-         $answer = [pscustomobject]@{{ PowerShell = $PSVersionTable.PSVersion.ToString(); Resources = $found }}; \
-         '{RESULT_MARK}' + (ConvertTo-Json -InputObject $answer -Depth 6 -Compress)"
-    )
+    MODULE_SCRIPT
+        .replace("__MODULES__", &list)
+        .replace("__MARK__", RESULT_MARK)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
+
+/// The PowerShell that lists a module's resources. `Get-DscResource -Module`
+/// is asked first; where it lists nothing (PSDesiredStateConfiguration on
+/// Linux does not list class-based resources) the module is imported and
+/// its `[DscResource()]` classes are read through reflection, which gives
+/// the same names, types, key and mandatory flags and enum values. Every
+/// error PowerShell raised on the way is reported under `Problems`.
+const MODULE_SCRIPT: &str = "
+    $ErrorActionPreference = 'Continue';
+    Import-Module PSDesiredStateConfiguration -ErrorAction SilentlyContinue;
+    $problems = [System.Collections.Generic.List[string]]::new();
+    $found = [System.Collections.Generic.List[object]]::new();
+    foreach ($m in @(__MODULES__)) {
+      $listed = @(Get-DscResource -Module $m -ErrorAction SilentlyContinue -ErrorVariable listErrors);
+      foreach ($e in $listErrors) { $problems.Add(\"Get-DscResource -Module ${m}: $e\") }
+      foreach ($r in $listed) {
+        $found.Add([pscustomobject]@{
+          Name = [string]$r.Name; Module = [string]$r.ModuleName; Version = [string]$r.Version;
+          Properties = @($r.Properties | ForEach-Object {
+            [pscustomobject]@{ Name = [string]$_.Name; PropertyType = [string]$_.PropertyType;
+              IsMandatory = [bool]$_.IsMandatory; Values = @($_.Values | ForEach-Object { [string]$_ }) } }) })
+      }
+      if ($listed.Count -gt 0) { continue }
+      $info = Import-Module $m -PassThru -ErrorAction SilentlyContinue -ErrorVariable importErrors;
+      foreach ($e in $importErrors) { $problems.Add(\"Import-Module ${m}: $e\") }
+      if (-not $info -or -not $info.ImplementingAssembly) { continue }
+      foreach ($t in $info.ImplementingAssembly.GetTypes()) {
+        if (-not ($t.CustomAttributes | Where-Object { $_.AttributeType.Name -eq 'DscResourceAttribute' })) { continue }
+        $props = @(foreach ($p in $t.GetProperties()) {
+          $a = $p.GetCustomAttributes($true) | Where-Object { $_.GetType().Name -eq 'DscPropertyAttribute' } | Select-Object -First 1;
+          if (-not $a) { continue }
+          $pt = $p.PropertyType; $values = @(); $typeName = '[' + $pt.Name + ']';
+          if ($pt.IsEnum) { $values = @([enum]::GetNames($pt)); $typeName = '[string]' }
+          [pscustomobject]@{ Name = $p.Name; PropertyType = $typeName;
+            IsMandatory = [bool]($a.Key -or $a.Mandatory); Values = $values } });
+        $found.Add([pscustomobject]@{ Name = $t.Name; Module = [string]$info.Name; Version = [string]$info.Version; Properties = $props })
+      }
+    }
+    $answer = [pscustomobject]@{ PowerShell = $PSVersionTable.PSVersion.ToString(); Resources = $found.ToArray(); Problems = $problems.ToArray() };
+    '__MARK__' + (ConvertTo-Json -InputObject $answer -Depth 6 -Compress)
+";
 
 /// A PowerShell single-quoted string, in which only the quote is special.
 fn quote(text: &str) -> String {
@@ -266,6 +307,8 @@ struct Modules {
     /// Each module's version.
     versions: BTreeMap<String, String>,
     schemas: Vec<ResourceSchema>,
+    /// The errors PowerShell raised while listing.
+    problems: Vec<String>,
 }
 
 /// Reads the JSON the module script prints.
@@ -278,6 +321,15 @@ fn read_modules(json: &str) -> Result<Modules, String> {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_owned(),
+        problems: answer
+            .get("Problems")
+            .and_then(Value::as_list)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|p| !p.is_empty())
+            .map(str::to_owned)
+            .collect(),
         ..Modules::default()
     };
     let resources = match answer.get("Resources") {
@@ -451,5 +503,9 @@ mod tests {
         let script = module_script(&BTreeSet::from(["PSDscResources", "It's"]));
         assert!(script.contains("@('It''s', 'PSDscResources')"));
         assert!(script.contains(RESULT_MARK));
+        assert!(
+            script.contains("DscResourceAttribute"),
+            "falls back to the classes"
+        );
     }
 }

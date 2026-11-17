@@ -354,8 +354,9 @@ fn the_resources_properties_are_exported_for_an_editor() {
     assert_eq!(
         export.pins.get("MeridianTestDsc").map(String::as_str),
         Some("1.0.0"),
-        "the module's version is pinned: {:?}",
-        export.pins
+        "the module's version is pinned: {:?}; notes: {:?}",
+        export.pins,
+        export.notes
     );
 
     // The PowerShell resource, as Get-DscResource describes it.
