@@ -120,6 +120,7 @@ impl Emitter for Chef {
             synthetic_notify: false,
             runtime_condition: true,
             secrets: false,
+            credentials: false,
         }
     }
 

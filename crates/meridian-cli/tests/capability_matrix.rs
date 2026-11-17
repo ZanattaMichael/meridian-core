@@ -35,6 +35,11 @@ compiled, with the reason. Each target's own page says how it does what it can.
   reference to it, never the value, and hands the value to its tool by a
   private channel when it runs. See
   [Secrets](dsl/secrets.md#handing-a-secret-to-a-tool).
+- **credentials** says the target reaches its host as the credential
+  `spec.targetHost.credential` names: it compiles the credential's plain
+  fields, such as the user, and hands its secret fields to the tool by a
+  private channel when it runs. See
+  [Credentials](dsl/credentials.md).
 - **import** is what `meridian import` can read of the tool's existing
   configuration and turn into a document for the target. See
   [Importing existing configuration](../operations/importing.md).
@@ -74,8 +79,9 @@ fn row(
         None => "no".to_owned(),
     };
     format!(
-        "| [{name}](../targets/{name}.md) | {category} | {types} | {notifies} | {runtime} | {plan} | {apply} | {outputs} | {inputs} | {secrets} | {import} | {schemas} |\n",
+        "| [{name}](../targets/{name}.md) | {category} | {types} | {notifies} | {runtime} | {plan} | {apply} | {outputs} | {inputs} | {secrets} | {credentials} | {import} | {schemas} |\n",
         schemas = yes(schemas.is_some()),
+        credentials = yes(capabilities.credentials),
         name = emitter.name(),
         category = emitter.category(),
         types = types.join(", "),
@@ -206,7 +212,7 @@ fn matrix() -> String {
     ];
     rows.sort();
     format!(
-        "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | apply | outputs | inputs | secrets | import | schemas |\n|---|---|---|---|---|---|---|---|---|---|---|---|\n{}",
+        "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | apply | outputs | inputs | secrets | credentials | import | schemas |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n{}",
         rows.concat()
     )
 }

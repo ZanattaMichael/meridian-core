@@ -89,6 +89,7 @@ fn the_binary_is_discovered_by_name_and_says_what_it_is() {
             synthetic_notify: false,
             runtime_condition: false,
             secrets: false,
+            credentials: false,
         }
     );
     assert_eq!(

@@ -142,13 +142,59 @@ the system allows, and passed as `--extra-vars @<path>`; the file is removed
 when the run ends. The value is never on the command line and never in
 Ansible's environment.
 
+### Reaching the host as a credential
+
+The target takes a [credential](../reference/dsl/credentials.md) for its
+host: `targetHost.credential` names an `ssh` or `usernamePassword`
+credential, and the host is reached as it instead of as whoever
+`ansible-playbook` is configured to be.
+
+```yaml
+spec:
+  secrets:
+    - name: deploy_key
+      from: file
+      path: /run/secrets/deploy_key
+      keepTrailingNewline: true
+  credentials:
+    - name: deploy
+      type: ssh
+      user: deploy
+      privateKey: ${{ secret.deploy_key }}
+  targetHost:
+    from: inline
+    host: web01.internal
+    credential: deploy
+```
+
+| Field | Where it goes |
+|---|---|
+| `user` | after the host in `inventory.ini`: `web01.internal ansible_user=deploy`. A name that cannot be written on an inventory line (whitespace, `=`, `[`, `#`) is refused |
+| `privateKey` | a file only the user can read, with the line break OpenSSH wants, passed as `--private-key <path>` and removed when the run ends |
+| `password` | `ansible_password` in the extra-vars file above, beside the document's secrets. Password authentication over SSH needs `sshpass` where `ansible-playbook` runs, as it does for Ansible on its own |
+| `agent: true` | nothing: the key comes from the SSH agent `ansible-playbook` already uses |
+| `from: ambient` | the user, if given, and nothing else |
+
+What `ansible-playbook` cannot take is refused when the document is compiled,
+with the reason (rule `unsupported-credential`): a `passphrase` on the key
+(add the key to an agent and set `agent: true`), a `certificate` beside the
+key (put it in the agent too), and a `domain` (for WinRM hosts, which this
+plugin does not reach). The credential is never in `playbook.yml`, and the
+plan names it: `on web01.internal as deploy (ssh, user deploy)`.
+
+`MERIDIAN_ANSIBLE_ARGS` still applies, so `--user` or `--private-key` given
+there and a credential in the document would both reach the command line;
+name the identity in one place.
+
 The runner is tested against a real `ansible-playbook` (ansible-core 2.19) on
 every pull request that touches it, over the `local` connection: a check-mode
 plan that creates nothing, a play checked on disk, a second plan that is in
 sync, drift put right, a handler that runs only when its notifier changed, a
 `runtimeWhen` answered by the host's facts, a command check mode cannot
-preview, a failed task, and a secret that reaches the play through the
+preview, a failed task, a secret that reaches the play through the
 extra-vars file and is in nothing Ansible prints, check mode with diff
-included. Reaching another machine over SSH, and the
+included, and a credential whose user is read from the inventory and whose
+key is named on the command line and in nothing Ansible prints or the plugin
+writes. Reaching another machine over SSH, and the
 package, service, user and group modules, have only met stand-ins. See
 [Real-tool tests](../contributing/real-tool-tests.md).

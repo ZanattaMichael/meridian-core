@@ -138,6 +138,7 @@ mod tests {
         Playbook {
             name: "web".to_owned(),
             hosts: "web01".to_owned(),
+            inventory_vars: Vec::new(),
             tasks: vec![Task {
                 notify: vec!["restart nginx".to_owned()],
                 ..task("pkg", "install nginx")

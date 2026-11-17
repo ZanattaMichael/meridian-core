@@ -3,6 +3,7 @@ use std::fmt::{self, Write as _};
 
 use meridian_value::{canonical_map, PlacedEscape, SecretRef, Value};
 
+use crate::credential::Credential;
 use crate::run::Category;
 use crate::schema::ResourceSchema;
 use crate::secrets::SecretName;
@@ -123,6 +124,11 @@ pub struct ResourceGraph {
     /// only to a target whose [`Capabilities::secrets`] is true, so a plugin
     /// that does not declare it never sees one here.
     pub secrets: Vec<SecretName>,
+    /// The credential the host is reached with, when the document names one
+    /// in `targetHost.credential`: its plain fields and the names of its
+    /// secret fields, never a value. The host sends one only to a target
+    /// whose [`Capabilities::credentials`] is true.
+    pub credential: Option<Credential>,
 }
 
 /// A value a document promises to later stages, such as the address of a
@@ -195,6 +201,28 @@ impl ResourceGraph {
         for s in &self.secrets {
             let _ = writeln!(out, "secret {} slot={}", s.name, s.secret.slot());
         }
+        if let Some(c) = &self.credential {
+            let _ = writeln!(
+                out,
+                "credential {} type={} ambient={} text={} flags={} secrets={}",
+                c.name,
+                c.kind,
+                c.ambient,
+                canonical_map(
+                    &c.text
+                        .iter()
+                        .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+                        .collect()
+                ),
+                canonical_map(
+                    &c.flags
+                        .iter()
+                        .map(|(k, v)| (k.clone(), Value::Bool(*v)))
+                        .collect()
+                ),
+                c.secret_fields.join(",")
+            );
+        }
         for r in &self.resources {
             let _ = writeln!(
                 out,
@@ -242,6 +270,13 @@ pub struct Capabilities {
     /// in the environment. A document that puts a secret in a param of a
     /// target without this is refused.
     pub secrets: bool,
+    /// The target takes the credential a document names for its host. Its
+    /// emitter writes the credential's plain fields where its tool reads
+    /// them, such as the user into an inventory, and its runner hands the
+    /// secret fields to the tool by a private channel, as it hands secrets.
+    /// A document that names a credential for a target without this is
+    /// refused.
+    pub credentials: bool,
 }
 
 /// The complete output of a compile: relative path to file content. It is

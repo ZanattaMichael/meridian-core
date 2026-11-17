@@ -203,6 +203,11 @@ pub struct StageReport {
     /// The host the document configures; empty for an Infrastructure
     /// document, or when the host is not known yet.
     pub host: String,
+    /// The credential the host is reached with, in a few words (`deploy
+    /// (ssh, user deploy)`), so that which identity touches a machine can
+    /// be read off a plan; empty when the document names none. Never any
+    /// part of a secret.
+    pub credential: String,
     /// What the document compiled to, when it got that far.
     pub artifact: Option<Artifact>,
     pub warnings: Vec<Warning>,
@@ -605,6 +610,7 @@ pub fn run_selected(
                 } else {
                     StageReport {
                         host: String::new(),
+                        credential: String::new(),
                         artifact: None,
                         warnings: Vec::new(),
                         outcome: Outcome::NotRun {
@@ -636,6 +642,7 @@ pub fn run_selected(
                 id,
                 target,
                 host: String::new(),
+                credential: String::new(),
                 artifact: None,
                 warnings: Vec::new(),
                 removed: Vec::new(),
@@ -672,7 +679,7 @@ pub fn run_selected(
     } else if failed.is_some() && mode == Mode::Apply && options.on_failure == OnFailure::Rollback {
         let items = std::mem::take(&mut run.touched)
             .into_iter()
-            .map(rollback::Item::Ready)
+            .map(|touched| rollback::Item::Ready(Box::new(touched)))
             .collect();
         report.rollbacks = rollback::execute(&mut run, &mut journal, observer, items);
     }
@@ -1327,6 +1334,9 @@ struct Compiled {
     host: String,
     /// The values the stage's tool is handed.
     inputs: Data,
+    /// The credential the host is reached with, when the document names
+    /// one, with its secret fields as slots.
+    credential: Option<meridian_ir::Credential>,
 }
 
 /// Why a stage did not compile, or cannot yet.
@@ -1397,6 +1407,7 @@ impl Run<'_> {
             id: id.clone(),
             target: stage.target().to_owned(),
             host: String::new(),
+            credential: String::new(),
             artifact: None,
             warnings: Vec::new(),
             removed: Vec::new(),
@@ -1447,6 +1458,7 @@ impl Run<'_> {
             emitted,
             host,
             mut inputs,
+            credential,
         } = match self.compile(stage, &secrets.names()) {
             Ok(compiled) => compiled,
             Err(Stop::Failed { reason, why, host }) => {
@@ -1464,6 +1476,7 @@ impl Run<'_> {
             .expect("the stage was compiled by its target");
         let info = target.info();
         report.host = host;
+        report.credential = credential.as_ref().map(|c| c.summary()).unwrap_or_default();
         report.warnings = emitted.warnings;
         self.artifacts.insert(id.clone(), emitted.artifact.clone());
         report.artifact = Some(emitted.artifact.clone());
@@ -1534,7 +1547,11 @@ impl Run<'_> {
             Ok(handed) => handed,
             Err(why) => return fail(report, REASON_COMPILE_REFUSED, why),
         };
-        let context = match self.context(&id, stage.target(), &report.host, inputs, handed) {
+        let held = match secrets::handed_credential(credential.as_ref(), secrets.table()) {
+            Ok(held) => held,
+            Err(why) => return fail(report, REASON_COMPILE_REFUSED, why),
+        };
+        let context = match self.context(&id, stage.target(), &report.host, inputs, handed, held) {
             Ok(context) => context,
             Err(why) => return fail(report, REASON_STATE_FAILED, why),
         };
@@ -1639,6 +1656,7 @@ impl Run<'_> {
                     target: stage.target().to_owned(),
                     context: RunContext {
                         secrets: meridian_sdk::Secrets::none(),
+                        credential: None,
                         ..context.clone()
                     },
                     previous: report.previous_good.clone(),
@@ -1782,6 +1800,45 @@ impl Run<'_> {
                 ));
             }
         }
+        // A credential named for the host. Only a target that declares it
+        // takes one is handed it, in every mode: the artifact of any other
+        // target would be run as whoever the tool is configured to be, which
+        // is not what the document says.
+        if let Some(name) = document
+            .as_resource_set()
+            .and_then(|d| d.spec.target_host.as_ref())
+            .map(|th| th.credential.as_str())
+            .filter(|name| !name.is_empty())
+        {
+            let takes_credentials = self
+                .registry
+                .target(document.target())
+                .is_some_and(|target| target.info().capabilities.credentials);
+            if !takes_credentials {
+                let takers: Vec<&str> = self
+                    .registry
+                    .names()
+                    .into_iter()
+                    .filter(|name| {
+                        self.registry
+                            .target(name)
+                            .is_some_and(|t| t.info().capabilities.credentials)
+                    })
+                    .collect();
+                let takers = if takers.is_empty() {
+                    "no loaded target does".to_owned()
+                } else {
+                    format!("targets that do: {}", takers.join(", "))
+                };
+                return Read::Failed(format!(
+                    "spec.targetHost names the credential {name:?}, and target {:?} does not \
+                     take one: it has no way to reach its host as that identity, so the \
+                     document would be applied as whoever the tool is configured to be. \
+                     Leave the credential out to use the tool's own; {takers}",
+                    document.target()
+                ));
+            }
+        }
         Read::Kept {
             document: Box::new(document),
             removed,
@@ -1889,6 +1946,7 @@ impl Run<'_> {
             }
         };
 
+        let credential = graph.credential.clone();
         let mut graph = to_sdk(&graph);
         // A secret in a param reaches the plugin by name, so the plugin can
         // write a reference the operator recognises. Only a target that
@@ -1902,6 +1960,7 @@ impl Run<'_> {
                 emitted,
                 host,
                 inputs,
+                credential,
             }),
             Err(EmitError::Refused(e)) => Err(failed(REASON_COMPILE_REFUSED, e.to_string(), host)),
             Err(EmitError::Plugin(e)) => Err(failed(REASON_PLUGIN_FAILED, e.to_string(), host)),
@@ -2165,6 +2224,7 @@ impl Run<'_> {
             "",
             Data::new(),
             meridian_sdk::Secrets::none(),
+            None,
         ) else {
             return;
         };
@@ -2213,6 +2273,7 @@ impl Run<'_> {
         host: &str,
         inputs: Data,
         secrets: meridian_sdk::Secrets,
+        credential: Option<meridian_sdk::HeldCredential>,
     ) -> Result<RunContext, String> {
         // The bundle was validated, which refuses a name that is not one
         // path segment; this keeps a caller that skipped it inside the
@@ -2235,6 +2296,7 @@ impl Run<'_> {
             work_dir,
             inputs,
             secrets,
+            credential,
         })
     }
 

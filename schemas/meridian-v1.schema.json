@@ -290,6 +290,182 @@
         }
       }
     },
+    "Credential": {
+      "description": "An identity, by name and type: how to prove who you are to a host, a tool or a service. A field that holds secret material reads a declared secret, as `${{ secret.<name> }}`; a value written there is refused.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "type"
+      ],
+      "properties": {
+        "name": {
+          "description": "The name the credential is used by, such as in `targetHost.credential`.",
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "description": "What kind of identity it is. The type fixes which fields it takes.",
+          "type": "string",
+          "oneOf": [
+            {
+              "const": "aws",
+              "description": "An AWS identity: `accessKeyId` and `secretAccessKey`, or a `profile`, or a `roleArn`, with a `region`."
+            },
+            {
+              "const": "azure",
+              "description": "An Azure identity: `tenantId` and `clientId` with a `clientSecret` or a `certificate`, or `managedIdentity: true`, with a `subscriptionId`."
+            },
+            {
+              "const": "certificate",
+              "description": "A certificate and its private key, for mutual TLS, with the `ca` that signed it."
+            },
+            {
+              "const": "gcp",
+              "description": "A Google Cloud identity: a `serviceAccountKey`, or an account to `impersonate`, with a `project`."
+            },
+            {
+              "const": "kubeconfig",
+              "description": "A cluster login: a whole `kubeconfig`, or a `token` with the `server` and its `ca`, and the `context` to use."
+            },
+            {
+              "const": "registry",
+              "description": "A login to an image or module registry: `server`, `user` and `password`."
+            },
+            {
+              "const": "ssh",
+              "description": "An SSH login: `user` with a `privateKey`, a `password`, or `agent: true`; a `passphrase` for the key and a `certificate` for it."
+            },
+            {
+              "const": "token",
+              "description": "A bearer token, with the `scheme` it is sent under."
+            },
+            {
+              "const": "usernamePassword",
+              "description": "A `user` and `password`, with a `domain` where the host needs one."
+            }
+          ]
+        },
+        "from": {
+          "description": "`ambient`: the tool finds the credential for itself, so no secret field is needed.",
+          "type": "string",
+          "oneOf": [
+            {
+              "const": "ambient",
+              "description": "The tool finds the credential for itself: its environment, its profile, its agent. The declaration names and types the identity without Meridian holding any of it."
+            }
+          ]
+        },
+        "user": {
+          "description": "With `ssh`, `usernamePassword` and `registry`: the user name.",
+          "type": "string"
+        },
+        "password": {
+          "description": "With `ssh`, `usernamePassword` and `registry`: the password, as `${{ secret.<name> }}`.",
+          "type": "string"
+        },
+        "privateKey": {
+          "description": "With `ssh`: the private key, as `${{ secret.<name> }}`. With `certificate`: the certificate's private key.",
+          "type": "string"
+        },
+        "passphrase": {
+          "description": "With `ssh`: the passphrase of the private key, as `${{ secret.<name> }}`.",
+          "type": "string"
+        },
+        "agent": {
+          "description": "With `ssh`: the key is in the SSH agent, so none is given here.",
+          "type": "boolean"
+        },
+        "certificate": {
+          "description": "With `ssh`: the certificate signed for the key. With `certificate`: the certificate, in PEM form.",
+          "type": "string"
+        },
+        "ca": {
+          "description": "With `certificate` and `kubeconfig`: the certificate authority to trust, in PEM form.",
+          "type": "string"
+        },
+        "domain": {
+          "description": "With `usernamePassword`: the Windows domain of the user.",
+          "type": "string"
+        },
+        "token": {
+          "description": "With `token` and `kubeconfig`: the token, as `${{ secret.<name> }}`.",
+          "type": "string"
+        },
+        "scheme": {
+          "description": "With `token`: the scheme the token is sent under, such as `Bearer`.",
+          "type": "string"
+        },
+        "server": {
+          "description": "With `registry`: the registry's host. With `kubeconfig`: the API server.",
+          "type": "string"
+        },
+        "kubeconfig": {
+          "description": "With `kubeconfig`: the whole kubeconfig file, as `${{ secret.<name> }}`.",
+          "type": "string"
+        },
+        "context": {
+          "description": "With `kubeconfig`: the context to use.",
+          "type": "string"
+        },
+        "accessKeyId": {
+          "description": "With `aws`: the access key id, which goes with `secretAccessKey`.",
+          "type": "string"
+        },
+        "secretAccessKey": {
+          "description": "With `aws`: the secret access key, as `${{ secret.<name> }}`.",
+          "type": "string"
+        },
+        "sessionToken": {
+          "description": "With `aws`: the session token of temporary keys, as `${{ secret.<name> }}`.",
+          "type": "string"
+        },
+        "profile": {
+          "description": "With `aws`: a profile of the AWS configuration to use.",
+          "type": "string"
+        },
+        "roleArn": {
+          "description": "With `aws`: a role to assume.",
+          "type": "string"
+        },
+        "region": {
+          "description": "With `aws`: the region.",
+          "type": "string"
+        },
+        "tenantId": {
+          "description": "With `azure`: the tenant.",
+          "type": "string"
+        },
+        "clientId": {
+          "description": "With `azure`: the application's client id.",
+          "type": "string"
+        },
+        "clientSecret": {
+          "description": "With `azure`: the application's client secret, as `${{ secret.<name> }}`. A `certificate` (as `${{ secret.<name> }}`, since it holds the key) stands in for it.",
+          "type": "string"
+        },
+        "managedIdentity": {
+          "description": "With `azure`: use the managed identity of the machine this runs on.",
+          "type": "boolean"
+        },
+        "subscriptionId": {
+          "description": "With `azure`: the subscription.",
+          "type": "string"
+        },
+        "serviceAccountKey": {
+          "description": "With `gcp`: the service account's key file, as `${{ secret.<name> }}`.",
+          "type": "string"
+        },
+        "impersonate": {
+          "description": "With `gcp`: a service account to impersonate.",
+          "type": "string"
+        },
+        "project": {
+          "description": "With `gcp`: the project.",
+          "type": "string"
+        }
+      }
+    },
     "Import": {
       "description": "A value the document's tool is handed from another document of the workflow.",
       "type": "object",
@@ -618,6 +794,13 @@
           "type": "array",
           "items": {
             "$ref": "#/definitions/Secret"
+          }
+        },
+        "credentials": {
+          "description": "The identities the document names, each a name, a type and the type's fields, used by name wherever a credential is asked for, such as `targetHost.credential`.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Credential"
           }
         },
         "imports": {
@@ -1110,6 +1293,10 @@
         "output": {
           "description": "The output of that document that holds the host. Required with `from: infrastructure`.",
           "type": "string"
+        },
+        "credential": {
+          "description": "The credential the host is reached with, by the name `spec.credentials` declares it under: one of type `ssh` or `usernamePassword`. Left out, the tool connects as it is configured to.",
+          "type": "string"
         }
       }
     },
@@ -1233,6 +1420,13 @@
           "type": "array",
           "items": {
             "$ref": "#/definitions/Secret"
+          }
+        },
+        "credentials": {
+          "description": "The identities the document names, each a name, a type and the type's fields, used by name wherever a credential is asked for, such as `targetHost.credential`.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Credential"
           }
         },
         "targetHost": {

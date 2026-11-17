@@ -96,6 +96,7 @@ fn fields_come_from_the_language_and_leave_out_what_is_already_there() {
             "variables",
             "conditions",
             "secrets",
+            "credentials",
             "targetHost",
             "imports",
             "resources"
@@ -110,6 +111,7 @@ fn fields_come_from_the_language_and_leave_out_what_is_already_there() {
             "variables",
             "conditions",
             "secrets",
+            "credentials",
             "imports",
             "resources",
             "outputs"
@@ -124,6 +126,7 @@ fn fields_come_from_the_language_and_leave_out_what_is_already_there() {
             "variables",
             "conditions",
             "secrets",
+            "credentials",
             "targetHost",
             "imports",
             "resources"

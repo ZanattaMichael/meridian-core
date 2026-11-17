@@ -196,6 +196,80 @@ impl Secret {
     }
 }
 
+/// `spec.credentials[].from`: the tool finds the credential for itself, in
+/// its own environment, profile or agent, as it does when no credential is
+/// named.
+pub const CREDENTIAL_FROM_AMBIENT: &str = "ambient";
+
+/// One entry of `spec.credentials`: an identity, declared by name and type,
+/// for use wherever one is asked for. A field that holds secret material is
+/// a reference to a declared secret, as `${{ secret.<name> }}`, and never a
+/// value.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Credential {
+    /// The name it is used by.
+    pub name: String,
+    /// Its type: one of [`meridian_secret::credential_types`].
+    pub r#type: String,
+    /// Empty, or [`CREDENTIAL_FROM_AMBIENT`].
+    pub from: String,
+    /// The type's fields, as written: text for a plain field, a yes or a no
+    /// for a flag, and for a secret field the reference as written, which
+    /// resolving turns into the secret itself.
+    pub fields: BTreeMap<String, Value>,
+    pub pos: Position,
+}
+
+impl Credential {
+    /// The type, when it is one the language has.
+    pub fn kind(&self) -> Option<&'static meridian_secret::CredentialType> {
+        meridian_secret::credential_type(&self.r#type)
+    }
+
+    /// Whether the tool finds the credential for itself.
+    pub fn is_ambient(&self) -> bool {
+        self.from == CREDENTIAL_FROM_AMBIENT
+    }
+
+    /// A field that is text, when it is there.
+    pub fn text(&self, field: &str) -> Option<&str> {
+        match self.fields.get(field) {
+            Some(Value::String(text)) => Some(text),
+            _ => None,
+        }
+    }
+
+    /// A flag, which is no when it is left out.
+    pub fn flag(&self, field: &str) -> bool {
+        matches!(self.fields.get(field), Some(Value::Bool(true)))
+    }
+
+    /// The fields that hold secret material, with the slot each stands for
+    /// once the document is resolved.
+    pub fn secrets(&self) -> Vec<(&str, meridian_value::SecretRef)> {
+        self.fields
+            .iter()
+            .filter_map(|(name, value)| match value {
+                Value::Secret(at) => Some((name.as_str(), *at)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The credential in a few words, for a plan: `deploy (ssh, user
+    /// deploy)`, never any part of a secret.
+    pub fn summary(&self) -> String {
+        let mut what = self.r#type.clone();
+        if let Some(user) = self.text("user") {
+            what.push_str(&format!(", user {user}"));
+        }
+        if self.is_ambient() {
+            what.push_str(", ambient");
+        }
+        format!("{} ({what})", self.name)
+    }
+}
+
 /// Binds a ResourceSet to the node it configures. `from: infrastructure`
 /// resolves `ref`/`output` against a sibling Infrastructure document.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -204,6 +278,9 @@ pub struct TargetHost {
     pub r#ref: String,
     pub output: String,
     pub host: String,
+    /// The credential the host is reached with, by the name
+    /// `spec.credentials` declares it under; empty for the tool's own.
+    pub credential: String,
     pub pos: Position,
 }
 
@@ -245,6 +322,8 @@ pub struct InfrastructureSpec {
     pub conditions: BTreeMap<String, String>,
     /// `spec.secrets`: the secrets the document reads, as `secret.<name>`.
     pub secrets: Vec<Secret>,
+    /// `spec.credentials`: the identities the document names.
+    pub credentials: Vec<Credential>,
     pub imports: Vec<Import>,
     pub resources: Vec<Resource>,
     pub outputs: Vec<Output>,
@@ -280,6 +359,8 @@ pub struct ResourceSetSpec {
     pub conditions: BTreeMap<String, String>,
     /// `spec.secrets`: the secrets the document reads, as `secret.<name>`.
     pub secrets: Vec<Secret>,
+    /// `spec.credentials`: the identities the document names.
+    pub credentials: Vec<Credential>,
     pub target_host: Option<TargetHost>,
     pub imports: Vec<Import>,
     pub resources: Vec<Resource>,
@@ -386,6 +467,19 @@ impl Document {
             Document::Infrastructure(d) => &d.spec.secrets,
             Document::ResourceSet(d) => &d.spec.secrets,
         }
+    }
+
+    /// `spec.credentials`.
+    pub fn credentials(&self) -> &[Credential] {
+        match self {
+            Document::Infrastructure(d) => &d.spec.credentials,
+            Document::ResourceSet(d) => &d.spec.credentials,
+        }
+    }
+
+    /// The credential declared as `name`, if there is one.
+    pub fn credential(&self, name: &str) -> Option<&Credential> {
+        self.credentials().iter().find(|c| c.name == name)
     }
 
     /// `spec.outputs`; a ResourceSet declares none.

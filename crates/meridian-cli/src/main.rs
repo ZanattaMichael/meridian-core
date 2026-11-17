@@ -2091,8 +2091,12 @@ impl Printer<'_> {
     fn print(&self, out: &mut dyn Write, report: &StageReport) -> std::io::Result<()> {
         let on = if report.host.is_empty() {
             String::new()
-        } else {
+        } else if report.credential.is_empty() {
             format!(" on {}", report.host)
+        } else {
+            // Which identity touches the machine is part of what a plan
+            // shows, so it can be reviewed.
+            format!(" on {} as {}", report.host, report.credential)
         };
         writeln!(
             out,

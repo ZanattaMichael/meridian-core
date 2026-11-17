@@ -64,6 +64,7 @@ impl Emitter for Fake {
             synthetic_notify: true,
             runtime_condition: false,
             secrets: std::env::var("FAKE_SECRETS").as_deref() != Ok("none"),
+            credentials: std::env::var("FAKE_SECRETS").as_deref() != Ok("none"),
         }
     }
 
@@ -111,6 +112,18 @@ impl Emitter for Fake {
                 .artifact
                 .files
                 .insert(format!("files/{}", resource.id), content);
+        }
+        // The credential the host is reached with: what a compile knows of
+        // it, which is never a value.
+        if let Some(credential) = &graph.credential {
+            emitted.artifact.files.insert(
+                "credential.txt".to_owned(),
+                format!(
+                    "{}\nsecret fields: {}\n",
+                    credential.summary(),
+                    credential.secret_fields.join(", ")
+                ),
+            );
         }
         // A declared output is compiled into the artifact, as a real target
         // compiles one into its tool's own output block.
@@ -179,6 +192,87 @@ fn hand_over_secrets(
     if let Some(sink) = std::env::var_os("FAKE_SECRET_SINK") {
         fs::copy(file.path(), sink)
             .map_err(|e| RunError::new(format!("copying the secrets to the sink: {e}")))?;
+    }
+    Ok(Some(file))
+}
+
+/// Hands the credential's secret fields to the tool as a real plugin would,
+/// in a file only the user can read, and records what was handed over and
+/// how, never a value. The file lives as long as the returned value.
+fn hand_over_credential(
+    context: &RunContext,
+    log: &dyn Log,
+) -> Result<Option<meridian_sdk::SecretFile>, RunError> {
+    let record = context.work_dir.join("credential-delivery.json");
+    let Some(credential) = &context.credential else {
+        let _ = fs::remove_file(&record);
+        return Ok(None);
+    };
+    let fields: Vec<(String, &meridian_sdk::SecretValue)> = credential
+        .secrets()
+        .map(|(field, value)| (Value::String(field.to_owned()).canonical(), value))
+        .collect();
+    let mut parts = vec![meridian_sdk::Part::Text("{")];
+    for (i, (key, value)) in fields.iter().enumerate() {
+        if i > 0 {
+            parts.push(meridian_sdk::Part::Text(","));
+        }
+        parts.push(meridian_sdk::Part::Text(key));
+        parts.push(meridian_sdk::Part::Text(":\""));
+        parts.push(meridian_sdk::Part::JsonString(value));
+        parts.push(meridian_sdk::Part::Text("\""));
+    }
+    parts.push(meridian_sdk::Part::Text("}\n"));
+    let file = meridian_sdk::SecretFile::create("credential.json", &parts)
+        .map_err(|e| RunError::new(format!("writing the credential file: {e}")))?;
+    let delivery = BTreeMap::from([
+        ("name".to_owned(), Value::from(credential.name())),
+        ("type".to_owned(), Value::from(credential.kind())),
+        ("ambient".to_owned(), Value::Bool(credential.ambient())),
+        (
+            "text".to_owned(),
+            Value::Map(
+                credential
+                    .declared
+                    .text
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Value::from(v.as_str())))
+                    .collect(),
+            ),
+        ),
+        (
+            "flags".to_owned(),
+            Value::Map(
+                credential
+                    .declared
+                    .flags
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Value::Bool(*v)))
+                    .collect(),
+            ),
+        ),
+        (
+            "secretFields".to_owned(),
+            Value::List(
+                credential
+                    .declared
+                    .secret_fields
+                    .iter()
+                    .map(|f| Value::from(f.as_str()))
+                    .collect(),
+            ),
+        ),
+        ("channel".to_owned(), Value::from("file")),
+    ]);
+    fs::write(&record, canonical_map(&delivery))
+        .map_err(|e| RunError::new(format!("recording the delivery: {e}")))?;
+    log.err(&format!(
+        "credential {} handed over in a private file",
+        credential.summary()
+    ));
+    if let Some(sink) = std::env::var_os("FAKE_CREDENTIAL_SINK") {
+        fs::copy(file.path(), sink)
+            .map_err(|e| RunError::new(format!("copying the credential to the sink: {e}")))?;
     }
     Ok(Some(file))
 }
@@ -280,6 +374,7 @@ impl Runner for FakeRunner {
     ) -> Result<Plan, RunError> {
         let state = read_state(&context.work_dir)?;
         let _secrets = hand_over_secrets(context, log)?;
+        let _credential = hand_over_credential(context, log)?;
         log.out(&format!(
             "comparing {} files for {} on {}",
             artifact.files.len(),
@@ -302,6 +397,7 @@ impl Runner for FakeRunner {
     ) -> Result<Applied, RunError> {
         let mut state = read_state(&context.work_dir)?;
         let _secrets = hand_over_secrets(context, log)?;
+        let _credential = hand_over_credential(context, log)?;
         // Tools echo their variables more often than anyone would like. This
         // one does it on purpose, so a host's masking has something to catch.
         if !context.inputs.is_empty() {

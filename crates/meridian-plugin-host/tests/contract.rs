@@ -41,6 +41,7 @@ const TARGETS: &[Target] = &[
             synthetic_notify: false,
             runtime_condition: true,
             secrets: true,
+            credentials: true,
         },
     },
     Target {
@@ -52,6 +53,7 @@ const TARGETS: &[Target] = &[
             synthetic_notify: false,
             runtime_condition: false,
             secrets: false,
+            credentials: false,
         },
     },
 ];

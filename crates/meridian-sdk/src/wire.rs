@@ -9,6 +9,7 @@ use meridian_value::{
     canonical_map, decode_map, decode_value, PlacedEscape, SecretRef, Value, SENSITIVE,
 };
 
+use crate::credential::{Credential, HeldCredential};
 use crate::import::*;
 use crate::pb;
 use crate::run::*;
@@ -73,6 +74,7 @@ pub fn graph_to_wire(g: &ResourceGraph) -> pb::ResourceGraph {
                 name: s.name.clone(),
             })
             .collect(),
+        credential: g.credential.as_ref().map(credential_to_wire),
         edges: g
             .edges
             .iter()
@@ -129,6 +131,7 @@ pub fn graph_from_wire(g: pb::ResourceGraph) -> Result<ResourceGraph, String> {
             name: s.name,
         })
         .collect();
+    out.credential = g.credential.map(credential_from_wire);
     for r in g.resources {
         let mut params =
             decode_map(&r.params_json).map_err(|e| format!("resource {:?}: {e}", r.id))?;
@@ -262,6 +265,32 @@ pub fn capabilities_to_wire(c: Capabilities) -> pb::Capabilities {
         synthetic_notify: c.synthetic_notify,
         runtime_condition: c.runtime_condition,
         secrets: c.secrets,
+        credentials: c.credentials,
+    }
+}
+
+/// Converts the credential a compile sees: no value is in it.
+pub fn credential_to_wire(c: &Credential) -> pb::Credential {
+    pb::Credential {
+        name: c.name.clone(),
+        r#type: c.kind.clone(),
+        ambient: c.ambient,
+        text: c.text.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        flags: c.flags.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+        secret_fields: c.secret_fields.clone(),
+    }
+}
+
+pub fn credential_from_wire(c: pb::Credential) -> Credential {
+    let mut secret_fields = c.secret_fields;
+    secret_fields.sort_unstable();
+    Credential {
+        name: c.name,
+        kind: c.r#type,
+        ambient: c.ambient,
+        text: c.text.into_iter().collect(),
+        flags: c.flags.into_iter().collect(),
+        secret_fields,
     }
 }
 
@@ -293,6 +322,7 @@ pub fn capabilities_from_wire(c: Option<pb::Capabilities>) -> Capabilities {
         synthetic_notify: c.synthetic_notify,
         runtime_condition: c.runtime_condition,
         secrets: c.secrets,
+        credentials: c.credentials,
     })
     .unwrap_or_default()
 }
@@ -571,10 +601,35 @@ pub fn context_to_wire(c: &RunContext) -> pb::RunContext {
                 value: value.expose(<[u8]>::to_vec),
             })
             .collect(),
+        credential: c.credential.as_ref().map(|held| pb::CredentialValues {
+            name: held.declared.name.clone(),
+            r#type: held.declared.kind.clone(),
+            ambient: held.declared.ambient,
+            text: held
+                .declared
+                .text
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            flags: held
+                .declared
+                .flags
+                .iter()
+                .map(|(k, v)| (k.clone(), *v))
+                .collect(),
+            secrets: held
+                .secrets()
+                .map(|(field, value)| pb::CredentialSecret {
+                    field: field.to_owned(),
+                    value: value.expose(<[u8]>::to_vec),
+                })
+                .collect(),
+        }),
     }
 }
 
-/// Converts a run context without its secrets, for a call that needs none.
+/// Converts a run context without its secrets, for a call that needs none:
+/// neither the secrets nor the credential's values cross.
 pub fn context_to_wire_without_secrets(c: &RunContext) -> pb::RunContext {
     pb::RunContext {
         document: c.document.clone(),
@@ -582,6 +637,7 @@ pub fn context_to_wire_without_secrets(c: &RunContext) -> pb::RunContext {
         work_dir: c.work_dir.to_string_lossy().into_owned(),
         inputs_json: canonical_map(&c.inputs).into_bytes(),
         secrets: Vec::new(),
+        credential: None,
     }
 }
 
@@ -599,12 +655,37 @@ pub fn context_from_wire(c: Option<pb::RunContext>) -> Result<RunContext, String
             value,
         ));
     }
+    let credential = match c.credential.take() {
+        None => None,
+        Some(mut held) => {
+            let mut values = Vec::with_capacity(held.secrets.len());
+            for secret in &mut held.secrets {
+                let value = SecretValue::take_from(&mut secret.value).map_err(|e| {
+                    format!(
+                        "holding the credential {:?}'s {}: {e}",
+                        held.name, secret.field
+                    )
+                })?;
+                values.push((std::mem::take(&mut secret.field), value));
+            }
+            let declared = Credential {
+                name: held.name,
+                kind: held.r#type,
+                ambient: held.ambient,
+                text: held.text.into_iter().collect(),
+                flags: held.flags.into_iter().collect(),
+                secret_fields: Vec::new(),
+            };
+            Some(HeldCredential::from_values(declared, values))
+        }
+    };
     Ok(RunContext {
         document: c.document,
         host: c.host,
         work_dir: c.work_dir.into(),
         inputs: decode_map(&c.inputs_json).map_err(|e| format!("reading the inputs: {e}"))?,
         secrets: Secrets::from_values(secrets),
+        credential,
     })
 }
 
@@ -1120,8 +1201,92 @@ mod tests {
             synthetic_notify: false,
             runtime_condition: true,
             secrets: true,
+            credentials: false,
         };
         assert_eq!(capabilities_from_wire(Some(capabilities_to_wire(all))), all);
         assert!(!capabilities_from_wire(None).secrets);
+        let with_credentials = Capabilities {
+            credentials: true,
+            ..all
+        };
+        assert_eq!(
+            capabilities_from_wire(Some(capabilities_to_wire(with_credentials))),
+            with_credentials
+        );
+        assert!(!capabilities_from_wire(None).credentials);
+    }
+
+    fn declared_credential() -> Credential {
+        Credential {
+            name: "deploy".to_owned(),
+            kind: "ssh".to_owned(),
+            ambient: false,
+            text: BTreeMap::from([("user".to_owned(), "deploy".to_owned())]),
+            flags: BTreeMap::from([("agent".to_owned(), false)]),
+            secret_fields: vec!["privateKey".to_owned()],
+        }
+    }
+
+    #[test]
+    fn a_graph_carries_its_credential_by_name_and_field_names_only() {
+        let graph = ResourceGraph {
+            name: "web".to_owned(),
+            credential: Some(declared_credential()),
+            ..ResourceGraph::default()
+        };
+        let wire = graph_to_wire(&graph);
+        let credential = wire.credential.clone().unwrap();
+        assert_eq!(credential.name, "deploy");
+        assert_eq!(credential.r#type, "ssh");
+        assert_eq!(credential.secret_fields, ["privateKey"]);
+        assert_eq!(credential.text["user"], "deploy");
+        // There is no field for a value: the message type cannot carry one.
+        assert_eq!(graph_from_wire(wire).unwrap(), graph);
+        assert!(graph_to_wire(&ResourceGraph::default())
+            .credential
+            .is_none());
+    }
+
+    #[test]
+    fn a_run_context_carries_the_credential_values_into_protected_memory_and_outputs_carry_none() {
+        let context = RunContext {
+            document: "web".to_owned(),
+            credential: Some(HeldCredential::from_values(
+                declared_credential(),
+                vec![("privateKey".to_owned(), secret("-----KEY-----"))],
+            )),
+            ..RunContext::default()
+        };
+        let wire = context_to_wire(&context);
+        let sent = wire.credential.clone().unwrap();
+        assert_eq!(sent.name, "deploy");
+        assert_eq!(sent.text["user"], "deploy");
+        assert_eq!(sent.secrets.len(), 1);
+        assert_eq!(sent.secrets[0].field, "privateKey");
+        assert_eq!(sent.secrets[0].value, b"-----KEY-----");
+
+        let back = context_from_wire(Some(wire)).unwrap();
+        let held = back.credential.as_ref().unwrap();
+        assert_eq!(held.name(), "deploy");
+        assert_eq!(held.kind(), "ssh");
+        assert_eq!(held.text("user"), Some("deploy"));
+        assert!(!held.flag("agent"));
+        assert_eq!(held.declared.secret_fields, ["privateKey"]);
+        assert!(held
+            .secret("privateKey")
+            .unwrap()
+            .expose(|b| b == b"-----KEY-----"));
+        assert!(held.secret("password").is_none());
+        // Debug names the fields and never a value.
+        let shown = format!("{held:?}");
+        assert!(
+            shown.contains("privateKey") && !shown.contains("KEY-----"),
+            "{shown}"
+        );
+
+        // A call that takes no secrets gets no credential either.
+        assert!(context_to_wire_without_secrets(&context)
+            .credential
+            .is_none());
     }
 }

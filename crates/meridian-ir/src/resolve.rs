@@ -686,6 +686,29 @@ pub(crate) fn check(doc: &Document, errs: &mut ErrorList) {
         }
     }
 
+    // A credential's plain fields reach the tool in the open, on its command
+    // line or in its inventory, so what they read is checked as shown text.
+    // Its secret fields are checked by validate against the type.
+    for (i, credential) in doc.credentials().iter().enumerate() {
+        let Some(kind) = credential.kind() else {
+            continue;
+        };
+        for (field, value) in &credential.fields {
+            if kind.is_secret(field) || kind.is_flag(field) {
+                continue;
+            }
+            if let Value::String(text) = value {
+                if let Err(why) = check_shown(text) {
+                    fail(
+                        &credential.pos,
+                        format!("spec.credentials[{i}].{field}"),
+                        why,
+                    );
+                }
+            }
+        }
+    }
+
     for (i, r) in doc.resources().iter().enumerate() {
         let path = format!("spec.resources[{i}]");
         for (field, text) in [("id", &r.id), ("type", &r.r#type)] {
@@ -987,10 +1010,60 @@ pub fn resolve_for(
         r.params = params;
     }
 
+    // A credential's secret fields become the secrets they read, which the
+    // resolved document holds as slots and never as values; its plain
+    // fields are placed as text.
+    let credentials = match &document {
+        Document::Infrastructure(d) => &d.spec.credentials,
+        Document::ResourceSet(d) => &d.spec.credentials,
+    };
+    let mut resolved_credentials = Vec::with_capacity(credentials.len());
+    for (i, credential) in credentials.iter().enumerate() {
+        let mut credential = credential.clone();
+        let path = format!("spec.credentials[{i}]");
+        let kind = credential.kind();
+        for (field, value) in &mut credential.fields {
+            let at = format!("{path}.{field}");
+            let is_secret = kind.is_some_and(|k| k.is_secret(field));
+            if is_secret {
+                let read = place(value, &scope, None, &at)
+                    .map_err(|(at, why)| Error::new(credential.pos.clone(), at, why))?;
+                if !matches!(read, Value::Secret(_)) {
+                    return Err(Error::new(
+                        credential.pos.clone(),
+                        at,
+                        format!(
+                            "{field} reads a secret, and the expression gives {}",
+                            read.describe()
+                        ),
+                    ));
+                }
+                *value = read;
+            } else if let Value::String(text) = value {
+                place_text(text, &scope, None).map_err(|why| {
+                    Error::new(
+                        credential.pos.clone(),
+                        at,
+                        if why == NOT_FOR_SECRETS {
+                            format!(
+                                "{field} is not secret: it reaches the tool in the open, so a \
+                                 secret cannot be placed in it"
+                            )
+                        } else {
+                            why
+                        },
+                    )
+                })?;
+            }
+        }
+        resolved_credentials.push(credential);
+    }
+
     match &mut document {
         Document::Infrastructure(d) => {
             placed(&mut d.spec.target_version, "spec.targetVersion")?;
             d.spec.resources = resources;
+            d.spec.credentials = resolved_credentials;
             d.spec.outputs = outputs(&d.spec.outputs, &scope, &escapes, &mut removed)?;
             clear(
                 &mut d.spec.when,
@@ -1003,6 +1076,7 @@ pub fn resolve_for(
         Document::ResourceSet(d) => {
             placed(&mut d.spec.target_version, "spec.targetVersion")?;
             d.spec.resources = resources;
+            d.spec.credentials = resolved_credentials;
             if let Some(th) = &mut d.spec.target_host {
                 place_text(&mut th.host, &scope, None)
                     .map_err(|why| Error::new(th.pos.clone(), "spec.targetHost.host", why))?;

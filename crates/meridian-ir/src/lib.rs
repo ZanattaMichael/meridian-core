@@ -27,9 +27,12 @@ pub use resolve::{
     resolve, resolve_for, resolve_with, resolved_labels, Removed, Resolution, Secrets,
 };
 pub use types::{
-    Dependency, Document, IfMissing, Import, Infrastructure, InfrastructureSpec, Kind, Metadata,
-    Notification, Output, Resource, ResourceSet, ResourceSetSpec, Secret, TargetHost,
-    API_VERSION_V1, IMPORT_FROM_ARTIFACT, IMPORT_FROM_OUTPUT, NOTIFY_ON_CHANGED,
-    TARGET_HOST_FROM_INFRASTRUCTURE, TARGET_HOST_FROM_INLINE,
+    Credential, Dependency, Document, IfMissing, Import, Infrastructure, InfrastructureSpec, Kind,
+    Metadata, Notification, Output, Resource, ResourceSet, ResourceSetSpec, Secret, TargetHost,
+    API_VERSION_V1, CREDENTIAL_FROM_AMBIENT, IMPORT_FROM_ARTIFACT, IMPORT_FROM_OUTPUT,
+    NOTIFY_ON_CHANGED, TARGET_HOST_FROM_INFRASTRUCTURE, TARGET_HOST_FROM_INLINE,
 };
-pub use validate::{is_document_name, load, validate, Bundle, MAX_DOCUMENT_NAME};
+pub use validate::{
+    is_document_name, load, secret_reference, validate, Bundle, HOST_CREDENTIAL_TYPES,
+    MAX_DOCUMENT_NAME,
+};

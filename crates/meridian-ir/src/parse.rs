@@ -402,6 +402,7 @@ impl Decoder<'_> {
                     variables: self.value_map(f.get("variables"), "spec.variables"),
                     conditions: self.conditions(f.get("conditions")),
                     secrets: self.secrets(f.get("secrets"), &pos),
+                    credentials: self.credentials(f.get("credentials"), &pos),
                     imports: self.imports(f.get("imports"), &pos),
                     resources: self.resources(f.get("resources"), &pos),
                     outputs: self.outputs(f.get("outputs"), &pos),
@@ -422,6 +423,7 @@ impl Decoder<'_> {
                     variables: self.value_map(f.get("variables"), "spec.variables"),
                     conditions: self.conditions(f.get("conditions")),
                     secrets: self.secrets(f.get("secrets"), &pos),
+                    credentials: self.credentials(f.get("credentials"), &pos),
                     target_host: self.target_host(f.get("targetHost"), &pos),
                     imports: self.imports(f.get("imports"), &pos),
                     resources: self.resources(f.get("resources"), &pos),
@@ -655,6 +657,32 @@ impl Decoder<'_> {
         out
     }
 
+    /// `spec.credentials`: each a name, a type, and the type's fields as
+    /// written. What a field holds is checked against the type by validate.
+    fn credentials(&mut self, node: Option<&Node>, doc_pos: &Position) -> Vec<Credential> {
+        let mut out = Vec::new();
+        for (i, item) in self.list(node, "spec.credentials").iter().enumerate() {
+            let path = format!("spec.credentials[{i}]");
+            let f = self.fields(Some(item), &path, &schema::CREDENTIAL.names());
+            let mut fields = BTreeMap::new();
+            for (key, value) in &f.0 {
+                if matches!(*key, "name" | "type" | "from") {
+                    continue;
+                }
+                let value = self.value(value, &join(&path, key));
+                fields.insert((*key).to_owned(), value);
+            }
+            out.push(Credential {
+                name: self.string(f.get("name"), &join(&path, "name")),
+                r#type: self.string(f.get("type"), &join(&path, "type")),
+                from: self.string(f.get("from"), &join(&path, "from")),
+                fields,
+                pos: self.at_or(item, doc_pos),
+            });
+        }
+        out
+    }
+
     /// One place a secret comes from: the fields of a `spec.secrets` entry
     /// or of one of its `fallback` entries.
     fn secret_source(&mut self, f: &Fields<'_>, path: &str) -> meridian_secret::Source {
@@ -717,6 +745,7 @@ impl Decoder<'_> {
             r#ref: self.string(f.get("ref"), &join(path, "ref")),
             output: self.string(f.get("output"), &join(path, "output")),
             host: self.string(f.get("host"), &join(path, "host")),
+            credential: self.string(f.get("credential"), &join(path, "credential")),
             pos: self.at_or(node, doc_pos),
         })
     }

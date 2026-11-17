@@ -74,6 +74,7 @@ fn the_plugin_describes_itself_as_infrastructure_as_code() {
             synthetic_notify: true,
             runtime_condition: false,
             secrets: true,
+            credentials: false,
         }
     );
     assert_eq!(

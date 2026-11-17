@@ -50,6 +50,51 @@ pub(crate) fn handed(
     Ok(meridian_sdk::Secrets::from_values(values))
 }
 
+/// The credential the host is reached with, with the value of each of its
+/// secret fields duplicated into protected memory of its own, for the tool.
+/// An error names the credential and the field, never a value.
+pub(crate) fn handed_credential(
+    credential: Option<&meridian_ir::Credential>,
+    table: &SecretTable,
+) -> Result<Option<meridian_sdk::HeldCredential>, String> {
+    let Some(credential) = credential else {
+        return Ok(None);
+    };
+    let mut values = Vec::new();
+    for (field, at) in credential.secrets() {
+        let value = table
+            .with(at, |held| held.duplicate())
+            .map_err(|e| format!("credential {:?}, {field}: {e}", credential.name))?
+            .map_err(|e| format!("credential {:?}, {field}: {e}", credential.name))?;
+        values.push((field.to_owned(), value));
+    }
+    let declared = meridian_sdk::Credential {
+        name: credential.name.clone(),
+        kind: credential.r#type.clone(),
+        ambient: credential.is_ambient(),
+        text: credential
+            .fields
+            .iter()
+            .filter_map(|(k, v)| match v {
+                Value::String(text) => Some((k.clone(), text.clone())),
+                _ => None,
+            })
+            .collect(),
+        flags: credential
+            .fields
+            .iter()
+            .filter_map(|(k, v)| match v {
+                Value::Bool(b) => Some((k.clone(), *b)),
+                _ => None,
+            })
+            .collect(),
+        secret_fields: Vec::new(),
+    };
+    Ok(Some(meridian_sdk::HeldCredential::from_values(
+        declared, values,
+    )))
+}
+
 /// The value of every declared secret that was fetched, by its declared
 /// name, for a tool that is handed an artifact without the graph it was
 /// compiled from: a rollback.

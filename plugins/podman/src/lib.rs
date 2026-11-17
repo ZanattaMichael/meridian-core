@@ -247,6 +247,7 @@ impl Emitter for Podman {
             synthetic_notify: false,
             runtime_condition: false,
             secrets: false,
+            credentials: false,
         }
     }
 

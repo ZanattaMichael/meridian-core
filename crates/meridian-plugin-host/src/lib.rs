@@ -246,6 +246,42 @@ pub fn to_sdk(graph: &meridian_ast::ResourceGraph) -> meridian_sdk::ResourceGrap
             })
             .collect(),
         secrets: Vec::new(),
+        credential: graph.credential.as_ref().map(|c| {
+            // A field is secret by the type's say-so, not by what it holds:
+            // before the document is resolved it holds the reference as
+            // written, and that is not text a plugin may read either.
+            let is_secret = |field: &str| c.kind().is_some_and(|kind| kind.is_secret(field));
+            let mut secret_fields: Vec<String> = c
+                .fields
+                .iter()
+                .filter(|(k, v)| is_secret(k) || matches!(v, Value::Secret(_)))
+                .map(|(k, _)| k.clone())
+                .collect();
+            secret_fields.sort_unstable();
+            meridian_sdk::Credential {
+                name: c.name.clone(),
+                kind: c.r#type.clone(),
+                ambient: c.is_ambient(),
+                text: c
+                    .fields
+                    .iter()
+                    .filter(|(k, _)| !is_secret(k))
+                    .filter_map(|(k, v)| match v {
+                        Value::String(text) => Some((k.clone(), text.clone())),
+                        _ => None,
+                    })
+                    .collect(),
+                flags: c
+                    .fields
+                    .iter()
+                    .filter_map(|(k, v)| match v {
+                        Value::Bool(b) => Some((k.clone(), *b)),
+                        _ => None,
+                    })
+                    .collect(),
+                secret_fields,
+            }
+        }),
     }
 }
 

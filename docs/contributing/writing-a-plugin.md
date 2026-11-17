@@ -275,10 +275,12 @@ them, so each one is a promise:
 - `supported_resource_types()`: every type you map, sorted. For a native
   target whose types are open-ended, describe the shape, as Bicep does with
   `<Namespace>/<type>@<api-version>`.
-- `capabilities()`: `native_notify`, `synthetic_notify`, `runtime_condition`
-  and `secrets`. Declare only what a test in your crate proves. `secrets`
-  says a param may hold a secret, and commits your runner to
-  [handing it over](#secrets) by a private channel.
+- `capabilities()`: `native_notify`, `synthetic_notify`, `runtime_condition`,
+  `secrets` and `credentials`. Declare only what a test in your crate proves.
+  `secrets` says a param may hold a secret, and commits your runner to
+  [handing it over](#secrets) by a private channel. `credentials` says your
+  target reaches its host as the credential `targetHost.credential` names,
+  and commits your emitter and runner to [the same](#credentials).
 - `category()`: the one you chose before you started. It also decides which
   kind of document your target accepts, as the table near the top says.
 - `target_versions()`: only if the tool comes in versions that need different
@@ -364,6 +366,7 @@ refuses what it left out.
 | `work_dir` | a directory kept between runs, for the artifact and the tool's own state |
 | `inputs` | values handed over from earlier stages of a workflow |
 | `secrets` | the value of each secret the document's params hold, for a target that declared `secrets`; see [Secrets](#secrets) |
+| `credential` | the credential the host is reached as, with the values of its secret fields, for a target that declared `credentials`; `None` when the document names none. See [Credentials](#credentials) |
 
 and you implement up to three operations. Declare only the ones you implement
 in `operations()`; the host never calls the others.
@@ -463,6 +466,42 @@ at and of its arguments and environment
 (`meridian_plugin_testkit::secrets`), asserting the value is in the file, in
 mode `0600`, and nowhere else. The host masks whatever the tool prints, but
 that is the second line of defence, not the first.
+
+### Credentials
+
+A document can name a [credential](../reference/dsl/credentials.md) its host
+is reached as: an `ssh` or `usernamePassword` identity, with a user that is
+plain text and a key or a password that is a secret. The host gives it to
+your plugin only if `capabilities().credentials` is true, and then in the
+same two halves:
+
+1. **Compiling: the shape, never a value.** `graph.credential` is a
+   `Credential`: its `name`, `kind`, whether it is `ambient`, its `text`
+   fields, its `flags`, and the *names* of its `secret_fields`. Write the
+   plain fields where the tool reads an identity (Ansible puts the user after
+   the host in the inventory), and refuse what the tool cannot take with a
+   `CompileError` that says why, as Ansible refuses a `passphrase`. Do not
+   silently drop a field: a credential the tool half-uses reaches the host as
+   someone else.
+
+2. **Running: the values, by a private channel.** `context.credential` is a
+   `HeldCredential`: the same `declared` shape, and `secret(field)` lends
+   each secret field as a `SecretValue`. Hand each one to the tool the way
+   the tool takes an identity, and no other: a key as a `SecretFile` of
+   `Part::Secret(key)` named by the tool's own flag (`--private-key <path>`),
+   a password in the same `SecretFile` as the document's secrets where the
+   tool reads variables from one. `secrets()` iterates them. Never an
+   argument, never the environment. `Debug` prints the name, the type and
+   the field names.
+
+The core refuses, before your plugin is called, a document that names a
+credential of a type a host cannot take, or for a target that did not declare
+the capability. Test both halves as for secrets: a compile test that the user
+is written and the key is not, and a stand-in test that keeps a copy of the
+key file and its mode and of the arguments and environment, asserting the key
+is in the file, in mode `0600`, and nowhere else. Then add the column to the
+[capability matrix](#step-7-documentation) and a section to the target's page
+saying where each field goes and what is refused.
 
 ## An importer
 

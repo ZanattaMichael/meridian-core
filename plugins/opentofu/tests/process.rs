@@ -42,6 +42,7 @@ fn the_binary_declares_its_category_and_everything_it_can_do() {
             synthetic_notify: true,
             runtime_condition: false,
             secrets: true,
+            credentials: false,
         }
     );
     assert_eq!(

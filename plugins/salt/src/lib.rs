@@ -143,6 +143,7 @@ impl Emitter for Salt {
             synthetic_notify: false,
             runtime_condition: true,
             secrets: false,
+            credentials: false,
         }
     }
 

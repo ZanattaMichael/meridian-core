@@ -31,10 +31,18 @@ pub(crate) fn serialise(playbook: &Playbook) -> BTreeMap<String, String> {
             format!("---\n{}", meridian_yaml::write(&document)),
         ),
         // Meridian resolves the host itself, so the inventory is a literal
-        // and not a lookup.
+        // and not a lookup. A credential's user goes after it.
         (
             INVENTORY_PATH.to_owned(),
-            format!("[meridian]\n{}\n", playbook.hosts),
+            format!(
+                "[meridian]\n{}{}\n",
+                playbook.hosts,
+                playbook
+                    .inventory_vars
+                    .iter()
+                    .map(|(k, v)| format!(" {k}={v}"))
+                    .collect::<String>()
+            ),
         ),
     ])
 }

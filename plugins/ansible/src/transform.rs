@@ -264,9 +264,76 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Playbook, CompileError>
     Ok(Playbook {
         name: graph.name.clone(),
         hosts: graph.host.clone(),
+        inventory_vars: inventory_vars(graph.credential.as_ref())?,
         tasks,
         handlers: handlers(graph)?,
     })
+}
+
+/// What the inventory says about reaching the host as the credential: the
+/// user. The credential's secret fields are not here; the runner hands them
+/// to ansible-playbook privately. What ansible-playbook cannot take is
+/// refused with the reason, never dropped.
+fn inventory_vars(
+    credential: Option<&meridian_sdk::Credential>,
+) -> Result<Vec<(String, String)>, CompileError> {
+    let Some(credential) = credential else {
+        return Ok(Vec::new());
+    };
+    let refuse = |msg: String| CompileError {
+        target: NAME.to_owned(),
+        resource: String::new(),
+        rule: "unsupported-credential".to_owned(),
+        msg: format!("the credential {:?}: {msg}", credential.name),
+        pos: Default::default(),
+    };
+    match credential.kind.as_str() {
+        "ssh" | "usernamePassword" => {}
+        other => {
+            return Err(refuse(format!(
+                "ansible-playbook reaches a host as an ssh or usernamePassword credential, \
+                 not {other}"
+            )))
+        }
+    }
+    if credential.has_secret("passphrase") {
+        return Err(refuse(
+            "ansible-playbook takes no passphrase for a private key; add the key to an SSH \
+             agent and set agent: true instead"
+                .to_owned(),
+        ));
+    }
+    if credential.text("certificate").is_some() {
+        return Err(refuse(
+            "ansible-playbook takes no certificate for a key; put it beside the key in the \
+             SSH agent and set agent: true"
+                .to_owned(),
+        ));
+    }
+    if credential.text("domain").is_some() {
+        return Err(refuse(
+            "ansible-playbook over SSH takes no domain; it is for WinRM hosts, which this \
+             plugin does not reach"
+                .to_owned(),
+        ));
+    }
+    let mut vars = Vec::new();
+    if let Some(user) = credential.text("user") {
+        // A user is written after the host in inventory.ini, where a space
+        // starts the next variable and a line break the next host.
+        if user.is_empty()
+            || user
+                .chars()
+                .any(|c| c.is_whitespace() || c == '=' || c == '[' || c == '#')
+        {
+            return Err(refuse(format!(
+                "the user {user:?} cannot be written into the inventory: a user name holds \
+                 no whitespace, `=`, `[` or `#`"
+            )));
+        }
+        vars.push((crate::USER_VARIABLE.to_owned(), user.to_owned()));
+    }
+    Ok(vars)
 }
 
 /// Maps one resource onto its native module call, in the given state.
