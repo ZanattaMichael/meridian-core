@@ -210,11 +210,8 @@ mod tests {
         ]);
         assert_eq!(secrets.len(), 2);
         assert_eq!(secrets.names(), ["api", "db"]);
-        assert!(secrets.get("db").unwrap().expose(|b| b == b"hunter2"));
-        assert!(secrets
-            .of(SecretRef::new(5))
-            .unwrap()
-            .expose(|b| b == b"k-1"));
+        assert!(secrets.get("db").unwrap().same(&secret("hunter2")));
+        assert!(secrets.of(SecretRef::new(5)).unwrap().same(&secret("k-1")));
         assert_eq!(secrets.name_of(SecretRef::new(3)), Some("db"));
         assert!(secrets.of(SecretRef::new(9)).is_none());
         let shown = format!("{secrets:?}");
