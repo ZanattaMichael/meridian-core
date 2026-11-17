@@ -160,6 +160,50 @@ if "$meridian" module install 2> "$work/denied.txt"; then
 fi
 grep -q 'no login for it was found' "$work/denied.txt" || { cat "$work/denied.txt"; fail "the refusal does not say why"; }
 
+say "a login the project declares, with no Docker login"
+cat >> meridian.yaml <<YAML
+      credential: private
+  credentials:
+    - name: private
+      type: registry
+      server: localhost:5001
+      user: reader
+      password:
+        from: env
+        key: MERIDIAN_TEST_REGISTRY_LOGIN
+YAML
+if "$meridian" module install 2> "$work/unset.txt"; then
+  fail "a credential whose secret is not set was used"
+fi
+grep -q 'the credential private: ' "$work/unset.txt" || { cat "$work/unset.txt"; fail "the refusal does not name the credential"; }
+# Published with the same credential, declared by the module being pushed.
+cp -r "$work/src-1.2.0" "$work/src-declared"
+sed -i "s/^  version: .*/  version: 1.2.5/" "$work/src-declared/meridian.yaml"
+sed -n '/^  credentials:/,$p' meridian.yaml >> "$work/src-declared/meridian.yaml"
+export MERIDIAN_TEST_REGISTRY_LOGIN=not-the-password
+if (cd "$work/src-declared" && "$meridian" module push "$private" --insecure --credential private) 2> "$work/refused.txt"; then
+  fail "a wrong password was accepted"
+fi
+grep -q 'the credential private was refused' "$work/refused.txt" || { cat "$work/refused.txt"; fail "the refusal does not say why"; }
+export MERIDIAN_TEST_REGISTRY_LOGIN=s3cret
+(cd "$work/src-declared" && "$meridian" module push "$private" --insecure --credential private)
+"$meridian" module install | tee "$work/declared.txt"
+grep -q '^+ acme/hardening 1.2.5 ' "$work/declared.txt" || fail "the module was not installed with the declared credential"
+if grep -rq 's3cret' meridian.lock .meridian "$work/declared.txt"; then
+  fail "the password was written down"
+fi
+"$meridian" module verify
+unset MERIDIAN_TEST_REGISTRY_LOGIN
+# A login for another registry is not sent to this one.
+sed -i 's/server: localhost:5001/server: registry.example.com/' meridian.yaml
+if MERIDIAN_TEST_REGISTRY_LOGIN=s3cret "$meridian" module update 2> "$work/elsewhere.txt"; then
+  fail "a login for another registry was sent"
+fi
+grep -q 'it was not sent' "$work/elsewhere.txt" || { cat "$work/elsewhere.txt"; fail "the refusal does not say why"; }
+
+say "a login from the Docker configuration"
+project "$work/docker-login" "$private" "=1.2.0"
+cd "$work/docker-login"
 # The login is written the way `docker login` writes it. Without it the
 # push is refused too.
 if (cd "$work/src-1.2.0" && "$meridian" module push "$private" --insecure) 2> "$work/push-denied.txt"; then

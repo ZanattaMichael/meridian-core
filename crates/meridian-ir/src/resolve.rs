@@ -310,32 +310,48 @@ fn secret_problems(secret: &Secret, path: &str) -> Vec<(String, String)> {
         );
     }
 
-    let written: Vec<(&str, &str)> = [
-        ("name", secret.name.as_str()),
-        ("from", secret.from.as_str()),
-        ("key", secret.key.as_str()),
-        ("path", secret.path.as_str()),
-    ]
-    .into_iter()
-    .chain(secret.command.iter().map(|arg| ("command", arg.as_str())))
-    .collect();
-    for (field, text) in written {
-        if has_interpolation(text) {
-            fail(
-                field,
-                "where a secret comes from is written out, so that it can be read without any \
-                 data; it cannot be interpolated"
-                    .to_owned(),
-            );
-        }
+    if has_interpolation(&secret.name) {
+        fail("name", NOT_INTERPOLATED.to_owned());
     }
-
-    // What the provider needs, and the fields that mean nothing to it.
-    for (field, why) in secret.source().problems() {
-        fail(field, why);
+    // Each place it is looked for: what is written out, what the provider
+    // needs, and the fields that mean nothing to it.
+    for (at, source) in secret.sources().iter().enumerate() {
+        let under = match at {
+            0 => String::new(),
+            n => format!("fallback[{}].", n - 1),
+        };
+        let written = [
+            ("from", source.from.as_str()),
+            ("key", source.key.as_str()),
+            ("path", source.path.as_str()),
+            ("service", source.service.as_str()),
+            ("account", source.account.as_str()),
+        ]
+        .into_iter()
+        .chain(source.command.iter().map(|arg| ("command", arg.as_str())))
+        .chain(
+            source
+                .attributes
+                .iter()
+                .flat_map(|(name, value)| [("attributes", name.as_str()), ("attributes", value)]),
+        );
+        let mut seen = Vec::new();
+        for (field, text) in written {
+            if has_interpolation(text) && !seen.contains(&field) {
+                seen.push(field);
+                fail(&format!("{under}{field}"), NOT_INTERPOLATED.to_owned());
+            }
+        }
+        for (field, why) in source.problems() {
+            fail(&format!("{under}{field}"), why);
+        }
     }
     found
 }
+
+/// Why a secret's declaration takes no interpolation.
+const NOT_INTERPOLATED: &str = "where a secret comes from is written out, so that it can be \
+                                read without any data; it cannot be interpolated";
 
 /// Visits every piece of text inside a value, with the path to it. A mapping
 /// key is visited too, with `is_key` set.

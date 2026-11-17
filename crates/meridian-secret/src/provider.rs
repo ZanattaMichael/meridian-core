@@ -13,7 +13,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, PoisonError};
 
-use crate::{SecretValue, DEFAULT_MAX_LEN};
+use crate::{stores, SecretValue, DEFAULT_MAX_LEN};
 
 /// Why a secret could not be fetched. It never holds the value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,19 +22,24 @@ pub enum FetchError {
     Missing(String),
     /// The place exists and was refused, or reading it failed.
     Failed(String),
+    /// The provider cannot be used on this machine at all: another
+    /// operating system, no session bus, its tool not installed.
+    Unavailable(String),
 }
 
 impl fmt::Display for FetchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            FetchError::Missing(why) | FetchError::Failed(why) => f.write_str(why),
+            FetchError::Missing(why) | FetchError::Failed(why) | FetchError::Unavailable(why) => {
+                f.write_str(why)
+            }
         }
     }
 }
 
 impl std::error::Error for FetchError {}
 
-fn failed(what: impl fmt::Display, e: std::io::Error) -> FetchError {
+pub(crate) fn failed(what: impl fmt::Display, e: std::io::Error) -> FetchError {
     FetchError::Failed(format!("{what}: {e}"))
 }
 
@@ -191,7 +196,65 @@ pub fn from_exec(command: &[String]) -> Result<SecretValue, FetchError> {
 }
 
 /// The providers a secret can come from.
-pub const PROVIDERS: &[&str] = &["env", "exec", "file"];
+pub const PROVIDERS: &[&str] = &[
+    "env",
+    "exec",
+    "file",
+    "keychain",
+    "keyring",
+    "secret-service",
+    "systemd-creds",
+];
+
+/// Every field a source can have, as a document writes them.
+const FIELDS: &[&str] = &[
+    "key",
+    "path",
+    "command",
+    "service",
+    "account",
+    "attributes",
+    "allowWideMode",
+    "keepTrailingNewline",
+];
+
+/// What a provider must be given and what else it takes, each field with
+/// what it is for.
+type Needs = &'static [(&'static str, &'static str)];
+
+fn shape(from: &str) -> Option<(Needs, &'static [&'static str])> {
+    Some(match from {
+        "env" => (&[("key", "the environment variable to read")], &[]),
+        "file" => (
+            &[("path", "the file to read")],
+            &["allowWideMode", "keepTrailingNewline"],
+        ),
+        "exec" => (
+            &[("command", "the program to run and its arguments, as a list")],
+            &[],
+        ),
+        "keyring" => (
+            &[("key", "the description of the key in the kernel keyring")],
+            &[],
+        ),
+        "systemd-creds" => (
+            &[("key", "the name of the credential the unit was given")],
+            &["keepTrailingNewline"],
+        ),
+        "secret-service" => (
+            &[("attributes", "the attributes the item was stored with")],
+            &[],
+        ),
+        "keychain" => (
+            &[
+                ("service", "the keychain item's service"),
+                ("account", "the keychain item's account"),
+            ],
+            &[],
+        ),
+        _ => return None,
+    })
+}
 
 /// Where one secret comes from: a provider and what it needs. This is what
 /// a document or a project file declares, and holds nothing of the value.
@@ -199,80 +262,76 @@ pub const PROVIDERS: &[&str] = &["env", "exec", "file"];
 pub struct Source {
     /// The provider: one of [`PROVIDERS`].
     pub from: String,
-    /// `env`: the environment variable.
+    /// `env`: the environment variable. `keyring`: the key's description.
+    /// `systemd-creds`: the credential's name.
     pub key: String,
     /// `file`: the file.
     pub path: String,
     /// `exec`: the program and its arguments. No shell reads them.
     pub command: Vec<String>,
+    /// `keychain`: the item's service.
+    pub service: String,
+    /// `keychain`: the item's account.
+    pub account: String,
+    /// `secret-service`: the attributes the item is found by.
+    pub attributes: BTreeMap<String, String>,
     /// `file`: read a file that others than its owner can read.
     pub allow_wide_mode: bool,
-    /// `file`: keep the value's last line ending.
+    /// `file`, `systemd-creds`: keep the value's last line ending.
     pub keep_trailing_newline: bool,
 }
 
 impl Source {
+    fn has(&self, field: &str) -> bool {
+        match field {
+            "key" => !self.key.is_empty(),
+            "path" => !self.path.is_empty(),
+            "command" => !self.command.is_empty(),
+            "service" => !self.service.is_empty(),
+            "account" => !self.account.is_empty(),
+            "attributes" => !self.attributes.is_empty(),
+            "allowWideMode" => self.allow_wide_mode,
+            "keepTrailingNewline" => self.keep_trailing_newline,
+            _ => false,
+        }
+    }
+
     /// What is wrong with the declaration, as the field at fault and why.
     /// Empty when the provider is known, has what it needs and is given
     /// nothing that means nothing to it.
     pub fn problems(&self) -> Vec<(&'static str, String)> {
         let mut found = Vec::new();
-        let has = |field: &str| match field {
-            "key" => !self.key.is_empty(),
-            "path" => !self.path.is_empty(),
-            "command" => !self.command.is_empty(),
-            "allowWideMode" => self.allow_wide_mode,
-            "keepTrailingNewline" => self.keep_trailing_newline,
-            _ => false,
+        let Some((needs, takes)) = shape(&self.from) else {
+            let why = if self.from.is_empty() {
+                format!(
+                    "a secret needs a provider: from is one of {}",
+                    PROVIDERS.join(", ")
+                )
+            } else {
+                format!(
+                    "{:?} is not a provider this version has; from is one of {}",
+                    self.from,
+                    PROVIDERS.join(", ")
+                )
+            };
+            found.push(("from", why));
+            return found;
         };
-        let (needs, takes): (&'static str, &[&str]) = match self.from.as_str() {
-            "env" => ("key", &[]),
-            "file" => ("path", &["allowWideMode", "keepTrailingNewline"]),
-            "exec" => ("command", &[]),
-            "" => {
+        for (field, what) in needs {
+            if !self.has(field) {
+                found.push((*field, format!("from: {} needs {field}, {what}", self.from)));
+            } else if *field == "command" && self.command[0].is_empty() {
                 found.push((
-                    "from",
-                    format!(
-                        "a secret needs a provider: from is one of {}",
-                        PROVIDERS.join(", ")
-                    ),
+                    *field,
+                    "the first item of command is the program to run".to_owned(),
                 ));
-                return found;
             }
-            other => {
-                found.push((
-                    "from",
-                    format!(
-                        "{other:?} is not a provider this version has; from is one of {}",
-                        PROVIDERS.join(", ")
-                    ),
-                ));
-                return found;
-            }
-        };
-        let what = match needs {
-            "key" => "key, the environment variable to read",
-            "path" => "path, the file to read",
-            _ => "command, the program to run and its arguments, as a list",
-        };
-        if !has(needs) {
-            found.push((needs, format!("from: {} needs {what}", self.from)));
-        } else if needs == "command" && self.command[0].is_empty() {
-            found.push((
-                needs,
-                "the first item of command is the program to run".to_owned(),
-            ));
         }
-        for field in [
-            "key",
-            "path",
-            "command",
-            "allowWideMode",
-            "keepTrailingNewline",
-        ] {
-            if field != needs && !takes.contains(&field) && has(field) {
+        for field in FIELDS {
+            let used = needs.iter().any(|(name, _)| name == field) || takes.contains(field);
+            if !used && self.has(field) {
                 found.push((
-                    field,
+                    *field,
                     format!("{field} means nothing to from: {}; remove it", self.from),
                 ));
             }
@@ -291,8 +350,24 @@ impl Source {
                 "the command {}",
                 self.command.first().map_or("", String::as_str)
             ),
+            "keyring" => format!("the kernel keyring, key {}", self.key),
+            "systemd-creds" => format!("the unit's credential {}", self.key),
+            "secret-service" => format!("the Secret Service, item {}", self.item()),
+            "keychain" => format!(
+                "the keychain, service {} and account {}",
+                self.service, self.account
+            ),
             other => format!("the provider {other:?}"),
         }
+    }
+
+    /// The attributes a Secret Service item is found by, as `name=value`.
+    fn item(&self) -> String {
+        self.attributes
+            .iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     /// Whether the place would answer, found out without reading the value.
@@ -316,6 +391,38 @@ impl Source {
                     Probe::Refused(format!("the command {program} was not found"))
                 }
             }
+            "keyring" => match stores::keyring_holds(&self.key) {
+                Ok(true) => {
+                    Probe::Present(format!("the kernel keyring holds the key {}", self.key))
+                }
+                Ok(false) => Probe::Absent(format!("the kernel keyring holds no key {}", self.key)),
+                Err(e) => Probe::from_error(e),
+            },
+            "systemd-creds" => match stores::credential_path(&self.key) {
+                Ok(path) if path.is_file() => {
+                    Probe::Present(format!("this unit was given the credential {}", self.key))
+                }
+                Ok(_) => Probe::Absent(format!("this unit was given no credential {}", self.key)),
+                Err(e) => Probe::from_error(e),
+            },
+            "secret-service" => match stores::secret_service_unavailable() {
+                Some(e) => Probe::from_error(e),
+                None if on_path(stores::SECRET_TOOL) => Probe::Unknown(format!(
+                    "the Secret Service is only asked by plan and apply: asking can open a \
+                     prompt to unlock it (item {})",
+                    self.item()
+                )),
+                None => Probe::Unavailable(format!(
+                    "the Secret Service is read with {}, which was not found",
+                    stores::SECRET_TOOL
+                )),
+            },
+            "keychain" if cfg!(target_os = "macos") => Probe::Unknown(format!(
+                "the keychain is only asked by plan and apply: asking can open a prompt \
+                 (service {}, account {})",
+                self.service, self.account
+            )),
+            "keychain" => Probe::Unavailable("the keychain is only on macOS".to_owned()),
             other => Probe::Refused(format!(
                 "{other:?} is not a provider this version has; from is one of {}",
                 PROVIDERS.join(", ")
@@ -335,11 +442,122 @@ impl Source {
                 },
             ),
             "exec" => from_exec(&self.command),
+            "keyring" => stores::from_keyring(&self.key),
+            "systemd-creds" => {
+                stores::from_systemd_credential(&self.key, self.keep_trailing_newline)
+            }
+            "secret-service" => stores::from_secret_service(&self.attributes),
+            "keychain" => stores::from_keychain(&self.service, &self.account),
             other => Err(FetchError::Failed(format!(
                 "{other:?} is not a provider this version has; from is one of {}",
                 PROVIDERS.join(", ")
             ))),
         }
+    }
+
+    /// Whether Meridian can put a value in this place itself. The others
+    /// are written by their own tools.
+    pub fn writable(&self) -> bool {
+        matches!(self.from.as_str(), "keyring" | "secret-service")
+    }
+
+    /// Stores `value` in this place, under `label` where the store shows
+    /// one. Only a [writable](Source::writable) place takes a value. The
+    /// error says why not, and never holds any part of the value: it is
+    /// [`FetchError::Unavailable`] when the store cannot be used on this
+    /// machine, so that the next place can be tried.
+    pub fn store(&self, label: &str, value: &SecretValue) -> Result<(), FetchError> {
+        match self.from.as_str() {
+            "keyring" => stores::into_keyring(&self.key, value),
+            "secret-service" => stores::into_secret_service(label, &self.attributes, value),
+            other => Err(FetchError::Unavailable(format!(
+                "from: {other} is not a place meridian writes; it is written with its own tool"
+            ))),
+        }
+    }
+}
+
+/// Stores `value` in the first of `sources` that meridian can write and
+/// that can be used on this machine, and says which it was.
+///
+/// A store that cannot be used here is passed over for the next; one that
+/// refuses stops the search. When none takes it, the error gives every
+/// writable place's reason, or says that no place is writable.
+pub fn store_first(
+    sources: &[Source],
+    label: &str,
+    value: &SecretValue,
+) -> Result<usize, FetchError> {
+    let mut reasons = Vec::new();
+    for (at, source) in sources.iter().enumerate() {
+        if !source.writable() {
+            continue;
+        }
+        match source.store(label, value) {
+            Ok(()) => return Ok(at),
+            Err(FetchError::Unavailable(why)) => reasons.push(why),
+            Err(refused) => return Err(refused),
+        }
+    }
+    Err(FetchError::Unavailable(if reasons.is_empty() {
+        "none of its places is one meridian writes".to_owned()
+    } else {
+        reasons.join("; ")
+    }))
+}
+
+/// Fetches from the first of `sources` that has the secret, and says which
+/// it was.
+///
+/// A place that has nothing, or that cannot be used on this machine, is
+/// passed over for the next. A place that is there and refused stops the
+/// search: that is a mistake to fix, not one to hide behind the next place.
+/// When none answers, the error gives every place's reason, and is
+/// [`FetchError::Missing`] when at least one place could have held it.
+pub fn fetch_first(sources: &[Source]) -> Result<(usize, SecretValue), FetchError> {
+    let mut reasons = Vec::new();
+    let mut could_hold = false;
+    for (at, source) in sources.iter().enumerate() {
+        match source.fetch() {
+            Ok(value) => return Ok((at, value)),
+            Err(FetchError::Missing(why)) => {
+                could_hold = true;
+                reasons.push(why);
+            }
+            Err(FetchError::Unavailable(why)) => reasons.push(why),
+            Err(failed) => return Err(failed),
+        }
+    }
+    let why = reasons.join("; ");
+    Err(if could_hold {
+        FetchError::Missing(why)
+    } else {
+        FetchError::Unavailable(why)
+    })
+}
+
+/// What [`fetch_first`] would find, without reading a value: the first
+/// place that holds something or can only be asked by a fetch, or the place
+/// that would be refused, or every place's reason for having nothing.
+pub fn probe_first(sources: &[Source]) -> (usize, Probe) {
+    let mut reasons = Vec::new();
+    let mut could_hold = false;
+    for (at, source) in sources.iter().enumerate() {
+        match source.probe() {
+            Probe::Absent(why) => {
+                could_hold = true;
+                reasons.push(why);
+            }
+            Probe::Unavailable(why) => reasons.push(why),
+            answer => return (at, answer),
+        }
+    }
+    let why = reasons.join("; ");
+    let last = sources.len().saturating_sub(1);
+    if could_hold {
+        (last, Probe::Absent(why))
+    } else {
+        (last, Probe::Unavailable(why))
     }
 }
 
@@ -355,13 +573,28 @@ pub enum Probe {
     Refused(String),
     /// Only a fetch can tell: a command is not run to find out.
     Unknown(String),
+    /// The provider cannot be used on this machine at all.
+    Unavailable(String),
 }
 
 impl Probe {
+    /// What a failed look at a place amounts to.
+    fn from_error(error: FetchError) -> Probe {
+        match error {
+            FetchError::Missing(why) => Probe::Absent(why),
+            FetchError::Failed(why) => Probe::Refused(why),
+            FetchError::Unavailable(why) => Probe::Unavailable(why),
+        }
+    }
+
     /// What was found, as a sentence without its full stop.
     pub fn words(&self) -> &str {
         match self {
-            Probe::Present(w) | Probe::Absent(w) | Probe::Refused(w) | Probe::Unknown(w) => w,
+            Probe::Present(w)
+            | Probe::Absent(w)
+            | Probe::Refused(w)
+            | Probe::Unknown(w)
+            | Probe::Unavailable(w) => w,
         }
     }
 }

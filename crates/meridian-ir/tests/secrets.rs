@@ -311,6 +311,276 @@ fn where_a_secret_comes_from_cannot_be_interpolated() {
     }
 }
 
+#[test]
+fn a_secret_can_come_from_a_store_of_the_operating_system() {
+    let text = resource_set(
+        "secrets:
+  - name: deploy
+    from: keyring
+    key: meridian:deploy
+  - name: unit
+    from: systemd-creds
+    key: deploy-token
+    keepTrailingNewline: true
+  - name: desktop
+    from: secret-service
+    attributes: {app: meridian, name: deploy}
+  - name: mac
+    from: keychain
+    service: deploy
+    account: meridian
+resources:
+  - id: x
+    type: file
+",
+    );
+    valid(&text);
+    let doc = document(&text);
+    let secrets = doc.secrets();
+    assert_eq!(
+        secrets
+            .iter()
+            .map(|s| (s.name.as_str(), s.from.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("deploy", "keyring"),
+            ("unit", "systemd-creds"),
+            ("desktop", "secret-service"),
+            ("mac", "keychain")
+        ]
+    );
+    assert_eq!(secrets[0].key, "meridian:deploy");
+    assert!(secrets[1].keep_trailing_newline);
+    assert_eq!(
+        secrets[2]
+            .attributes
+            .iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect::<Vec<_>>(),
+        ["app=meridian", "name=deploy"]
+    );
+    assert_eq!(
+        (secrets[3].service.as_str(), secrets[3].account.as_str()),
+        ("deploy", "meridian")
+    );
+    // Each is one place, and that place is what the secrets crate is given.
+    for secret in secrets {
+        assert!(secret.fallback.is_empty());
+        assert_eq!(secret.sources(), [secret.source()]);
+        assert_eq!(secret.source().from, secret.from);
+    }
+    assert_eq!(
+        secrets[3].source().place(),
+        "the keychain, service deploy and account meridian"
+    );
+}
+
+const WITH_FALLBACK: &str = "secrets:
+  - name: deploy
+    from: secret-service
+    attributes: {app: meridian, name: deploy}
+    optional: true
+    fallback:
+      - from: keyring
+        key: meridian:deploy
+      - from: file
+        path: /run/secrets/deploy
+        allowWideMode: true
+      - {from: exec, command: [pass, show, deploy]}
+resources:
+  - id: x
+    type: file
+";
+
+#[test]
+fn a_secret_can_name_further_places_to_look_in_order() {
+    let text = resource_set(WITH_FALLBACK);
+    valid(&text);
+    let doc = document(&text);
+    let secret = &doc.secrets()[0];
+    assert!(secret.optional);
+    assert_eq!(secret.fallback.len(), 3);
+    let sources = secret.sources();
+    assert_eq!(
+        sources.iter().map(|s| s.from.as_str()).collect::<Vec<_>>(),
+        ["secret-service", "keyring", "file", "exec"]
+    );
+    assert_eq!(sources[0], secret.source());
+    assert_eq!(sources[1].key, "meridian:deploy");
+    assert_eq!(sources[2].path, "/run/secrets/deploy");
+    // A field of one place is that place's alone.
+    assert!(sources[2].allow_wide_mode);
+    assert!(!sources[0].allow_wide_mode && !sources[3].allow_wide_mode);
+    assert_eq!(sources[3].command, ["pass", "show", "deploy"]);
+    assert!(sources[1].attributes.is_empty());
+
+    // An empty list is no further place.
+    let none = resource_set(
+        "secrets:\n  - {name: a, from: env, key: K, fallback: []}\nresources:\n  - id: x\n    \
+         type: file\n",
+    );
+    valid(&none);
+    assert_eq!(document(&none).secrets()[0].sources().len(), 1);
+}
+
+#[test]
+fn a_further_place_is_checked_as_the_first_is_and_named_by_where_it_is() {
+    for (entry, parts) in [
+        (
+            "{name: a, from: env, key: K, fallback: [{key: K2}]}",
+            vec![
+                "spec.secrets[0].fallback[0].from",
+                "a secret needs a provider",
+            ],
+        ),
+        (
+            "{name: a, from: env, key: K, fallback: [{from: env, key: K2}, {from: vault}]}",
+            vec![
+                "spec.secrets[0].fallback[1].from",
+                "\"vault\" is not a provider this version has",
+            ],
+        ),
+        (
+            "{name: a, from: env, key: K, fallback: [{from: keyring}]}",
+            vec![
+                "spec.secrets[0].fallback[0].key",
+                "from: keyring needs key, the description of the key in the kernel keyring",
+            ],
+        ),
+        (
+            "{name: a, from: env, key: K, fallback: [{from: keychain, service: s}]}",
+            vec![
+                "spec.secrets[0].fallback[0].account",
+                "from: keychain needs account",
+            ],
+        ),
+        (
+            "{name: a, from: env, key: K, fallback: [{from: secret-service}]}",
+            vec![
+                "spec.secrets[0].fallback[0].attributes",
+                "from: secret-service needs attributes",
+            ],
+        ),
+        (
+            "{name: a, from: env, key: K, fallback: [{from: file, path: /x, key: K}]}",
+            vec![
+                "spec.secrets[0].fallback[0].key",
+                "key means nothing to from: file",
+            ],
+        ),
+        (
+            "{name: a, from: keyring, key: K, attributes: {app: m}}",
+            vec![
+                "spec.secrets[0].attributes",
+                "attributes means nothing to from: keyring",
+            ],
+        ),
+        (
+            "{name: a, from: systemd-creds, key: K, allowWideMode: true}",
+            vec![
+                "spec.secrets[0].allowWideMode",
+                "allowWideMode means nothing to from: systemd-creds",
+            ],
+        ),
+    ] {
+        refused(
+            &resource_set(&format!(
+                "secrets:\n  - {entry}\nresources:\n  - id: x\n    type: file\n"
+            )),
+            &parts,
+        );
+    }
+}
+
+#[test]
+fn a_further_place_takes_only_what_says_where_and_never_a_value() {
+    let read = |entry: &str| {
+        parse(
+            "doc.yaml",
+            resource_set(&format!(
+                "secrets:\n  - {entry}\nresources:\n  - id: x\n    type: file\n"
+            ))
+            .as_bytes(),
+        )
+        .unwrap_err()
+        .to_string()
+    };
+    // A further place is a place: it has no name of its own, is not
+    // optional on its own, and has no places of its own.
+    for field in ["name: b", "optional: true", "fallback: []"] {
+        let err = read(&format!(
+            "{{name: a, from: env, key: K, fallback: [{{from: env, key: K2, {field}}}]}}"
+        ));
+        let name = field.split(':').next().unwrap();
+        assert!(
+            err.contains("spec.secrets[0].fallback[0]") && err.contains(name),
+            "{err}"
+        );
+    }
+    // There is nowhere to write a value, and what was written is not
+    // repeated.
+    let err =
+        read("{name: a, from: env, key: K, fallback: [{from: env, key: K2, value: hunter2}]}");
+    assert!(
+        err.contains("spec.secrets[0].fallback[0]") && err.contains("value"),
+        "{err}"
+    );
+    assert!(!err.contains("hunter2"), "{err}");
+    // The list is a list of places, and attributes are text by name.
+    let err = read("{name: a, from: env, key: K, fallback: {from: env, key: K2}}");
+    assert!(
+        err.contains("spec.secrets[0].fallback") && err.contains("expected a list"),
+        "{err}"
+    );
+    let err = read("{name: a, from: secret-service, attributes: [app, meridian]}");
+    assert!(err.contains("spec.secrets[0].attributes"), "{err}");
+}
+
+#[test]
+fn a_further_place_cannot_be_interpolated_either() {
+    let open = concat!("$", "{{");
+    for (field, entry) in [
+        (
+            "service",
+            format!("{{name: a, from: keychain, service: \"{open} data.s }}}}\", account: m}}"),
+        ),
+        (
+            "account",
+            format!("{{name: a, from: keychain, service: s, account: \"{open} data.a }}}}\"}}"),
+        ),
+        (
+            "attributes",
+            format!(
+                "{{name: a, from: secret-service, attributes: {{app: \"{open} data.a }}}}\"}}}}"
+            ),
+        ),
+        (
+            "fallback[0].key",
+            format!(
+                "{{name: a, from: env, key: K, fallback: [{{from: keyring, key: \"{open} data.k \
+                 }}}}\"}}]}}"
+            ),
+        ),
+        (
+            "fallback[1].path",
+            format!(
+                "{{name: a, from: env, key: K, fallback: [{{from: env, key: K2}}, {{from: file, \
+                 path: \"/run/{open} data.env }}}}\"}}]}}"
+            ),
+        ),
+    ] {
+        refused(
+            &resource_set(&format!(
+                "secrets:\n  - {entry}\nresources:\n  - id: x\n    type: file\n"
+            )),
+            &[
+                &format!("spec.secrets[0].{field}"),
+                "where a secret comes from is written out",
+            ],
+        );
+    }
+}
+
 // ---- reading -----------------------------------------------------------
 
 #[test]

@@ -149,7 +149,10 @@ fn run(command: Command, what: &str) -> String {
 
 /// The examples whose conditions read a secret. `compile` never fetches one,
 /// so these are the examples it cannot decide.
-const DECIDED_BY_A_SECRET: &[&str] = &["examples/language/features-by-secret.yaml"];
+const DECIDED_BY_A_SECRET: &[&str] = &[
+    "examples/language/features-by-secret.yaml",
+    "examples/language/secret-from-a-store.yaml",
+];
 
 /// What `compile` says of a condition that reads a secret.
 const NOT_FETCHED: &str =
@@ -717,6 +720,120 @@ fn secrets_decide_an_example_and_are_written_nowhere() {
 /// `secret-in-a-setting.yaml` places a secret in a file. `compile` writes
 /// the secret's name where it belongs and never reads the secret, and `plan`
 /// stops before anything could be written.
+/// `secret-from-a-store.yaml` is planned on three machines that keep the
+/// deploy token in different places, and on one that has none. The target is
+/// stood in as above, and the keyring's key is one no machine has, so that a
+/// developer's own keyring does not answer.
+#[test]
+fn one_document_finds_its_secret_wherever_each_machine_keeps_it() {
+    let example = repo_root().join(DECIDED_BY_A_SECRET[1]);
+    let source = fs::read_to_string(&example).unwrap();
+    let root = scratch(env!("CARGO_TARGET_TMPDIR"), "secret-from-a-store");
+    let key = format!("meridian-test:example-not-stored:{}", std::process::id());
+    let stood_in = [
+        ("target: ansible", "target: fake".to_owned()),
+        ("key: meridian:deploy-token", format!("key: \"{key}\"")),
+    ]
+    .iter()
+    .fold(source, |text, (from, to)| {
+        assert!(text.contains(from), "the example no longer has {from:?}");
+        text.replace(from, to)
+    });
+    let credentials = root.join("credentials");
+    fs::create_dir_all(&credentials).unwrap();
+    fs::write(
+        credentials.join("deploy-token"),
+        format!("{DEPLOY_TOKEN}\n"),
+    )
+    .unwrap();
+
+    let meridian = |dir: &Path, command: &[&str], env: &[(&str, &str)]| {
+        let mut meridian = Command::new(env!("CARGO_BIN_EXE_meridian"));
+        meridian
+            .args(command)
+            .arg("site.yaml")
+            .current_dir(dir)
+            .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())
+            .env_remove("MERIDIAN_STATE_DIR")
+            .env_remove("DBUS_SESSION_BUS_ADDRESS")
+            .env_remove("CREDENTIALS_DIRECTORY")
+            .env_remove("DEPLOY_TOKEN");
+        for (name, value) in env {
+            meridian.env(name, value);
+        }
+        meridian
+    };
+    let given = credentials.display().to_string();
+    for (what, env, place, deploys) in [
+        (
+            "a pipeline",
+            vec![("DEPLOY_TOKEN", DEPLOY_TOKEN)],
+            "env            ok: the environment variable DEPLOY_TOKEN is set",
+            true,
+        ),
+        (
+            "a service",
+            vec![("CREDENTIALS_DIRECTORY", given.as_str())],
+            "systemd-creds  ok: this unit was given the credential deploy-token",
+            true,
+        ),
+        (
+            // The unit's credential is asked before the variable.
+            "a service that also has the variable",
+            vec![
+                ("CREDENTIALS_DIRECTORY", given.as_str()),
+                ("DEPLOY_TOKEN", "not-the-token"),
+            ],
+            "systemd-creds  ok: this unit was given the credential deploy-token",
+            true,
+        ),
+        (
+            "a machine with no token",
+            vec![],
+            "absent, optional: ",
+            false,
+        ),
+    ] {
+        // Each machine is a directory of its own, with its own record.
+        let dir = root.join(what.replace(' ', "-"));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("site.yaml"), &stood_in).unwrap();
+        let checked = run(
+            meridian(&dir, &["secret", "check"], &env),
+            &format!("checking on {what}"),
+        );
+        // The column is as wide as the widest provider shown.
+        let squeezed = checked.split_whitespace().collect::<Vec<_>>().join(" ");
+        let wanted = place.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(squeezed.contains(&wanted), "{what}:\n{checked}");
+
+        let planned = run(
+            meridian(&dir, &["plan"], &env),
+            &format!("planning on {what}"),
+        );
+        assert_eq!(
+            planned.contains("+ create files/deploy_timer"),
+            deploys,
+            "{what}:\n{planned}"
+        );
+        assert!(planned.contains("+ create files/deploys_conf"), "{planned}");
+        let applied = run(
+            meridian(&dir, &["apply"], &env),
+            &format!("applying on {what}"),
+        );
+        for said in [&checked, &planned, &applied] {
+            assert!(!said.contains(DEPLOY_TOKEN), "{what}:\n{said}");
+        }
+        for (path, text) in everything_under(&dir) {
+            assert!(
+                !text.contains(DEPLOY_TOKEN),
+                "{what}: {} holds the token",
+                path.display()
+            );
+        }
+    }
+}
+
 #[test]
 fn a_secret_in_a_setting_is_compiled_as_its_name_and_never_planned() {
     const CANARY: &str = "zzq-not-a-real-password-canary";

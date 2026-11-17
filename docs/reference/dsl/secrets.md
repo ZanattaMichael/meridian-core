@@ -47,7 +47,9 @@ on [its own page](../../concepts/secrets-in-memory.md).
 
 - [Declaring a secret](#declaring-a-secret)
 - [The providers](#the-providers)
+- [Several places for one secret](#several-places-for-one-secret)
 - [Reading a secret](#reading-a-secret)
+- [Storing a secret](#storing-a-secret)
 - [What an expression can do with one](#what-an-expression-can-do-with-one)
 - [Where a secret cannot be used](#where-a-secret-cannot-be-used)
 - [When a secret is fetched](#when-a-secret-is-fetched)
@@ -63,20 +65,24 @@ on [its own page](../../concepts/secrets-in-memory.md).
 | Field | Required | Meaning |
 |---|---|---|
 | `name` | yes | the name it is read by, as `secret.<name>`: letters, digits and underscores, not starting with a digit |
-| `from` | yes | the provider: `env`, `file` or `exec` |
-| `key` | for `env` | the environment variable |
+| `from` | yes | the provider: `env`, `file`, `exec`, `keyring`, `systemd-creds`, `secret-service` or `keychain` |
+| `key` | for `env`, `keyring`, `systemd-creds` | the environment variable; the key's description in the kernel keyring; the name of the credential the unit was given |
 | `path` | for `file` | the file |
 | `command` | for `exec` | the program and its arguments, as a list |
-| `optional` | no | `true`: a secret that is not found is `null` instead of an error |
+| `attributes` | for `secret-service` | the attributes the item was stored with, as a mapping of text |
+| `service`, `account` | for `keychain` | the keychain item's service and account |
+| `optional` | no | `true`: a secret that no place has is `null` instead of an error |
 | `allowWideMode` | no, `file` only | `true`: read the file even though others than its owner can read it |
-| `keepTrailingNewline` | no, `file` only | `true`: the file's last line ending is part of the secret |
+| `keepTrailingNewline` | no, `file` and `systemd-creds` only | `true`: the value's last line ending is part of the secret |
+| `fallback` | no | the places to look next, in order, as a list of `{from: ..., ...}`: see [several places](#several-places-for-one-secret) |
 
 There is no field for a value, and one written under any other name is refused
 as an unknown field without being repeated in the error.
 
-Where a secret comes from is written out. `key`, `path` and `command` cannot
-hold an [interpolation](interpolation.md), so that `validate` can read every
-declaration without any data.
+Where a secret comes from is written out. `key`, `path`, `command`,
+`service`, `account` and `attributes` cannot hold an
+[interpolation](interpolation.md), in a `fallback` entry either, so that
+`validate` can read every declaration without any data.
 
 A field that means nothing to the provider is refused (`path` on `from: env`,
 for example), so a declaration never silently ignores part of what was written.
@@ -89,10 +95,64 @@ for example), so a declaration never silently ignores part of what was written.
 | `file` | the file at `path`, without its last line ending | a file that does not exist; a file its group or others can read or write, unless `allowWideMode: true`; a file larger than 256 KiB; a directory | a relative `path` is relative to where `meridian` is run |
 | `exec` | what `command` prints, without its last line ending | a command that is not found, exits with a failure, is stopped by a signal, or prints nothing | the command is run **without a shell**: `command: [pass, show, site/db]` runs `pass` with two arguments, and nothing in them is expanded. What the command writes to its standard error is discarded. This is how a password manager or a cloud CLI is used |
 
-The operating system's own stores (the macOS keychain, the Windows credential
-manager, the Secret Service on Linux) and remote stores such as Vault are
-planned as providers; until then, `exec` with the store's own command line tool
+### The operating system's stores
+
+A long-lived credential on a workstation is best kept in the store the
+operating system already protects, and on a server in what the service
+manager hands the unit. Each is a provider like the three above, reads
+straight into protected memory, and puts nothing it read into an error.
+
+| `from` | Reads | Refuses | Says it is unavailable when | Notes |
+|---|---|---|---|---|
+| `keyring` | the key of type `user` with description `key` from the Linux kernel keyring: the session keyring, then the user keyring | a key larger than 256 KiB | the kernel refuses the keyring itself, as a container's sandbox often does; on another operating system | a key never touches a disk and can be given a lifetime with `keyctl timeout`. Meridian writes this store: [`secret set`](../cli.md#secret-set) puts a value in the user keyring, readable by its owner (`keyctl setperm ... 0x3f3f0000`), so that a later command reads it from any session. A key added with `keyctl add` is readable by a possessor alone, which a session that does not link the user keyring is not |
+| `systemd-creds` | the credential `key` that systemd passed to the unit (`LoadCredential=`, `LoadCredentialEncrypted=`), from `$CREDENTIALS_DIRECTORY`, without its last line ending unless `keepTrailingNewline: true` | a `key` that is a path and not one name | `CREDENTIALS_DIRECTORY` is not set: Meridian is not running as a unit that was given credentials | the directory is readable by the unit alone, and an encrypted credential is decrypted by systemd into memory that is never swapped, so the file's mode is not checked |
+| `secret-service` | the item of the freedesktop Secret Service (GNOME Keyring, KWallet) stored with `attributes`, through `secret-tool lookup` | an item the service holds nothing for is missing; a tool that fails otherwise | `DBUS_SESSION_BUS_ADDRESS` is not set (a server or a pipeline has no session bus, and the tool would wait for one); `secret-tool` is not installed (package `libsecret-tools`) | the attributes find the item and are not secret: the service stores them unencrypted itself. Meridian writes this store: `secret set` hands the value to `secret-tool store` on its standard input |
+| `keychain` | the generic password for `service` and `account` from the macOS keychain, through `/usr/bin/security find-generic-password` | a locked keychain, or a read the keychain did not allow | on any system but macOS | the keychain asks the user the first time a program reads an item it did not make; add the item with `security add-generic-password -A` to allow every program, or answer "Always Allow". Meridian does not write the keychain |
+
+Only `plan` and `apply` ask the Secret Service and the keychain, since asking
+can open a prompt to unlock them; `secret check` says `not checked` for both.
+
+The Windows Credential Manager and remote stores such as Vault are still to
+come as providers; until then, `exec` with the store's own command line tool
 reaches them.
+
+## Several places for one secret
+
+A secret may name the places it could be in, in order, so that one document
+works on a laptop, as a service and in a pipeline. `from` and its fields are
+the first place; `fallback` is a list of the rest, each written as a place is:
+
+```yaml
+  secrets:
+    - name: deploy_token
+      from: secret-service
+      attributes: {app: meridian, name: deploy-token}
+      optional: true
+      fallback:
+        - from: keyring
+          key: meridian:deploy-token
+        - from: systemd-creds
+          key: deploy-token
+        - from: env
+          key: DEPLOY_TOKEN
+```
+
+The first place that has the secret answers, and the places after it are not
+asked. A place that has nothing, or that this machine does not have at all
+(no session bus, no unit credentials, another operating system), is passed
+over for the next. A place that is there and refuses, such as a file others
+can read or a command that fails, stops the run: that is a mistake to fix, not
+one to hide behind the next place.
+
+When no place has it, the error gives every place's reason, in order, and the
+secret is missing if at least one place could have held it, or unavailable if
+none can be used on this machine. An `optional` secret that no place has is
+`null`.
+
+A `fallback` entry is a place: it has `from` and the fields its provider
+needs, and no `name`, `optional` or `fallback` of its own. Each is checked by
+the same rules as the first, and an error names it by where it is, as
+`spec.secrets[0].fallback[1].key`.
 
 ## Reading a secret
 
@@ -209,6 +269,23 @@ same message.
   once, naming the secrets; with
   [`--strict-secrets`](../cli.md#secrets) the stage stops instead.
 
+## Storing a secret
+
+[`meridian secret set <name> <files>...`](../cli.md#secret-set) puts a value
+in the first place the secret names that Meridian can write and that this
+machine has: the kernel keyring (`from: keyring`) or the Secret Service
+(`from: secret-service`). The value is typed at a prompt that does not show
+it, or piped in; it is never an argument, since arguments are in the process
+list for every user to read. A place written with its own tool (`env`,
+`file`, `exec`, `systemd-creds`, `keychain`) is passed over, and a secret
+that names no writable place is refused with every place it does name.
+
+```
+$ meridian secret set deploy_token site.yaml
+Value for deploy_token (not shown):
+stored deploy_token in the kernel keyring, key meridian:deploy-token
+```
+
 ## Checking before a run
 
 [`meridian secret check`](../cli.md#secret-check) lists every secret the
@@ -222,6 +299,10 @@ site (site.yaml)
   db_password   env    ok: the environment variable SITE_DB_PASSWORD is set
   deploy_token  file   absent, optional: the file /run/secrets/deploy-token does not exist
 ```
+
+A secret with several places is reported by the first place that would
+answer, or, when none would, with every place's reason. A store this machine
+does not have is `UNAVAILABLE`.
 
 ## What each command does
 
@@ -247,9 +328,10 @@ a command's arguments.
 | No name | `validate` | `spec.secrets[0].name: a secret needs a name; it is read as secret.<name>` |
 | A name that cannot follow `secret.` | `validate` | `"has-dash" is not a usable name: a secret is read as secret.<name>, so its name is letters, digits and underscores, and does not start with a digit` |
 | The same name twice | `validate` | `spec.secrets[1].name: the secret "a" is declared twice` |
-| No provider, or one this version does not have | `validate` | `"vault" is not a provider this version has; from is one of env, exec, file` |
+| No provider, or one this version does not have | `validate` | `"vault" is not a provider this version has; from is one of env, exec, file, keychain, keyring, secret-service, systemd-creds` |
 | The provider's field is missing | `validate` | `spec.secrets[0].key: from: env needs key, the environment variable to read` |
 | A field the provider does not use | `validate` | `spec.secrets[0].path: path means nothing to from: env; remove it` |
+| A further place that is wrong | `validate` | `spec.secrets[0].fallback[1].key: from: keyring needs key, the description of the key in the kernel keyring` |
 | An interpolation in a declaration | `validate` | `where a secret comes from is written out, so that it can be read without any data; it cannot be interpolated` |
 | A secret that is read and not declared | `validate` | `secret.x is not declared (spec.secrets declares none)` |
 | A secret in a place that is shown or stored | `validate`, or when resolved | `a secret cannot be used here: ...` |
@@ -258,6 +340,10 @@ a command's arguments.
 | The file can be read by others | `plan`, `apply` | `secret "token" (from: file): ... has mode 0644 ... allowWideMode: true` |
 | A secret cannot be locked in memory, with `--strict-secrets` | `plan`, `apply` | `the secret "db_password" could not be locked in memory and may reach swap, and --strict-secrets is set. ...` |
 | The command failed | `plan`, `apply` | `secret "flag" (from: exec): the command sh exited with status 4` |
+| No place has the secret | `plan`, `apply` | `secret "deploy_token" (from: secret-service, then keyring, then env): the Secret Service needs a session bus, and DBUS_SESSION_BUS_ADDRESS is not set; ...; the kernel keyring holds no key meridian:deploy-token; the environment variable DEPLOY_TOKEN is not set` |
+| A store this machine does not have | `plan`, `apply` | `secret "deploy_key" (from: keychain): the keychain is only on macOS` |
+| The kernel keyring holds the key and this session may not read it | `plan`, `apply` | `secret "x" (from: keyring): the kernel keyring holds the key ..., and this session may not read it: the key is readable only by a possessor, and this session's keyring does not link the user keyring. Let the owner read it with: keyctl setperm ... 0x3f3f0000, or store it with meridian secret set` |
+| `secret set` on a secret with no writable place | `secret set` | `"deploy_token" names no place meridian can write. It is looked for in the environment variable DEPLOY_TOKEN, then in the file token.txt. meridian writes the kernel keyring (from: keyring) and the Secret Service (from: secret-service); every other place is written with its own tool` |
 | A secret that is not base64 is given to `base64Decode` | `plan`, `apply` | `base64Decode(...): the secret is not base64` |
 
 ## Examples
@@ -269,6 +355,7 @@ file it reads beside it:
 |---|---|
 | [`features-by-secret.yaml`](../../../examples/language/features-by-secret.yaml) | three secrets, one from each provider, read only by conditions: an optional licence, a default password that is warned about, a secret beside ordinary data. It can be planned and applied today |
 | [`secret-in-a-setting.yaml`](../../../examples/language/secret-in-a-setting.yaml) | a password placed in a database URL through a variable and `urlEncode`, and what `compile` writes in its place |
+| [`secret-from-a-store.yaml`](../../../examples/language/secret-from-a-store.yaml) | one deploy token with four places: the desktop's Secret Service, the kernel keyring, the credential systemd gave the unit, and last a variable. The same document is planned on a laptop, as a service and in a pipeline, and a machine with none of them deploys nothing |
 
 The first is planned with its password in the environment:
 
@@ -311,7 +398,18 @@ SIGNING_KEY=base64Encode((secret signing_key))
 LOG_LEVEL=info
 ```
 
-Both are held in place by tests: the first is planned and applied for each row
-of the table above and everything the runs print and leave behind is searched
-for the secrets; the second is compiled with a password in the environment
-that must not appear anywhere.
+The third is checked, planned and applied with the token in each place in
+turn:
+
+```
+$ meridian secret check examples/language/secret-from-a-store.yaml
+deploys (examples/language/secret-from-a-store.yaml)
+  deploy_token  systemd-creds  ok: this unit was given the credential deploy-token
+```
+
+All three are held in place by tests: the first is planned and applied for
+each row of the table above and everything the runs print and leave behind is
+searched for the secrets; the second is compiled with a password in the
+environment that must not appear anywhere; the third is run on four machines
+that keep the token in different places, or nowhere, and the token is found
+in nothing they print or write.

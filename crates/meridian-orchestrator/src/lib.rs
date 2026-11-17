@@ -70,7 +70,7 @@ pub use lock::{LockError, LockInfo};
 pub use policy::{Decisions, Policy};
 pub use record::{RunRecord, RunStatus, StepRecord, StepStatus};
 pub use rollback::{RollbackOutcome, RollbackReport};
-pub use secrets::{check_declared, Declared};
+pub use secrets::{check_declared, names_declared, places_declared, Declared};
 pub use select::Selector;
 pub use state::{artifact_hash, stage_key, RunState, StageRecord, STATE_KEY};
 

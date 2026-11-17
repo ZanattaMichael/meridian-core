@@ -695,6 +695,18 @@ impl<'a> Evaluator<'a> {
                     | (Value::String(text), Value::Secret(x)) => {
                         table.same_as_text(*x, text).map_err(failed)?
                     }
+                    // Whether a secret is null is whether it was found, and
+                    // only a fetch can say: one that is optional reads as
+                    // null on a machine that does not have it.
+                    (Value::Secret(x), Value::Null) | (Value::Null, Value::Secret(x)) => {
+                        match table.awaited(*x) {
+                            Some(what) => {
+                                return Err(failed(meridian_secret::TableError::NotFetched(what)))
+                            }
+                            // Fetched, so it was found: it is not null.
+                            None => false,
+                        }
+                    }
                     // A secret is text; it is never a number, a list or null.
                     _ => false,
                 };

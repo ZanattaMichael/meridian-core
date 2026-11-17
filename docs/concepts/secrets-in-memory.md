@@ -11,8 +11,9 @@ the bytes of a secret.
 > **Where this stands.** A document can declare secrets and read them: see
 > [the secrets reference](../reference/dsl/secrets.md). A secret can decide a
 > `when` today, `meridian secret check` says whether each would be found, and
-> a credential can be resolved outside a run. Handing a secret to a tool, the
-> operating system's stores as providers and `meridian secret set` come next.
+> a credential can be resolved outside a run, a secret can name several
+> places and be kept in the operating system's own stores, and
+> `meridian secret set` puts it there. Handing a secret to a tool comes next.
 
 ## The promise, and its limit
 
@@ -106,7 +107,7 @@ are in the run's `SecretTable`, in this crate.
 
 ## Fetching
 
-Three providers are built. Each reads straight into locked memory, and none
+Seven providers are built. Each reads straight into locked memory, and none
 puts a value into an error.
 
 | Provider | What it does | What it refuses |
@@ -114,6 +115,23 @@ puts a value into an error.
 | `from_env(key)` | reads the variable, **removes it from the environment** so a program started later does not inherit it, wipes the copy it read, and keeps one copy in locked memory so a later read of the same variable in the same process still answers | an unset variable is `Missing`; an empty one is an empty secret, not a missing one |
 | `from_file(path, options)` | reads the file, without its last line ending unless `keep_trailing_newline` | a file that anyone but its owner can read or write, unless `allow_wide_mode`; a file longer than 256 KiB; a directory |
 | `from_exec(command)` | runs the command **without a shell**, reads what it prints, discards its standard error | a command that fails, is not found, is stopped by a signal, or prints nothing. The error names the program and never its arguments or output |
+| `from_keyring(description)` | finds the key with `keyctl(KEYCTL_SEARCH)` in the session and then the user keyring, and reads it with `KEYCTL_READ` **straight into the locked region**, sized by the key's own length; no library buffer is between the kernel and the home | a key larger than 256 KiB; a description with a NUL. The keyring being shut off (a container's sandbox) is `Unavailable` |
+| `from_systemd_credential(name, keep)` | opens `$CREDENTIALS_DIRECTORY/<name>` and reads it as a file | a name that is a path; no `CREDENTIALS_DIRECTORY` is `Unavailable` |
+| `from_secret_service(attributes)` | runs `secret-tool lookup` and reads its standard output as `exec` does | no session bus, or no `secret-tool`, is `Unavailable`; the tool failing or printing nothing is `Missing` |
+| `from_keychain(service, account)` | runs `/usr/bin/security find-generic-password -w` and reads its standard output | exit status 44 is `Missing`; any other failure is refused without what the tool printed; not macOS is `Unavailable` |
+
+`Source::store(label, value)` writes the two stores Meridian writes: the
+kernel keyring with `add_key(2)` from the locked region, and the Secret
+Service by handing the value to `secret-tool store` on its standard input.
+Nothing goes through an argument.
+
+A third kind of answer, `FetchError::Unavailable`, is what lets a secret name
+several places: `fetch_first` passes over a place that is `Missing` or
+`Unavailable` for the next and stops at one that `Failed`, and `probe_first`
+and `store_first` do the same without reading or with writing. The value a
+person types for `secret set` is read by `read_from_stdin` with `read(2)` on
+the terminal, a byte at a time with echo off, into the locked region, with no
+`BufReader` keeping a copy.
 
 Where a secret comes from is a `Source`: the provider and what it needs. A
 document's declaration and a project's credential are both made of them, so
@@ -138,6 +156,10 @@ it with the same model.
   into locked memory. The `Credential` that comes back prints as its name and
   type, lends a secret field as a `SecretValue`, and wipes them when dropped.
 - An error names the field and the provider, and nothing a provider read.
+
+The first user is the module system: a project declares credentials under
+`spec.credentials` in `meridian.yaml` and names one for a registry. See
+[registry logins](../reference/modules.md#registry-logins).
 
 ## Handing a secret to a tool
 
@@ -192,6 +214,7 @@ In `crates/meridian-secret/tests`:
 | `deliver.rs` | the file's modes, content, removal, and the sweep after a killed run |
 | `mask.rs` | every form is masked, in text and in bytes |
 | `credential.rs` | a credential resolves with its secret fields in protected memory; only the one asked for is fetched; a secret written out is refused; no error or debug form holds a value |
+| `stores.rs` | the kernel keyring gives back every byte stored in it, or says it is shut off; a unit credential is one name and never a path; the Secret Service is reached through its tool with the value on standard input and never in an argument, and is unavailable without a bus or the tool; the keychain is unavailable off macOS and read from a keychain made for the test on it; with several places the first that has the secret answers, an unavailable store is passed over, a refusal stops the search, and every reason is given when none answers |
 | `expose_is_rare.rs` | `expose` and `unsafe` appear only where expected |
 
 Across the other crates:
@@ -201,4 +224,5 @@ Across the other crates:
 | `meridian-secret/tests/table.rs` | secrets are joined, encoded and compared without leaving protected memory; one that is not fetched is described and never guessed; a wiped one is gone |
 | `meridian-expr/tests/secrets.rs` | an expression holds a reference; joins and placements stay secret; a comparison is a plain answer; every other function and operator refuses; no error holds a value |
 | `meridian-ir/tests/secrets.rs` | every rule of a declaration; every place a secret is refused; a resolved document, its debug form and its encoding hold only `(sensitive)`; the secrets are wiped when their holder is dropped |
+| `meridian-cli/tests/secret_stores.rs` | through the real command: `secret set` stores a value from standard input and a run reads it back from the keyring and the Secret Service; the value reaches the store's tool on its standard input and never as an argument; a store this machine does not have is passed over for the next place and every reason is given when none has it; the value is in nothing printed or written |
 | `meridian-cli/tests/secrets.rs` | through the real command: the value is in nothing `plan` and `apply` print and in no file of the state directory or of `compile --out`; a failed fetch repeats neither the value, a command's output nor its arguments; a secret read from the environment is not inherited by a program started afterwards; a secret that cannot be locked is warned about once, or refused with `--strict-secrets`; `secret check` reads no value and runs no command |

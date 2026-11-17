@@ -16,7 +16,7 @@ meridian import   <paths>... [--from TARGET] [--name NAME] [-o DIR] [-r] [--forc
 meridian migrate  <files>... [--to APIVERSION] [--check]
 meridian version
 meridian module   install [--locked] | update [NAME]... | verify | list | sign --key FILE | pack [--out FILE] | push REPOSITORY
-meridian secret check <files>...
+meridian secret check <files>... | set NAME <files>...
 meridian rules check --hierarchy FILE [--rules FILE] [--require-rules] [--data FILE] [--set KEY=VALUE]
 meridian fmt      <paths>... [--check] [--keep-order]
 meridian lint     <paths>... [--data FILE] [--set KEY=VALUE] [--state-dir DIR] [--fix] [--strict] [--json]
@@ -396,9 +396,36 @@ error: 1 secret would not be found by plan or apply
 | `absent, optional` | nothing is there, and the secret is `optional: true`, so it reads as `null` | no |
 | `MISSING` | nothing is there | yes |
 | `REFUSED` | the place is there and a fetch would refuse it, or the command was not found | yes |
+| `UNAVAILABLE` | the store cannot be used on this machine: another operating system, no session bus, its tool not installed | yes |
+
+A secret with [several places](dsl/secrets.md#several-places-for-one-secret)
+is shown with the first place that would answer, or with every place's reason
+when none would. The Secret Service and the keychain are `not checked`, since
+asking them can open a prompt.
 
 It takes `--state-dir`, for a file written `@<module>:<path>`, and loads no
 plugin.
+
+### `secret set`
+
+Stores a value for the [secret](dsl/secrets.md#storing-a-secret) `NAME`, as
+the documents declare it, in the first place it names that meridian can
+write and this machine has: the kernel keyring (`from: keyring`) or the
+Secret Service (`from: secret-service`). The value is read from standard
+input, or typed at a prompt that does not show it, and is never an argument.
+
+```
+$ meridian secret set deploy_token site.yaml
+Value for deploy_token (not shown):
+stored deploy_token in the kernel keyring, key meridian:deploy-token
+$ printf '%s' "$TOKEN" | meridian secret set deploy_token site.yaml
+stored deploy_token in the kernel keyring, key meridian:deploy-token
+```
+
+From a pipe the value is everything read without its last line ending; at a
+terminal it is the line typed. An empty value stores nothing. A secret that
+names no writable place, or one that is not declared, is refused and the
+value is not read. It takes `--state-dir` as `secret check` does.
 
 ### `fmt`
 
@@ -566,7 +593,7 @@ the current directory requires.
 | `meridian module list` | Lists the pinned modules, their versions and sources |
 | `meridian module sign --key FILE` | Signs the module in the current directory, writing `meridian.sig` in it |
 | `meridian module pack [--out FILE]` | Writes the module in the current directory as the archive a registry stores |
-| `meridian module push REPOSITORY [--insecure]` | Publishes the module in the current directory to an OCI registry under its version. A version that is already published is never replaced with other content |
+| `meridian module push REPOSITORY [--insecure] [--credential NAME]` | Publishes the module in the current directory to an OCI registry under its version. A version that is already published is never replaced with other content. `--credential` logs in with a [credential the manifest declares](modules.md#registry-logins) instead of the Docker configuration |
 
 Only `install`, `update` and `push` use the network. Each command, its output and its
 errors are described in [Modules](modules.md#commands).

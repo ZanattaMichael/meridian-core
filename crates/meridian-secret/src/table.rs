@@ -160,6 +160,15 @@ impl SecretTable {
         matches!(self.lock().get(secret.slot() as usize), Some(Slot::Held(_)))
     }
 
+    /// What the secret would be, when it is declared and not fetched: this
+    /// is `validate` or `compile`. `None` once it is held or wiped.
+    pub fn awaited(&self, secret: SecretRef) -> Option<String> {
+        match self.lock().get(secret.slot() as usize) {
+            Some(Slot::Described(what)) => Some(what.clone()),
+            _ => None,
+        }
+    }
+
     /// Wipes one secret. Its reference stays valid and answers `Gone`.
     pub fn wipe(&self, secret: SecretRef) {
         if let Some(slot) = self.lock().get_mut(secret.slot() as usize) {

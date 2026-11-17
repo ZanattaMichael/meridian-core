@@ -10,6 +10,7 @@ repository.workspace = true
 base64 = "0.22"
 flate2 = "1"
 meridian-ir = { path = "../meridian-ir" }
+meridian-secret = { path = "../meridian-secret" }
 meridian-signing = { path = "../meridian-signing" }
 semver = "1"
 serde_json = "1"

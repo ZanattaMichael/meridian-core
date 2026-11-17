@@ -14,6 +14,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use base64::Engine as _;
+use meridian_secret::Credential;
 use semver::Version;
 use ureq::http::Response;
 use ureq::{Agent, Body};
@@ -33,7 +34,7 @@ const MAX_MANIFEST_BYTES: u64 = 4 << 20;
 const MAX_TAG_PAGES: usize = 100;
 
 /// One repository on one registry.
-pub(crate) struct Repository {
+pub(crate) struct Repository<'a> {
     agent: Agent,
     /// `https://host[:port]`.
     base: String,
@@ -43,11 +44,19 @@ pub(crate) struct Repository {
     /// As written, for messages.
     name: String,
     insecure: bool,
-    credentials: Option<(String, String)>,
+    login: Login<'a>,
     /// The `Authorization` header that last worked.
     authorization: RefCell<Option<String>>,
     /// Whether this is a push, for the message when access is refused.
     writing: Cell<bool>,
+}
+
+/// Who to be to a registry.
+enum Login<'a> {
+    /// What the Docker configuration file holds for the host, if anything.
+    Docker(Option<(String, String)>),
+    /// A credential the project declared and named for this repository.
+    Declared(&'a Credential),
 }
 
 /// One request to a registry.
@@ -138,18 +147,37 @@ fn credentials_from(config: &[u8], host: &str) -> Option<(String, String)> {
 }
 
 fn basic(user: &str, password: &str) -> String {
-    format!(
+    basic_bytes(user, password.as_bytes())
+}
+
+/// The `Authorization` header for a user and a password that is not
+/// necessarily text. The joined copy is overwritten before it is freed; the
+/// header itself is what the registry is sent.
+fn basic_bytes(user: &str, password: &[u8]) -> String {
+    let mut joined = Vec::with_capacity(user.len() + 1 + password.len());
+    joined.extend_from_slice(user.as_bytes());
+    joined.push(b':');
+    joined.extend_from_slice(password);
+    let header = format!(
         "Basic {}",
-        base64::engine::general_purpose::STANDARD.encode(format!("{user}:{password}"))
-    )
+        base64::engine::general_purpose::STANDARD.encode(&joined)
+    );
+    joined.fill(0);
+    header
 }
 
 fn header<'r>(response: &'r Response<Body>, name: &str) -> Option<&'r str> {
     response.headers().get(name)?.to_str().ok()
 }
 
-impl Repository {
-    pub(crate) fn open(repository: &str, insecure: bool) -> Result<Repository, Error> {
+impl<'a> Repository<'a> {
+    /// Opens a repository. `declared` is the credential the project named
+    /// for it; without one, the Docker configuration file is looked in.
+    pub(crate) fn open(
+        repository: &str,
+        insecure: bool,
+        declared: Option<&'a Credential>,
+    ) -> Result<Repository<'a>, Error> {
         let bad = || {
             Error::new(format!(
                 "{repository:?} is not a registry repository such as \
@@ -185,6 +213,27 @@ impl Repository {
             .user_agent(concat!("meridian/", env!("CARGO_PKG_VERSION")))
             .build()
             .into();
+        let login = match declared {
+            None => Login::Docker(docker_credentials(host)),
+            Some(credential) => {
+                if !matches!(credential.kind.as_str(), "registry" | "usernamePassword") {
+                    return Err(Error::new(format!(
+                        "the credential {} is a {} credential; a registry is logged in to \
+                         with a registry or a usernamePassword credential",
+                        credential.name, credential.kind
+                    )));
+                }
+                // A login declared for one registry is never sent to another.
+                if let Some(server) = credential.text("server").filter(|s| *s != host) {
+                    return Err(Error::new(format!(
+                        "the credential {} is for the registry {server}, and {repository} is \
+                         on {host}; it was not sent",
+                        credential.name
+                    )));
+                }
+                Login::Declared(credential)
+            }
+        };
         let scheme = if insecure { "http" } else { "https" };
         Ok(Repository {
             agent,
@@ -193,7 +242,7 @@ impl Repository {
             path: path.to_owned(),
             name: repository.to_owned(),
             insecure,
-            credentials: docker_credentials(host),
+            login,
             authorization: RefCell::new(None),
             writing: Cell::new(false),
         })
@@ -236,14 +285,24 @@ impl Repository {
         result.map_err(|e| Error::new(format!("reaching the registry {}: {e}", self.host)))
     }
 
+    /// The `Authorization` header that says who we are, when we have a login.
+    fn basic_login(&self) -> Option<String> {
+        match &self.login {
+            Login::Docker(found) => found.as_ref().map(|(user, password)| basic(user, password)),
+            Login::Declared(credential) => {
+                let user = credential.text("user").unwrap_or_default();
+                credential
+                    .secret("password")
+                    .map(|password| password.expose(|bytes| basic_bytes(user, bytes)))
+            }
+        }
+    }
+
     /// Answers a 401 by logging in the way the registry asked for.
     fn authorize(&self, challenge: &str) -> Result<String, Error> {
         let (scheme, params) = challenge.split_once(' ').unwrap_or((challenge, ""));
         if scheme.eq_ignore_ascii_case("basic") {
-            return match &self.credentials {
-                Some((user, password)) => Ok(basic(user, password)),
-                None => Err(self.no_access()),
-            };
+            return self.basic_login().ok_or_else(|| self.no_access());
         }
         if !scheme.eq_ignore_ascii_case("bearer") {
             return Err(Error::new(format!(
@@ -273,10 +332,7 @@ impl Repository {
                 separator = '&';
             }
         }
-        let login = self
-            .credentials
-            .as_ref()
-            .map(|(user, password)| basic(user, password));
+        let login = self.basic_login();
         let token_call = Call::Get {
             accept: "application/json",
         };
@@ -302,11 +358,17 @@ impl Repository {
     }
 
     fn no_access(&self) -> Error {
-        let hint = if self.credentials.is_some() {
-            "the login in the Docker configuration file was refused"
-        } else {
-            "no login for it was found in the Docker configuration file; run `docker login` \
-             for that registry"
+        let hint = match &self.login {
+            Login::Declared(credential) => {
+                format!("the credential {} was refused", credential.name)
+            }
+            Login::Docker(Some(_)) => {
+                "the login in the Docker configuration file was refused".to_owned()
+            }
+            Login::Docker(None) => "no login for it was found in the Docker configuration \
+                                    file; run `docker login` for that registry, or name a \
+                                    credential for it in meridian.yaml"
+                .to_owned(),
         };
         let doing = if self.writing.get() {
             "writing to"
@@ -478,7 +540,7 @@ impl Repository {
 const EMPTY_CONFIG: &[u8] = b"{}";
 const EMPTY_CONFIG_MEDIA_TYPE: &str = "application/vnd.oci.empty.v1+json";
 
-impl Repository {
+impl Repository<'_> {
     /// The digest of the manifest at `reference`, if there is one.
     fn existing(&self, reference: &str) -> Result<Option<String>, Error> {
         let url = format!("{}/v2/{}/manifests/{reference}", self.base, self.path);
@@ -558,12 +620,13 @@ fn json_string(s: &str) -> String {
 pub fn push(
     repository: &str,
     insecure: bool,
+    login: Option<&Credential>,
     name: &str,
     version: &Version,
     description: &str,
     archive: &[u8],
 ) -> Result<Pushed, Error> {
-    let repo = Repository::open(repository, insecure)?;
+    let repo = Repository::open(repository, insecure, login)?;
     repo.writing.set(true);
     // A tag cannot hold `+`.
     let tag = version.to_string().replace('+', "_");
@@ -632,8 +695,9 @@ pub fn push(
 pub(crate) fn versions(
     repository: &str,
     insecure: bool,
+    login: Option<&Credential>,
 ) -> Result<BTreeMap<Version, String>, Error> {
-    let repo = Repository::open(repository, insecure)?;
+    let repo = Repository::open(repository, insecure, login)?;
     let mut out = BTreeMap::new();
     for tag in repo.tags()? {
         // A tag cannot hold `+`, so build metadata is written with `_`.
@@ -652,10 +716,11 @@ pub(crate) fn versions(
 pub(crate) fn fetch(
     repository: &str,
     insecure: bool,
+    login: Option<&Credential>,
     reference: &str,
     dest: &Path,
 ) -> Result<String, Error> {
-    let repo = Repository::open(repository, insecure)?;
+    let repo = Repository::open(repository, insecure, login)?;
     let (digest, layer) = repo.manifest(reference)?;
     let archive = repo.blob(&layer)?;
     unpack(&archive, dest)?;
@@ -719,7 +784,7 @@ mod tests {
 
     #[test]
     fn a_repository_is_a_host_and_a_path_and_nothing_else() {
-        assert!(Repository::open("registry.example.com:5000/acme/nginx", false).is_ok());
+        assert!(Repository::open("registry.example.com:5000/acme/nginx", false, None).is_ok());
         for bad in [
             "nginx",
             "registry.example.com/",
@@ -729,7 +794,7 @@ mod tests {
             "/a/b",
             "reg/a/../b",
         ] {
-            assert!(Repository::open(bad, false).is_err(), "{bad}");
+            assert!(Repository::open(bad, false, None).is_err(), "{bad}");
         }
     }
 }

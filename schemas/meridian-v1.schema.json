@@ -93,6 +93,96 @@
         }
       }
     },
+    "SecretSource": {
+      "description": "Another place a secret is looked for, when the places before it have nothing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from"
+      ],
+      "properties": {
+        "from": {
+          "description": "The provider the value is fetched from.",
+          "type": "string",
+          "oneOf": [
+            {
+              "const": "env",
+              "description": "An environment variable, named by `key`."
+            },
+            {
+              "const": "file",
+              "description": "A file, named by `path`."
+            },
+            {
+              "const": "exec",
+              "description": "The output of a program, given by `command`. No shell reads it."
+            },
+            {
+              "const": "keyring",
+              "description": "A key in the Linux kernel keyring, found by its description, `key`."
+            },
+            {
+              "const": "systemd-creds",
+              "description": "A credential systemd passed to this unit, named by `key`."
+            },
+            {
+              "const": "secret-service",
+              "description": "An item in the freedesktop Secret Service (GNOME Keyring, KWallet), found by its `attributes`."
+            },
+            {
+              "const": "keychain",
+              "description": "A generic password in the macOS keychain, found by `service` and `account`."
+            }
+          ]
+        },
+        "key": {
+          "description": "With `from: env`: the environment variable that holds the value. With `from: keyring`: the description of the key. With `from: systemd-creds`: the name of the credential.",
+          "type": "string"
+        },
+        "path": {
+          "description": "With `from: file`: the file that holds the value.",
+          "type": "string"
+        },
+        "command": {
+          "description": "With `from: exec`: the program and its arguments, as a list. No shell reads them.",
+          "type": "array",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        },
+        "service": {
+          "description": "With `from: keychain`: the service of the keychain item.",
+          "type": "string"
+        },
+        "account": {
+          "description": "With `from: keychain`: the account of the keychain item.",
+          "type": "string"
+        },
+        "attributes": {
+          "description": "With `from: secret-service`: the attributes the item is found by. They are not secret.",
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        },
+        "allowWideMode": {
+          "description": "With `from: file`: read the file even though others can read it as well.",
+          "type": "boolean"
+        },
+        "keepTrailingNewline": {
+          "description": "With `from: file` and `from: systemd-creds`: keep the value's last line ending.",
+          "type": "boolean"
+        }
+      }
+    },
     "Secret": {
       "description": "A secret's name and where it comes from. Its value is never written in a document.",
       "type": "object",
@@ -122,11 +212,27 @@
             {
               "const": "exec",
               "description": "The output of a program, given by `command`. No shell reads it."
+            },
+            {
+              "const": "keyring",
+              "description": "A key in the Linux kernel keyring, found by its description, `key`."
+            },
+            {
+              "const": "systemd-creds",
+              "description": "A credential systemd passed to this unit, named by `key`."
+            },
+            {
+              "const": "secret-service",
+              "description": "An item in the freedesktop Secret Service (GNOME Keyring, KWallet), found by its `attributes`."
+            },
+            {
+              "const": "keychain",
+              "description": "A generic password in the macOS keychain, found by `service` and `account`."
             }
           ]
         },
         "key": {
-          "description": "With `from: env`: the environment variable that holds the value.",
+          "description": "With `from: env`: the environment variable that holds the value. With `from: keyring`: the description of the key. With `from: systemd-creds`: the name of the credential.",
           "type": "string"
         },
         "path": {
@@ -144,17 +250,43 @@
             ]
           }
         },
-        "optional": {
-          "description": "A secret that cannot be found is `null` instead of an error.",
-          "type": "boolean"
+        "service": {
+          "description": "With `from: keychain`: the service of the keychain item.",
+          "type": "string"
+        },
+        "account": {
+          "description": "With `from: keychain`: the account of the keychain item.",
+          "type": "string"
+        },
+        "attributes": {
+          "description": "With `from: secret-service`: the attributes the item is found by. They are not secret.",
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
         },
         "allowWideMode": {
           "description": "With `from: file`: read the file even though others can read it as well.",
           "type": "boolean"
         },
         "keepTrailingNewline": {
-          "description": "With `from: file` and `from: exec`: keep the value's last line ending.",
+          "description": "With `from: file` and `from: systemd-creds`: keep the value's last line ending.",
           "type": "boolean"
+        },
+        "optional": {
+          "description": "A secret that cannot be found is `null` instead of an error.",
+          "type": "boolean"
+        },
+        "fallback": {
+          "description": "The places to look next, in order, when the first has nothing or cannot be used on this machine.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SecretSource"
+          }
         }
       }
     },
