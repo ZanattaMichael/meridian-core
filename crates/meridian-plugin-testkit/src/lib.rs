@@ -119,14 +119,36 @@ pub fn assert_golden_refusal(dir: &Path, case: &str, refusal: &meridian_sdk::Com
     assert_golden_files(dir, case, &got);
 }
 
+/// Whether a file in a golden directory is a golden file of `case`.
+///
+/// A golden name is `<case>.<suffix>` where the suffix is an artifact path
+/// with its slashes and dots turned into underscores, or `warnings` or
+/// `refused`: so it never holds a second dot. A test's own input beside its
+/// golden files, `web.yaml` for the case `web`, is therefore not a golden
+/// file, and recording the case again neither compares nor deletes it.
+pub fn is_golden_of(case: &str, name: &str) -> bool {
+    let Some(suffix) = name
+        .strip_prefix(case)
+        .and_then(|rest| rest.strip_prefix('.'))
+    else {
+        return false;
+    };
+    const SOURCE_EXTENSIONS: &[&str] = &[
+        "yaml", "yml", "json", "md", "toml", "rs", "sh", "ps1", "py", "txt", "hcl", "tf",
+    ];
+    !suffix.is_empty() && !suffix.contains('.') && !SOURCE_EXTENSIONS.contains(&suffix)
+}
+
 fn assert_golden_files(dir: &Path, case: &str, got: &BTreeMap<String, String>) {
-    let prefix = format!("{case}.");
     if std::env::var_os("UPDATE_GOLDEN").is_some() {
         fs::create_dir_all(dir).expect("creating the golden directory");
+        // Only a golden file of this case that the compile no longer
+        // produces is removed; anything else in the directory is not the
+        // kit's to delete.
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let name = entry.file_name().into_string().unwrap_or_default();
-                if name.starts_with(&prefix) && !got.contains_key(&name) {
+                if is_golden_of(case, &name) && !got.contains_key(&name) {
                     let _ = fs::remove_file(entry.path());
                 }
             }
@@ -139,7 +161,7 @@ fn assert_golden_files(dir: &Path, case: &str, got: &BTreeMap<String, String>) {
     let want: BTreeMap<String, String> = fs::read_dir(dir)
         .unwrap_or_else(|e| panic!("listing {}: {e}", dir.display()))
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-        .filter(|name| name.starts_with(&prefix))
+        .filter(|name| is_golden_of(case, name))
         .map(|name| {
             let text = fs::read_to_string(dir.join(&name)).unwrap();
             (name, text)
@@ -150,10 +172,13 @@ fn assert_golden_files(dir: &Path, case: &str, got: &BTreeMap<String, String>) {
     assert_eq!(
         got.keys().collect::<Vec<_>>(),
         want.keys().collect::<Vec<_>>(),
-        "{case}: the set of golden files differs"
+        "{case}: the set of golden files differs; run the tests with UPDATE_GOLDEN=1 to record them again"
     );
     for (name, text) in got {
-        assert_eq!(text, &want[name], "{name}");
+        assert_eq!(
+            text, &want[name],
+            "{name}: run the tests with UPDATE_GOLDEN=1 to record it again"
+        );
     }
 }
 
@@ -319,6 +344,45 @@ pub fn artifact(files: &[(&str, &str)]) -> Artifact {
     }
 }
 
+/// Whether a test against the real tool was asked for, by the one rule every
+/// real-tool test follows: `MERIDIAN_TEST_REAL_<TOOL>` is set and not empty.
+///
+/// Returns `None`, with a line saying what to set, when it was not. A test
+/// then returns early; it is also marked `#[ignore]`, so a plain `cargo test`
+/// counts it as ignored and never as passed. With
+/// `MERIDIAN_TEST_REAL_REQUIRED` set as well, a switch that is missing is a
+/// failure, so a CI job cannot go green because its variable was misspelt.
+///
+/// `tool` is the upper-case part of the variable, such as `"TERRAFORM"`.
+pub fn real_tool_asked(tool: &str) -> Option<String> {
+    let variable = format!("MERIDIAN_TEST_REAL_{tool}");
+    let value = std::env::var(&variable)
+        .ok()
+        .filter(|v| !v.trim().is_empty() && v.trim() != "0");
+    if value.is_none() {
+        assert!(
+            std::env::var_os("MERIDIAN_TEST_REAL_REQUIRED").is_none(),
+            "MERIDIAN_TEST_REAL_REQUIRED is set, and {variable} is not: this run was meant to \
+             test the real tool and would have checked nothing"
+        );
+        eprintln!("skipped: set {variable}=1 to run against the real tool");
+    }
+    value
+}
+
+/// The program a real-tool test runs, when the test was asked for: the
+/// value of `MERIDIAN_<TOOL>` (how the plugin itself is told where its tool
+/// is), or `default`.
+pub fn real_tool_program(tool: &str, default: &str) -> Option<String> {
+    real_tool_asked(tool)?;
+    Some(
+        std::env::var(format!("MERIDIAN_{tool}"))
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| default.to_owned()),
+    )
+}
+
 /// A new, empty directory for one test, under Cargo's target directory when
 /// the caller passes `env!("CARGO_TARGET_TMPDIR")`.
 pub fn scratch(base: &str, name: &str) -> PathBuf {
@@ -345,8 +409,15 @@ fn place_stand_in(dir: &Path, name: &str, script: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let path = dir.join(name);
     // Written under another name and renamed, so the file is never executed
-    // while it is still open for writing.
-    let staged = dir.join(format!("{name}.staged"));
+    // while it is still open for writing. The name is this writer's own, so
+    // two tests placing a stand-in of the same name at once do not rename
+    // each other's half-written file.
+    static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let staged = dir.join(format!(
+        "{name}.staged.{}.{}",
+        std::process::id(),
+        WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     fs::write(&staged, script).expect("writing the stand-in");
     fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).expect("marking it executable");
     fs::rename(&staged, &path).expect("placing the stand-in");

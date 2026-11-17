@@ -1,0 +1,39 @@
+name: Set up Rust
+description: >-
+  Installs the toolchain rust-toolchain.toml names, with any extra components,
+  and restores the build cache. Every job that runs cargo uses this, so the
+  toolchain and the cache settings are decided once.
+
+inputs:
+  components:
+    description: Extra toolchain components, comma separated (clippy and rustfmt come with the toolchain file)
+    required: false
+    default: ''
+  cache-key:
+    description: A word added to the cache key, for a job whose build differs from the rest (coverage instruments everything)
+    required: false
+    default: ''
+  save-cache:
+    description: Whether this job saves the cache, as well as reading it. Only main's runs save, so pull requests share one cache
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    # With no toolchain named, rustup installs the one rust-toolchain.toml
+    # pins. A new Rust release changes nothing here until that file does.
+    - name: Install the pinned toolchain
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.components }}" ]; then
+          rustup toolchain install --profile minimal --component "${{ inputs.components }}" --no-self-update
+        else
+          rustup toolchain install --profile minimal --no-self-update
+        fi
+        rustup show active-toolchain
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ${{ inputs.cache-key != '' && inputs.cache-key || 'workspace' }}
+        save-if: ${{ inputs.save-cache == 'true' && github.ref == 'refs/heads/main' }}

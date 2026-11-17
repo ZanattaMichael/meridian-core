@@ -49,8 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the stable toolchain
-        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: ./.github/actions/setup-rust
 
       - name: Install DscPipelineRunner
         shell: pwsh
@@ -89,7 +88,7 @@ jobs:
           # Invoke-DscResource (DSC v2) does not work on Linux, so only DSC v3
           # is asked for here. The windows job covers DSC v2.
           MERIDIAN_TEST_REAL_DSC_V3: '1'
-        run: cargo test -p meridian-target-dsc --locked --test real -- --nocapture --test-threads=1
+        run: cargo test -p meridian-target-dsc --locked --test real -- --ignored --nocapture --test-threads=1
 
   windows-runner:
     name: the plugin's runner on Windows, DSC v2 and v3
@@ -98,8 +97,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the stable toolchain
-        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: ./.github/actions/setup-rust
 
       - name: Install DscPipelineRunner
         shell: pwsh
@@ -143,7 +141,7 @@ jobs:
           MERIDIAN_TEST_REAL_DSC: '1'
           MERIDIAN_TEST_REAL_DSC_V2: '1'
           MERIDIAN_TEST_REAL_DSC_V3: '1'
-        run: cargo test -p meridian-target-dsc --locked --test real -- --nocapture --test-threads=1
+        run: cargo test -p meridian-target-dsc --locked --test real -- --ignored --nocapture --test-threads=1
 
   compile:
     name: compile the Windows documents
@@ -152,8 +150,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the stable toolchain
-        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: ./.github/actions/setup-rust
 
       - name: Compile
         run: |

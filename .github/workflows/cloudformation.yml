@@ -40,8 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the stable toolchain
-        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: ./.github/actions/setup-rust
 
       # Built before the emulator starts, so a compile error costs nothing.
       - name: Build the tests
@@ -73,7 +72,7 @@ jobs:
         env:
           MERIDIAN_TEST_REAL_CLOUDFORMATION: '1'
           MERIDIAN_AWS_ARGS: --endpoint-url http://localhost:4566
-        run: cargo test -p meridian-target-cloudformation --locked --test real -- --nocapture --test-threads=1
+        run: cargo test -p meridian-target-cloudformation --locked --test real -- --ignored --nocapture --test-threads=1
 
       - name: Show LocalStack's log when something failed
         if: failure()

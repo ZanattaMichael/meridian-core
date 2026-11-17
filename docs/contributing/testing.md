@@ -44,6 +44,20 @@ as closely as the output is.
 the tool's place, sees its real arguments and working directory, and answers as
 the tool would. [Writing a plugin](writing-a-plugin.md) has both in detail.
 
+Both come from the plugin test kit, `crates/meridian-plugin-testkit`, which
+has tests of its own (`tests/kit.rs`) so a plugin's test cannot be wrong
+because the kit is. Two of its rules are easy to trip over:
+
+- A golden file is `testdata/<case>.<suffix>`, where the suffix is one word
+  with no dot in it and is not a source extension (`yaml`, `json`, `rs`, `md`
+  and the like), so `web.playbook_yml` is a golden of `web` and `web.yaml` is
+  not. With `UPDATE_GOLDEN=1` the kit deletes only the golden files of the
+  case being recorded, so a fixture, a note or another case's files are never
+  removed by a rename.
+- A stand-in is written to a unique staging name and renamed into place, so
+  tests that place a stand-in of the same name at once, in threads or across
+  test binaries, each get a whole script.
+
 ### A table for every validation rule
 
 Some of a plugin's validation rules cannot be reached from a document: the

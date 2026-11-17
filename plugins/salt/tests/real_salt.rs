@@ -1,6 +1,6 @@
 //! The plugin against Salt itself.
 //!
-//! These tests run when `MERIDIAN_TEST_SALT_CALL` names a `salt-call`
+//! These tests run when `MERIDIAN_TEST_REAL_SALT_CALL` names a `salt-call`
 //! program, and pass without doing anything when it does not, so the suite
 //! needs no Salt installed. CI installs one and sets the variable. The one
 //! test that dry-runs package, service and account states needs a Salt that
@@ -25,7 +25,7 @@ use meridian_sdk::{Artifact, Data, Emitter, RunContext, Runner};
 use meridian_target_salt::{Salt, SaltRunner, Transport};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
-const VARIABLE: &str = "MERIDIAN_TEST_SALT_CALL";
+const VARIABLE: &str = "MERIDIAN_TEST_REAL_SALT_CALL";
 
 /// The output of `id` with one flag: who the tests run as.
 fn id(flag: &str) -> String {
@@ -45,11 +45,11 @@ fn real(dir: &Path) -> Option<SaltRunner> {
 
 /// A runner for a `salt-call` that may change the system, or `None` when
 /// there is none. Dry-running a package state refreshes the package index,
-/// which an unprivileged Salt cannot do. `MERIDIAN_TEST_SALT_CALL_ROOT` names
+/// which an unprivileged Salt cannot do. `MERIDIAN_TEST_REAL_SALT_CALL_ROOT` names
 /// a program that runs `salt-call` as root; without it, the ordinary one
 /// serves when the tests themselves run as root.
 fn privileged(dir: &Path) -> Option<SaltRunner> {
-    let as_root = std::env::var("MERIDIAN_TEST_SALT_CALL_ROOT")
+    let as_root = std::env::var("MERIDIAN_TEST_REAL_SALT_CALL_ROOT")
         .ok()
         .filter(|v| !v.is_empty());
     match as_root {
@@ -108,6 +108,7 @@ fn ids(changes: &[meridian_sdk::Change]) -> Vec<&str> {
 /// Every shared fixture, dry-run by Salt. Nothing is changed. A file that
 /// did not render, a state function that does not exist, an argument Salt
 /// does not know or a requisite that names nothing would each fail here.
+#[ignore = "needs a real salt-call or salt-ssh; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn salt_accepts_what_every_fixture_compiles_to() {
     let dir = scratch(TMP, "real-fixtures");
@@ -225,6 +226,7 @@ fn site(base: &Path, content: &str) -> String {
 /// and a last line with no newline.
 const CONTENT: &str = "# {{ not.a.variable }} {% not a tag %} {# not a comment #}\nkey: value\n  indented: \"quoted\"\nlast";
 
+#[ignore = "needs a real salt-call or salt-ssh; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_document_is_planned_applied_and_then_in_sync() {
     let dir = scratch(TMP, "real-apply");
@@ -311,6 +313,7 @@ fn a_document_is_planned_applied_and_then_in_sync() {
     );
 }
 
+#[ignore = "needs a real salt-call or salt-ssh; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_failed_state_stops_what_depends_on_it_and_reports_what_was_done() {
     let dir = scratch(TMP, "real-failure");
@@ -335,6 +338,7 @@ fn a_failed_state_stops_what_depends_on_it_and_reports_what_was_done() {
     assert!(!base.join("never").exists());
 }
 
+#[ignore = "needs a real salt-call or salt-ssh; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_condition_that_is_not_an_expression_is_salts_to_refuse() {
     let dir = scratch(TMP, "real-render");
@@ -350,12 +354,13 @@ fn a_condition_that_is_not_an_expression_is_salts_to_refuse() {
 }
 
 /// The other transport, against a host that accepts SSH. It runs when
-/// `MERIDIAN_TEST_SALT_SSH` names a `salt-ssh` program;
-/// `MERIDIAN_TEST_SALT_SSH_HOST` names the host (this machine by default) and
-/// `MERIDIAN_TEST_SALT_SSH_ARGS` says how to sign in to it.
+/// `MERIDIAN_TEST_REAL_SALT_SSH` names a `salt-ssh` program;
+/// `MERIDIAN_TEST_REAL_SALT_SSH_HOST` names the host (this machine by default) and
+/// `MERIDIAN_TEST_REAL_SALT_SSH_ARGS` says how to sign in to it.
+#[ignore = "needs a real salt-call or salt-ssh; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn another_host_is_configured_over_ssh() {
-    let Some(program) = std::env::var("MERIDIAN_TEST_SALT_SSH")
+    let Some(program) = std::env::var("MERIDIAN_TEST_REAL_SALT_SSH")
         .ok()
         .filter(|v| !v.is_empty())
     else {
@@ -366,12 +371,13 @@ fn another_host_is_configured_over_ssh() {
         salt_call: "salt-call".into(),
         salt_ssh: program,
         transport: Some(Transport::Ssh),
-        extra_args: std::env::var("MERIDIAN_TEST_SALT_SSH_ARGS")
+        extra_args: std::env::var("MERIDIAN_TEST_REAL_SALT_SSH_ARGS")
             .map(|v| v.split_whitespace().map(str::to_owned).collect())
             .unwrap_or_default(),
     };
     let ctx = RunContext {
-        host: std::env::var("MERIDIAN_TEST_SALT_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
+        host: std::env::var("MERIDIAN_TEST_REAL_SALT_SSH_HOST")
+            .unwrap_or_else(|_| "127.0.0.1".into()),
         ..context(&dir)
     };
     let base = dir.join("node");

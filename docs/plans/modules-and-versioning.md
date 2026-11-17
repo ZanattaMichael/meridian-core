@@ -1,8 +1,13 @@
 # Modules and Versioning
 
-> Status: **proposed**. Extends [release and versioning](release-and-versioning.md); where
-> the two differ, that plan wins until this one is accepted.
-> Amend by pull request against this file.
+> Status: **built**: modules, enforced versioning and module signing landed as pull
+> requests 62, 67, 83 and 85, and registry credentials as 131, all merged 2026-11-17. The
+> [modules reference](../reference/modules.md) describes what is built; where this note
+> and the reference differ, the reference describes the code. The owner has not reviewed
+> the choices made while building; the ones a user sees are
+> [decision records](../decisions/README.md). Extends
+> [release and versioning](release-and-versioning.md). Amend by pull request against
+> this file.
 
 This note designs two things that belong together because each needs the other to be
 safe:

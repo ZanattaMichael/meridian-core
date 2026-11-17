@@ -1,6 +1,11 @@
 # Run safety: state, locking, resume, rollback, drift, policy and imports
 
-Status: design note, written before the code. It amends
+Status: **built**, as pull request 60, merged 2026-11-17. This note was
+written before the code and is kept as the design; the
+[running safely](../concepts/run-safety.md) concept page and the [state reference](../reference/state.md) describe what is built where
+the two differ. Its [decisions for the owner](#11-decisions-for-the-owner)
+were built as recommended and have not been confirmed; see
+[As built](#13-as-built). It amends
 [design plan §11.5](design-plan.md) and the "What this does not do" section of
 [the two-stage architecture](../concepts/two-stage-architecture.md), and it
 implements the run-state half of
@@ -431,3 +436,21 @@ before the next.
 | 3 | snapshots, `--on-failure rollback`, `meridian rollback`, `meridian drift` |
 | 4 | policy checks, `meridian-policy-opa`, a CI job against real OPA |
 | 5 | `spec.imports`, ordering by need, the cloud-init to Terraform example |
+
+## 13. As built
+
+Everything in sections 2 to 9 was built in pull request 60, on the
+recommended side of every decision in section 11. The owner has not confirmed
+R1 to R7; each can still be turned without redoing the rest, and a change
+becomes an issue. What differs from the note:
+
+- `spec.imports` needed a protocol field, `DescribeResponse.accepts_inputs`,
+  and a `variable` resource type in the Terraform and OpenTofu compilers, so a
+  target says whether it takes inputs; `meridian plugins` and the
+  [capability matrix](../reference/capability-matrix.md) show it as `inputs`.
+- Policy events carry counts only. `policy.finding` events, with the rule,
+  the resource and the level, are
+  [issue 102](https://github.com/ZanattaMichael/meridian-core/issues/102).
+- A document's secrets are fetched once, at the stage's own turn, and never
+  in the policy preflight; the preflight asks a document that declares
+  secrets at its turn instead.

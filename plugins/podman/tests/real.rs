@@ -1,6 +1,6 @@
 //! The plugin against the real tools.
 //!
-//! These tests do nothing unless `MERIDIAN_TEST_PODMAN` says how far to go:
+//! These tests do nothing unless `MERIDIAN_TEST_REAL_PODMAN` says how far to go:
 //!
 //! - `quadlet`: the machine has Podman, so every example is read by its own
 //!   Quadlet. Nothing is installed or started.
@@ -24,14 +24,16 @@ use meridian_target_podman::{Podman, PodmanRunner, Scope};
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
 
 fn level() -> String {
-    std::env::var("MERIDIAN_TEST_PODMAN").unwrap_or_default()
+    std::env::var("MERIDIAN_TEST_REAL_PODMAN").unwrap_or_default()
 }
 
 fn wants(needed: &str) -> bool {
     let level = level();
     let run = level == needed || (needed == "quadlet" && level == "system");
     if !run {
-        eprintln!("skipped: set MERIDIAN_TEST_PODMAN={needed} to run this against the real Podman");
+        eprintln!(
+            "skipped: set MERIDIAN_TEST_REAL_PODMAN={needed} to run this against the real Podman"
+        );
     }
     run
 }
@@ -111,6 +113,7 @@ fn shown(changes: &[Change]) -> Vec<String> {
     changes.iter().map(ToString::to_string).collect()
 }
 
+#[ignore = "needs a real Podman; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn the_real_quadlet_accepts_the_examples() {
     if !wants("quadlet") {
@@ -129,6 +132,7 @@ fn the_real_quadlet_accepts_the_examples() {
     }
 }
 
+#[ignore = "needs a real Podman; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_pod_is_accepted_by_podman_5_and_refused_by_name_before_it() {
     if !wants("quadlet") {
@@ -154,6 +158,7 @@ fn a_pod_is_accepted_by_podman_5_and_refused_by_name_before_it() {
     }
 }
 
+#[ignore = "needs a real Podman; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn the_real_quadlet_refuses_a_key_it_does_not_know() {
     if !wants("quadlet") {
@@ -174,6 +179,7 @@ fn the_real_quadlet_refuses_a_key_it_does_not_know() {
     );
 }
 
+#[ignore = "needs a real Podman; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn values_reach_podman_meaning_what_the_document_said() {
     if !wants("quadlet") {
@@ -254,6 +260,7 @@ impl Drop for Cleanup {
     }
 }
 
+#[ignore = "needs a real Podman; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn units_are_really_installed_run_changed_and_removed() {
     if !wants("system") {
@@ -417,6 +424,7 @@ fn units_are_really_installed_run_changed_and_removed() {
         .in_sync());
 }
 
+#[ignore = "needs a real Podman; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_container_that_cannot_start_fails_the_apply_and_says_why() {
     if !wants("system") {

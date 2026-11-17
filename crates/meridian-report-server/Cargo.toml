@@ -11,13 +11,13 @@ name = "meridian-report-server"
 path = "src/main.rs"
 
 [dependencies]
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
-base64 = "0.22"
-clap = { version = "4", features = ["derive", "env"] }
+axum = { workspace = true }
+base64 = { workspace = true }
+clap = { workspace = true }
 meridian-orchestrator = { path = "../meridian-orchestrator" }
 meridian-report = { path = "../meridian-report" }
 meridian-sdk = { path = "../meridian-sdk" }
-tokio = { version = "1", features = ["rt-multi-thread", "net", "signal", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "signal", "macros"] }
 
 [lints]
 workspace = true

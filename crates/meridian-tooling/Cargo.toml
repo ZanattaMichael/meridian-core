@@ -14,19 +14,12 @@ meridian-module = { path = "../meridian-module" }
 meridian-orchestrator = { path = "../meridian-orchestrator" }
 meridian-plugin-host = { path = "../meridian-plugin-host" }
 meridian-sdk = { path = "../meridian-sdk" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha2 = "0.11"
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
 
 [dev-dependencies]
-meridian-target-ansible = { path = "../../plugins/ansible" }
-meridian-target-chef = { path = "../../plugins/chef" }
-meridian-target-cloud-init = { path = "../../plugins/cloud-init" }
-meridian-target-dsc = { path = "../../plugins/dsc" }
-meridian-target-openvox = { path = "../../plugins/openvox" }
-meridian-target-puppet = { path = "../../plugins/puppet" }
-meridian-target-salt = { path = "../../plugins/salt" }
-meridian-target-terraform = { path = "../../plugins/terraform" }
+meridian-all-targets = { path = "../meridian-all-targets" }
 
 [lints]
 workspace = true

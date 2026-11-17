@@ -1,6 +1,6 @@
 # Reporting: what a run tells people and other systems
 
-Status: design note. The owner chose on 2026-11-17 to stream locally, export
+Status: **built** (pull request 70, merged 2026-11-17); this note is the design. The owner chose on 2026-11-17 to stream locally, export
 through sinks, **and** build a Meridian report server
 ([decision](#6-decisions)). Parts 1 and 2 are built in the pull request that
 adds this note; [delivery](#7-delivery) says what follows.

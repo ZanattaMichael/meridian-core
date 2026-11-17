@@ -3,30 +3,220 @@
 <img src="../branding/logos/meridian-ansible.svg" width="72" alt="Meridian Ansible plugin logo">
 
 Compiles a ResourceSet into a playbook and an inventory, and runs them with
-`ansible-playbook`.
+`ansible-playbook` from the machine Meridian runs on. Ansible still does the
+work: Meridian writes the play a person would have written and runs Ansible
+on it.
 
 ## What it does and does not support
 
 | | |
 |---|---|
+| Category | Configuration management |
 | Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)) |
-| `dependsOn` | Yes, as task order. Ansible runs a play top to bottom, so independent resources still run in sequence; a warning says which |
-| `notifies` | Native: handlers. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec |
-| `runtimeWhen` | Yes: a task's `when:` |
-| Plan | Yes: `--check --diff`. A task Ansible skips in check mode cannot be previewed |
-| Outputs | No |
+| `dependsOn` | Yes, as task order. A play runs top to bottom, so independent resources still run in sequence; a warning says which |
+| `notifies` | Native: handlers. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec. The action is kept: a reload stays a reload |
+| `runtimeWhen` | Yes: a task's `when:`, as an Ansible expression |
+| Secrets | Yes: by an extra-vars file only the user can read, with `no_log` on the task |
+| References | `${id.param}` is settled from the document when it is compiled; anything else in `${...}` is refused, and `$${` is a literal `${` ([rules](../reference/resource-types.md#references)) |
+| Plan | Yes: `--check --diff`. A task Ansible skips in check mode cannot be previewed, and makes the plan unknown |
+| Apply | Yes |
+| Outputs | No. A play produces no values for a later stage to read |
 | Import | Yes: playbooks and task files. See [Importing](#importing) |
+| Compiles to | `playbook.yml` and `inventory.ini` |
+| Runs with | `ansible-playbook`, over whatever connection Ansible is configured for |
 
-## What a document compiles to
+What it does not do:
 
-`playbook.yml` (one play, one task a resource, named by the resource's id) and
-`inventory.ini` (the document's host). Modules are the `ansible.builtin` ones:
-`package`, `service`, `copy` for a file with content and `file` otherwise,
-`user`, `group`, `command`, and `shell` for an exec with `shell: true`.
+- **No roles, no collections, no vault.** A play is one list of tasks built
+  from `ansible.builtin` modules. What the document says is all the play says.
+- **No resource types beyond the six.** There is no passthrough to arbitrary
+  modules; a `template`, `lineinfile` or `git` task has no resource type.
+  Anything else is refused at compile time.
+- **No inventory beyond the host.** `inventory.ini` holds the document's one
+  host. Groups, host variables and connection settings go through
+  [`MERIDIAN_ANSIBLE_ARGS`](#settings) or Ansible's own configuration.
+- **`package.version` is refused**, though Ansible could express it; see
+  [What is refused](#what-is-refused).
+- **It creates no infrastructure.** It configures a host that already exists.
 
-A notify becomes a handler named after the action and the resource, such as
-`reload nginx_svc`. Handlers run once, at the end of the play, only when a task
-that notifies them changed something.
+Contents: [Requirements](#requirements) ·
+[A first document](#a-first-document) ·
+[Resource types](#resource-types) ·
+[Ordering and notifications](#ordering-and-notifications) ·
+[What a compile writes](#what-a-compile-writes) ·
+[Importing](#importing) ·
+[Running](#running) ·
+[Settings](#settings) ·
+[What is refused](#what-is-refused) ·
+[Troubleshooting](#troubleshooting) ·
+[How it is tested](#how-it-is-tested)
+
+## Requirements
+
+| Where | What |
+|---|---|
+| The machine Meridian runs on | `ansible-playbook` (ansible-core; `pip install ansible-core`) |
+| The host | What Ansible needs: SSH and Python, or `--connection local` for this machine. Connection settings go in [`MERIDIAN_ANSIBLE_ARGS`](#settings) |
+| To compile only | Nothing. `meridian compile` never runs Ansible |
+
+Tested with ansible-core 2.19.
+
+## A first document
+
+[`examples/ansible/web-server.yaml`](../../examples/ansible/web-server.yaml)
+installs nginx, writes its configuration and keeps it running, and is walked
+through in [your first ResourceSet](../quickstart/first-resourceset.md):
+
+```yaml
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: web
+spec:
+  target: ansible
+  targetHost:
+    from: inline
+    host: web01.example.com
+  resources:
+    - id: nginx_pkg
+      type: package
+      params:
+        name: nginx
+    - id: nginx_conf
+      type: file
+      params:
+        path: /etc/nginx/conf.d/site.conf
+        content: |
+          server {
+            listen 80;
+            root /srv/www;
+          }
+        owner: root
+        mode: "0644"
+      dependsOn:
+        - resource: nginx_pkg
+      # Runs only when the file really changed, once, at the end of the play.
+      notifies:
+        - resource: nginx_svc
+          action: reload
+    - id: nginx_svc
+      type: service
+      state: running
+      params:
+        name: nginx
+        enabled: true
+      dependsOn:
+        - resource: nginx_pkg
+```
+
+It compiles to a play of three tasks and one handler:
+
+```yaml
+---
+- name: web
+  hosts: web01.example.com
+  tasks:
+    - name: nginx_pkg
+      ansible.builtin.package:
+        name: nginx
+        state: present
+    - name: nginx_conf
+      ansible.builtin.copy:
+        content: |
+          server {
+            listen 80;
+            root /srv/www;
+          }
+        dest: /etc/nginx/conf.d/site.conf
+        mode: "0644"
+        owner: root
+      notify:
+        - reload nginx_svc
+    - name: nginx_svc
+      ansible.builtin.service:
+        enabled: true
+        name: nginx
+        state: started
+  handlers:
+    - name: reload nginx_svc
+      ansible.builtin.service:
+        enabled: true
+        name: nginx
+        state: reloaded
+```
+
+The same document compiles for Chef, Salt or cloud-init by changing `target`,
+and for Puppet or OpenVox once the reload is a restart; the
+[conformance matrix](../reference/conformance-matrix.md) says where the
+targets differ.
+
+## Resource types
+
+The six shared types, as this target takes them. A param not listed is refused
+(`unsupported-param`); a state not listed is refused (`unsupported-state`).
+
+| Type | Module | States (`state`) | Params | Required |
+|---|---|---|---|---|
+| `package` | `ansible.builtin.package` | `present` (default), `absent`, `latest` | `name` | `name` |
+| `service` | `ansible.builtin.service` | `running` (`started`, default), `started`, `stopped`, `restarted`, `reloaded` | `name`, `enabled` | `name` |
+| `file` | `ansible.builtin.copy` when there is `content`, `ansible.builtin.file` otherwise | `present` (`file`, default), `file`, `directory`, `absent` | `path` (`dest` or `path`), `content`, `owner`, `group`, `mode` | `path` |
+| `user` | `ansible.builtin.user` | `present` (default), `absent` | `name`, `uid`, `home`, `shell`, `system`, `groups` | `name` |
+| `group` | `ansible.builtin.group` | `present` (default), `absent` | `name`, `gid`, `system` | `name` |
+| `exec` | `ansible.builtin.command`, or `ansible.builtin.shell` with `shell: true` | none; an exec has no state | `command` (`cmd`), `chdir`, `creates`, `removes`, `shell` | `command` |
+
+Notes on how they map:
+
+- A resource's **id is the task name**, so Ansible's output names the task
+  by the id, and Meridian reads the changes back by it. An id must be one
+  line and not empty.
+- `exec` with `shell: true` runs through `ansible.builtin.shell`, so a pipe or
+  a redirection works. Without it `ansible.builtin.command` runs the command
+  as written, so a pipe reaches the program as an argument.
+- `exec` runs on every play unless `creates` or `removes` says when it is
+  already done. In check mode a command with neither is skipped, which makes
+  the plan unknown.
+- A `mode` is written as Ansible reads it: quote it in the document
+  (`"0644"`), or the YAML reads it as a number and the compile refuses it.
+
+## Ordering and notifications
+
+`dependsOn` becomes the order of the tasks. Ansible runs a play top to bottom,
+so the resources are written in the apply order Meridian decided, and
+resources that are independent of each other still run one after the other.
+The compile warns which resources were independent, so the flattening is
+visible.
+
+`notifies` becomes a handler, named after the action and the resource, such
+as `reload nginx_svc`. Handlers run once, at the end of the play, only when a
+task that notifies them changed something:
+
+| Notified type | Actions | What the handler does |
+|---|---|---|
+| `service` | `restart`, `reload`, `start`, `stop` | `ansible.builtin.service` with `state: restarted`, `reloaded`, `started` or `stopped` |
+| `exec` | `run` | runs the command again |
+| anything else | none | refused: `unsupported-action` |
+
+`runtimeWhen` is copied into the task's `when:` as written, so it is an
+Ansible expression, answered by the host's facts when the play runs:
+
+```yaml
+runtimeWhen: "ansible_facts['os_family'] == 'Debian'"
+```
+
+A handler never carries a condition: it runs because a task that notified it
+changed, and nothing else.
+
+## What a compile writes
+
+```
+playbook.yml
+inventory.ini
+```
+
+`playbook.yml` holds one play with one task per resource, named by the
+resource's id, and one handler per distinct notification. `inventory.ini`
+holds the document's host on one line, in a group named `meridian`. They are separate so the play can be
+run against an inventory of your own.
 
 Ansible renders every string in a task through Jinja on the control machine,
 so a Jinja expression written in the document, such as
@@ -35,25 +225,22 @@ play runs. A value Meridian places from `--data`, `--set`, a data layer or
 `env()` is not: the plugin declares Jinja's openings (`{{`, `{%`, `{#`), and
 the core writes each one in a placed value as an expression that yields itself
 (`{{ '{{' }}`), which Jinja renders back to the text. So a data value holding
-`{{ lookup('pipe', 'id') }}` reaches the node as that text, and never runs
+`{{ lookup('pipe', 'id') }}` reaches the host as that text, and never runs
 `id` on the control machine
 ([values from data are literal](../reference/dsl/interpolation.md#a-tools-own-expressions)).
 
 The host in `inventory.ini` is one line, so the plugin refuses a host that is
-not a name (rule `invalid-host`); the core refuses one before it gets this far
+not a name (`invalid-host`); the core refuses one before it gets this far
 ([`targetHost`](../reference/dsl/outputs-and-hand-offs.md#rules)).
 
-`runtimeWhen` is copied into the task's `when:` as written, so it is an Ansible
-expression:
-
-```yaml
-runtimeWhen: "ansible_facts['os_family'] == 'Debian'"
-```
-
-## Example
-
-[`examples/ansible/web-server.yaml`](../../examples/ansible/web-server.yaml), walked
-through in [your first ResourceSet](../quickstart/first-resourceset.md).
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a
+resource's params is compiled as `{{ meridian_secret_<name> }}`, and the task
+that holds one is marked `no_log: true`, so Ansible prints neither its
+arguments, its diff nor its result. When the stage runs, the values are
+written into an extra-vars file only the user can read, held in memory where
+the system allows, and passed as `--extra-vars @<path>`; the file is removed
+when the run ends. The value is never on the command line and never in
+Ansible's environment.
 
 ## Importing
 
@@ -126,29 +313,88 @@ test imports a playbook full of things a document cannot say; its document and r
 |---|---|
 | Plan | `ansible-playbook --inventory inventory.ini --check --diff playbook.yml` |
 | Apply | `ansible-playbook --inventory inventory.ini playbook.yml` |
+
+Both run in the stage's work directory with the output callback forced to
+`default` and colour off, so an `ansible.cfg` of your own cannot reshape the
+report Meridian reads. Changes are read from that report, task by task and
+handler by handler: a `changed:` line under `TASK [nginx_conf]` is a change to
+`nginx_conf`. A looped task reports once.
+
+In check mode a task Ansible cannot preview is skipped: a command with no
+`creates` or `removes`, or a condition only the host can answer. A plan with
+a skipped task is reported as **unknown**, not as empty, so a run never says
+"nothing to do" on no evidence.
+
+A failed task fails the stage, with the end of Ansible's output and the
+changes made before it. Ansible's own exit statuses are named: `2` is a
+failed task, `4` is a host that could not be reached.
+
+## Settings
+
+| Variable | Meaning |
+|---|---|
 | `MERIDIAN_ANSIBLE_PLAYBOOK` | the program to run, when `ansible-playbook` is not on `PATH` |
-| `MERIDIAN_ANSIBLE_ARGS` | arguments added to every run: `--user deploy --private-key ~/.ssh/deploy`, or `--connection local` |
+| `MERIDIAN_ANSIBLE_ARGS` | arguments added to every run, split on spaces: `--user deploy --private-key ~/.ssh/deploy`, or `--connection local` for this machine |
 
-Changes are read from Ansible's own report (`changed:` per task and handler). A
-failed task or an unreachable host fails the stage, with the end of Ansible's
-output.
+## What is refused
 
-A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a
-resource's params is compiled as `{{ meridian_secret_<name> }}`, and the task
-that holds one is marked `no_log: true`, so Ansible prints neither its
-arguments, its diff nor its result. When the stage runs, the values are
-written into an extra-vars file only the user can read, held in memory where
-the system allows, and passed as `--extra-vars @<path>`; the file is removed
-when the run ends. The value is never on the command line and never in
-Ansible's environment.
+Every refusal names the resource, the line and the rule. The rules this
+target can raise, and what to do:
 
-The runner is tested against a real `ansible-playbook` (ansible-core 2.19) on
-every pull request that touches it, over the `local` connection: a check-mode
-plan that creates nothing, a play checked on disk, a second plan that is in
-sync, drift put right, a handler that runs only when its notifier changed, a
-`runtimeWhen` answered by the host's facts, a command check mode cannot
-preview, a failed task, and a secret that reaches the play through the
-extra-vars file and is in nothing Ansible prints, check mode with diff
-included. Reaching another machine over SSH, and the
-package, service, user and group modules, have only met stand-ins. See
-[Real-tool tests](../contributing/real-tool-tests.md).
+| Rule | Meaning | What to do |
+|---|---|---|
+| `unsupported-resource-type` | a type outside the six, or in the wrong case (`Package`) | use one of the six; there is no passthrough |
+| `unsupported-param` | a param this type does not take on Ansible, including `package.version` | drop it |
+| `missing-param` | no `name`, `path` or `command` | add it |
+| `empty-param` | a required param that is empty text | give it a value |
+| `unsupported-state` | a state this type does not have, or any state on an `exec` | see the table under [Resource types](#resource-types) |
+| `unsupported-action` | a notify action the type does not take: anything on a package, file, user or group | notify a service or an exec |
+| `unknown-notify-target` | a notify names a resource the document does not declare | fix the id |
+| `ordering-violated` | the order the core handed over puts a resource before its dependency | a core bug; report it |
+| `duplicate-resource` | two resources with the same id | rename one |
+| `duplicate-task-name`, `duplicate-handler-name` | two tasks or two handlers that would share a name | rename one; a handler is named after its action and resource |
+| `empty-name`, `multiline-name` | an id that cannot be a task name | use one line of letters, digits and underscores |
+| `missing-module`, `empty-module-args` | a task with no module, or a module given nothing | a plugin bug; report it |
+| `missing-handler` | a task notifies a handler the play does not define | a plugin bug; report it |
+| `conditional-handler` | a `runtimeWhen` on a handler | a plugin bug; report it |
+| `dangling-reference` | `${id.param}` names a resource or a param that is not there | fix the reference |
+| `invalid-host` | a host that is not a name, so it cannot be an inventory line | the core refuses one first ([`targetHost`](../reference/dsl/outputs-and-hand-offs.md#rules)) |
+| `missing-host` | a ResourceSet with no host to write the inventory for | give it a `targetHost` |
+
+## Troubleshooting
+
+| What you see | Why | What to do |
+|---|---|---|
+| `could not run ansible-playbook: it is not installed, or not on the PATH` | the plugin runs `ansible-playbook` on the machine running Meridian | `pip install ansible-core`, or set `MERIDIAN_ANSIBLE_PLAYBOOK` |
+| `ansible-playbook could not reach the host` (status `4`) | SSH, the user or the key is not what Ansible needs | put the connection settings in `MERIDIAN_ANSIBLE_ARGS`, or `--connection local` for this machine |
+| the plan is unknown | a task was skipped in check mode: an exec with no `creates` or `removes`, or a condition only the host can answer | give the exec a `creates`, or read the apply's report |
+| `ansible-playbook reported a failed task` (status `2`) | a task failed on the host; the ones before it were applied | read the output above the message; `apply --resume` continues after the fix |
+| a handler did not run | handlers run only when a task that notifies them changed | expected; change the notifier, or declare the state you want on the service |
+| a warning that resources are independent but run in sequence | a play is one sequence | expected; it says what the target cannot express |
+
+## How it is tested
+
+- **Golden files** under `plugins/ansible/testdata/` record what every fixture
+  compiles to, byte for byte, the warnings it raises, and what each refusal
+  says.
+- **The conformance tests** compile the same documents for every shared-type
+  target and generate the [conformance matrix](../reference/conformance-matrix.md),
+  which fails when this target starts accepting or refusing something new.
+- **Run tests** (`plugins/ansible/tests/run.rs`) drive the runner against a
+  stand-in for `ansible-playbook`: the exact command, the report read back
+  task by task, and the exit statuses.
+- **Import tests** (`plugins/ansible/tests/import.rs`) round-trip the
+  playbooks under `testdata/import/`; see [Importing](#importing).
+- **Real-tool tests** (`plugins/ansible/tests/real.rs`, workflow
+  `ansible.yml`) run ansible-core 2.19 over the `local` connection: a
+  check-mode plan that creates nothing, a play checked on disk, a second plan
+  that is in sync, drift put right, a handler that runs only when its
+  notifier changed, a `runtimeWhen` answered by the host's facts, a command
+  check mode cannot preview, a failed task, and a secret that reaches the
+  play through the extra-vars file and is in nothing Ansible prints, check
+  mode with diff included. They are marked `#[ignore]`
+  and run with
+  `MERIDIAN_TEST_REAL_ANSIBLE=1 cargo test -p meridian-target-ansible --test real -- --ignored`.
+  Reaching another machine over SSH, and the package, service, user and group
+  modules, have only met stand-ins. See
+  [Real-tool tests](../contributing/real-tool-tests.md).

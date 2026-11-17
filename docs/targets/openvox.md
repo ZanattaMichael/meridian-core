@@ -530,5 +530,5 @@ To run the last group yourself:
 
 ```
 gem install openvox
-MERIDIAN_TEST_OPENVOX=1 cargo test -p meridian-target-openvox --test real
+MERIDIAN_TEST_REAL_OPENVOX=1 cargo test -p meridian-target-openvox --test real
 ```

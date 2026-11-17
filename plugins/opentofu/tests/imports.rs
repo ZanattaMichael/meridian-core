@@ -6,7 +6,7 @@
 //! creates nothing outside its scratch directory: the value lands in a
 //! `terraform_data` resource, which is built into OpenTofu.
 //!
-//! Like `tests/real.rs`, it runs when `MERIDIAN_TEST_TOFU` names the
+//! Like `tests/real.rs`, it runs when `MERIDIAN_TEST_REAL_TOFU` names the
 //! program and passes without doing anything otherwise.
 
 #![cfg(unix)]
@@ -79,13 +79,14 @@ fn received(outcome: &Outcome) -> String {
     }
 }
 
+#[ignore = "needs a real tofu; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn user_data_compiled_by_one_plugin_is_a_variable_in_the_tool_of_another() {
-    let Some(program) = std::env::var("MERIDIAN_TEST_TOFU")
+    let Some(program) = std::env::var("MERIDIAN_TEST_REAL_TOFU")
         .ok()
         .filter(|program| !program.trim().is_empty())
     else {
-        eprintln!("skipped: MERIDIAN_TEST_TOFU is not set");
+        eprintln!("skipped: MERIDIAN_TEST_REAL_TOFU is not set");
         return;
     };
     let dir = scratch(TMP, "real-imports");

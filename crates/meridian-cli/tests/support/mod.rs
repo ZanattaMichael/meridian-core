@@ -7,28 +7,10 @@ use meridian_sdk::{Category, CompileError, Data, Emitted, Emitter};
 
 /// Every target the workspace ships, sorted by name.
 pub fn emitters() -> Vec<Box<dyn Emitter>> {
-    let mut all: Vec<Box<dyn Emitter>> = vec![
-        Box::new(meridian_target_ansible::Ansible),
-        Box::new(meridian_target_arm::Arm),
-        Box::new(meridian_target_bicep::Bicep),
-        Box::new(meridian_target_chef::Chef),
-        Box::new(meridian_target_cloud_init::CloudInit),
-        Box::new(meridian_target_cloudformation::CloudFormation),
-        Box::new(meridian_target_docker::Docker),
-        Box::new(meridian_target_dsc::Dsc),
-        Box::new(meridian_target_helm::Helm),
-        Box::new(meridian_target_kubernetes::Kubernetes),
-        Box::new(meridian_target_opentofu::OpenTofu),
-        Box::new(meridian_target_openvox::OpenVox),
-        Box::new(meridian_target_packer::Packer),
-        Box::new(meridian_target_podman::Podman),
-        Box::new(meridian_target_pulumi::Pulumi),
-        Box::new(meridian_target_puppet::Puppet),
-        Box::new(meridian_target_salt::Salt),
-        Box::new(meridian_target_terraform::Terraform),
-    ];
-    all.sort_by(|a, b| a.name().cmp(b.name()));
-    all
+    meridian_all_targets::emitters()
+        .into_iter()
+        .map(|e| e as Box<dyn Emitter>)
+        .collect()
 }
 
 /// One target, by name.

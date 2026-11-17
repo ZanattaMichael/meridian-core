@@ -183,13 +183,9 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    workspace = ROOT / "Cargo.toml"
-    text = workspace.read_text(encoding="utf-8")
-    members = re.search(r"^members = \[(.*)\]$", text, re.MULTILINE)
-    if members is None:
-        fail("could not find the members line in Cargo.toml; add the crate by hand")
-    text = text.replace(members.group(0), f'members = [{members.group(1)}, "plugins/{name}"]')
-    workspace.write_text(text, encoding="utf-8")
+    # The workspace lists `plugins/*`, so the crate is a member already. The one
+    # list of targets is `crates/meridian-all-targets`, whose tests fail until
+    # the plugin is in it and where readers look for it.
 
     # Renaming changes how the imports sort, so the crate is formatted again.
     # Without cargo the copy still builds; `cargo fmt --all` tidies it later.
@@ -205,6 +201,12 @@ def main() -> int:
   plugins/{name}/               the crate (binary: meridian-target-{name})
   examples/{name}/site.yaml     its example document
   docs/targets/{name}.md        its documentation page, as a stub
+
+Add it to the one list of targets, which the conformance tests and the
+capability matrix read:
+
+  crates/meridian-all-targets/Cargo.toml    a dependency on meridian-target-{name}
+  crates/meridian-all-targets/src/lib.rs    a target!(...) entry in ALL, in name order
 
 Check that it works before changing anything:
 

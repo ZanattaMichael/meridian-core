@@ -34,8 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the stable toolchain
-        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: ./.github/actions/setup-rust
 
       - name: Install Cinc Client
         run: |
@@ -60,4 +59,4 @@ jobs:
         env:
           MERIDIAN_TEST_REAL_CHEF: '1'
           MERIDIAN_CHEF_CLIENT: cinc-client
-        run: cargo test -p meridian-target-chef --locked --test real -- --nocapture --test-threads=1
+        run: cargo test -p meridian-target-chef --locked --test real -- --ignored --nocapture --test-threads=1

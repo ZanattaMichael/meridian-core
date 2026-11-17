@@ -105,6 +105,7 @@ fn site(root: &Path, content: &str, mode: &str) -> Artifact {
     ))
 }
 
+#[ignore = "needs a real ansible-playbook; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_plan_changes_nothing_an_apply_converges_and_a_second_plan_is_in_sync() {
     let Some(runner) = ansible() else { return };
@@ -191,6 +192,7 @@ fn reloads(dir: &Path) -> usize {
         .unwrap_or(0)
 }
 
+#[ignore = "needs a real ansible-playbook; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_handler_runs_only_when_its_notifier_changed_and_a_condition_is_answered_by_the_host() {
     let Some(runner) = ansible() else { return };
@@ -225,6 +227,7 @@ fn a_handler_runs_only_when_its_notifier_changed_and_a_condition_is_answered_by_
     assert_eq!(reloads(&dir), 5);
 }
 
+#[ignore = "needs a real ansible-playbook; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_command_ansible_cannot_preview_makes_the_plan_unknown() {
     let Some(runner) = ansible() else { return };
@@ -241,6 +244,7 @@ fn a_command_ansible_cannot_preview_makes_the_plan_unknown() {
     assert!(!dir.join("touched").exists());
 }
 
+#[ignore = "needs a real ansible-playbook; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_failed_task_fails_the_run_with_ansibles_own_reason_and_what_changed_before_it() {
     let Some(runner) = ansible() else { return };
@@ -263,6 +267,7 @@ fn a_failed_task_fails_the_run_with_ansibles_own_reason_and_what_changed_before_
     );
 }
 
+#[ignore = "needs a real ansible-playbook; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_secret_reaches_the_play_through_a_private_file_and_is_in_nothing_ansible_prints_or_the_plugin_writes(
 ) {

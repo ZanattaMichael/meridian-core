@@ -6,7 +6,7 @@
 //! accepts, that the commands exist and print what the runner reads.
 //!
 //! It needs `pulumi` on `PATH` and a network to fetch the random provider,
-//! so it runs only when `MERIDIAN_REAL_PULUMI` is set, as the `pulumi`
+//! so it runs only when `MERIDIAN_TEST_REAL_PULUMI` is set, as the `pulumi`
 //! workflow does. It needs no cloud account: state is kept in a scratch
 //! directory and the random provider touches nothing outside it.
 
@@ -27,9 +27,9 @@ const TMP: &str = env!("CARGO_TARGET_TMPDIR");
 
 /// Whether the test should run, said once per test when it does not.
 fn enabled(test: &str) -> bool {
-    let enabled = std::env::var_os("MERIDIAN_REAL_PULUMI").is_some_and(|v| !v.is_empty());
+    let enabled = std::env::var_os("MERIDIAN_TEST_REAL_PULUMI").is_some_and(|v| !v.is_empty());
     if !enabled {
-        eprintln!("{test}: skipped; set MERIDIAN_REAL_PULUMI=1 to run it against pulumi");
+        eprintln!("{test}: skipped; set MERIDIAN_TEST_REAL_PULUMI=1 to run it against pulumi");
     }
     enabled
 }
@@ -94,6 +94,7 @@ fn text(output: &Output) -> &str {
     output.value.as_str().expect("the output is a string")
 }
 
+#[ignore = "needs a real pulumi; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn a_document_is_planned_applied_and_changed() {
     if !enabled("a_document_is_planned_applied_and_changed") {
@@ -196,6 +197,7 @@ fn a_document_is_planned_applied_and_changed() {
     assert_eq!(changes(&plan), ["delete password"]);
 }
 
+#[ignore = "needs a real pulumi; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn names_options_and_functions_are_ones_pulumi_accepts() {
     if !enabled("names_options_and_functions_are_ones_pulumi_accepts") {
@@ -240,6 +242,7 @@ fn names_options_and_functions_are_ones_pulumi_accepts() {
     assert!(matches!(roll, Value::Int(1..=6)), "{roll:?}");
 }
 
+#[ignore = "needs a real pulumi; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn what_pulumi_refuses_comes_back_as_its_own_words() {
     if !enabled("what_pulumi_refuses_comes_back_as_its_own_words") {
@@ -268,6 +271,7 @@ fn what_pulumi_refuses_comes_back_as_its_own_words() {
     );
 }
 
+#[ignore = "needs a real pulumi; see docs/contributing/real-tool-tests.md"]
 #[test]
 fn the_packages_schemas_are_exported_for_an_editor() {
     if !enabled("the_packages_schemas_are_exported_for_an_editor") {

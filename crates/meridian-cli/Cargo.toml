@@ -11,7 +11,7 @@ name = "meridian"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4", features = ["derive", "env"] }
+clap = { workspace = true }
 meridian-ast = { path = "../meridian-ast" }
 meridian-expr = { path = "../meridian-expr" }
 meridian-import = { path = "../meridian-import" }
@@ -25,37 +25,20 @@ meridian-resolve = { path = "../meridian-resolve" }
 meridian-rules = { path = "../meridian-rules" }
 meridian-sdk = { path = "../meridian-sdk" }
 meridian-tooling = { path = "../meridian-tooling" }
-serde_json = "1"
+serde_json = { workspace = true }
 meridian-secret = { path = "../meridian-secret" }
 
 [dev-dependencies]
-jsonschema = { version = "0.61", default-features = false }
+jsonschema = { workspace = true }
 meridian-expr = { path = "../meridian-expr" }
 meridian-graph = { path = "../meridian-graph" }
 meridian-resolve = { path = "../meridian-resolve" }
 meridian-value = { path = "../meridian-value" }
 meridian-yaml = { path = "../meridian-yaml" }
-proptest = { version = "1", default-features = false, features = ["std"] }
-serde_json = "1"
+proptest = { workspace = true }
+serde_json = { workspace = true }
 meridian-plugin-testkit = { path = "../meridian-plugin-testkit" }
-meridian-target-ansible = { path = "../../plugins/ansible" }
-meridian-target-arm = { path = "../../plugins/arm" }
-meridian-target-bicep = { path = "../../plugins/bicep" }
-meridian-target-chef = { path = "../../plugins/chef" }
-meridian-target-cloud-init = { path = "../../plugins/cloud-init" }
-meridian-target-cloudformation = { path = "../../plugins/cloudformation" }
-meridian-target-docker = { path = "../../plugins/docker" }
-meridian-target-dsc = { path = "../../plugins/dsc" }
-meridian-target-helm = { path = "../../plugins/helm" }
-meridian-target-kubernetes = { path = "../../plugins/kubernetes" }
-meridian-target-opentofu = { path = "../../plugins/opentofu" }
-meridian-target-packer = { path = "../../plugins/packer" }
-meridian-target-podman = { path = "../../plugins/podman" }
-meridian-target-pulumi = { path = "../../plugins/pulumi" }
-meridian-target-openvox = { path = "../../plugins/openvox" }
-meridian-target-puppet = { path = "../../plugins/puppet" }
-meridian-target-salt = { path = "../../plugins/salt" }
-meridian-target-terraform = { path = "../../plugins/terraform" }
+meridian-all-targets = { path = "../meridian-all-targets" }
 meridian-target-fake = { path = "../meridian-target-fake" }
 
 [lints]

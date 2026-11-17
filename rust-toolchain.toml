@@ -1,0 +1,8 @@
+# The toolchain CI and a contributor build with. Bumping it is a deliberate
+# change here, reviewed like any other, and not something a new Rust release
+# does to main on its own. `rust-version` in Cargo.toml is the oldest that
+# still builds.
+[toolchain]
+channel = "1.97.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"
