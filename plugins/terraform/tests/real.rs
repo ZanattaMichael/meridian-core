@@ -27,7 +27,7 @@ use std::process::{Command, Stdio};
 
 use meridian_plugin_host::{Client, RunFailure, StartOptions};
 use meridian_plugin_testkit::{
-    graph_from_file, graph_from_text, plugin_binary, repo_root, scratch,
+    graph_from_file, graph_from_text, plugin_binary, repo_root, scratch, secret_in_param, secrets,
 };
 use meridian_sdk::{
     Applied, Artifact, Change, ChangeAction, Data, LogLine, Output, Plan, RunContext,
@@ -312,6 +312,62 @@ fn a_provider_from_the_registry_writes_a_real_file() {
     fs::remove_file(&file).unwrap();
     let (plan, _) = plan_ok("the plan after drift", &client, &context, &second);
     assert_eq!(changes(&plan.changes), [(ChangeAction::Create, "motd")]);
+}
+
+#[ignore = "needs a real terraform; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_secret_reaches_terraform_through_a_private_variables_file_and_is_in_nothing_it_prints() {
+    let Some(program) = terraform() else { return };
+    let dir = scratch(TMP, "real-secret");
+    const VALUE: &str = "s3cr3t-not-a-real-password-Q9";
+    let client = start(&program);
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: secret\nspec:\n  target: terraform\n  resources:\n    - id: token\n      type: terraform_data\n      params:\n        input: placeholder\n";
+    let mut graph = graph_from_text("secret.yaml", text, "terraform");
+    let slot = secret_in_param(&mut graph, "token", "input", "api_token");
+    let artifact = client
+        .emit(&graph, &Data::new())
+        .expect("the document compiles")
+        .artifact;
+    let config = &artifact.files["main.tf.json"];
+    assert!(
+        config.contains("\"${var.meridian_secret_api_token}\""),
+        "{config}"
+    );
+    assert!(!config.contains(VALUE));
+    let mut context = context(&dir, "secret");
+    context.secrets = secrets(&[(slot, "api_token", VALUE)]);
+
+    let (plan, printed) = plan_ok("the plan", &client, &context, &artifact);
+    assert_eq!(changes(&plan.changes), [(ChangeAction::Create, "token")]);
+    assert!(
+        !printed.iter().any(|line| line.contains(VALUE)),
+        "terraform printed the secret: {printed:?}"
+    );
+    assert!(
+        !context.work_dir.join("meridian.tfplan").exists(),
+        "the saved plan, which holds every variable, was left behind"
+    );
+
+    let mut printed = Vec::new();
+    client
+        .apply(&context, &artifact, &mut |line: LogLine| {
+            printed.push(line.text)
+        })
+        .unwrap_or_else(|e| panic!("{}", explain("the apply", &e, &printed)));
+    assert!(
+        !printed.iter().any(|line| line.contains(VALUE)),
+        "terraform printed the secret: {printed:?}"
+    );
+    assert!(!context.work_dir.join("meridian.tfplan").exists());
+    // The value reached Terraform: it is in the state Terraform keeps for
+    // its own resource, which is the tool's own business and the reason a
+    // document that holds secrets should declare a backend that protects
+    // them.
+    let state = fs::read_to_string(context.work_dir.join("terraform.tfstate")).unwrap();
+    assert!(state.contains(VALUE), "the value did not reach terraform");
+    assert!(!fs::read_to_string(context.work_dir.join("main.tf.json"))
+        .unwrap()
+        .contains(VALUE));
 }
 
 #[ignore = "needs a real terraform; see docs/contributing/real-tool-tests.md"]

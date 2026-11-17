@@ -4,8 +4,8 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{artifact, scratch, stand_in, KeptLog};
-use meridian_sdk::{Artifact, ChangeAction, RunContext, Runner};
+use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
+use meridian_sdk::{Artifact, ChangeAction, RunContext, Runner, SecretRef};
 use meridian_target_ansible::AnsibleRunner;
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -184,4 +184,53 @@ fn a_missing_program_and_a_foreign_artifact_are_plain_errors() {
         err.msg,
         "the artifact has no playbook.yml; it was not compiled by this plugin"
     );
+}
+
+#[test]
+fn secrets_reach_ansible_playbook_in_a_private_file_and_nowhere_else() {
+    let dir = scratch(TMP, "secrets");
+    // The stand-in keeps a copy of the extra-vars file it was pointed at,
+    // and of its environment.
+    let body = format!(
+        "env > \"{dir}/env\"\nfor a in \"$@\"; do case \"$a\" in @*) cp \"${{a#@}}\" \"{dir}/vars\"; stat -c %a \"${{a#@}}\" > \"{dir}/mode\" 2>/dev/null || stat -f %Lp \"${{a#@}}\" > \"{dir}/mode\";; esac; done\n{TWO_CHANGES}",
+        dir = dir.display()
+    );
+    let runner = runner(&dir, &body);
+    let mut context = context(&dir);
+    context.secrets = secrets(&[(SecretRef::new(1), "db_password", "hunter2")]);
+    let log = KeptLog::default();
+    runner.apply(&context, &compiled(), &log).unwrap();
+
+    // The tool read the value from the file, under the variable's name.
+    assert_eq!(
+        fs::read_to_string(dir.join("vars")).unwrap(),
+        "{\"meridian_secret_db_password\":\"hunter2\"}\n"
+    );
+    // Only the owner may read the file. Windows has no Unix mode to read.
+    #[cfg(unix)]
+    assert_eq!(fs::read_to_string(dir.join("mode")).unwrap().trim(), "600");
+    // The command line named the file and nothing more, the environment
+    // held nothing, and the file is gone now the run is over.
+    let args = fs::read_to_string(dir.join("args")).unwrap();
+    assert!(args.contains("--extra-vars @"), "{args}");
+    assert!(!args.contains("hunter2"), "{args}");
+    assert!(!fs::read_to_string(dir.join("env"))
+        .unwrap()
+        .contains("hunter2"));
+    let path = args
+        .split_whitespace()
+        .find_map(|a| a.strip_prefix('@'))
+        .unwrap();
+    assert!(!Path::new(path).exists(), "{path} was left behind");
+    assert!(!log.text().iter().any(|l| l.contains("hunter2")));
+}
+
+#[test]
+fn a_run_without_secrets_passes_no_extra_vars() {
+    let dir = scratch(TMP, "no-secrets");
+    runner(&dir, TWO_CHANGES)
+        .plan(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+    let args = fs::read_to_string(dir.join("args")).unwrap();
+    assert!(!args.contains("--extra-vars"), "{args}");
 }

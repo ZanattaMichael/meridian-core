@@ -16,6 +16,7 @@ on it.
 | `dependsOn` | Yes, as task order. A play runs top to bottom, so independent resources still run in sequence; a warning says which |
 | `notifies` | Native: handlers. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec. The action is kept: a reload stays a reload |
 | `runtimeWhen` | Yes: a task's `when:`, as an Ansible expression |
+| Secrets | Yes: by an extra-vars file only the user can read, with `no_log` on the task |
 | References | `${id.param}` is settled from the document when it is compiled; anything else in `${...}` is refused, and `$${` is a literal `${` ([rules](../reference/resource-types.md#references)) |
 | Plan | Yes: `--check --diff`. A task Ansible skips in check mode cannot be previewed, and makes the plan unknown |
 | Apply | Yes |
@@ -232,6 +233,15 @@ The host in `inventory.ini` is one line, so the plugin refuses a host that is
 not a name (`invalid-host`); the core refuses one before it gets this far
 ([`targetHost`](../reference/dsl/outputs-and-hand-offs.md#rules)).
 
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a
+resource's params is compiled as `{{ meridian_secret_<name> }}`, and the task
+that holds one is marked `no_log: true`, so Ansible prints neither its
+arguments, its diff nor its result. When the stage runs, the values are
+written into an extra-vars file only the user can read, held in memory where
+the system allows, and passed as `--extra-vars @<path>`; the file is removed
+when the run ends. The value is never on the command line and never in
+Ansible's environment.
+
 ## Importing
 
 `meridian import site.yml` reads playbooks and task files and writes one ResourceSet for
@@ -380,7 +390,9 @@ target can raise, and what to do:
   check-mode plan that creates nothing, a play checked on disk, a second plan
   that is in sync, drift put right, a handler that runs only when its
   notifier changed, a `runtimeWhen` answered by the host's facts, a command
-  check mode cannot preview, and a failed task. They are marked `#[ignore]`
+  check mode cannot preview, a failed task, and a secret that reaches the
+  play through the extra-vars file and is in nothing Ansible prints, check
+  mode with diff included. They are marked `#[ignore]`
   and run with
   `MERIDIAN_TEST_REAL_ANSIBLE=1 cargo test -p meridian-target-ansible --test real -- --ignored`.
   Reaching another machine over SSH, and the package, service, user and group

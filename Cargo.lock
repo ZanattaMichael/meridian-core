@@ -1349,6 +1349,7 @@ dependencies = [
 name = "meridian-sdk"
 version = "0.1.0"
 dependencies = [
+ "meridian-secret",
  "meridian-value",
  "prost",
  "protox",

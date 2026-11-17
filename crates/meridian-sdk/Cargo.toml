@@ -8,6 +8,7 @@ repository.workspace = true
 build = "build.rs"
 
 [dependencies]
+meridian-secret = { path = "../meridian-secret" }
 meridian-value = { path = "../meridian-value" }
 prost = { workspace = true }
 serde = { workspace = true }

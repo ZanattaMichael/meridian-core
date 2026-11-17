@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
 
-use meridian_value::{canonical_map, PlacedEscape, Value};
+use meridian_value::{canonical_map, PlacedEscape, SecretRef, Value};
 
 use crate::run::Category;
 use crate::schema::ResourceSchema;
+use crate::secrets::SecretName;
 
 /// A point inside a source document. `line` and `column` are 1-based; a zero
 /// `line` means the position is unknown. It travels with every resource so a
@@ -116,6 +117,12 @@ pub struct ResourceGraph {
     /// What the document promises to later stages. Only a document that
     /// provisions infrastructure declares any.
     pub outputs: Vec<OutputDeclaration>,
+    /// Every secret the resources' params refer to, by the slot a
+    /// [`Value::Secret`] in them holds and the name the document declared
+    /// it under. Empty for a document without one. The host sends a secret
+    /// only to a target whose [`Capabilities::secrets`] is true, so a plugin
+    /// that does not declare it never sees one here.
+    pub secrets: Vec<SecretName>,
 }
 
 /// A value a document promises to later stages, such as the address of a
@@ -147,6 +154,34 @@ impl ResourceGraph {
         self.resources.iter().map(|r| r.id.as_str()).collect()
     }
 
+    /// The name of the secret a [`Value::Secret`] in a param stands for.
+    pub fn secret_name(&self, secret: SecretRef) -> Option<&str> {
+        self.secrets
+            .iter()
+            .find(|n| n.secret == secret)
+            .map(|n| n.name.as_str())
+    }
+
+    /// Whether any param holds a secret.
+    pub fn has_secrets(&self) -> bool {
+        !self.secrets.is_empty()
+    }
+
+    /// The same tree with every secret in a param written as the text
+    /// `write` gives for its name: the reference the tool will resolve when
+    /// it runs, such as `{{ meridian_secret_db_password }}` for a tool that
+    /// reads variables. An emitter calls this first and compiles the result,
+    /// and its runner hands the values over under the same names.
+    pub fn secrets_written_as(&self, write: impl Fn(&str) -> String) -> ResourceGraph {
+        let mut out = self.clone();
+        for resource in &mut out.resources {
+            for value in resource.params.values_mut() {
+                *value = crate::secrets::written_as(value, &self.secrets, &write);
+            }
+        }
+        out
+    }
+
     /// Renders the tree in a stable textual form, so a test can assert that
     /// what left the host is exactly what reached the plugin.
     pub fn canonical(&self) -> String {
@@ -156,6 +191,9 @@ impl ResourceGraph {
         );
         if !self.target_version.is_empty() {
             let _ = writeln!(out, "targetVersion={}", self.target_version);
+        }
+        for s in &self.secrets {
+            let _ = writeln!(out, "secret {} slot={}", s.name, s.secret.slot());
         }
         for r in &self.resources {
             let _ = writeln!(
@@ -197,6 +235,13 @@ pub struct Capabilities {
     /// The target can evaluate a condition at the instant of apply, which is
     /// what `runtimeWhen` requires.
     pub runtime_condition: bool,
+    /// The target takes a secret in a param. Its emitter writes a reference
+    /// to the secret into the artifact and never a value, and its runner
+    /// hands the value to the tool by a private channel: standard input, or
+    /// a file only the user can read. Never on the command line and never
+    /// in the environment. A document that puts a secret in a param of a
+    /// target without this is refused.
+    pub secrets: bool,
 }
 
 /// The complete output of a compile: relative path to file content. It is

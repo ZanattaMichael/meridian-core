@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use meridian_expr::{has_interpolation, Expr, Names, Scope, Template};
 use meridian_secret::{Masker, SecretTable, SecretValue};
-use meridian_value::{PlacedEscape, Value};
+use meridian_value::{PlacedEscape, SecretRef, Value};
 
 use crate::condition::{self, Data};
 use crate::error::{Error, ErrorList, Position};
@@ -124,6 +124,18 @@ impl Secrets {
     /// The table the values point into.
     pub fn table(&self) -> &Arc<SecretTable> {
         &self.table
+    }
+
+    /// Each declared secret's name and the slot that stands for it. An
+    /// optional secret that was not found has no slot and is left out.
+    pub fn names(&self) -> Vec<(String, SecretRef)> {
+        self.values
+            .iter()
+            .filter_map(|(name, value)| match value {
+                Value::Secret(at) => Some((name.clone(), *at)),
+                _ => None,
+            })
+            .collect()
     }
 }
 

@@ -29,7 +29,7 @@ use std::fmt;
 
 use meridian_sdk::{
     Capabilities, Category, CompileError, ImportError, ImportFormat, Operations, PlacedEscape,
-    RunError,
+    RunError, SecretRef, Value,
 };
 
 pub use client::{Client, StartOptions, HANDSHAKE_TIMEOUT};
@@ -245,5 +245,46 @@ pub fn to_sdk(graph: &meridian_ast::ResourceGraph) -> meridian_sdk::ResourceGrap
                 pos: position(&o.pos),
             })
             .collect(),
+        secrets: Vec::new(),
     }
+}
+
+/// Names every secret the graph's params refer to, in the order they are
+/// met, so a plugin can write a reference to each: by the name the document
+/// declared it under, or, for one made from a declared secret by an
+/// expression (a secret joined with text, say), `derived_1`, `derived_2`
+/// and so on, since no name of the document's is its own.
+pub fn name_secrets(graph: &mut meridian_sdk::ResourceGraph, declared: &[(String, SecretRef)]) {
+    fn walk(value: &Value, found: &mut Vec<SecretRef>) {
+        match value {
+            Value::Secret(at) => {
+                if !found.contains(at) {
+                    found.push(*at);
+                }
+            }
+            Value::List(items) => items.iter().for_each(|item| walk(item, found)),
+            Value::Map(entries) => entries.values().for_each(|item| walk(item, found)),
+            _ => {}
+        }
+    }
+    let mut used = Vec::new();
+    for resource in &graph.resources {
+        for value in resource.params.values() {
+            walk(value, &mut used);
+        }
+    }
+    let mut derived = 0;
+    graph.secrets = used
+        .into_iter()
+        .map(|secret| {
+            let name = match declared.iter().find(|(_, at)| *at == secret) {
+                Some((name, _)) => name.clone(),
+                None => {
+                    derived += 1;
+                    format!("derived_{derived}")
+                }
+            };
+            meridian_sdk::SecretName { secret, name }
+        })
+        .collect();
 }

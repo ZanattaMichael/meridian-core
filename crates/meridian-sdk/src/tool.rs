@@ -11,9 +11,9 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-use crate::{Artifact, Log, RunError};
+use crate::{Artifact, Log, RunError, SecretValue};
 
 /// How much of a tool's output a failure carries.
 const TAIL_BYTES: usize = 8 * 1024;
@@ -112,8 +112,17 @@ pub struct Tool {
     shown: Vec<String>,
     dir: Option<PathBuf>,
     env: Vec<(String, String)>,
-    stdin: Option<String>,
+    stdin: Option<Stdin>,
     relay_stdout: bool,
+}
+
+/// What a tool is given on its standard input.
+#[derive(Clone, Debug)]
+enum Stdin {
+    Text(String),
+    /// A secret, written straight from protected memory into the pipe. A
+    /// clone of the tool shares the one copy.
+    Secret(Arc<SecretValue>),
 }
 
 impl Tool {
@@ -177,7 +186,17 @@ impl Tool {
 
     /// Text written to the tool's standard input, which is otherwise closed.
     pub fn stdin(mut self, text: impl Into<String>) -> Self {
-        self.stdin = Some(text.into());
+        self.stdin = Some(Stdin::Text(text.into()));
+        self
+    }
+
+    /// A secret written to the tool's standard input: the first choice for
+    /// handing a tool a secret, since a pipe is read by the tool alone and
+    /// leaves nothing behind. The bytes go from protected memory into the
+    /// pipe and are copied nowhere on the way. The tool is given a copy, so
+    /// make one with [`SecretValue::duplicate`] to keep the original.
+    pub fn stdin_secret(mut self, secret: SecretValue) -> Self {
+        self.stdin = Some(Stdin::Secret(Arc::new(secret)));
         self
     }
 
@@ -254,11 +273,14 @@ impl Tool {
         let relay_stdout = self.relay_stdout;
 
         let (out, err) = std::thread::scope(|scope| {
-            if let (Some(mut pipe), Some(text)) = (stdin, self.stdin.as_deref()) {
+            if let (Some(mut pipe), Some(input)) = (stdin, self.stdin.as_ref()) {
                 scope.spawn(move || {
                     // A tool that exits without reading its input is not this
                     // call's failure to report; its exit status is.
-                    let _ = pipe.write_all(text.as_bytes());
+                    let _ = match input {
+                        Stdin::Text(text) => pipe.write_all(text.as_bytes()),
+                        Stdin::Secret(secret) => secret.expose(|bytes| pipe.write_all(bytes)),
+                    };
                 });
             }
             let out = scope.spawn(|| {
@@ -532,6 +554,20 @@ mod tests {
             .secret_arg("hunter2")
             .arg("");
         assert_eq!(tool.command_line(), "tool apply '-var=name=a b' '***' ''");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_secret_on_stdin_reaches_the_tool_and_is_not_on_its_command_line() {
+        let secret = SecretValue::from_reader(&b"hunter2\n"[..], 64).unwrap();
+        let tool = Tool::new("sh")
+            .args(["-c", "cat"])
+            .stdin_secret(secret)
+            .capture_stdout();
+        assert_eq!(tool.command_line(), "sh -c cat");
+        assert!(!format!("{tool:?}").contains("hunter2"));
+        let finished = tool.run(&NoLog).unwrap();
+        assert_eq!(finished.stdout, "hunter2\n");
     }
 
     #[cfg(unix)]

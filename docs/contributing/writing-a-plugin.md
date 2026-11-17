@@ -275,8 +275,10 @@ them, so each one is a promise:
 - `supported_resource_types()`: every type you map, sorted. For a native
   target whose types are open-ended, describe the shape, as Bicep does with
   `<Namespace>/<type>@<api-version>`.
-- `capabilities()`: `native_notify`, `synthetic_notify` and
-  `runtime_condition`. Declare only what a test in your crate proves.
+- `capabilities()`: `native_notify`, `synthetic_notify`, `runtime_condition`
+  and `secrets`. Declare only what a test in your crate proves. `secrets`
+  says a param may hold a secret, and commits your runner to
+  [handing it over](#secrets) by a private channel.
 - `category()`: the one you chose before you started. It also decides which
   kind of document your target accepts, as the table near the top says.
 - `target_versions()`: only if the tool comes in versions that need different
@@ -361,6 +363,7 @@ refuses what it left out.
 | `host` | the machine being configured; empty for a document that creates infrastructure |
 | `work_dir` | a directory kept between runs, for the artifact and the tool's own state |
 | `inputs` | values handed over from earlier stages of a workflow |
+| `secrets` | the value of each secret the document's params hold, for a target that declared `secrets`; see [Secrets](#secrets) |
 
 and you implement up to three operations. Declare only the ones you implement
 in `operations()`; the host never calls the others.
@@ -410,6 +413,56 @@ Three rules for a runner:
 
 Let the operator point at the program with an environment variable named
 `MERIDIAN_<TOOL>`, as the template does. The tests rely on it too.
+
+### Secrets
+
+A document can put a [secret](../reference/dsl/secrets.md) in a resource's
+params: a password, a key. The host hands it to your plugin only if
+`capabilities().secrets` is true, and then in two halves:
+
+1. **Compiling: a name, never a value.** The param arrives as
+   `Value::Secret`, and `graph.secrets` names it. Your emitter writes a
+   reference the tool resolves when it runs, and the simplest way is to do it
+   first and compile the result:
+
+   ```rust
+   fn emit(&self, graph: &ResourceGraph, data: &Data) -> Result<Emitted, CompileError> {
+       let graph = graph.secrets_written_as(|name| format!("${{var.meridian_secret_{name}}}"));
+       // ... compile `graph` as before
+   }
+   ```
+
+   Declare whatever the tool needs for the reference to resolve (Terraform
+   needs the variable, marked `sensitive`), and tell the tool not to print it
+   where the tool has a way to say so (Ansible's `no_log`).
+
+2. **Running: the value, by a private channel.** `context.secrets` holds each
+   value under the same name. Hand it to the tool one of two ways, and no
+   other:
+
+   - a file only the user can read, for a tool that reads its variables from
+     one. `context.secrets.json_file("vars.json", |name| format!("meridian_secret_{name}"))`
+     writes them all as one JSON object into a `SecretFile`: mode `0600`, in
+     a directory of its own, in memory where the system allows, overwritten
+     and removed when you drop it. Keep it until the tool has exited, and
+     give the tool the path (`-var-file=<path>`, `--extra-vars @<path>`).
+   - the tool's standard input, for a tool that reads a value from it.
+     `Tool::stdin_secret(value)` pipes it straight from protected memory.
+
+   Never an argument, which every user of the machine can read in `ps`, and
+   never the environment, which the tool passes on to everything it starts.
+   The value is a `SecretValue`: it cannot be printed, cloned or compared by
+   accident, and it is wiped when the context is dropped. A tool that keeps
+   what it was given (a saved plan, a state file) is your plugin's to clean
+   up or to document, as the Terraform plugin scrubs its saved plan.
+
+Test both halves the way the first-party plugins do: a compile test that the
+reference is written and the value is not (`meridian_plugin_testkit::secret_in_param`),
+and a run test against a stand-in that keeps a copy of the file it was pointed
+at and of its arguments and environment
+(`meridian_plugin_testkit::secrets`), asserting the value is in the file, in
+mode `0600`, and nowhere else. The host masks whatever the tool prints, but
+that is the second line of defence, not the first.
 
 ## An importer
 

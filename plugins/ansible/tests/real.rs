@@ -21,7 +21,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use meridian_plugin_testkit::{graph_from_text, scratch, KeptLog};
+use meridian_plugin_testkit::{graph_from_text, scratch, secret_in_param, secrets, KeptLog};
 use meridian_sdk::{
     Applied, Artifact, Change, ChangeAction, Data, Emitter, Plan, RunContext, RunError, Runner,
 };
@@ -265,4 +265,65 @@ fn a_failed_task_fails_the_run_with_ansibles_own_reason_and_what_changed_before_
         !dir.join("after").exists(),
         "nothing runs after the failure"
     );
+}
+
+#[ignore = "needs a real ansible-playbook; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_secret_reaches_the_play_through_a_private_file_and_is_in_nothing_ansible_prints_or_the_plugin_writes(
+) {
+    let Some(runner) = ansible() else { return };
+    let dir = scratch(TMP, "real-secret");
+    const VALUE: &str = "s3cr3t-not-a-real-password-Q9";
+    let root = dir.display();
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: site\nspec:\n  target: ansible\n  targetHost:\n    from: inline\n    host: localhost\n  resources:\n    - id: env_file\n      type: file\n      params:\n        path: {root}/app.env\n        content: placeholder\n        mode: \"0600\"\n"
+    );
+    let mut graph = graph_from_text("site.yaml", &text, "ansible");
+    let slot = secret_in_param(&mut graph, "env_file", "content", "db_password");
+    let artifact = Ansible
+        .emit(&graph, &Data::new())
+        .unwrap_or_else(|e| panic!("{e}"))
+        .artifact;
+    assert!(!artifact.files["playbook.yml"].contains(VALUE));
+    let mut context = context(&dir);
+    context.secrets = secrets(&[(slot, "db_password", VALUE)]);
+
+    // A check run with diff would print the content; a task handed a
+    // secret prints nothing.
+    let log = KeptLog::default();
+    let preview = runner
+        .plan(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(
+        changes(&preview.changes),
+        [("env_file", ChangeAction::Update)]
+    );
+    assert!(
+        !log.text().iter().any(|line| line.contains(VALUE)),
+        "{:?}",
+        log.text()
+    );
+
+    let log = KeptLog::default();
+    runner
+        .apply(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert!(
+        !log.text().iter().any(|line| line.contains(VALUE)),
+        "{:?}",
+        log.text()
+    );
+    assert_eq!(fs::read_to_string(dir.join("app.env")).unwrap(), VALUE);
+    // Nothing the plugin wrote to its work directory holds the value.
+    for entry in fs::read_dir(dir.join("work")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() {
+            let bytes = fs::read(&path).unwrap();
+            assert!(
+                !String::from_utf8_lossy(&bytes).contains(VALUE),
+                "{} holds the secret",
+                path.display()
+            );
+        }
+    }
 }

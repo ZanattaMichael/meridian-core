@@ -70,6 +70,21 @@ impl AnsibleRunner {
         if check {
             tool = tool.args(["--check", "--diff"]);
         }
+        // Secrets reach ansible-playbook as extra variables read from a file
+        // only the user can read, named on the command line by its path and
+        // nothing more. The file lives until the run is over.
+        let secrets = if context.secrets.is_empty() {
+            None
+        } else {
+            let file = context
+                .secrets
+                .json_file("extra-vars.json", crate::secret_variable)
+                .map_err(|e| RunError::new(format!("writing the extra-vars file: {e}")))?;
+            tool = tool
+                .arg("--extra-vars")
+                .arg(format!("@{}", file.path().display()));
+            Some(file)
+        };
         tool = tool
             .args(self.extra_args.iter().cloned())
             .arg(PLAYBOOK_PATH);
@@ -80,6 +95,7 @@ impl AnsibleRunner {
             check,
         };
         let finished = tool.run(&reader)?;
+        drop(secrets);
         let report = reader
             .report
             .into_inner()

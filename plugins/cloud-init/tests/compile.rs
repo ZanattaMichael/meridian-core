@@ -280,6 +280,7 @@ fn the_target_declares_what_it_is_and_can_express() {
             native_notify: false,
             synthetic_notify: true,
             runtime_condition: false,
+            secrets: false,
         }
     );
 }
