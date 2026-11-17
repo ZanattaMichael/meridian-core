@@ -4,6 +4,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
+use crate::credential::HeldCredential;
 use crate::{Artifact, Data, Secrets, Value};
 
 /// The kind of tool a plugin drives. The core routes on it, to decide which
@@ -97,6 +98,11 @@ pub struct RunContext {
     /// [`Capabilities::secrets`](crate::Capabilities::secrets) is true, and
     /// only for `plan` and `apply`.
     pub secrets: Secrets,
+    /// The credential the host is reached with, with the value of each of
+    /// its secret fields, when the document names one. Sent only to a target
+    /// whose [`Capabilities::credentials`](crate::Capabilities::credentials)
+    /// is true, and only for `plan` and `apply`.
+    pub credential: Option<HeldCredential>,
 }
 
 /// What the tool would do, or did, to one thing it manages.

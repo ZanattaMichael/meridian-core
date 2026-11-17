@@ -11,8 +11,8 @@
 //! orders it with no further change.
 
 use crate::types::{
-    Kind, API_VERSION_V1, IMPORT_FROM_ARTIFACT, IMPORT_FROM_OUTPUT, NOTIFY_ON_CHANGED,
-    TARGET_HOST_FROM_INFRASTRUCTURE, TARGET_HOST_FROM_INLINE,
+    Kind, API_VERSION_V1, CREDENTIAL_FROM_AMBIENT, IMPORT_FROM_ARTIFACT, IMPORT_FROM_OUTPUT,
+    NOTIFY_ON_CHANGED, TARGET_HOST_FROM_INFRASTRUCTURE, TARGET_HOST_FROM_INLINE,
 };
 
 /// One mapping in a document: the fields it may hold, in the order the
@@ -115,6 +115,9 @@ pub enum Role {
     OutputRef,
     /// Text that may hold `${resource.path}` references.
     Expression,
+    /// A reference to a declared secret, `${{ secret.<name> }}`, and nothing
+    /// else.
+    SecretRef,
 }
 
 const fn text(name: &'static str, required: bool, role: Role, doc: &'static str) -> Field {
@@ -600,7 +603,251 @@ pub const TARGET_HOST: Shape = Shape {
             "The output of that document that holds the host. Required with \
              `from: infrastructure`.",
         ),
+        text(
+            "credential",
+            false,
+            Role::None,
+            "The credential the host is reached with, by the name `spec.credentials` \
+             declares it under: one of type `ssh` or `usernamePassword`. Left out, the \
+             tool connects as it is configured to.",
+        ),
     ],
+};
+
+/// The values `credentials[].type` accepts.
+pub const CREDENTIAL_TYPE: &[Choice] = &[
+    choice(
+        "aws",
+        "An AWS identity: `accessKeyId` and `secretAccessKey`, or a `profile`, or a \
+         `roleArn`, with a `region`.",
+    ),
+    choice(
+        "azure",
+        "An Azure identity: `tenantId` and `clientId` with a `clientSecret` or a \
+         `certificate`, or `managedIdentity: true`, with a `subscriptionId`.",
+    ),
+    choice(
+        "certificate",
+        "A certificate and its private key, for mutual TLS, with the `ca` that signed it.",
+    ),
+    choice(
+        "gcp",
+        "A Google Cloud identity: a `serviceAccountKey`, or an account to `impersonate`, \
+         with a `project`.",
+    ),
+    choice(
+        "kubeconfig",
+        "A cluster login: a whole `kubeconfig`, or a `token` with the `server` and its \
+         `ca`, and the `context` to use.",
+    ),
+    choice(
+        "registry",
+        "A login to an image or module registry: `server`, `user` and `password`.",
+    ),
+    choice(
+        "ssh",
+        "An SSH login: `user` with a `privateKey`, a `password`, or `agent: true`; a \
+         `passphrase` for the key and a `certificate` for it.",
+    ),
+    choice(
+        "token",
+        "A bearer token, with the `scheme` it is sent under.",
+    ),
+    choice(
+        "usernamePassword",
+        "A `user` and `password`, with a `domain` where the host needs one.",
+    ),
+];
+
+/// The values `credentials[].from` accepts.
+pub const CREDENTIAL_FROM: &[Choice] = &[choice(
+    CREDENTIAL_FROM_AMBIENT,
+    "The tool finds the credential for itself: its environment, its profile, its \
+     agent. The declaration names and types the identity without Meridian holding \
+     any of it.",
+)];
+
+/// A field of a credential that holds secret material: a reference to a
+/// declared secret, never a value.
+const fn secret_field(name: &'static str, doc: &'static str) -> Field {
+    Field {
+        name,
+        doc,
+        required: false,
+        ty: Type::String,
+        role: Role::SecretRef,
+    }
+}
+
+/// One entry of `spec.credentials`.
+pub const CREDENTIAL: Shape = Shape {
+    name: "Credential",
+    doc: "An identity, by name and type: how to prove who you are to a host, a tool or a \
+          service. A field that holds secret material reads a declared secret, as \
+          `${{ secret.<name> }}`; a value written there is refused.",
+    fields: &[
+        text(
+            "name",
+            true,
+            Role::None,
+            "The name the credential is used by, such as in `targetHost.credential`.",
+        ),
+        Field {
+            name: "type",
+            doc: "What kind of identity it is. The type fixes which fields it takes.",
+            required: true,
+            ty: Type::Enum(CREDENTIAL_TYPE),
+            role: Role::None,
+        },
+        Field {
+            name: "from",
+            doc: "`ambient`: the tool finds the credential for itself, so no secret field \
+                  is needed.",
+            required: false,
+            ty: Type::Enum(CREDENTIAL_FROM),
+            role: Role::None,
+        },
+        text(
+            "user",
+            false,
+            Role::None,
+            "With `ssh`, `usernamePassword` and `registry`: the user name.",
+        ),
+        secret_field(
+            "password",
+            "With `ssh`, `usernamePassword` and `registry`: the password, as \
+             `${{ secret.<name> }}`.",
+        ),
+        secret_field(
+            "privateKey",
+            "With `ssh`: the private key, as `${{ secret.<name> }}`. With \
+             `certificate`: the certificate's private key.",
+        ),
+        secret_field(
+            "passphrase",
+            "With `ssh`: the passphrase of the private key, as `${{ secret.<name> }}`.",
+        ),
+        flag(
+            "agent",
+            "With `ssh`: the key is in the SSH agent, so none is given here.",
+        ),
+        text(
+            "certificate",
+            false,
+            Role::None,
+            "With `ssh`: the certificate signed for the key. With `certificate`: the \
+             certificate, in PEM form.",
+        ),
+        text(
+            "ca",
+            false,
+            Role::None,
+            "With `certificate` and `kubeconfig`: the certificate authority to trust, in \
+             PEM form.",
+        ),
+        text(
+            "domain",
+            false,
+            Role::None,
+            "With `usernamePassword`: the Windows domain of the user.",
+        ),
+        secret_field(
+            "token",
+            "With `token` and `kubeconfig`: the token, as `${{ secret.<name> }}`.",
+        ),
+        text(
+            "scheme",
+            false,
+            Role::None,
+            "With `token`: the scheme the token is sent under, such as `Bearer`.",
+        ),
+        text(
+            "server",
+            false,
+            Role::None,
+            "With `registry`: the registry's host. With `kubeconfig`: the API server.",
+        ),
+        secret_field(
+            "kubeconfig",
+            "With `kubeconfig`: the whole kubeconfig file, as `${{ secret.<name> }}`.",
+        ),
+        text(
+            "context",
+            false,
+            Role::None,
+            "With `kubeconfig`: the context to use.",
+        ),
+        text(
+            "accessKeyId",
+            false,
+            Role::None,
+            "With `aws`: the access key id, which goes with `secretAccessKey`.",
+        ),
+        secret_field(
+            "secretAccessKey",
+            "With `aws`: the secret access key, as `${{ secret.<name> }}`.",
+        ),
+        secret_field(
+            "sessionToken",
+            "With `aws`: the session token of temporary keys, as `${{ secret.<name> }}`.",
+        ),
+        text(
+            "profile",
+            false,
+            Role::None,
+            "With `aws`: a profile of the AWS configuration to use.",
+        ),
+        text(
+            "roleArn",
+            false,
+            Role::None,
+            "With `aws`: a role to assume.",
+        ),
+        text("region", false, Role::None, "With `aws`: the region."),
+        text("tenantId", false, Role::None, "With `azure`: the tenant."),
+        text(
+            "clientId",
+            false,
+            Role::None,
+            "With `azure`: the application's client id.",
+        ),
+        secret_field(
+            "clientSecret",
+            "With `azure`: the application's client secret, as `${{ secret.<name> }}`. \
+             A `certificate` (as `${{ secret.<name> }}`, since it holds the key) stands \
+             in for it.",
+        ),
+        flag(
+            "managedIdentity",
+            "With `azure`: use the managed identity of the machine this runs on.",
+        ),
+        text(
+            "subscriptionId",
+            false,
+            Role::None,
+            "With `azure`: the subscription.",
+        ),
+        secret_field(
+            "serviceAccountKey",
+            "With `gcp`: the service account's key file, as `${{ secret.<name> }}`.",
+        ),
+        text(
+            "impersonate",
+            false,
+            Role::None,
+            "With `gcp`: a service account to impersonate.",
+        ),
+        text("project", false, Role::None, "With `gcp`: the project."),
+    ],
+};
+
+const CREDENTIALS: Field = Field {
+    name: "credentials",
+    doc: "The identities the document names, each a name, a type and the type's fields, \
+          used by name wherever a credential is asked for, such as `targetHost.credential`.",
+    required: false,
+    ty: Type::List(&CREDENTIAL),
+    role: Role::None,
 };
 
 const TARGET: Field = text(
@@ -730,6 +977,7 @@ pub const INFRASTRUCTURE_SPEC: Shape = Shape {
         VARIABLES,
         CONDITIONS,
         SECRETS,
+        CREDENTIALS,
         IMPORTS,
         RESOURCES,
         Field {
@@ -754,6 +1002,7 @@ pub const RESOURCE_SET_SPEC: Shape = Shape {
         VARIABLES,
         CONDITIONS,
         SECRETS,
+        CREDENTIALS,
         Field {
             name: "targetHost",
             doc: "The host this document configures.",

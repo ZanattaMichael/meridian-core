@@ -63,8 +63,8 @@ use std::fmt;
 use std::io::Read;
 
 pub use credential::{
-    resolve_credential, Credential, CredentialDeclaration, CredentialError, CredentialField,
-    FieldSource, CREDENTIAL_TYPES,
+    credential_type, credential_types, resolve_credential, Credential, CredentialDeclaration,
+    CredentialError, CredentialField, CredentialType, FieldSource, CREDENTIAL_TYPES,
 };
 pub use deliver::{sweep_stale, Part, SecretFile};
 pub use mask::Masker;

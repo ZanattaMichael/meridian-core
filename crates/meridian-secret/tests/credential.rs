@@ -246,3 +246,101 @@ fn a_failed_fetch_names_the_field_and_the_provider_and_nothing_read() {
     );
     assert!(!format!("{error:?}").contains(PASSWORD));
 }
+
+// ---- the type table ----------------------------------------------------
+
+#[test]
+fn the_language_has_nine_credential_types_in_name_order() {
+    let names: Vec<&str> = meridian_secret::credential_types()
+        .iter()
+        .map(|t| t.name)
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "aws",
+            "azure",
+            "certificate",
+            "gcp",
+            "kubeconfig",
+            "registry",
+            "ssh",
+            "token",
+            "usernamePassword"
+        ]
+    );
+    // The manifest's types are the ones that resolve outside a run.
+    let outside: Vec<&str> = meridian_secret::credential_types()
+        .iter()
+        .filter(|t| t.outside_run)
+        .map(|t| t.name)
+        .collect();
+    assert_eq!(outside, CREDENTIAL_TYPES);
+    assert!(meridian_secret::credential_type("vault").is_none());
+}
+
+#[test]
+fn every_type_is_consistent_with_itself() {
+    for kind in meridian_secret::credential_types() {
+        let fields = kind.fields();
+        assert!(!fields.is_empty(), "{} has no fields", kind.name);
+        let mut sorted = fields.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            fields, sorted,
+            "{}: fields repeat or are unordered",
+            kind.name
+        );
+        // A field is plain, secret or a flag, never two of those.
+        for field in &fields {
+            let kinds = [
+                kind.plain.contains(field),
+                kind.secret.contains(field),
+                kind.flags.contains(field),
+            ];
+            assert_eq!(
+                kinds.iter().filter(|k| **k).count(),
+                1,
+                "{}.{field} is more than one kind",
+                kind.name
+            );
+            assert!(kind.has(field));
+        }
+        assert!(!kind.has("value"), "{}: value is not a field", kind.name);
+        // Every way to complete the credential names fields of the type.
+        assert!(!kind.one_of.is_empty(), "{}: no way to complete", kind.name);
+        for way in kind.one_of {
+            assert!(!way.is_empty());
+            for field in *way {
+                assert!(kind.has(field), "{}: {field} is not a field", kind.name);
+            }
+        }
+        // And every type has something secret to hold, since a type with
+        // nothing secret would be plain configuration.
+        assert!(!kind.secret.is_empty(), "{}: nothing secret", kind.name);
+        assert!(!kind.used_for.is_empty());
+    }
+}
+
+#[test]
+fn completeness_takes_any_one_way() {
+    let ssh = meridian_secret::credential_type("ssh").unwrap();
+    assert!(ssh.complete(|f| f == "privateKey"));
+    assert!(ssh.complete(|f| f == "password"));
+    assert!(ssh.complete(|f| f == "agent"));
+    assert!(!ssh.complete(|f| f == "user"));
+    assert!(!ssh.complete(|_| false));
+    assert_eq!(ssh.needs(), "privateKey, or password, or agent: true");
+
+    let aws = meridian_secret::credential_type("aws").unwrap();
+    assert!(aws.complete(|f| f == "accessKeyId" || f == "secretAccessKey"));
+    assert!(!aws.complete(|f| f == "accessKeyId"));
+    assert_eq!(
+        aws.needs(),
+        "accessKeyId and secretAccessKey, or profile, or roleArn"
+    );
+    assert!(aws.is_secret("secretAccessKey") && !aws.is_secret("accessKeyId"));
+    let azure = meridian_secret::credential_type("azure").unwrap();
+    assert!(azure.is_flag("managedIdentity") && !azure.is_flag("clientId"));
+}

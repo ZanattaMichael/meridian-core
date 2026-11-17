@@ -161,6 +161,36 @@ The first user is the module system: a project declares credentials under
 `spec.credentials` in `meridian.yaml` and names one for a registry. See
 [registry logins](../reference/modules.md#registry-logins).
 
+## A credential in a run
+
+A document declares the same kind of thing under `spec.credentials`, with
+every type the language has, and names one for its host with
+`targetHost.credential` ([Credentials](../reference/dsl/credentials.md)).
+In a run a credential's secret fields are secrets of the document, and
+nothing more is added to the model:
+
+- A secret field is declared as exactly `${{ secret.<name> }}`, so once the
+  document is resolved the field *is* a `Value::Secret` slot in the run's
+  table: one home, as for any secret. A plain field (a user, a region) is
+  text, checked as shown text, so a secret cannot be placed in one.
+- The credential handed to a plugin is a `HeldCredential`: the declared
+  shape, and one `SecretValue` per secret field, duplicated from the table
+  by name into a holder of its own, wiped with the stage. It prints as its
+  name, its type and its field names.
+- It crosses to the plugin as the run context does: the values at plan and
+  apply only, over the private socket, taken straight into protected memory
+  on the other side (`SecretValue::take_from`); `outputs` is sent none. At
+  compile the plugin sees the shape and the names of the secret fields, and
+  no value.
+- What the host prints and records is the summary, `deploy (ssh, user
+  deploy)`: the plan line, the run record and the events hold that and
+  nothing of a value.
+- A rollback fetches the credential again at the stage's turn, as it does the
+  document's secrets.
+
+A credential's secret fields are counted among the stage's secrets for
+masking what the tool prints, since they are the same slots.
+
 ## Handing a secret to a tool
 
 In order of preference: the tool's standard input or a file descriptor, then a
@@ -258,6 +288,9 @@ Across the other crates:
 | File | What it proves |
 |---|---|
 | `meridian-secret/tests/table.rs` | secrets are joined, encoded and compared without leaving protected memory; one that is not fetched is described and never guessed; a wiped one is gone |
+| `meridian-ir/tests/credentials.rs` | a credential's secret fields are one declared secret each, a literal is refused without being repeated, a plain field takes no secret, and a resolved credential holds slots and never values |
+| `meridian-cli/tests/credentials.rs` | a credential's key reaches the test target in a private file of mode `0600`, and is in nothing `plan` and `apply` print or write: not the plan, not the state directory, not the run record; a target that takes none is refused before anything runs |
+| `plugins/ansible/tests/run.rs` | a key reaches a stand-in `ansible-playbook` as `--private-key` naming a `0600` file, a password in the extra-vars file, and neither is in an argument, the environment or the log; the files are gone after the run |
 | `meridian-expr/tests/secrets.rs` | an expression holds a reference; joins and placements stay secret; a comparison is a plain answer; every other function and operator refuses; no error holds a value |
 | `meridian-ir/tests/secrets.rs` | every rule of a declaration; every place a secret is refused; a resolved document, its debug form and its encoding hold only `(sensitive)`; the secrets are wiped when their holder is dropped |
 | `meridian-cli/tests/secret_stores.rs` | through the real command: `secret set` stores a value from standard input and a run reads it back from the keyring and the Secret Service; the value reaches the store's tool on its standard input and never as an argument; a store this machine does not have is passed over for the next place and every reason is given when none has it; the value is in nothing printed or written |

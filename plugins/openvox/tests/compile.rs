@@ -58,6 +58,7 @@ fn the_plugin_describes_itself_as_openvox() {
             synthetic_notify: false,
             runtime_condition: false,
             secrets: false,
+            credentials: false,
         }
     );
     assert_eq!(

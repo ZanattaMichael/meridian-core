@@ -17,6 +17,7 @@ on it.
 | `notifies` | Native: handlers. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec. The action is kept: a reload stays a reload |
 | `runtimeWhen` | Yes: a task's `when:`, as an Ansible expression |
 | Secrets | Yes: by an extra-vars file only the user can read, with `no_log` on the task |
+| Credentials | Yes: an `ssh` or `usernamePassword` credential for the host, the user in the inventory and the key or password by a private file. See [Reaching the host as a credential](#reaching-the-host-as-a-credential) |
 | References | `${id.param}` is settled from the document when it is compiled; anything else in `${...}` is refused, and `$${` is a literal `${` ([rules](../reference/resource-types.md#references)) |
 | Plan | Yes: `--check --diff`. A task Ansible skips in check mode cannot be previewed, and makes the plan unknown |
 | Apply | Yes |
@@ -336,6 +337,50 @@ failed task, `4` is a host that could not be reached.
 | `MERIDIAN_ANSIBLE_PLAYBOOK` | the program to run, when `ansible-playbook` is not on `PATH` |
 | `MERIDIAN_ANSIBLE_ARGS` | arguments added to every run, split on spaces: `--user deploy --private-key ~/.ssh/deploy`, or `--connection local` for this machine |
 
+## Reaching the host as a credential
+
+The target takes a [credential](../reference/dsl/credentials.md) for its
+host: `targetHost.credential` names an `ssh` or `usernamePassword`
+credential, and the host is reached as it instead of as whoever
+`ansible-playbook` is configured to be.
+
+```yaml
+spec:
+  secrets:
+    - name: deploy_key
+      from: file
+      path: /run/secrets/deploy_key
+      keepTrailingNewline: true
+  credentials:
+    - name: deploy
+      type: ssh
+      user: deploy
+      privateKey: ${{ secret.deploy_key }}
+  targetHost:
+    from: inline
+    host: web01.internal
+    credential: deploy
+```
+
+| Field | Where it goes |
+|---|---|
+| `user` | after the host in `inventory.ini`: `web01.internal ansible_user=deploy`. A name that cannot be written on an inventory line (whitespace, `=`, `[`, `#`) is refused |
+| `privateKey` | a file only the user can read, with the line break OpenSSH wants, passed as `--private-key <path>` and removed when the run ends |
+| `password` | `ansible_password` in the extra-vars file that carries the document's secrets, beside them. Password authentication over SSH needs `sshpass` where `ansible-playbook` runs, as it does for Ansible on its own |
+| `agent: true` | nothing: the key comes from the SSH agent `ansible-playbook` already uses |
+| `from: ambient` | the user, if given, and nothing else |
+
+What `ansible-playbook` cannot take is refused when the document is compiled,
+with the reason (rule `unsupported-credential`): a `passphrase` on the key
+(add the key to an agent and set `agent: true`), a `certificate` beside the
+key (put it in the agent too), and a `domain` (for WinRM hosts, which this
+plugin does not reach). The credential is never in `playbook.yml`, and the
+plan names it: `on web01.internal as deploy (ssh, user deploy)`.
+
+`MERIDIAN_ANSIBLE_ARGS` still applies, so `--user` or `--private-key` given
+there and a credential in the document would both reach the command line;
+name the identity in one place.
+
 ## What is refused
 
 Every refusal names the resource, the line and the rule. The rules this
@@ -359,6 +404,7 @@ target can raise, and what to do:
 | `conditional-handler` | a `runtimeWhen` on a handler | a plugin bug; report it |
 | `dangling-reference` | `${id.param}` names a resource or a param that is not there | fix the reference |
 | `invalid-host` | a host that is not a name, so it cannot be an inventory line | the core refuses one first ([`targetHost`](../reference/dsl/outputs-and-hand-offs.md#rules)) |
+| `unsupported-credential` | a credential field `ansible-playbook` cannot take: a `passphrase`, a `certificate`, a `domain`, a user that cannot be an inventory line, or a type that is not `ssh` or `usernamePassword` | see [Reaching the host as a credential](#reaching-the-host-as-a-credential) |
 | `missing-host` | a ResourceSet with no host to write the inventory for | give it a `targetHost` |
 
 ## Troubleshooting
@@ -366,7 +412,7 @@ target can raise, and what to do:
 | What you see | Why | What to do |
 |---|---|---|
 | `could not run ansible-playbook: it is not installed, or not on the PATH` | the plugin runs `ansible-playbook` on the machine running Meridian | `pip install ansible-core`, or set `MERIDIAN_ANSIBLE_PLAYBOOK` |
-| `ansible-playbook could not reach the host` (status `4`) | SSH, the user or the key is not what Ansible needs | put the connection settings in `MERIDIAN_ANSIBLE_ARGS`, or `--connection local` for this machine |
+| `ansible-playbook could not reach the host` (status `4`) | SSH, the user or the key is not what Ansible needs | name a [credential](#reaching-the-host-as-a-credential) for the host, put the connection settings in `MERIDIAN_ANSIBLE_ARGS`, or use `--connection local` for this machine |
 | the plan is unknown | a task was skipped in check mode: an exec with no `creates` or `removes`, or a condition only the host can answer | give the exec a `creates`, or read the apply's report |
 | `ansible-playbook reported a failed task` (status `2`) | a task failed on the host; the ones before it were applied | read the output above the message; `apply --resume` continues after the fix |
 | a handler did not run | handlers run only when a task that notifies them changed | expected; change the notifier, or declare the state you want on the service |
@@ -390,9 +436,11 @@ target can raise, and what to do:
   check-mode plan that creates nothing, a play checked on disk, a second plan
   that is in sync, drift put right, a handler that runs only when its
   notifier changed, a `runtimeWhen` answered by the host's facts, a command
-  check mode cannot preview, a failed task, and a secret that reaches the
+  check mode cannot preview, a failed task, a secret that reaches the
   play through the extra-vars file and is in nothing Ansible prints, check
-  mode with diff included. They are marked `#[ignore]`
+  mode with diff included, and a credential whose user is read from the
+  inventory and whose key is named on the command line and is in nothing
+  Ansible prints or the plugin writes. They are marked `#[ignore]`
   and run with
   `MERIDIAN_TEST_REAL_ANSIBLE=1 cargo test -p meridian-target-ansible --test real -- --ignored`.
   Reaching another machine over SSH, and the package, service, user and group

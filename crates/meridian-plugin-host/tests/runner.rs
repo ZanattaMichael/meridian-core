@@ -49,6 +49,7 @@ fn context(test: &str) -> RunContext {
         work_dir,
         inputs: Data::new(),
         secrets: Default::default(),
+        credential: None,
     }
 }
 
@@ -82,6 +83,7 @@ fn graph(resources: Vec<Resource>) -> ResourceGraph {
         edges: Vec::new(),
         outputs: Vec::new(),
         secrets: Vec::new(),
+        credential: None,
     }
 }
 
@@ -124,6 +126,7 @@ fn a_rust_plugin_describes_its_category_and_operations() {
             synthetic_notify: true,
             runtime_condition: false,
             secrets: true,
+            credentials: true,
         }
     );
     assert_eq!(info.category, Category::Containerization);
@@ -626,7 +629,98 @@ fn a_secret_in_a_param_reaches_the_plugin_by_name_and_its_value_when_it_runs() {
 }
 
 #[test]
-fn a_plugin_that_takes_no_secrets_says_so() {
+fn a_credential_reaches_the_plugin_by_name_when_it_compiles_and_by_value_when_it_runs() {
+    let sink = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("runner")
+        .join("credential-sink.json");
+    let _ = fs::remove_file(&sink);
+    let mut env: Vec<(String, String)> = std::env::vars().collect();
+    env.push((
+        "FAKE_CREDENTIAL_SINK".to_owned(),
+        sink.to_string_lossy().into_owned(),
+    ));
+    let client = Client::start(
+        &fake(),
+        &StartOptions {
+            env: Some(env),
+            ..StartOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(client.info().capabilities.credentials);
+
+    // Compiling: the graph names the credential and its secret fields, and
+    // the plugin can put that in its artifact, since there is no value in it.
+    let declared = meridian_sdk::Credential {
+        name: "deploy".to_owned(),
+        kind: "ssh".to_owned(),
+        ambient: false,
+        text: BTreeMap::from([("user".to_owned(), "deploy".to_owned())]),
+        flags: BTreeMap::new(),
+        secret_fields: vec!["privateKey".to_owned()],
+    };
+    let mut graph = graph(vec![file("conf", "x")]);
+    graph.credential = Some(declared.clone());
+    let emitted = client.emit(&graph, &Data::new()).unwrap();
+    assert_eq!(
+        emitted.artifact.files["credential.txt"],
+        "deploy (ssh, user deploy)\nsecret fields: privateKey\n"
+    );
+
+    // Running: the values go with the run, and the plugin hands them to its
+    // tool in a private file, recording what it did and never a value.
+    let mut context = context("credential");
+    context.credential = Some(meridian_sdk::HeldCredential::from_values(
+        declared,
+        vec![(
+            "privateKey".to_owned(),
+            SecretValue::from_reader(&b"-----KEY-----"[..], 64).unwrap(),
+        )],
+    ));
+    let mut printed = Vec::new();
+    client
+        .plan(&context, &emitted.artifact, &mut |line: LogLine| {
+            printed.push(line.text)
+        })
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(&sink).unwrap(),
+        "{\"privateKey\":\"-----KEY-----\"}\n"
+    );
+    assert!(printed.contains(
+        &"credential deploy (ssh, user deploy) handed over in a private file".to_owned()
+    ));
+    let delivery = fs::read_to_string(context.work_dir.join("credential-delivery.json")).unwrap();
+    for part in [
+        "\"name\":\"deploy\"",
+        "\"type\":\"ssh\"",
+        "\"secretFields\":[\"privateKey\"]",
+        "\"text\":{\"user\":\"deploy\"}",
+        "\"channel\":\"file\"",
+    ] {
+        assert!(delivery.contains(part), "{delivery} lacks {part}");
+    }
+    assert!(!delivery.contains("KEY"), "{delivery}");
+    assert!(!printed.iter().any(|l| l.contains("KEY")), "{printed:?}");
+    // The private file is gone once the call is over.
+    let private = context.work_dir.join("credential.json");
+    assert!(!private.exists());
+
+    // Apply gets it too; reading outputs needs none and is sent none.
+    let _ = fs::remove_file(&sink);
+    client
+        .apply(&context, &emitted.artifact, &mut no_log())
+        .unwrap();
+    assert!(sink.exists());
+    let _ = fs::remove_file(&sink);
+    context.credential = None;
+    client.outputs(&context).unwrap();
+    assert!(!sink.exists());
+    client.close().unwrap();
+}
+
+#[test]
+fn a_plugin_that_takes_no_secrets_takes_no_credential_either() {
     let mut env: Vec<(String, String)> = std::env::vars().collect();
     env.push(("FAKE_SECRETS".to_owned(), "none".to_owned()));
     let client = Client::start(
@@ -638,5 +732,6 @@ fn a_plugin_that_takes_no_secrets_says_so() {
     )
     .unwrap();
     assert!(!client.info().capabilities.secrets);
+    assert!(!client.info().capabilities.credentials);
     client.close().unwrap();
 }

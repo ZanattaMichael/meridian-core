@@ -155,6 +155,7 @@ impl Emitter for Puppet {
             synthetic_notify: false,
             runtime_condition: false,
             secrets: false,
+            credentials: false,
         }
     }
 

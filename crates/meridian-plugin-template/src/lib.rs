@@ -134,6 +134,7 @@ impl Emitter for Template {
             synthetic_notify: false,
             runtime_condition: false,
             secrets: false,
+            credentials: false,
         }
     }
 

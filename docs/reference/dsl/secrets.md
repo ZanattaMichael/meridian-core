@@ -53,6 +53,7 @@ on [its own page](../../concepts/secrets-in-memory.md).
 - [What an expression can do with one](#what-an-expression-can-do-with-one)
 - [Where a secret cannot be used](#where-a-secret-cannot-be-used)
 - [Handing a secret to a tool](#handing-a-secret-to-a-tool)
+- [A secret in a credential](#a-secret-in-a-credential)
 - [When a secret is fetched](#when-a-secret-is-fetched)
 - [Checking before a run](#checking-before-a-run)
 - [What each command does](#what-each-command-does)
@@ -302,6 +303,16 @@ resource "app_env": params.content holds a secret, and target "chef" does not ta
 
 A rollback hands the tool the document's secrets again, fetched at the
 stage's turn: the artifact being put back refers to them by name.
+
+## A secret in a credential
+
+A [credential](credentials.md) is an identity: a user and a key, a user and
+a password, a token. Its secret fields are declared secrets, each read as
+exactly `${{ secret.<name> }}`, and they follow the same route to the tool
+as a secret in a param, by the tool's own channel for an identity: Ansible
+takes a key as `--private-key <private file>` and a password in the
+extra-vars file. A literal in a secret field is refused when the document is
+validated. See [Credentials](credentials.md).
 
 ## When a secret is fetched
 

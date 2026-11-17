@@ -124,6 +124,9 @@ pub struct ResourceGraph {
     /// What the document promises to later stages, in declaration order.
     /// Only an Infrastructure document declares any.
     pub outputs: Vec<Output>,
+    /// The credential the host is reached with, when the document names one
+    /// in `targetHost.credential`. Resolved: its secret fields are slots.
+    pub credential: Option<meridian_ir::Credential>,
 
     resources: Vec<Resource>,
     by_id: HashMap<String, usize>,
@@ -151,6 +154,13 @@ impl ResourceGraph {
             &rs.spec.resources,
         )?;
         graph.target_version = rs.spec.target_version.clone();
+        graph.credential = rs
+            .spec
+            .target_host
+            .as_ref()
+            .filter(|th| !th.credential.is_empty())
+            .and_then(|th| rs.spec.credentials.iter().find(|c| c.name == th.credential))
+            .cloned();
         Ok(graph)
     }
 
@@ -258,6 +268,7 @@ impl ResourceGraph {
             target: target.to_owned(),
             target_version: String::new(),
             outputs: Vec::new(),
+            credential: None,
             resources: kept,
             by_id,
             edges,

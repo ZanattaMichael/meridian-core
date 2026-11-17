@@ -142,6 +142,32 @@ message ResourceGraph {
   // secrets names every secret the resources' params refer to. Empty for a
   // graph without one.
   repeated SecretName secrets = 8;
+  // credential is the identity the host is reached with, when the document
+  // names one. It holds the credential's plain fields and the names of its
+  // secret fields, never a value: the values arrive in RunContext.credential
+  // for Plan and Apply. Sent only to a target whose capabilities include
+  // credentials.
+  Credential credential = 9;
+}
+
+// Credential is an identity a document declares, as a compile sees it: its
+// name, its type, its plain fields and which of its fields hold secret
+// material. It holds no secret.
+message Credential {
+  string name = 1;
+  // type is one of the language's credential types: ssh, usernamePassword,
+  // token, certificate, aws, azure, gcp, kubeconfig, registry.
+  string type = 2;
+  // ambient says the tool finds the credential for itself; no secret field
+  // is given then.
+  bool ambient = 3;
+  // text holds the fields that are not secret, by name: a user, a region.
+  map<string, string> text = 4;
+  // flags holds the fields that are a yes or a no, by name: agent,
+  // managedIdentity.
+  map<string, bool> flags = 5;
+  // secret_fields names the fields that hold secret material.
+  repeated string secret_fields = 6;
 }
 
 // Capabilities is a target's honest declaration of what it can express. It is
@@ -160,6 +186,13 @@ message Capabilities {
   // before this field existed reports false, so the protocol version did
   // not change.
   bool secrets = 4;
+  // credentials says the target takes the credential a document names for
+  // its host: its emitter writes the credential's plain fields where its
+  // tool reads them (a user into an inventory, say) and its runner hands the
+  // secret fields to the tool by a private channel, as it hands secrets. A
+  // host refuses a document that names a credential for a target that does
+  // not say so. A plugin built before this field existed reports false.
+  bool credentials = 5;
 }
 
 // Artifact is the complete output of a compile: relative path to file content.
@@ -415,6 +448,29 @@ message RunContext {
   // into protected memory as it arrives and wipes the message. The plugin
   // holds them for the length of the call and no longer.
   repeated Secret secrets = 5;
+  // credential is the identity the host is reached with, with the value of
+  // each of its secret fields, sent as secrets are: only to a target whose
+  // capabilities include credentials, and only for Plan and Apply.
+  CredentialValues credential = 6;
+}
+
+// CredentialValues is a credential with the value of each of its secret
+// fields, as a run hands it to a plugin. The values cross the plugin's
+// private socket in this message and are taken into protected memory by
+// the SDK as they arrive, as a Secret's value is.
+message CredentialValues {
+  string name = 1;
+  string type = 2;
+  bool ambient = 3;
+  map<string, string> text = 4;
+  map<string, bool> flags = 5;
+  repeated CredentialSecret secrets = 6;
+}
+
+// CredentialSecret is one secret field of a credential and its value.
+message CredentialSecret {
+  string field = 1;
+  bytes value = 2;
 }
 
 // Secret is one secret's value, on its way to a plugin.

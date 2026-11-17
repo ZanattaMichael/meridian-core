@@ -224,6 +224,7 @@ impl Emitter for Terraform {
             synthetic_notify: true,
             runtime_condition: false,
             secrets: true,
+            credentials: false,
         }
     }
 

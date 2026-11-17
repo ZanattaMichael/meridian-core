@@ -147,6 +147,7 @@ fn the_plugin_says_what_it_is() {
             synthetic_notify: false,
             runtime_condition: true,
             secrets: false,
+            credentials: false,
         }
     );
     assert_eq!(

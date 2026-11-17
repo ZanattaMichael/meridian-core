@@ -50,7 +50,7 @@ pub(crate) struct Touched {
 /// One stage of a rollback: ready to be put back, or already known not to
 /// be possible.
 pub(crate) enum Item {
-    Ready(Touched),
+    Ready(Box<Touched>),
     Unavailable(RollbackReport, &'static str),
 }
 
@@ -241,6 +241,7 @@ pub(crate) fn items_of(run: &mut Run<'_>, of: &RunRecord) -> Vec<Item> {
             &host,
             inputs,
             meridian_sdk::Secrets::none(),
+            None,
         ) {
             Ok(context) => context,
             Err(why) => {
@@ -248,14 +249,14 @@ pub(crate) fn items_of(run: &mut Run<'_>, of: &RunRecord) -> Vec<Item> {
                 continue;
             }
         };
-        items.push(Item::Ready(Touched {
+        items.push(Item::Ready(Box::new(Touched {
             id: step.id.clone(),
             target: step.target.clone(),
             context,
             previous: step.previous.clone(),
             attempted: step.artifact.clone(),
             masker: Masker::new(),
-        }));
+        })));
     }
     items
 }
@@ -284,7 +285,7 @@ pub(crate) fn execute(
                     },
                     "earlier-rollback-failed",
                 ),
-                None => one(run, journal, observer, touched),
+                None => one(run, journal, observer, *touched),
             },
         };
         let at = Some((&report.id, report.target.as_str(), report.host.as_str()));
@@ -326,7 +327,18 @@ pub(crate) fn execute(
 /// may refer to any; one an expression made from them is not among them,
 /// and a tool that needs it says so. With them comes a filter for what the
 /// tool prints. A document without secrets gives none.
-fn secrets_of(run: &Run<'_>, id: &StageId) -> Result<(meridian_sdk::Secrets, Masker), String> {
+#[allow(clippy::type_complexity)]
+fn secrets_of(
+    run: &Run<'_>,
+    id: &StageId,
+) -> Result<
+    (
+        meridian_sdk::Secrets,
+        Option<meridian_sdk::HeldCredential>,
+        Masker,
+    ),
+    String,
+> {
     let document = run
         .bundle
         .documents
@@ -337,12 +349,34 @@ fn secrets_of(run: &Run<'_>, id: &StageId) -> Result<(meridian_sdk::Secrets, Mas
             _ => false,
         });
     let Some(document) = document.filter(|doc| !doc.secrets().is_empty()) else {
-        return Ok((meridian_sdk::Secrets::none(), Masker::new()));
+        return Ok((meridian_sdk::Secrets::none(), None, Masker::new()));
     };
     let mut secrets = meridian_ir::Secrets::declared(document);
     crate::secrets::fetch(document, &mut secrets)?;
     let handed = crate::secrets::handed_by_name(&secrets)?;
-    Ok((handed, secrets.masker()))
+    // The credential the host is reached with is made of those secrets,
+    // read as the document resolves them.
+    let names_credential = document
+        .as_resource_set()
+        .and_then(|d| d.spec.target_host.as_ref())
+        .is_some_and(|th| !th.credential.is_empty());
+    let credential = if names_credential {
+        match meridian_ir::resolve_with(document, &run.options.data, &secrets) {
+            Ok(meridian_ir::Resolution::Kept { document, .. }) => {
+                let resolved = document
+                    .as_resource_set()
+                    .and_then(|d| d.spec.target_host.as_ref())
+                    .and_then(|th| document.credential(&th.credential))
+                    .cloned();
+                crate::secrets::handed_credential(resolved.as_ref(), secrets.table())?
+            }
+            Ok(meridian_ir::Resolution::Skipped { .. }) => None,
+            Err(e) => return Err(e.to_string()),
+        }
+    } else {
+        None
+    };
+    Ok((handed, credential, secrets.masker()))
 }
 
 /// Puts one stage back.
@@ -405,10 +439,11 @@ fn one(
 
     // The secrets are fetched at the stage's turn and held for it alone,
     // as an apply holds them.
-    if context.secrets.is_empty() {
+    if context.secrets.is_empty() && context.credential.is_none() {
         match secrets_of(run, &id) {
-            Ok((handed, filter)) => {
+            Ok((handed, credential, filter)) => {
                 context.secrets = handed;
+                context.credential = credential;
                 masker = filter;
             }
             Err(why) => return (unavailable(why), "secrets-unavailable"),

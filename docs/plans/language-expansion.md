@@ -1923,6 +1923,29 @@ and not an authentication failure an hour later. A plugin can add a type.
   rollout@web01 (ansible)   endpoint web01 as credential "deploy" (ssh, user deploy)
   ```
 
+**As built (phase 7, second part).** `spec.credentials` takes every type of
+the table, checked against a fixed list of plain fields, secret fields and
+flags per type (`meridian_secret::credential_types`), and a completeness rule
+per type (`privateKey`, or `password`, or `agent: true`), unless the
+credential is `from: ambient`. A secret field is exactly `${{ secret.<name>
+}}` of a declared secret; a literal, an undeclared secret or any other
+expression is refused by `validate`, and a plain field takes interpolation
+from data but never a secret. Endpoints are not built yet, so the first use
+is `targetHost.credential`, which takes an `ssh` or `usernamePassword`
+credential; a target declares `Capabilities::credentials`, is given the
+credential's shape and secret field names at compile (`ResourceGraph::
+credential`) and its values at plan and apply (`RunContext::credential`, a
+`HeldCredential`), and a document that names one for a target without the
+capability is refused before anything runs. Built for `ansible`
+(`ansible_user` in the inventory, the key as `--private-key` naming a `0600`
+file, the password as `ansible_password` in the extra-vars file; passphrase,
+certificate and domain refused) and the test target. The plan line reads
+`on web01 as deploy (ssh, user deploy)`. A credential's secret fields are
+secrets of the document, so the run record, the events and the mask treat
+them as any other. Not built: a credential as a `final` declaration, a
+plugin adding a type, and the other uses (settings, stores, sinks). See
+[the reference](../reference/dsl/credentials.md).
+
 ## 13. Workflows
 
 ### 13.1 The `Workflow` document
@@ -2330,7 +2353,7 @@ green before the next starts.
 | 5b | `Composite`, `include`, `extends`, the configuration type (`segment`, `targets`) | 5 |
 | 6 | `Inventory`, endpoint types, `spec.endpoints`, one instance per endpoint, `--endpoint`, sources from outputs | 4, 5 |
 | 6a (built in part) | `meridian-secret`: the locked, wiped-on-drop value, process hardening, the secret handle in `Value` and how the mark spreads, the output filter, the delivery helpers (standard input, user-only files), `spec.secrets` with the `env`, `file`, `exec` and operating-system store providers, `meridian secret set` and `check`, `resolve_credential`, and the tests of [11.9](#119-what-is-tested). **Built so far:** the crate, the handle and the mark, `spec.secrets` with `env`, `file` and `exec`, fetched per stage and wiped after it, `--strict-secrets` and the warning when memory cannot be locked, `meridian secret check`, and `resolve_credential` for the `registry`, `usernamePassword` and `token` types ([reference](../reference/dsl/secrets.md), [how it is held](../concepts/secrets-in-memory.md)). Then the `keyring`, `systemd-creds`, `secret-service` and `keychain` stores, `fallback` places for one secret, and `meridian secret set` into the keyring and the Secret Service. **Still to come:** `credential-manager` on Windows, writing the keychain, the `tpm` plugin | 2 |
-| 7 (built in part) | secrets and credentials on targets: credential types, sealed references and the secret stream in the protocol, delivery on every target by its channel of [11.6](#116-handing-a-secret-to-a-tool), the plugin contract suite with the recording tool. **Built so far:** the `secrets` capability, secrets by name in the graph and by value in the run context, delivery on `ansible`, `terraform` and `opentofu` and the test target, the SDK's `Secrets`, `json_file` and `stdin_secret`, and the stand-in and real-tool tests of the handover. **Still to come:** credential types in documents, delivery on every other target, the recording tool as one suite | 6, 6a |
+| 7 (built in part) | secrets and credentials on targets: credential types, sealed references and the secret stream in the protocol, delivery on every target by its channel of [11.6](#116-handing-a-secret-to-a-tool), the plugin contract suite with the recording tool. **Built so far:** the `secrets` capability, secrets by name in the graph and by value in the run context, delivery on `ansible`, `terraform` and `opentofu` and the test target, the SDK's `Secrets`, `json_file` and `stdin_secret`, and the stand-in and real-tool tests of the handover; credential types in documents (`spec.credentials`, every type checked, `targetHost.credential`, the `credentials` capability, delivery on `ansible` and the test target). **Still to come:** delivery on every other target, the recording tool as one suite | 6, 6a |
 | 7a | events and the run record: the event stream, `status`, `runs`, `events`, locking, `--events json` | 4 |
 | 8 | `Workflow`: steps, order from needs, `with`, `assign` from data, fan-out strategies, gates, failure handling, resume | 5a, 6, 7a |
 | 8a | notification sinks: the sink protocol, `webhook` and `command` built in, then `slack`, `teams`, `email`, `opentelemetry` | 7, 7a |

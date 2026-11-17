@@ -65,6 +65,7 @@ fn the_plugin_describes_itself_over_the_protocol() {
             synthetic_notify: true,
             runtime_condition: false,
             secrets: false,
+            credentials: false,
         }
     );
     assert_eq!(

@@ -51,6 +51,13 @@ pub fn secret_reference(name: &str) -> String {
     format!("{{{{ {} }}}}", secret_variable(name))
 }
 
+/// The Ansible variable a credential's password is handed over as, in the
+/// same private extra-vars file as the document's secrets.
+pub const PASSWORD_VARIABLE: &str = "ansible_password";
+
+/// The inventory variable a credential's user is written as.
+pub const USER_VARIABLE: &str = "ansible_user";
+
 /// One native Ansible task or handler: the module to run, its arguments, and
 /// the structural keys around it. It is the native tree the transform stage
 /// produces and the emit stage serialises.
@@ -80,6 +87,10 @@ pub(crate) struct Task {
 pub(crate) struct Playbook {
     pub name: String,
     pub hosts: String,
+    /// Host variables written after the host in the inventory, such as the
+    /// `ansible_user` a credential names. Never a secret: a secret field of
+    /// the credential reaches the runner, which hands it over privately.
+    pub inventory_vars: Vec<(String, String)>,
     pub tasks: Vec<Task>,
     pub handlers: Vec<Task>,
 }
@@ -121,6 +132,7 @@ impl Emitter for Ansible {
             synthetic_notify: false,
             runtime_condition: true,
             secrets: true,
+            credentials: true,
         }
     }
 
