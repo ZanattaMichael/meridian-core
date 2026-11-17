@@ -65,9 +65,9 @@ spec:
 |---|---|
 | Indentation: two spaces, with list items indented under their key | Every value, exactly as typed, including numbers such as `0644` |
 | The order of the language's own fields: `apiVersion`, `kind`, `metadata`, `spec`; in `spec` `target`, `targetVersion`, `when`, `variables`, `conditions`, `secrets`, `targetHost`, `imports`, `resources`, `outputs`; in a resource `id`, `type`, `state`, `when`, `runtimeWhen`, `params`, `dependsOn`, `notifies` | The order of anything the language does not define: params, labels, resources, list entries |
-| Trailing spaces, and runs of blank lines (one is kept) | Quotes, and whether a value is written in block or flow style (`{name: nginx}` stays as it is) |
+| Trailing spaces, and runs of blank lines (one is kept), outside block scalars | Quotes, and whether a value is written in block or flow style (`{name: nginx}` stays as it is) |
 | A missing newline at the end of the file | Comments, which move with the field or list entry they are written above or beside |
-| | Block scalars (`|` and `>`): their text is kept line for line |
+| A byte order mark at the start of the file, which is dropped | Block scalars (`|` and `>`): their text is kept line for line, trailing spaces included, and a `|+` or `>+` at the end of the file keeps the blank lines after it, which are part of its value |
 | | JSON files, which are returned unchanged |
 
 The field order is the one the language's own tables list, which is also the

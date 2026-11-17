@@ -113,6 +113,54 @@ fn plugins_lists_what_each_plugin_is_and_can_do() {
     );
 }
 
+/// Runs `meridian` with its stdout closed before it writes, as
+/// `meridian ... | head -0` does.
+fn meridian_with_stdout_closed(dir: &Path, args: &[&str]) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .args(args)
+        .current_dir(dir)
+        .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())
+        .env_remove("MERIDIAN_STATE_DIR")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("meridian runs");
+    drop(child.stdout.take());
+    child.wait_with_output().expect("meridian exits")
+}
+
+#[test]
+fn a_reader_that_stops_early_ends_the_printing_and_not_the_command() {
+    let dir = scratch("closed-stdout", WORKFLOW);
+    // What would have printed is dropped quietly, and the command succeeds.
+    for args in [&["plugins"][..], &["validate", "site.yaml"], &["version"]] {
+        let out = meridian_with_stdout_closed(&dir, args);
+        assert!(out.status.success(), "{args:?}: {}", stderr(&out));
+        assert_eq!(stderr(&out), "", "{args:?}");
+    }
+    // A command that prints before it decides keeps its verdict: stdout is
+    // closed, lint found an error, and the exit status says so.
+    fs::write(
+        dir.join("bad.yaml"),
+        WORKFLOW.replace(
+            "content: \"welcome\\n\"",
+            "content: \"welcome\\n\"\n      dependsOn:\n        - resource: nope",
+        ),
+    )
+    .unwrap();
+    let open = meridian(&dir, &["lint", "bad.yaml"]);
+    assert_eq!(open.status.code(), Some(1), "{}", stderr(&open));
+    assert!(
+        stdout(&open).contains("[invalid-document]"),
+        "{}",
+        stdout(&open)
+    );
+    let closed = meridian_with_stdout_closed(&dir, &["lint", "bad.yaml"]);
+    assert_eq!(closed.status.code(), Some(1));
+    assert!(!stderr(&closed).contains("panicked"), "{}", stderr(&closed));
+    assert_eq!(stderr(&closed), stderr(&open));
+}
+
 #[test]
 fn compile_writes_each_documents_files_and_applies_nothing() {
     let dir = scratch("compile", WORKFLOW);

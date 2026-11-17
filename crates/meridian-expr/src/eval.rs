@@ -307,6 +307,16 @@ impl PieceOwned {
     }
 }
 
+/// `value`, or `None` when it is not set or is null: what `??`, `default()`
+/// and `coalesce()` fall through on.
+fn present_of(value: Outcome<Value>) -> Outcome<Option<Value>> {
+    match value {
+        Ok(Value::Null) | Err(Failure::NotSet { .. }) => Ok(None),
+        Ok(value) => Ok(Some(value)),
+        Err(other) => Err(other),
+    }
+}
+
 fn overflow(op: &str) -> Failure {
     Failure::Other(format!(
         "the result of {op} is too large for a whole number"
@@ -322,7 +332,13 @@ impl<'a> Evaluator<'a> {
     }
 
     pub(crate) fn truth(&mut self, node: &Node) -> Outcome<bool> {
-        match self.value(node)? {
+        let value = self.value(node);
+        self.truth_of(value, node)
+    }
+
+    /// Whether `value`, which is what `node` came to, is true.
+    fn truth_of(&self, value: Outcome<Value>, node: &Node) -> Outcome<bool> {
+        match value? {
             Value::Bool(b) => Ok(b),
             other => Err(Failure::Other(format!(
                 "{} is {}, not true or false; compare it with == or !=",
@@ -356,75 +372,7 @@ impl<'a> Evaluator<'a> {
                     None => return Err(self.not_set(node)),
                 }
             }
-            Node::Field(base, key) => {
-                let holder = self.value(base)?;
-                match holder {
-                    Value::Map(mut map) => match map.remove(key) {
-                        Some(value) => value,
-                        None => return Err(self.not_set(node)),
-                    },
-                    // `list.0` is `list[0]`.
-                    Value::List(mut items) if key.parse::<usize>().is_ok() => {
-                        match key.parse::<usize>() {
-                            Ok(at) if at < items.len() => items.swap_remove(at),
-                            _ => return Err(self.not_set(node)),
-                        }
-                    }
-                    other => {
-                        return Err(Failure::Other(format!(
-                            "{} is {}, so it has no key {key:?}",
-                            base.describe(),
-                            other.describe()
-                        )))
-                    }
-                }
-            }
-            Node::Index(base, index) => {
-                let holder = self.value(base)?;
-                let index_value = self.value(index)?;
-                match (holder, &index_value) {
-                    (Value::Map(mut map), Value::String(key)) => match map.remove(key) {
-                        Some(value) => value,
-                        None => return Err(self.not_set(node)),
-                    },
-                    (Value::List(mut items), index) if Number::of(index).is_some() => {
-                        let Some(Number::Int(n)) = Number::of(index) else {
-                            return Err(Failure::Other(format!(
-                                "an index into a list is a whole number, not {}",
-                                index.canonical()
-                            )));
-                        };
-                        // A negative index counts from the end.
-                        let len = items.len() as i64;
-                        let at = if n < 0 { len + n } else { n };
-                        if at < 0 || at >= len {
-                            return Err(self.not_set(node));
-                        }
-                        items.swap_remove(at as usize)
-                    }
-                    (Value::Map(_), other) => {
-                        return Err(Failure::Other(format!(
-                            "{} is a mapping, so it is indexed with text, not {}",
-                            base.describe(),
-                            other.describe()
-                        )))
-                    }
-                    (Value::List(_), other) => {
-                        return Err(Failure::Other(format!(
-                            "{} is a list, so it is indexed with a number, not {}",
-                            base.describe(),
-                            other.describe()
-                        )))
-                    }
-                    (other, _) => {
-                        return Err(Failure::Other(format!(
-                            "{} is {}, so it cannot be indexed",
-                            base.describe(),
-                            other.describe()
-                        )))
-                    }
-                }
-            }
+            Node::Field(..) | Node::Index(..) => self.path(node)?,
             Node::Unary(Unary::Not, inner) => Value::Bool(!self.truth(inner)?),
             Node::Unary(Unary::Negate, inner) => match Number::of(&self.value(inner)?) {
                 Some(Number::Int(n)) => Value::Int(n.checked_neg().ok_or_else(|| overflow("-"))?),
@@ -456,37 +404,156 @@ impl<'a> Evaluator<'a> {
                 }
                 Value::Map(map)
             }
-            Node::Binary(op, left, right) => self.binary(*op, left, right)?,
+            Node::Binary(..) => self.chain(node)?,
             Node::Call(name, args) => self.call(name, args)?,
+        })
+    }
+
+    /// Evaluates a path of field reads and indexes, `a.b[0].c`. Each step
+    /// holds the one before it, so a long path is a deep tree; it is walked
+    /// here with a list instead of a call per step, so its length costs no
+    /// stack.
+    fn path(&mut self, node: &Node) -> Outcome<Value> {
+        let mut steps = Vec::new();
+        let mut innermost = node;
+        while let Node::Field(base, _) | Node::Index(base, _) = innermost {
+            steps.push(innermost);
+            innermost = base;
+        }
+        let mut holder = self.value(innermost)?;
+        for step in steps.into_iter().rev() {
+            holder = match step {
+                Node::Field(base, key) => self.field(holder, step, base, key)?,
+                Node::Index(base, index) => self.index(holder, step, base, index)?,
+                _ => unreachable!("only fields and indexes are steps of a path"),
+            };
+        }
+        Ok(holder)
+    }
+
+    /// `holder.key`, where `holder` is what `base` came to.
+    fn field(&mut self, holder: Value, node: &Node, base: &Node, key: &str) -> Outcome<Value> {
+        Ok(match holder {
+            Value::Map(mut map) => match map.remove(key) {
+                Some(value) => value,
+                None => return Err(self.not_set(node)),
+            },
+            // `list.0` is `list[0]`.
+            Value::List(mut items) if key.parse::<usize>().is_ok() => match key.parse::<usize>() {
+                Ok(at) if at < items.len() => items.swap_remove(at),
+                _ => return Err(self.not_set(node)),
+            },
+            other => {
+                return Err(Failure::Other(format!(
+                    "{} is {}, so it has no key {key:?}",
+                    base.describe(),
+                    other.describe()
+                )))
+            }
+        })
+    }
+
+    /// `holder[index]`, where `holder` is what `base` came to.
+    fn index(&mut self, holder: Value, node: &Node, base: &Node, index: &Node) -> Outcome<Value> {
+        let index_value = self.value(index)?;
+        Ok(match (holder, &index_value) {
+            (Value::Map(mut map), Value::String(key)) => match map.remove(key) {
+                Some(value) => value,
+                None => return Err(self.not_set(node)),
+            },
+            (Value::List(mut items), index) if Number::of(index).is_some() => {
+                let Some(Number::Int(n)) = Number::of(index) else {
+                    return Err(Failure::Other(format!(
+                        "an index into a list is a whole number, not {}",
+                        index.canonical()
+                    )));
+                };
+                // A negative index counts from the end.
+                let len = items.len() as i64;
+                let at = if n < 0 { len + n } else { n };
+                if at < 0 || at >= len {
+                    return Err(self.not_set(node));
+                }
+                items.swap_remove(at as usize)
+            }
+            (Value::Map(_), other) => {
+                return Err(Failure::Other(format!(
+                    "{} is a mapping, so it is indexed with text, not {}",
+                    base.describe(),
+                    other.describe()
+                )))
+            }
+            (Value::List(_), other) => {
+                return Err(Failure::Other(format!(
+                    "{} is a list, so it is indexed with a number, not {}",
+                    base.describe(),
+                    other.describe()
+                )))
+            }
+            (other, _) => {
+                return Err(Failure::Other(format!(
+                    "{} is {}, so it cannot be indexed",
+                    base.describe(),
+                    other.describe()
+                )))
+            }
         })
     }
 
     /// The value of `node`, or `None` when it is not set or is null: what
     /// `??`, `default()` and `coalesce()` fall through on.
     fn present(&mut self, node: &Node) -> Outcome<Option<Value>> {
-        match self.value(node) {
-            Ok(Value::Null) | Err(Failure::NotSet { .. }) => Ok(None),
-            Ok(value) => Ok(Some(value)),
-            Err(other) => Err(other),
-        }
+        present_of(self.value(node))
     }
 
-    fn binary(&mut self, op: Binary, left: &Node, right: &Node) -> Outcome<Value> {
-        // The right side is only decided when the left leaves the answer
-        // open, so `defined(data.x) && data.x == 1` can guard itself.
-        match op {
-            Binary::And => return Ok(Value::Bool(self.truth(left)? && self.truth(right)?)),
-            Binary::Or => return Ok(Value::Bool(self.truth(left)? || self.truth(right)?)),
-            Binary::Coalesce => {
-                return match self.present(left)? {
+    /// Evaluates a run of binary operators. Operators of one precedence
+    /// associate to the left, so `a + b + c` is a tree whose left side goes
+    /// as deep as the chain is long; it is walked here with a list instead
+    /// of a call per level, so a long chain costs no stack.
+    fn chain(&mut self, node: &Node) -> Outcome<Value> {
+        let mut spine = Vec::new();
+        let mut leftmost = node;
+        while let Node::Binary(op, left, right) = leftmost {
+            spine.push((*op, &**left, &**right));
+            leftmost = left;
+        }
+        let mut acc = self.value(leftmost);
+        for (op, left, right) in spine.into_iter().rev() {
+            // The right side is only decided when the left leaves the
+            // answer open, so `defined(data.x) && data.x == 1` can guard
+            // itself.
+            acc = match op {
+                Binary::And => {
+                    let a = self.truth_of(acc, left)?;
+                    Ok(Value::Bool(a && self.truth(right)?))
+                }
+                Binary::Or => {
+                    let a = self.truth_of(acc, left)?;
+                    Ok(Value::Bool(a || self.truth(right)?))
+                }
+                Binary::Coalesce => match present_of(acc)? {
                     Some(value) => Ok(value),
                     None => self.value(right),
+                },
+                _ => {
+                    let a = acc?;
+                    let b = self.value(right)?;
+                    self.binary(op, a, b, left, right)
                 }
-            }
-            _ => {}
+            };
         }
-        let a = self.value(left)?;
-        let b = self.value(right)?;
+        acc
+    }
+
+    /// Applies `op` to `a` and `b`, what `left` and `right` came to.
+    fn binary(
+        &mut self,
+        op: Binary,
+        a: Value,
+        b: Value,
+        left: &Node,
+        right: &Node,
+    ) -> Outcome<Value> {
         let mismatch = |verb: &str| {
             Failure::Other(format!(
                 "cannot {verb} {} and {} with {}; convert one first, with toString or toNumber",
@@ -590,14 +657,17 @@ impl<'a> Evaluator<'a> {
                     )));
                 }
                 match (x, y, op) {
+                    // The one remainder that overflows, the smallest
+                    // number by -1, is 0.
                     (Number::Int(x), Number::Int(y), Binary::Remainder) => {
-                        Value::Int(x.checked_rem(y).ok_or_else(|| overflow("%"))?)
+                        Value::Int(x.checked_rem(y).unwrap_or(0))
                     }
                     // Whole numbers that divide exactly stay whole.
                     (Number::Int(x), Number::Int(y), _) if x % y == 0 => {
                         Value::Int(x.checked_div(y).ok_or_else(|| overflow("/"))?)
                     }
-                    (x, y, Binary::Remainder) => Value::Float(x.float() % y.float()),
+                    // A remainder of nothing is 0, never -0.
+                    (x, y, Binary::Remainder) => Value::Float(x.float() % y.float() + 0.0),
                     (x, y, _) => Value::Float(x.float() / y.float()),
                 }
             }

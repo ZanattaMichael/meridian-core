@@ -761,6 +761,32 @@ fn fmt_leaves_yaml_that_is_not_meridian_alone() {
     assert!(out.status.success(), "{}", stderr(&out));
 }
 
+#[test]
+fn fmt_and_lint_read_a_file_that_starts_with_a_byte_order_mark() {
+    let dir = scratch("fmt-bom");
+    let marked = format!(
+        "\u{feff}{}",
+        WEB.replace("\n  resources:", "\n  resources:   ")
+    );
+    fs::write(dir.join("web.yaml"), &marked).unwrap();
+    let out = meridian(&dir, &["fmt", "--check", "web.yaml"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "web.yaml\n");
+    assert!(!stderr(&out).contains("skipped"), "{}", stderr(&out));
+    // One standard layout: the mark goes with the rest of the layout.
+    let out = meridian(&dir, &["fmt", "web.yaml"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(fs::read_to_string(dir.join("web.yaml")).unwrap(), WEB);
+
+    fs::write(dir.join("web.yaml"), format!("\u{feff}{WEB}")).unwrap();
+    let out = meridian(&dir, &["lint", "web.yaml"]);
+    assert!(out.status.success(), "{}{}", stdout(&out), stderr(&out));
+    assert_eq!(
+        stdout(&out),
+        "1 document in 1 file checked, nothing to report\n"
+    );
+}
+
 /// The examples are what people copy, so they are kept in the standard
 /// layout: `meridian fmt --check examples` passes.
 #[test]
