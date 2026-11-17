@@ -32,6 +32,11 @@ Puppet identifies a managed thing by its name or path, not by the declaration's
 title. Two resources that manage the same package or file would only collide on
 the node, so Meridian refuses them at compile time.
 
+The node statement in `site.pp` is written as a Puppet string, with the same quoting
+as every other string the plugin writes, and the plugin refuses a host that is not a
+name (rule `invalid-host`); the core refuses one before it gets this far
+([`targetHost`](../reference/dsl/outputs-and-hand-offs.md#rules)).
+
 ## Example
 
 [`examples/puppet/web-server.yaml`](../../examples/puppet/web-server.yaml) compiles to:

@@ -409,3 +409,22 @@ fn a_host_that_cannot_be_reached_or_was_never_named_is_said_plainly() {
         "MERIDIAN_CLOUD_INIT_WAIT=ssh needs a host to wait for, and this document resolved none"
     );
 }
+
+#[test]
+fn a_host_ssh_would_read_as_an_option_is_refused_before_the_wait() {
+    // Issue 134: the core refuses such a host first; the runner is the last
+    // thing between it and ssh's command line.
+    let dir = scratch(TMP, "hostile-host");
+    let hostile = RunContext {
+        host: "-oProxyCommand=touch /tmp/pwned".into(),
+        ..context(&dir)
+    };
+    let err = waiting(&dir, BOOT_DONE)
+        .apply(&hostile, &compiled(USER_DATA), &KeptLog::default())
+        .expect_err("refused");
+    assert!(
+        err.to_string().contains("ssh cannot be given this host"),
+        "{err}"
+    );
+    assert!(!dir.join("ssh.args").exists());
+}

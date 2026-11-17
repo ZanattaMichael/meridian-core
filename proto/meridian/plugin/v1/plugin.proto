@@ -212,6 +212,26 @@ message DescribeResponse {
   // field existed reports none, and an editor then knows only the names in
   // resource_types, so the protocol version did not change.
   repeated ResourceSchema resource_schemas = 20;
+  // placed_text lists the openings of the tool's own expression syntax, and
+  // how each is written as literal text. The host applies them to every
+  // value an interpolation places from data, so data can never open an
+  // expression the tool evaluates (Jinja's "{{" for Ansible, a leading "["
+  // for an ARM template). A plugin built before this field existed lists
+  // none, and the host then escapes only Meridian's own "${", so the
+  // protocol version did not change.
+  repeated PlacedEscape placed_text = 21;
+}
+
+// PlacedEscape is one opening of a tool's expression syntax, and what the
+// tool reads as that text and nothing more.
+message PlacedEscape {
+  // text opens an expression for the tool, such as "{{".
+  string text = 1;
+  // written is what the tool reads as the text itself, such as "{{ '{{' }}".
+  string written = 2;
+  // only_at_start says the text opens an expression only at the start of a
+  // value, as "[" does in an ARM template.
+  bool only_at_start = 3;
 }
 
 // ParamSchema is one param of a resource type.

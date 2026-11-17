@@ -240,6 +240,39 @@ fn an_expression_and_escaped_text_pass_through_untouched() {
 }
 
 #[test]
+fn a_value_the_core_placed_from_data_is_never_an_expression() {
+    // Issue 136: a value placed from data that opens with `[` reaches the
+    // plugin opening with `[[`, which the plugin declared as the escape.
+    let declared = Arm.placed_text();
+    assert_eq!(declared.len(), 1);
+    assert_eq!(
+        (
+            declared[0].text.as_str(),
+            declared[0].written.as_str(),
+            declared[0].only_at_start
+        ),
+        ("[", "[[", true)
+    );
+    // Where Resource Manager would otherwise read an expression, the escape
+    // is kept; where it could not, it is dropped, so the deployed value is
+    // the literal either way.
+    let text = template(&format!(
+        "{VNET}{}",
+        nic("        name: web-nic\n        location: \"[[resourceGroup().id]\"\n        tags:\n          open: \"[[not closed\"\n          list: [\"[[listKeys(x)]\"]\n          joined: \"[[x] ${vnet.name}\"\n")
+    ));
+    assert!(
+        text.contains("\"location\": \"[[resourceGroup().id]\""),
+        "{text}"
+    );
+    assert!(text.contains("\"open\": \"[not closed\""), "{text}");
+    assert!(text.contains("\"[[listKeys(x)]\""), "{text}");
+    assert!(
+        text.contains("\"joined\": \"[format('[x] {0}', 'web-vnet')]\""),
+        "{text}"
+    );
+}
+
+#[test]
 fn a_name_left_out_is_the_id() {
     let text = template(
         "    - id: logs\n      type: Microsoft.Storage/storageAccounts\n      params: {apiVersion: \"2023-01-01\"}\n",

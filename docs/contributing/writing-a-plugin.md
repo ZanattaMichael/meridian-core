@@ -281,6 +281,21 @@ them, so each one is a promise:
 - `target_versions()`: only if the tool comes in versions that need different
   output, as DSC does. Leave it out otherwise, and a document that asks your
   target for a version is refused instead of being silently ignored.
+- `placed_text()`: the openings of your tool's own expression syntax, if it
+  has any beyond `${`, and how each is written as literal text. The core
+  applies them to every value an interpolation places from data before `emit`
+  sees it, so data can never open an expression the tool evaluates; what the
+  author wrote in the document is untouched. Ansible declares Jinja's `{{`,
+  `{%` and `{#`, each written as `{{ '{{' }}`; ARM declares `[` at the start
+  of a value, written `[[`. A tool whose files are rendered through a template
+  engine must declare the engine's openings, or a value from `--data` is as
+  live as one the author wrote. Leave it out for a tool with no such syntax.
+
+```rust
+fn placed_text(&self) -> Vec<PlacedEscape> {
+    vec![PlacedEscape::anywhere("{{", "{{ '{{' }}")]
+}
+```
 
 ### Describe your resource types for editors
 
@@ -649,6 +664,8 @@ is this list:
 - [ ] Everything the tool cannot express is refused, with a test for each refusal
 - [ ] `capabilities()`, `category()` and `supported_resource_types()` claim only what a test proves
 - [ ] `resource_schemas()` describes each type from the tables the transform stage checks, or is left out on purpose
+- [ ] `placed_text()` declares every opening of the tool's own expression syntax, or the tool has none
+- [ ] a runner checks `RunContext.host` with `meridian_sdk::check_host` before handing it to a command line, and an emitter that writes the host into a file refuses one that is not a name
 - [ ] The runner builds no shell command strings, or says where it does and why
 - [ ] `docs/targets/<name>.md` is complete and opens with what is and is not supported
 - [ ] The target is listed in the README, the docs index, the install page and the capability matrix

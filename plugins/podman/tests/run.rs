@@ -542,9 +542,13 @@ fn a_host_ssh_cannot_reach_is_named() {
         ..context(&dir)
     };
     let err = runner.plan(&odd, &shop(), &KeptLog::default()).unwrap_err();
-    assert_eq!(
-        err.msg,
-        "\"-oProxyCommand=evil\" is not a host name ssh can be given"
+    assert!(
+        err.msg.contains("ssh cannot be given this host")
+            && err
+                .msg
+                .contains("\"-oProxyCommand=evil\" starts with \"-\""),
+        "{}",
+        err.msg
     );
 }
 

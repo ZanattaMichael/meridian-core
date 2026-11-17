@@ -199,6 +199,45 @@ fn a_bundle_validates_target_host_from_inline() {
 }
 
 #[test]
+fn a_host_that_is_not_a_name_is_refused_before_any_tool_sees_it() {
+    // Issue 134: the host goes to ssh, an inventory and a manifest raw, so a
+    // host that would be read as an option, a host variable or Puppet code
+    // is refused by validate.
+    for (host, says) in [
+        ("\"-oProxyCommand=touch /tmp/pwned\"", "starts with \"-\""),
+        ("\"web01 ansible_connection=local\"", "whitespace"),
+        ("\"web01\\n[all:vars]\\nx=y\"", "whitespace"),
+        ("\"x' { } node 'y\"", "'\\''"),
+    ] {
+        let doc = format!(
+            "{HEAD}  targetHost:\n    from: inline\n    host: {host}\n  resources:\n    - {{id: a, type: package}}\n"
+        );
+        let err = Bundle::new([parse_one(&doc)])
+            .validate()
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("spec.targetHost.host") && err.contains(says),
+            "{host}: {err}"
+        );
+    }
+    // A name, an address and user@host pass, as before.
+    for host in [
+        "web01",
+        "10.0.0.5",
+        "\"[fe80::1%eth0]\"",
+        "deploy@web01.example.com",
+    ] {
+        let doc = format!(
+            "{HEAD}  targetHost:\n    from: inline\n    host: {host}\n  resources:\n    - {{id: a, type: package}}\n"
+        );
+        Bundle::new([parse_one(&doc)])
+            .validate()
+            .unwrap_or_else(|e| panic!("{host}: {e}"));
+    }
+}
+
+#[test]
 fn a_bundle_rejects_duplicate_document_names() {
     let text = format!("{VALID_RESOURCE_SET}---\n{VALID_RESOURCE_SET}");
     let bundle = Bundle::new(parse("bundle.yaml", text.as_bytes()).unwrap());

@@ -243,3 +243,23 @@ fn a_directory_with_content_is_refused_here_not_on_the_node() {
          remove the param or the state"
     );
 }
+
+#[test]
+fn a_host_that_is_not_a_name_is_refused_rather_than_written_into_site_pp() {
+    // Issue 134: a quote in the host would end the node statement, and what
+    // followed would be Puppet code. The core refuses such a host first;
+    // this is the plugin's own line of defence, and site.pp is written
+    // through the same quoting as every other string.
+    let text = "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: puppet\n  targetHost:\n    from: inline\n    host: web01\n  resources:\n    - id: a\n      type: package\n      params: {name: nginx}\n";
+    let mut graph = graph_from_text("site.yaml", text, "puppet");
+    graph.host = "x' { } exec { 'x': command => 'touch /tmp/pwned' } node 'y".to_owned();
+    let refused = emit(&graph).expect_err("refused");
+    assert_eq!(refused.rule, "invalid-host");
+    assert!(refused.msg.contains("site.pp"), "{refused}");
+
+    let site = &compile("    - id: a\n      type: package\n      params: {name: nginx}\n")
+        .unwrap()
+        .artifact
+        .files[meridian_target_puppet::SITE_PATH];
+    assert!(site.contains("node 'web01.example.com' {"), "{site}");
+}

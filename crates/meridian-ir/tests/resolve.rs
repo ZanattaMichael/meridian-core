@@ -2,7 +2,10 @@
 //! outputs and edges, and interpolation in every place it is allowed, with
 //! every way each can be wrong.
 
-use meridian_ir::{parse, resolve, Bundle, Data, Document, Removed, Resolution, Value};
+use meridian_ir::{
+    parse, resolve, resolve_for, Bundle, Data, Document, PlacedEscape, Removed, Resolution,
+    Secrets, Value,
+};
 
 fn data_of(text: &str) -> Data {
     let Value::Map(map) = meridian_ir::parse_value("data.yaml", text.as_bytes()).unwrap() else {
@@ -872,4 +875,105 @@ fn resolving_is_the_same_for_every_target_and_both_kinds() {
     assert_eq!(seen.len(), 36);
     assert!(seen.iter().all(|s| s == &seen[0]), "{seen:#?}");
     assert_eq!(seen[0].0.len(), 2);
+}
+
+#[test]
+fn a_host_an_interpolation_places_is_held_to_what_a_name_can_be() {
+    // Issue 134: validate cannot check a host that is decided from data, so
+    // resolve does, once it is placed, and before any tool is pointed at it.
+    let doc = "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata: {name: site}\nspec:\n  target: \
+               ansible\n  targetHost: {from: inline, host: \"${{ data.host }}\"}\n  resources:\n    - \
+               {id: a, type: file, params: {path: /a}}\n";
+    for (host, says) in [
+        ("-oProxyCommand=touch /tmp/pwned", "starts with \"-\""),
+        ("web01 ansible_connection=local", "whitespace"),
+        ("x' { } node 'y", "'\\''"),
+    ] {
+        let data = data_of(&format!("host: {host:?}\n"));
+        let err = match resolve(&document(doc), &data) {
+            Err(e) => e.to_string(),
+            other => panic!("{host}: {other:?}"),
+        };
+        assert!(
+            err.contains("spec.targetHost.host") && err.contains(says),
+            "{host}: {err}"
+        );
+    }
+    let (kept, _) = kept_with(doc, &data_of("host: deploy@web01.example.com\n"));
+    let Document::ResourceSet(rs) = kept else {
+        panic!("a ResourceSet");
+    };
+    assert_eq!(
+        rs.spec.target_host.unwrap().host,
+        "deploy@web01.example.com"
+    );
+}
+
+#[test]
+fn a_placed_value_is_made_literal_for_the_target_the_document_names() {
+    // Issues 135 and 136: the openings of the tool's own expression syntax
+    // are the plugin's to declare, by target name, and they apply to every
+    // value placed after the target is decided, including an output's.
+    let escapes_for = |target: &str| match target {
+        "ansible" => vec![PlacedEscape::anywhere("{{", "{{ '{{' }}")],
+        "arm" => vec![PlacedEscape::at_start("[", "[[")],
+        _ => Vec::new(),
+    };
+    let data = data_of(
+        "motd: \"hello {{ lookup('pipe','id') }}\"\nloc: \"[resourceGroup().id]\"\ntarget: \
+         ansible\n",
+    );
+    let placed = |text: &str, id: &str, name: &str| {
+        let doc = document(text);
+        match resolve_for(&doc, &data, &Secrets::declared(&doc), &escapes_for).unwrap() {
+            Resolution::Kept { document, .. } => param(&document, id, name).clone(),
+            other => panic!("{other:?}"),
+        }
+    };
+
+    let ansible = resource_set(
+        "resources:\n  - {id: a, type: file, params: {path: /a, content: \"${{ data.motd }}\", \
+         loc: \"${{ data.loc }}\"}}\n",
+    );
+    assert_eq!(
+        placed(&ansible, "a", "content"),
+        text("hello {{ '{{' }} lookup('pipe','id') }}")
+    );
+    // What ARM declares does not apply to Ansible.
+    assert_eq!(placed(&ansible, "a", "loc"), text("[resourceGroup().id]"));
+
+    // The target itself may be placed: the escapes follow what it becomes.
+    let interpolated = ansible.replace("target: ansible", "target: \"${{ data.target }}\"");
+    assert_eq!(
+        placed(&interpolated, "a", "content"),
+        text("hello {{ '{{' }} lookup('pipe','id') }}")
+    );
+
+    let arm = infrastructure(
+        "resources:\n  - {id: a, type: x, params: {loc: \"${{ data.loc }}\", motd: \"${{ data.motd \
+         }}\"}}\noutputs:\n  - {name: loc, value: \"${{ data.loc }}\"}\n",
+    )
+    .replace("target: terraform", "target: arm");
+    assert_eq!(placed(&arm, "a", "loc"), text("[[resourceGroup().id]"));
+    assert_eq!(
+        placed(&arm, "a", "motd"),
+        text("hello {{ lookup('pipe','id') }}")
+    );
+    let doc = document(&arm);
+    let Resolution::Kept { document, .. } =
+        resolve_for(&doc, &data, &Secrets::declared(&doc), &escapes_for).unwrap()
+    else {
+        panic!("kept");
+    };
+    let Document::Infrastructure(infra) = *document else {
+        panic!("an Infrastructure");
+    };
+    assert_eq!(infra.spec.outputs[0].value, "[[resourceGroup().id]");
+
+    // Without a plugin's word, only Meridian's own escape applies.
+    let (kept, _) = kept_with(&ansible, &data);
+    assert_eq!(
+        param(&kept, "a", "content"),
+        &text("hello {{ lookup('pipe','id') }}")
+    );
 }
