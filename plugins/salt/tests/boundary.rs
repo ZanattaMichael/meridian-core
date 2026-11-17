@@ -46,6 +46,7 @@ fn the_plugin_describes_itself() {
             native_notify: true,
             synthetic_notify: false,
             runtime_condition: true,
+            secrets: false,
         }
     );
     assert_eq!(

@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use meridian_ir::{Document, Secrets};
-use meridian_sdk::Value;
+use meridian_sdk::{ResourceGraph, Value};
 use meridian_secret::{FetchError, Probe, SecretTable};
 
 /// Fetches every secret the document declares into `secrets`.
@@ -29,6 +29,41 @@ pub(crate) fn fetch(doc: &Document, secrets: &mut Secrets) -> Result<(), String>
         }
     }
     Ok(())
+}
+
+/// The value of every secret the graph's params refer to, each a copy in
+/// protected memory of its own, for the tool. The plugin is handed them by
+/// the names the graph gave them. An error names the secret and never a
+/// value.
+pub(crate) fn handed(
+    graph: &ResourceGraph,
+    table: &SecretTable,
+) -> Result<meridian_sdk::Secrets, String> {
+    let mut values = Vec::with_capacity(graph.secrets.len());
+    for named in &graph.secrets {
+        let value = table
+            .with(named.secret, |held| held.duplicate())
+            .map_err(|e| format!("secret {:?}: {e}", named.name))?
+            .map_err(|e| format!("secret {:?}: {e}", named.name))?;
+        values.push((named.secret, named.name.clone(), value));
+    }
+    Ok(meridian_sdk::Secrets::from_values(values))
+}
+
+/// The value of every declared secret that was fetched, by its declared
+/// name, for a tool that is handed an artifact without the graph it was
+/// compiled from: a rollback.
+pub(crate) fn handed_by_name(secrets: &Secrets) -> Result<meridian_sdk::Secrets, String> {
+    let mut values = Vec::new();
+    for (name, at) in secrets.names() {
+        let value = secrets
+            .table()
+            .with(at, |held| held.duplicate())
+            .map_err(|e| format!("secret {name:?}: {e}"))?
+            .map_err(|e| format!("secret {name:?}: {e}"))?;
+        values.push((at, name, value));
+    }
+    Ok(meridian_sdk::Secrets::from_values(values))
 }
 
 /// Where the first secret in a document's params is: the resource and the

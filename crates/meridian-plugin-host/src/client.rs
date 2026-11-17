@@ -432,8 +432,10 @@ impl Client {
     /// Reads the values the last apply produced, without applying anything.
     pub fn outputs(&self, context: &RunContext) -> Result<Vec<Output>, RunFailure> {
         let mut runner = self.runner("report outputs", self.info.operations.outputs)?;
+        // Reading outputs changes nothing and needs no secret, so none is
+        // sent.
         let request = pb::OutputsRequest {
-            context: Some(wire::context_to_wire(context)),
+            context: Some(wire::context_to_wire_without_secrets(context)),
         };
         let result = self
             .runtime

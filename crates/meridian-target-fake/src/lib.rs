@@ -10,6 +10,14 @@
 //! `FAIL` makes the tool fail at that file, `PANIC` panics the runner, and
 //! `EXIT` kills the whole plugin process mid-run.
 //!
+//! It takes secrets, as a real target does. A secret in a param is compiled
+//! as the reference `<<secret NAME>>`, which its tool would resolve when it
+//! runs; when it runs, the values are handed to the tool in a private file,
+//! and `secrets-delivery.json` in the work directory says what was handed
+//! over and how (never a value). A test that must see the bytes reach the
+//! tool names a file in `FAKE_SECRET_SINK`, and the tool copies the private
+//! file there. `FAKE_SECRETS=none` makes it a target that takes no secret.
+//!
 //! It imports as well. Its tool's "existing configuration" is a `*.fake`
 //! file of `name = content` lines, each of which becomes a `file` resource.
 //! A line that starts with `?` is something the importer does not
@@ -55,6 +63,7 @@ impl Emitter for Fake {
             native_notify: false,
             synthetic_notify: true,
             runtime_condition: false,
+            secrets: std::env::var("FAKE_SECRETS").as_deref() != Ok("none"),
         }
     }
 
@@ -71,6 +80,9 @@ impl Emitter for Fake {
 
     fn emit(&self, graph: &ResourceGraph, data: &Data) -> Result<Emitted, CompileError> {
         let mut emitted = Emitted::default();
+        // A secret is written as a reference its tool resolves when it runs,
+        // never as a value: the emitter has none.
+        let graph = graph.secrets_written_as(|name| format!("<<secret {name}>>"));
         for resource in &graph.resources {
             if resource.r#type != "file" {
                 return Err(CompileError::for_resource(
@@ -124,6 +136,51 @@ pub struct FakeRunner {
     pub operations: Operations,
     /// Whether the tool takes inputs, which it then echoes when it applies.
     pub accepts_inputs: bool,
+}
+
+/// Hands the run's secrets to the tool the way a real plugin would, in a
+/// file only the user can read, and records in the work directory what was
+/// handed over and how, never a value. The file lives as long as the
+/// returned value.
+fn hand_over_secrets(
+    context: &RunContext,
+    log: &dyn Log,
+) -> Result<Option<meridian_sdk::SecretFile>, RunError> {
+    let record = context.work_dir.join("secrets-delivery.json");
+    if context.secrets.is_empty() {
+        let _ = fs::remove_file(&record);
+        return Ok(None);
+    }
+    let file = context
+        .secrets
+        .json_file("secrets.json", str::to_owned)
+        .map_err(|e| RunError::new(format!("writing the secrets file: {e}")))?;
+    let names: Vec<Value> = context
+        .secrets
+        .names()
+        .into_iter()
+        .map(Value::from)
+        .collect();
+    let delivery = BTreeMap::from([
+        ("names".to_owned(), Value::List(names)),
+        ("channel".to_owned(), Value::from("file")),
+        ("in_memory".to_owned(), Value::Bool(file.in_memory())),
+        (
+            "bytes".to_owned(),
+            Value::Int(context.secrets.iter().map(|(_, v)| v.len() as i64).sum()),
+        ),
+    ]);
+    fs::write(&record, canonical_map(&delivery))
+        .map_err(|e| RunError::new(format!("recording the delivery: {e}")))?;
+    log.err(&format!(
+        "{} secret(s) handed over in a private file",
+        context.secrets.len()
+    ));
+    if let Some(sink) = std::env::var_os("FAKE_SECRET_SINK") {
+        fs::copy(file.path(), sink)
+            .map_err(|e| RunError::new(format!("copying the secrets to the sink: {e}")))?;
+    }
+    Ok(Some(file))
 }
 
 /// What the last apply wrote, by artifact path.
@@ -222,6 +279,7 @@ impl Runner for FakeRunner {
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
         let state = read_state(&context.work_dir)?;
+        let _secrets = hand_over_secrets(context, log)?;
         log.out(&format!(
             "comparing {} files for {} on {}",
             artifact.files.len(),
@@ -243,6 +301,7 @@ impl Runner for FakeRunner {
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
         let mut state = read_state(&context.work_dir)?;
+        let _secrets = hand_over_secrets(context, log)?;
         // Tools echo their variables more often than anyone would like. This
         // one does it on purpose, so a host's masking has something to catch.
         if !context.inputs.is_empty() {

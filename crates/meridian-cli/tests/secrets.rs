@@ -302,11 +302,39 @@ spec:
 );
 
 #[test]
-fn compile_writes_the_name_of_a_secret_in_a_param_and_never_its_value() {
+fn compile_writes_a_reference_to_a_secret_in_a_param_and_never_its_value() {
     let dir = scratch("placeholder");
     fs::write(dir.join("site.yaml"), IN_A_PARAM).unwrap();
     // The variable is set, and compile still does not read it.
     let out = meridian(&dir, &["compile", "site.yaml", "--out", "out"]);
+    assert!(out.status.success(), "{}{}", stdout(&out), stderr(&out));
+    nothing_leaked(&out, &dir, &[]);
+    let written: Vec<String> = files_under(&dir.join("out"))
+        .into_iter()
+        .map(|(_, bytes)| String::from_utf8_lossy(&bytes).into_owned())
+        .collect();
+    // The fake target takes secrets, so each param that holds one is
+    // compiled as the reference its tool resolves when it runs. A value made
+    // from a secret and text is a secret of its own, named for what it is.
+    assert!(
+        written.iter().any(|text| text == "<<secret derived_1>>"),
+        "{written:#?}"
+    );
+    assert!(
+        written.iter().any(|text| text == "<<secret derived_2>>"),
+        "{written:#?}"
+    );
+}
+
+#[test]
+fn compile_writes_the_name_of_a_secret_in_a_param_for_a_target_that_takes_none() {
+    let dir = scratch("placeholder-no-channel");
+    fs::write(dir.join("site.yaml"), IN_A_PARAM).unwrap();
+    let out = meridian_with(
+        &dir,
+        &["compile", "site.yaml", "--out", "out"],
+        &[("SITE_DB_PASSWORD", PASSWORD), ("FAKE_SECRETS", "none")],
+    );
     assert!(out.status.success(), "{}{}", stdout(&out), stderr(&out));
     nothing_leaked(&out, &dir, &[]);
     let written: Vec<String> = files_under(&dir.join("out"))
@@ -332,13 +360,19 @@ fn plan_and_apply_stop_before_a_secret_in_a_param_would_be_written_to_a_file() {
     let dir = scratch("refused");
     fs::write(dir.join("site.yaml"), IN_A_PARAM).unwrap();
     for command in ["plan", "apply"] {
-        let out = meridian(&dir, &[command, "site.yaml"]);
+        let out = meridian_with(
+            &dir,
+            &[command, "site.yaml"],
+            &[("SITE_DB_PASSWORD", PASSWORD), ("FAKE_SECRETS", "none")],
+        );
         assert_eq!(out.status.code(), Some(1), "{command}: {}", stdout(&out));
         let text = format!("{}{}", stdout(&out), stderr(&out));
         assert!(
             text.contains(
-                "resource \"conf\": params.content holds a secret, and target \"fake\" cannot be \
-                 handed a secret yet"
+                "resource \"conf\": params.content holds a secret, and target \"fake\" does \
+                 not take one: it has no private channel to hand a secret to its tool, so the \
+                 value would be written into a file or dropped. A secret can still decide a \
+                 when for it; no loaded target does"
             ),
             "{command}: {text}"
         );
@@ -348,6 +382,116 @@ fn plan_and_apply_stop_before_a_secret_in_a_param_would_be_written_to_a_file() {
             assert!(!holds(&bytes, "password="), "{}", path.display());
         }
     }
+}
+
+/// The one place a secret may be when a tool runs: a file only the user can
+/// read, which the fake tool copies to the sink a test names.
+fn sink(dir: &Path) -> PathBuf {
+    dir.join("sink.json")
+}
+
+#[test]
+fn plan_and_apply_hand_a_secret_to_the_tool_in_a_private_file_and_nowhere_else() {
+    let dir = scratch("handed");
+    fs::write(dir.join("site.yaml"), IN_A_PARAM).unwrap();
+    let sink = sink(&dir);
+    for command in ["plan", "apply"] {
+        let _ = fs::remove_file(&sink);
+        let out = meridian_with(
+            &dir,
+            &[command, "site.yaml"],
+            &[
+                ("SITE_DB_PASSWORD", PASSWORD),
+                ("FAKE_SECRET_SINK", sink.to_str().unwrap()),
+            ],
+        );
+        assert!(
+            out.status.success(),
+            "{command}: {}{}",
+            stdout(&out),
+            stderr(&out)
+        );
+        // The tool got every value, each under the name the artifact refers
+        // to it by, and the file it got them in was readable by the user
+        // alone.
+        let handed = fs::read_to_string(&sink).unwrap();
+        assert_eq!(
+            handed,
+            format!(
+                "{{\"derived_1\":\"password={PASSWORD}\\n\",\"derived_2\":\"postgres://app:{PASSWORD}@db/app\"}}\n"
+            ),
+            "{command}"
+        );
+        let mode = fs::metadata(&sink).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "{command}");
+        // And nothing else holds one: not what was printed, not the plan,
+        // not the state directory, not what the tool applied.
+        nothing_leaked(&out, &dir, &["sink.json"]);
+        let text = format!("{}{}", stdout(&out), stderr(&out));
+        assert!(
+            text.contains("2 secret(s) handed over in a private file"),
+            "{command}: {text}"
+        );
+    }
+    // What was applied refers to the secrets; the record of the delivery
+    // names them and says how they went, and nothing more.
+    let work = dir.join(".meridian/resourceset/site/fake");
+    assert_eq!(
+        fs::read_to_string(work.join("current/files/conf")).unwrap(),
+        "<<secret derived_1>>"
+    );
+    let delivery = fs::read_to_string(work.join("secrets-delivery.json")).unwrap();
+    // Whether the file was held in memory depends on the machine.
+    let delivery = delivery
+        .replace(",\"in_memory\":true", "")
+        .replace(",\"in_memory\":false", "");
+    assert_eq!(
+        delivery,
+        format!(
+            "{{\"bytes\":{},\"channel\":\"file\",\"names\":[\"derived_1\",\"derived_2\"]}}",
+            "password=\n".len() + "postgres://app:@db/app".len() + 2 * PASSWORD.len()
+        )
+    );
+}
+
+#[test]
+fn a_secret_that_is_a_whole_param_is_handed_over_under_its_own_name() {
+    let dir = scratch("whole-param");
+    let document = IN_A_PARAM
+        .replace(
+            "content: \"password=${{ secret.db_password }}\\n\"",
+            "content: ${{ secret.db_password }}",
+        )
+        .replace(
+            "content: \"postgres://app:${{ urlEncode(secret.db_password) }}@db/app\"",
+            "content: ${{ urlEncode(secret.db_password) }}",
+        );
+    assert_ne!(document, IN_A_PARAM);
+    fs::write(dir.join("site.yaml"), document).unwrap();
+    let sink = sink(&dir);
+    let out = meridian_with(
+        &dir,
+        &["apply", "site.yaml"],
+        &[
+            ("SITE_DB_PASSWORD", PASSWORD),
+            ("FAKE_SECRET_SINK", sink.to_str().unwrap()),
+        ],
+    );
+    assert!(out.status.success(), "{}{}", stdout(&out), stderr(&out));
+    assert_eq!(
+        fs::read_to_string(&sink).unwrap(),
+        format!("{{\"db_password\":\"{PASSWORD}\",\"derived_1\":\"{PASSWORD}\"}}\n")
+    );
+    nothing_leaked(&out, &dir, &["sink.json"]);
+    let work = dir.join(".meridian/resourceset/site/fake");
+    assert_eq!(
+        fs::read_to_string(work.join("current/files/conf")).unwrap(),
+        "<<secret db_password>>"
+    );
+    assert_eq!(
+        fs::read_to_string(work.join("current/files/url")).unwrap(),
+        "<<secret derived_1>>"
+    );
 }
 
 #[test]

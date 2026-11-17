@@ -216,6 +216,7 @@ impl Emitter for Packer {
             native_notify: false,
             synthetic_notify: false,
             runtime_condition: false,
+            secrets: false,
         }
     }
 

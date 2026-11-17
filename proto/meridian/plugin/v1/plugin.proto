@@ -60,6 +60,31 @@ message Resource {
   int32 index = 6;
 
   Position pos = 7;
+
+  // secret_params says where in params_json a secret stands. Each entry
+  // names a path into the object (keys, and list indexes as decimal
+  // strings) at which params_json holds the placeholder "(sensitive)", and
+  // the slot of the secret that belongs there, one of ResourceGraph.secrets.
+  // The bytes of the secret never travel with the graph: a plugin writes a
+  // reference to the secret into its artifact, and is handed the value when
+  // it runs, in RunContext.secrets. Only a target whose capabilities include
+  // secrets is sent one.
+  repeated SecretParam secret_params = 8;
+}
+
+// SecretParam is one place in a resource's params where a secret stands.
+message SecretParam {
+  repeated string path = 1;
+  uint32 slot = 2;
+}
+
+// SecretName names one secret a graph's params refer to, by the slot that
+// Resource.secret_params and RunContext.secrets use for it. The name is the
+// one the document declared it under, so a plugin can write a reference
+// the operator recognises, such as a variable called after it.
+message SecretName {
+  uint32 slot = 1;
+  string name = 2;
 }
 
 // EdgeKind keeps an ordering constraint and a deferred trigger structurally
@@ -114,6 +139,9 @@ message ResourceGraph {
   // document does not ask for one. The host has already checked it against
   // the versions the plugin declares in Describe.
   string target_version = 7;
+  // secrets names every secret the resources' params refer to. Empty for a
+  // graph without one.
+  repeated SecretName secrets = 8;
 }
 
 // Capabilities is a target's honest declaration of what it can express. It is
@@ -122,6 +150,16 @@ message Capabilities {
   bool native_notify = 1;
   bool synthetic_notify = 2;
   bool runtime_condition = 3;
+  // secrets says the target takes a secret in a param: its emitter writes a
+  // reference to the secret into the artifact, never the value, and its
+  // runner hands the value to the tool by a private channel (the tool's
+  // standard input, or a file only the user can read), never on the command
+  // line and never in the environment. A host refuses a document that puts
+  // a secret in a param of a target that does not say so, because the value
+  // would otherwise be dropped or written into a file. A plugin built
+  // before this field existed reports false, so the protocol version did
+  // not change.
+  bool secrets = 4;
 }
 
 // Artifact is the complete output of a compile: relative path to file content.
@@ -370,6 +408,20 @@ message RunContext {
   // inputs_json is a JSON object of values handed to this stage from the
   // outputs of earlier ones, keyed by the name the document gave them.
   bytes inputs_json = 4;
+  // secrets is the value of every secret the graph's params referred to,
+  // sent only to a target whose capabilities include secrets, and only for
+  // Plan and Apply: Outputs is sent none. The host sends them over the
+  // plugin's private socket and nowhere else, and the SDK takes each one
+  // into protected memory as it arrives and wipes the message. The plugin
+  // holds them for the length of the call and no longer.
+  repeated Secret secrets = 5;
+}
+
+// Secret is one secret's value, on its way to a plugin.
+message Secret {
+  uint32 slot = 1;
+  string name = 2;
+  bytes value = 3;
 }
 
 // ChangeAction is what the tool would do, or did, to one thing it manages.

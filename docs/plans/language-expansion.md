@@ -1688,6 +1688,20 @@ tested once. A crash that skips the guard leaves a file in a `0700` directory
 on a filesystem that does not survive a reboot; the next run removes any such
 directory it finds whose owning process is gone.
 
+**As built (phase 7, first part).** A target declares `Capabilities::secrets`
+and is then handed a secret in a param: at compile as `Value::Secret` with
+its name in `ResourceGraph::secrets`, which the emitter writes as a reference
+(`secrets_written_as`); at plan and apply as the value in
+`RunContext::secrets`, which the runner hands over with `Secrets::json_file`
+(rank 2) or `Tool::stdin_secret` (rank 1). Built for `ansible` (extra-vars
+file, and the task marked `no_log`), `terraform` and `opentofu` (`-var-file`
+on `plan`, the variable declared `sensitive`, the saved plan scrubbed after
+use since it holds every variable) and the test target. Every other target
+still stops the stage, naming the targets that take one. A value made from a
+secret and text is handed over as a secret of its own, `derived_<n>`.
+`secretDelivery: literal`, rank 4 for provider credentials and the SSH agent
+are not built. See [the reference](../reference/dsl/secrets.md#handing-a-secret-to-a-tool).
+
 ### 11.7 The operating system's own stores
 
 The best place for a long-lived credential on a workstation is the store the
@@ -1772,6 +1786,21 @@ most exact.
 | A malicious or compromised plugin | not stopped by any of the above: a plugin given a secret can do anything with it. The defences are the ones for any code you run: a plugin is a signed release from a named publisher ([governance](governance.md)), a document's `requires` pins it, and a plugin is given only the secrets of the resources it compiles. A plugin that should never see secrets can be told so in the project's settings: `plugins: {<name>: {secrets: deny}}` |
 | A secret provider plugin returns a value over the same wire | the same stream, in the other direction; the provider's settings are sent to it and never echoed back in an error |
 | A notification sink receives a secret | it cannot: events are built from structures that hold handles, and a sink is never sent a secret stream. A sink's own credential reaches it by the same stream as any plugin's |
+
+**As built (phase 7, first part).** A secret is sent only to a target that
+declares the capability, only for the params its resources hold, and only at
+plan and apply; `outputs` is sent none. At compile the graph carries the mask,
+the path to it and the secret's slot and name, and the SDK puts a
+`Value::Secret` back. The value travels in the `RunContext` of the plan or
+apply request, over the plugin's private socket, rather than on a stream of
+its own: the message is the one copy outside protected memory, dropped once
+sent, and the SDK takes each value into a `SecretValue` and wipes the
+message's bytes as it reads it. The plugin holds the values in
+`RunContext::secrets` for the length of the call. The recording tool of the
+contract suite is, for now, each plugin's stand-in in its own run tests and
+the test target, which keeps a copy of what it was handed for the CLI tests
+to read back; `plugins: {<name>: {secrets: deny}}`, the peer check and the
+TCP refusal are not built.
 
 ### 11.9 What is tested
 
@@ -2299,7 +2328,7 @@ green before the next starts.
 | 5b | `Composite`, `include`, `extends`, the configuration type (`segment`, `targets`) | 5 |
 | 6 | `Inventory`, endpoint types, `spec.endpoints`, one instance per endpoint, `--endpoint`, sources from outputs | 4, 5 |
 | 6a | `meridian-secret`: the locked, wiped-on-drop value, process hardening, the secret handle in `Value` and how the mark spreads, the output filter, the delivery helpers (standard input, user-only files), `spec.secrets` with the `env`, `file`, `exec` and operating-system store providers, `meridian secret set` and `check`, `resolve_credential`, and the tests of [11.9](#119-what-is-tested). **Built so far:** the crate, the handle and the mark, `spec.secrets` with `env`, `file` and `exec`, fetched per stage and wiped after it, `--strict-secrets` and the warning when memory cannot be locked, `meridian secret check`, and `resolve_credential` for the `registry`, `usernamePassword` and `token` types ([reference](../reference/dsl/secrets.md), [how it is held](../concepts/secrets-in-memory.md)). Then the `keyring`, `systemd-creds`, `secret-service` and `keychain` stores, `fallback` places for one secret, and `meridian secret set` into the keyring and the Secret Service. **Still to come:** `credential-manager` on Windows, writing the keychain, the `tpm` plugin | 2 |
-| 7 | secrets and credentials on targets: credential types, sealed references and the secret stream in the protocol, delivery on every target by its channel of [11.6](#116-handing-a-secret-to-a-tool), the plugin contract suite with the recording tool | 6, 6a |
+| 7 | secrets and credentials on targets: credential types, sealed references and the secret stream in the protocol, delivery on every target by its channel of [11.6](#116-handing-a-secret-to-a-tool), the plugin contract suite with the recording tool. **Built so far:** the `secrets` capability, secrets by name in the graph and by value in the run context, delivery on `ansible`, `terraform` and `opentofu` and the test target, the SDK's `Secrets`, `json_file` and `stdin_secret`, and the stand-in and real-tool tests of the handover. **Still to come:** credential types in documents, delivery on every other target, the recording tool as one suite | 6, 6a |
 | 7a | events and the run record: the event stream, `status`, `runs`, `events`, locking, `--events json` | 4 |
 | 8 | `Workflow`: steps, order from needs, `with`, `assign` from data, fan-out strategies, gates, failure handling, resume | 5a, 6, 7a |
 | 8a | notification sinks: the sink protocol, `webhook` and `command` built in, then `slack`, `teams`, `email`, `opentelemetry` | 7, 7a |
