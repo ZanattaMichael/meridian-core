@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
 use meridian_sdk::{
-    Applied, Artifact, Data, Emitted, Emitter, LogLine, Operations, Output, Plan, ResourceGraph,
-    RunContext, PROTOCOL_VERSION, VERSION,
+    Applied, Artifact, Data, Emitted, Emitter, ImportSource, Imported, Importer, LogLine,
+    Operations, Output, Plan, ResourceGraph, RunContext, PROTOCOL_VERSION, VERSION,
 };
 
 use crate::client::{Client, StartOptions};
-use crate::{EmitError, Error, Info, RunFailure, BINARY_PREFIX};
+use crate::{EmitError, Error, ImportFailure, Info, RunFailure, BINARY_PREFIX};
 
 /// A registered target: an emitter compiled into this binary, or a plugin
 /// process. Code that compiles a document does not need to tell them apart.
@@ -16,7 +16,7 @@ pub struct Target {
 }
 
 enum Kind {
-    InProcess(Box<dyn Emitter + Send + Sync>),
+    InProcess(Box<dyn Emitter + Send + Sync>, Option<Box<dyn Importer>>),
     Plugin(Box<Client>),
 }
 
@@ -33,10 +33,32 @@ impl Target {
             // A compiled-in emitter does not know its own registered name is
             // what the reader needs to see, so it is stamped here, exactly as
             // it is for a refusal that crossed the process boundary.
-            Kind::InProcess(emitter) => emitter.emit(graph, data).map_err(|mut e| {
+            Kind::InProcess(emitter, _) => emitter.emit(graph, data).map_err(|mut e| {
                 e.target = self.info.name.clone();
                 EmitError::Refused(e)
             }),
+        }
+    }
+
+    /// Reads a tool's existing configuration into Meridian documents. Every
+    /// document that names no target is stamped with this one.
+    pub fn import(&self, source: &ImportSource) -> Result<Imported, ImportFailure> {
+        match &self.kind {
+            Kind::Plugin(client) => client.import(source),
+            Kind::InProcess(_, Some(importer)) => {
+                let mut imported = importer.import(source).map_err(ImportFailure::Source)?;
+                for document in &mut imported.documents {
+                    if document.target.is_empty() {
+                        document.target = self.info.name.clone();
+                    }
+                }
+                Ok(imported)
+            }
+            Kind::InProcess(_, None) => Err(ImportFailure::Plugin(Error {
+                plugin: self.info.name.clone(),
+                msg: "this target does not import".to_owned(),
+                ..Error::default()
+            })),
         }
     }
 
@@ -69,7 +91,7 @@ impl Target {
     fn client(&self, verb: &str) -> Result<&Client, RunFailure> {
         match &self.kind {
             Kind::Plugin(client) => Ok(client),
-            Kind::InProcess(_) => Err(RunFailure::Plugin(Error {
+            Kind::InProcess(..) => Err(RunFailure::Plugin(Error {
                 plugin: self.info.name.clone(),
                 msg: format!("this target does not {verb}"),
                 ..Error::default()
@@ -100,6 +122,16 @@ impl Registry {
     /// their build, and silently picking one would make which output they got
     /// depend on load order.
     pub fn register(&mut self, emitter: Box<dyn Emitter + Send + Sync>) -> Result<(), Error> {
+        self.register_with_importer(emitter, None)
+    }
+
+    /// Adds a compiled-in emitter together with the importer that reads its
+    /// tool's existing configuration.
+    pub fn register_with_importer(
+        &mut self,
+        emitter: Box<dyn Emitter + Send + Sync>,
+        importer: Option<Box<dyn Importer>>,
+    ) -> Result<(), Error> {
         let name = emitter.name().to_owned();
         if name.is_empty() {
             return Err(Error {
@@ -116,6 +148,7 @@ impl Registry {
             capabilities: emitter.capabilities(),
             category: emitter.category(),
             target_versions: emitter.target_versions(),
+            import_formats: importer.as_ref().map(|i| i.formats()).unwrap_or_default(),
             operations: Operations::COMPILE_ONLY,
             accepts_inputs: false,
             path: String::new(),
@@ -124,7 +157,7 @@ impl Registry {
             name,
             Target {
                 info,
-                kind: Kind::InProcess(emitter),
+                kind: Kind::InProcess(emitter, importer),
             },
         );
         Ok(())
@@ -225,7 +258,7 @@ impl Registry {
             .into_values()
             .filter_map(|t| match t.kind {
                 Kind::Plugin(client) => client.close().err(),
-                Kind::InProcess(_) => None,
+                Kind::InProcess(..) => None,
             })
             .map(|e| e.to_string())
             .collect();

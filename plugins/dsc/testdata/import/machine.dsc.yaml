@@ -1,0 +1,17 @@
+# A DSC v3 configuration document.
+$schema: https://aka.ms/dsc/schemas/v3/bundled/config/document.json
+resources:
+  - name: Launch key
+    type: Microsoft.Windows/Registry
+    properties:
+      keyPath: HKLM\Software\Example
+      valueName: Launch
+      valueData:
+        String: "[[not an expression]"
+  - name: Tooling
+    type: Microsoft.WinGet/Package
+    properties:
+      id: Git.Git
+      source: winget
+    dependsOn:
+      - "[resourceId('Microsoft.Windows/Registry', 'Launch key')]"

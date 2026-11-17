@@ -1,0 +1,1 @@
+note: site.yml:3: play "Web server": a document has no play variables, so the value of each of these was written in wherever a task uses it: app_home, app_user, workers

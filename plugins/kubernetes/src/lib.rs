@@ -39,6 +39,7 @@
 #![allow(clippy::result_large_err)]
 
 mod emit;
+mod import;
 mod runner;
 mod sort;
 mod transform;
@@ -52,6 +53,7 @@ use meridian_sdk::{
 };
 
 pub use emit::{CLUSTER_PATH, MANIFESTS_PATH};
+pub use import::KubernetesImporter;
 pub use runner::KubernetesRunner;
 
 /// The target name a document selects with `spec.target`.

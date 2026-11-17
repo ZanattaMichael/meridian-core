@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 meridian-ast = { path = "../meridian-ast" }
+meridian-import = { path = "../meridian-import" }
 meridian-ir = { path = "../meridian-ir" }
 meridian-plugin-host = { path = "../meridian-plugin-host" }
 meridian-sdk = { path = "../meridian-sdk" }

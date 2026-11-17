@@ -113,6 +113,45 @@ spec:
         meridian.dev/restart-on-web-config: 3e7aa8895791e35c
 ```
 
+## Importing
+
+`meridian import --from kubernetes PATHS` reads manifests, in YAML or JSON, and writes
+one Infrastructure document holding every object in them. [Importing existing configuration](../operations/importing.md) is the guide.
+
+A manifest is what this target compiles to, so the mapping is the target's own, read
+backwards:
+
+| In the manifests | In the document |
+|---|---|
+| An object | a resource whose type is `apiVersion/kind` and whose params are the object's other fields |
+| The object's name | the resource's id, with hyphens turned into underscores. `metadata.name` is left out where the id gives the same name back |
+| A second object of the same name, such as a Deployment and its Service | the id `<name>_<kind>`. The object keeps its own name |
+| A `List`, as `kubectl get -o yaml` prints several objects | its items, one resource each |
+| Several documents in one file, and several files | every object, in the order `kubectl apply` would have sent them |
+| `${VAR}` in a string, as in a shell script held in a ConfigMap | written `$${VAR}`, so the document does not read it as a reference and the compiled manifest has `${VAR}` again |
+
+The files are read by YAML 1.1's rules, as Kubernetes reads them: `yes` and `on` are
+booleans, and `0644` is an octal number.
+
+What is reported:
+
+| In the manifests | What happens | Level |
+|---|---|---|
+| `status`, and what a cluster writes into `metadata`: `uid`, `resourceVersion`, `creationTimestamp`, `generation`, `managedFields`, `selfLink`, and the `last-applied-configuration` and `deployment.kubernetes.io/revision` annotations | Left out. None of it is desired state, and `kubectl apply` refuses some of it. This is what makes an object exported from a cluster importable | note |
+| An object with `generateName` and no name | Named after its id, because `kubectl apply` needs a name | changed |
+| A `Kustomization` | Left out. It is instructions for kustomize: build it with `kubectl kustomize` and import what that prints, or use the [helm](helm.md) target, which takes an overlay | not translated |
+| A YAML document that is not an object | Left out | not translated |
+
+A Helm template is refused outright, with the advice to render the chart with
+`helm template` and import what it prints. A manifest that merely holds `{{ }}` inside a
+string, as a Prometheus rule does, is not mistaken for one.
+
+The round-trip test imports
+[`web/web.yaml`](../../plugins/kubernetes/testdata/import/web/web.yaml), compiles the
+document, and compares the manifests it compiles to with the originals, object for
+object. The imported document is
+[`web.meridian.yaml`](../../plugins/kubernetes/testdata/import/web.meridian.yaml).
+
 ## Running
 
 | | |

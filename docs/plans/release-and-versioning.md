@@ -73,9 +73,10 @@ A breaking change without mechanical migration transfers the project's cost onto
 user, multiplied by their document count.
 
 Where migration cannot be mechanical, the tool says so per document and points at the
-specific decision needed. It never guesses. This is the same principle as the refusal to
-build a reverse compiler ([migration and adoption §1](migration-and-adoption.md#1-scope-decision-forward-compiling-only)):
-an approximate transformation of production configuration is worse than an honest refusal.
+specific decision needed. It never guesses. This is the same principle `meridian import`
+is held to ([migration and adoption §1.4](migration-and-adoption.md#14-how-the-importer-answers-these-objections)):
+a transformation of production configuration says, per item, what it could not carry
+over, and never approximates quietly.
 
 ---
 

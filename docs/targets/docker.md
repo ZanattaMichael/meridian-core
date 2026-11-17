@@ -784,6 +784,43 @@ proxy:
     - "80"
 ```
 
+## Importing
+
+`meridian import compose.yaml` reads one Compose file and writes one Infrastructure
+document. [Importing existing configuration](../operations/importing.md) is the guide. A file named `compose.yaml`, `compose.yml`,
+`docker-compose.yaml`, `docker-compose.yml`, or one of those with a middle part such as
+`compose.prod.yaml`, is recognised without `--from`.
+
+| In the Compose file | In the document |
+|---|---|
+| Each service, network, volume, config and secret | a resource of that type, whose id is the element's name and whose params are its fields |
+| `name` | the document's name |
+| The directory the file is in | `directory` on a `project` resource, so a relative build context, bind mount or `env_file` keeps meaning what it meant |
+| `depends_on` that waits the way `dependsOn` does: `service_healthy` on a service with a healthcheck, `service_started` (or the short form, a list of names) on one without | `dependsOn` |
+| `depends_on` with `restart: true` | `notifies` with the action `restart`, on the service that is waited for |
+| Any other `depends_on`: `service_completed_successfully`, `service_started` on a service that has a healthcheck, `required: false` | kept as the `depends_on` param, so the condition is exactly the one written |
+| `$$` | `$`. The target writes every dollar sign literally, so the compiled file has `$$` again |
+| A YAML anchor and its aliases | written out in full wherever it was used |
+
+What is reported:
+
+| In the Compose file | What happens | Level |
+|---|---|---|
+| `${VARIABLE}` and `$VARIABLE` | The text is carried literally and marked. A compiled file never asks Compose to substitute, so write the value in, or declare it in the service's `environment` | not translated |
+| `include` | Left out. Merge the files with `docker compose config` and import what that prints | not translated |
+| Two elements with the same name, such as a service and a volume both called `db` | The second is left out: ids are unique in a document. Rename one in the Compose file and import again | not translated |
+| A name that cannot be an id, such as `my.service` | Left out, for the same reason | not translated |
+| `version`, and top-level `x-` extension fields | Left out: neither is part of the project | note |
+
+More than one Compose file is refused: Compose merges several files into one project by
+rules of its own. Merge them first with `docker compose -f a.yaml -f b.yaml config`.
+
+The round-trip test imports
+[`shop/compose.yaml`](../../plugins/docker/testdata/import/shop/compose.yaml), compiles
+the document, and compares the Compose file it compiles to with the original as Compose
+reads them. The imported document is
+[`shop.meridian.yaml`](../../plugins/docker/testdata/import/shop.meridian.yaml).
+
 ## Troubleshooting
 
 | What you see | What to do |

@@ -20,6 +20,7 @@ with `tofu`.
 | Compiles to | `main.tofu.json`, which only OpenTofu reads |
 | Runs | `tofu`, version 1.8 or later; 1.11 or later for `ephemeral.<type>` |
 | Plugin binary | `meridian-target-opentofu` |
+| Import | Yes: `*.tf`, `*.tofu` and their JSON forms. See [Importing](#importing) |
 
 ## A first document
 
@@ -469,6 +470,35 @@ file (`terraform.tfstate`) from `.meridian/infrastructure/<document>/terraform` 
 the same remote state. Follow OpenTofu's own migration guide for the version you are
 moving from.
 
+## Importing
+
+`meridian import --from opentofu DIR` reads a directory's `*.tf`, `*.tofu`, `*.tf.json`
+and `*.tofu.json` files and writes one Infrastructure document. The language is
+Terraform's, so everything on [the Terraform page](terraform.md#importing) holds here:
+the same mapping, the same renaming of names that collide, the same things reported. A
+`*.tofu` file replaces the `*.tf` file of the same name, as it does for `tofu`.
+[Importing existing configuration](../operations/importing.md) is the guide.
+
+`--from opentofu` is needed for `*.tf` files, which Terraform reads too. A directory that
+holds only `*.tofu` files is OpenTofu's without being told.
+
+What OpenTofu has and Terraform does not is imported as well:
+
+| In the configuration | In the document |
+|---|---|
+| `terraform { encryption { ... } }` | a resource of type `encryption`. `key_provider` and `method` blocks become its params, and `state` and `plan` keep the method they name |
+| `ephemeral "random_password" "db"` | type `ephemeral.random_password` |
+| `key_provider.pbkdf2.main`, `method.aes_gcm.main` inside the encryption block | kept as written: they name parts of the same block, not resources |
+
+A passphrase written in the configuration is carried into the document as it is, and the
+compile-time checks under [State and plan encryption](#state-and-plan-encryption) then
+apply to it. Take it from a variable instead.
+
+The round-trip tests are in
+[`plugins/opentofu/tests/import.rs`](../../plugins/opentofu/tests/import.rs): the
+Terraform page's `web-vm` configuration compiled for OpenTofu, and a configuration with
+state encryption.
+
 ## Testing
 
 The plugin's tests are in [`plugins/opentofu/tests`](../../plugins/opentofu/tests):
@@ -479,6 +509,7 @@ The plugin's tests are in [`plugins/opentofu/tests`](../../plugins/opentofu/test
 | `compile.rs` | every mapping and refusal, against golden files in `testdata/` | nothing |
 | `run.rs` | the exact commands, environment and error handling, against a stand-in for `tofu` | nothing |
 | `process.rs` | the shipped binary gives the same answers across the plugin protocol | nothing |
+| `import.rs` | importing a configuration and compiling it back gives the same configuration, by meaning | nothing |
 | `real.rs` | plan, apply, outputs, encryption, notify and validation against a real `tofu` | OpenTofu |
 
 ```sh

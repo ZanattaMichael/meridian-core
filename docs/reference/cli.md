@@ -13,6 +13,7 @@ meridian events   [RUN] [--type TYPE]
 meridian report   [RUN] [--format FORMAT] [--out FILE] [--from FILE]
 meridian unlock   <ID>
 meridian plugins
+meridian import   <paths>... [--from TARGET] [--name NAME] [-o DIR] [-r] [--force] [--strict]
 meridian migrate  <files>... [--to APIVERSION] [--check]
 meridian version
 meridian module   install [--locked] | update [NAME]... | verify | list | pack [--out FILE] | push REPOSITORY
@@ -241,20 +242,59 @@ types it takes, the versions of its tool it compiles for (when it declares any),
 and where its binary is.
 
 ```
-terraform
-  category:  infrastructure-as-code
-  can:       compile, plan, apply, outputs, imports
-  resources: <provider>_<type>, backend, data.<type>, module, provider, variable
+dsc
+  category:  configuration-management
+  can:       compile, plan, apply, import
+  resources: <Module>/<Resource>, runner
+  versions:  2, 3
+  imports:   PowerShell DSC configurations (*.ps1)
+  imports:   DSC v3 configuration documents and DscPipelineRunner projects (*.dsc.yaml, *.dsc.yml, *.dsc.json, *.dsc.config.yaml, *.dsc.config.yml, *.dsc.config.json, Datum.yml, *.yaml, *.yml, *.json)
   sdk:       0.1.0 (protocol 2)
-  binary:    /usr/local/bin/meridian-target-terraform
+  binary:    /usr/local/bin/meridian-target-dsc
 ```
 
-`imports` in the `can` line says the plugin hands its tool the values a
+`inputs` in the `can` line says the plugin hands its tool the values a
 document's [`spec.imports`](dsl/outputs-and-hand-offs.md#imports) brings from
 other documents.
 
 The category decides which kind of document the plugin is handed, and the
-versions decide which `targetVersion` a document may ask it for.
+versions decide which `targetVersion` a document may ask it for. A plugin that
+can read its tool's existing configuration lists `import` under `can`, and the
+file names each of its formats claims under `imports`.
+
+### `import`
+
+Turns a tool's existing configuration into Meridian documents. It only reads:
+no tool is run and nothing but the documents is written.
+
+```
+meridian import ./compose.yaml                      # print the document
+meridian import ./infra --from terraform -o imported  # write imported/<name>.yaml
+meridian import ./playbooks -r -o imported --strict  # fail if anything was lost
+```
+
+| Option | Meaning |
+|---|---|
+| `PATHS...` | the files to import, or directories holding them. A directory gives the files in it that the plugin's formats claim |
+| `--from TARGET` | the plugin whose tool the files belong to. Left out, it is worked out from the file names, and the import stops and asks when the names fit more than one plugin (`main.tf` is both Terraform's and OpenTofu's) |
+| `--name NAME` | what to call the imported document. Defaults to the name of the directory or file, or to a name the source itself gives |
+| `-o DIR`, `--out DIR` | write each document to `DIR/<name>.yaml`. Left out, the documents are printed to standard output |
+| `-r`, `--recursive` | look in the directories inside a directory too |
+| `--force` | replace a document that already exists under `--out` |
+| `--strict` | exit `1` when anything was changed or not translated. The documents are still written |
+
+The report is written to standard error: the documents and how many resources
+each holds, then what was **not translated**, what was **changed**, and any
+**notes**. Everything in the first two groups is also a comment in the document
+that starts `TODO(meridian-import)`, beside the resource it is about. Nothing a
+source says is left out without one.
+
+Every document is validated before it is written, exactly as `meridian
+validate` would.
+
+[Importing existing configuration](../operations/importing.md) walks through an
+import, says what each plugin reads, and what an imported document does and
+does not promise.
 
 `sdk` is the SDK release the plugin was built against, and `protocol` is the
 protocol version `meridian` and the plugin agreed on when it started. A plugin
@@ -451,6 +491,10 @@ stage could not be rolled back, or the run was
 refused because the state is locked or there was nothing to resume or roll
 back, or a [sink](reporting.md#sinks) marked `required` failed. `2` for a mistake in the command line itself, and from `drift` when a
 stage has drifted.
+
+`import` exits `0` when it wrote its documents, whatever it reported about
+them; `1` when the source could not be read or no plugin imports it, and, with
+`--strict`, when anything was changed or not translated.
 
 ## Plugins and their tools
 

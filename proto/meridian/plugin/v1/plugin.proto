@@ -10,6 +10,12 @@
 //
 // Version 2 added the plugin's category and operations to Describe, and the
 // Runner service.
+//
+// Importer is a third, optional service: it reads a tool's existing
+// configuration and returns the Meridian documents that describe the same
+// thing. A plugin that serves it lists the formats it reads in Describe. It
+// was added without changing the protocol version, because a plugin built
+// before it existed lists no formats and is simply never asked.
 syntax = "proto3";
 
 package meridian.plugin.v1;
@@ -190,12 +196,16 @@ message DescribeResponse {
   // before this field existed reports none, so the protocol version did not
   // change.
   repeated string target_versions = 8;
+  // import_formats lists the kinds of existing configuration the plugin can
+  // turn into Meridian documents. A plugin that lists any also serves
+  // Importer; a plugin that lists none is never asked to import.
+  repeated ImportFormat import_formats = 9;
   // accepts_inputs says the plugin hands RunContext.inputs to its tool, as
   // the tool's own variables or parameters. A document that declares
   // spec.imports is refused for a plugin that does not say so, because the
   // values would otherwise be dropped without a word. A plugin built before
   // this field existed reports false, so the protocol version did not change.
-  bool accepts_inputs = 9;
+  bool accepts_inputs = 10;
 }
 
 message EmitRequest {
@@ -366,4 +376,144 @@ service Runner {
   // Outputs reports the values the last apply produced, read from the tool's
   // own state, without applying anything.
   rpc Outputs(OutputsRequest) returns (OutputsResponse);
+}
+
+// ImportFormat is one kind of existing configuration a plugin can read, such
+// as Terraform's HCL or a Compose file.
+message ImportFormat {
+  // name is a short word for the format, such as "hcl" or "compose".
+  string name = 1;
+  // description is one line a person can read in a listing.
+  string description = 2;
+  // patterns are the file names the format usually has, as globs over the
+  // file's base name: "*.tf", "compose.yaml". The host uses them to gather a
+  // directory's files and to guess which plugin a file belongs to. They are a
+  // hint, never a guarantee: the plugin still decides what it can read.
+  repeated string patterns = 3;
+}
+
+message ImportRequest {
+  // files is the configuration to read: path, relative to what the operator
+  // named, to the file's text.
+  map<string, string> files = 1;
+  // name is what the operator wants the imported document called. When the
+  // source yields several documents the plugin derives each one's name from
+  // it. Empty lets the plugin choose.
+  string name = 2;
+  // root is the directory the files were read from, as an absolute path on
+  // the operator's machine; empty when they did not come from one place. The
+  // plugin never reads it. It is there for a configuration whose meaning
+  // depends on where it is, such as one that names files beside itself.
+  string root = 3;
+}
+
+// ImportedResource is one resource of an imported document, in the terms a
+// Meridian document is written in.
+message ImportedResource {
+  string id = 1;
+  string type = 2;
+  string state = 3;
+  // params_json is the resource's params as a JSON object, for the same
+  // reason Resource.params_json is JSON: to keep the value types.
+  bytes params_json = 4;
+  // depends_on lists the ids of the resources this one must follow.
+  repeated string depends_on = 5;
+  repeated ImportedNotify notifies = 6;
+  string runtime_when = 7;
+  // origin says where in the source the resource came from, such as
+  // "main.tf:12". It is written beside the resource as a comment.
+  string origin = 8;
+}
+
+message ImportedNotify {
+  string resource = 1;
+  string action = 2;
+}
+
+message ImportedOutput {
+  string name = 1;
+  string value = 2;
+}
+
+// DocumentKind is which of Meridian's document kinds an imported document is.
+enum DocumentKind {
+  DOCUMENT_KIND_UNSPECIFIED = 0;
+  // Provisions things: an Infrastructure document.
+  DOCUMENT_KIND_INFRASTRUCTURE = 1;
+  // Configures a host that exists: a ResourceSet document.
+  DOCUMENT_KIND_RESOURCE_SET = 2;
+}
+
+// ImportedDocument is one Meridian document, as data. The host writes it out
+// in the language's current syntax, so a plugin never has to know how a
+// document is spelled.
+message ImportedDocument {
+  DocumentKind kind = 1;
+  string name = 2;
+  // target is the target the document selects; empty means the plugin that
+  // imported it.
+  string target = 3;
+  string target_version = 4;
+  // host is the node a ResourceSet configures; empty when the source does not
+  // name one.
+  string host = 5;
+  repeated ImportedResource resources = 6;
+  repeated ImportedOutput outputs = 7;
+}
+
+// NoteLevel says how much an importer's note should worry the operator.
+enum NoteLevel {
+  NOTE_LEVEL_UNSPECIFIED = 0;
+  // Carried over faithfully; the note explains how.
+  NOTE_LEVEL_INFO = 1;
+  // Carried over, but not as the source wrote it. The document may behave
+  // differently and should be reviewed.
+  NOTE_LEVEL_CHANGED = 2;
+  // Not carried over at all. The document does less than the source did until
+  // someone writes the missing part.
+  NOTE_LEVEL_UNTRANSLATED = 3;
+}
+
+// ImportNote is one thing the importer wants the operator to know. Nothing
+// the source says may be dropped without one: a note of level CHANGED or
+// UNTRANSLATED becomes a TODO marker in the written document.
+message ImportNote {
+  NoteLevel level = 1;
+  // origin says where in the source the note is about, such as "main.tf:12".
+  string origin = 2;
+  // subject names the thing, in the source's own terms: `variable "region"`,
+  // `task "Install nginx"`.
+  string subject = 3;
+  string msg = 4;
+  // document is the name of the imported document the note belongs to; empty
+  // when it is about the import as a whole.
+  string document = 5;
+  // resource is the id of the imported resource the note belongs to; empty
+  // when it is about the document.
+  string resource = 6;
+}
+
+// ImportError is the importer being unable to read the source at all: a
+// syntax error, or a file that is not this tool's. Like CompileError it
+// travels inside a successful response, because it is an answer about the
+// source and not a fault in the plugin.
+message ImportError {
+  string msg = 1;
+  string file = 2;
+  // line is 1-based; zero when unknown.
+  int32 line = 3;
+}
+
+message ImportResponse {
+  repeated ImportedDocument documents = 1;
+  repeated ImportNote notes = 2;
+  // error is set when nothing could be imported. When it is set, documents
+  // and notes are meaningless.
+  ImportError error = 3;
+}
+
+// Importer turns a tool's existing configuration into Meridian documents. It
+// has no side effects: it reads the text it is given and nothing else.
+service Importer {
+  rpc Import(ImportRequest) returns (ImportResponse);
 }

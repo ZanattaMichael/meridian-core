@@ -108,8 +108,8 @@ fn plugins_lists_what_each_plugin_is_and_can_do() {
     assert_eq!(
         text,
         format!(
-            "fake\n  category:  containerization\n  can:       compile, plan, apply, outputs, imports\n  \
-             resources: file\n  versions:  1, 2.4\n  sdk:       0.1.0 (protocol 2)\n  binary:    {}\n",
+            "fake\n  category:  containerization\n  can:       compile, plan, apply, outputs, inputs, import\n  \
+             resources: file\n  versions:  1, 2.4\n  imports:   Fake files (*.fake)\n  sdk:       0.1.0 (protocol 2)\n  binary:    {}\n",
             binary.display()
         )
     );
@@ -453,6 +453,139 @@ fn a_target_version_the_target_does_not_compile_for_is_refused() {
         ),
         "{}",
         stdout(&bad)
+    );
+}
+
+const FAKE_SOURCE: &str =
+    "# What the fake tool already has.\nmotd = welcome\nissue = authorised use only\n";
+
+#[test]
+fn import_writes_a_document_that_compiles_and_reports_what_it_read() {
+    let dir = scratch("import", WORKFLOW);
+    fs::create_dir_all(dir.join("legacy")).unwrap();
+    fs::write(dir.join("legacy/files.fake"), FAKE_SOURCE).unwrap();
+
+    // Printed when no directory is given: the document on stdout, the report
+    // on stderr. The plugin is found from the file's name.
+    let out = meridian(&dir, &["import", "legacy"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let document = stdout(&out);
+    assert!(
+        document.starts_with("# Imported from legacy by `meridian import`."),
+        "{document}"
+    );
+    assert!(
+        document
+            .contains("kind: Infrastructure\nmetadata:\n  name: legacy\nspec:\n  target: fake\n"),
+        "{document}"
+    );
+    assert!(document.contains("    # From files.fake:2\n    - id: motd\n      type: file\n      params:\n        content: welcome\n"), "{document}");
+    assert_eq!(
+        stderr(&out),
+        "imported legacy with the fake plugin: 1 document, 2 resources\n  legacy (Infrastructure, 2 resources)\n\
+         everything in the source was carried over\n"
+    );
+
+    // Written when one is, and what was written compiles.
+    let out = meridian(
+        &dir,
+        &["import", "legacy", "--name", "old", "-o", "imported"],
+    );
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "");
+    assert!(
+        stderr(&out).contains("  old (Infrastructure, 2 resources) -> imported/old.yaml\n"),
+        "{}",
+        stderr(&out)
+    );
+    let compiled = meridian(&dir, &["compile", "imported/old.yaml", "--out", "build"]);
+    assert!(compiled.status.success(), "{}", stderr(&compiled));
+    assert_eq!(
+        fs::read_to_string(dir.join("build/old/files/motd")).unwrap(),
+        "welcome"
+    );
+
+    // A document that is already there is not replaced unless asked.
+    let again = meridian(
+        &dir,
+        &["import", "legacy", "--name", "old", "-o", "imported"],
+    );
+    assert_eq!(again.status.code(), Some(1));
+    assert!(
+        stderr(&again).contains("already exists; pass --force"),
+        "{}",
+        stderr(&again)
+    );
+    let forced = meridian(
+        &dir,
+        &[
+            "import", "legacy", "--name", "old", "-o", "imported", "--force",
+        ],
+    );
+    assert!(forced.status.success(), "{}", stderr(&forced));
+}
+
+#[test]
+fn import_marks_what_was_not_carried_over_and_strict_makes_it_an_error() {
+    let dir = scratch("import-lost", WORKFLOW);
+    fs::write(
+        dir.join("files.fake"),
+        format!("{FAKE_SOURCE}? a symbolic link\n"),
+    )
+    .unwrap();
+
+    let out = meridian(&dir, &["import", "files.fake", "-o", "imported"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let report = stderr(&out);
+    assert!(
+        report.contains("files.fake:4: a symbolic link: the fake tool has nothing like this, so it was left out"),
+        "{report}"
+    );
+    assert!(
+        report.contains("1 thing to look at before applying"),
+        "{report}"
+    );
+    let document = fs::read_to_string(dir.join("imported/files.yaml")).unwrap();
+    assert!(
+        document.contains("# TODO(meridian-import): not translated: files.fake:4: a symbolic link"),
+        "{document}"
+    );
+
+    // The same import as a check: the document is still written.
+    let strict = meridian(&dir, &["import", "files.fake", "-o", "strict", "--strict"]);
+    assert_eq!(strict.status.code(), Some(1));
+    assert!(
+        stderr(&strict).contains("error: --strict: 1"),
+        "{}",
+        stderr(&strict)
+    );
+    assert!(dir.join("strict/files.yaml").exists());
+}
+
+#[test]
+fn import_says_where_a_source_is_wrong_and_when_no_plugin_reads_it() {
+    let dir = scratch("import-errors", WORKFLOW);
+    fs::write(dir.join("files.fake"), "motd = welcome\nBROKEN\n").unwrap();
+    let broken = meridian(&dir, &["import", "files.fake"]);
+    assert_eq!(broken.status.code(), Some(1));
+    assert_eq!(stdout(&broken), "");
+    assert!(
+        stderr(&broken).contains("files.fake:2: this line is broken"),
+        "{}",
+        stderr(&broken)
+    );
+
+    fs::write(dir.join("notes.txt"), "nothing\n").unwrap();
+    let unknown = meridian(&dir, &["import", "notes.txt"]);
+    assert_eq!(unknown.status.code(), Some(1));
+    assert!(stderr(&unknown).contains("--from"), "{}", stderr(&unknown));
+
+    let missing = meridian(&dir, &["import", "files.fake", "--from", "nonesuch"]);
+    assert_eq!(missing.status.code(), Some(1));
+    assert!(
+        stderr(&missing).contains("nonesuch"),
+        "{}",
+        stderr(&missing)
     );
 }
 

@@ -32,6 +32,7 @@ pub(crate) fn serialise(config: &Config) -> BTreeMap<String, String> {
     let mut providers: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     let mut resources: BTreeMap<String, Value> = BTreeMap::new();
     let mut data: BTreeMap<String, Value> = BTreeMap::new();
+    let mut locals: BTreeMap<String, Value> = BTreeMap::new();
 
     if !config.required_providers.is_empty() {
         terraform.insert(
@@ -47,6 +48,11 @@ pub(crate) fn serialise(config: &Config) -> BTreeMap<String, String> {
             Kind::Data => nest(&mut data, &block.r#type, &block.name, body),
             Kind::Module => nest(&mut root, "module", &block.name, body),
             Kind::Variable => nest(&mut root, "variable", &block.name, body),
+            Kind::Local => {
+                // Validation has already required the value.
+                let value = block.body.get("value").cloned().unwrap_or(Value::Null);
+                locals.insert(block.name.clone(), value);
+            }
             Kind::Provider => providers
                 .entry(block.r#type.clone())
                 .or_default()
@@ -78,6 +84,9 @@ pub(crate) fn serialise(config: &Config) -> BTreeMap<String, String> {
     }
     if !data.is_empty() {
         root.insert("data".to_owned(), Value::Map(data));
+    }
+    if !locals.is_empty() {
+        root.insert("locals".to_owned(), Value::Map(locals));
     }
     if !config.outputs.is_empty() {
         root.insert(

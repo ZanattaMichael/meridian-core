@@ -26,12 +26,13 @@ flowchart LR
     r --> tool[the real tool]
 ```
 
-A plugin has two halves, and they never mix.
+A plugin has two halves, and they never mix. A third is optional.
 
 | Half | Trait | What it does | Side effects |
 |---|---|---|---|
 | Compiling | [`Emitter`](../../crates/meridian-sdk/src/types.rs) | turns a `ResourceGraph` into an `Artifact` (paths and file contents, as data), or refuses | none, ever |
 | Running | [`Runner`](../../crates/meridian-sdk/src/run.rs) | writes the artifact to a work directory and drives the tool to `plan`, `apply` and report `outputs` | whatever the tool does |
+| Importing, optional | [`Importer`](../../crates/meridian-sdk/src/import.rs) | reads the tool's existing configuration, handed to it as text, and returns documents as data with notes on what it could not carry over. See [An importer](#an-importer) | none, ever |
 
 By the time a document reaches your plugin, the core has already parsed it,
 validated it, resolved the target host to a literal and put the resources in an
@@ -341,6 +342,153 @@ Three rules for a runner:
 
 Let the operator point at the program with an environment variable named
 `MERIDIAN_<TOOL>`, as the template does. The tests rely on it too.
+
+## An importer
+
+This step is optional. A plugin is complete without it, and `meridian plugins` simply
+does not list `import` for one that has none.
+
+An importer is the third half of a plugin: it reads the tool's **existing**
+configuration and returns the Meridian documents that describe the same thing, so
+`meridian import` can write them
+([what the operator sees](../operations/importing.md)). Write one when people already
+have a body of configuration for your tool. It lives in `src/import.rs`.
+
+```rust
+use meridian_sdk::{ImportError, ImportFormat, ImportSource, Imported, Importer};
+
+pub struct MyToolImporter;
+
+impl Importer for MyToolImporter {
+    /// The files this importer reads, by name. `meridian import` uses the
+    /// patterns to choose a plugin and to pick files out of a directory.
+    fn formats(&self) -> Vec<ImportFormat> {
+        vec![ImportFormat::new("mytool", "MyTool files", &["*.mytool", "mytool.yaml"])]
+    }
+
+    fn import(&self, source: &ImportSource) -> Result<Imported, ImportError> {
+        // source.files: path -> text. Never read the disk yourself.
+        todo!()
+    }
+}
+```
+
+and in `main.rs`:
+
+```rust
+meridian_sdk::serve(
+    meridian_sdk::Plugin::new(MyTool)
+        .with_runner(MyToolRunner::from_env())
+        .with_importer(MyToolImporter),
+)
+```
+
+What you return is **data, not YAML**:
+
+| Type | What it holds |
+|---|---|
+| [`Imported`](../../crates/meridian-sdk/src/import.rs) | the documents, and the notes |
+| `ImportedDocument` | `kind` (Infrastructure or ResourceSet), `name`, `host` for a ResourceSet, `target_version`, `resources`, `outputs`. Leave `target` empty and the host fills in your plugin's name |
+| `ImportedResource` | `id`, `type`, `state`, `params`, `depends_on`, `notifies`, `runtime_when`, and `origin`: where in the source it came from, such as `main.tf:12` |
+| `ImportNote` | one thing the operator should know: its level, where in the source, what it is about, and which resource it belongs beside |
+
+`meridian` renders the documents in the current language and validates them. So an
+importer never knows how a document is spelled, and when the language changes its output
+changes with it.
+
+### The rule
+
+It is the compile rule, turned round:
+
+> Everything the source says is either in the document, or in a note. An importer never
+> leaves something out quietly, and never invents an approximation.
+
+| Call | When | In the document |
+|---|---|---|
+| `notes.untranslated(...)` | the source says something the document does not: a construct with no counterpart, a file that was not read, a computed value | a `TODO(meridian-import)` comment |
+| `notes.changed(...)` | it is in the document, but not as the source wrote it, and may behave differently: a renamed id, an assumed default | a `TODO(meridian-import)` comment |
+| `notes.info(...)` | carried over faithfully, in a way worth explaining | a plain comment |
+
+Write each note for the person who has to act on it: where it is in their file, what
+happened, and what to do. `--strict` fails an import with any note of the first two
+levels, so do not use them for things that are fine.
+
+Three things reviewers will look for:
+
+- **Do not fall back to an escape hatch.** A construct your target has no resource type
+  for is `untranslated`. Turning it into an `exec`, or a passthrough that happens to
+  compile, produces a document that claims more than it does.
+- **Do not evaluate.** Variables, loops, templates and functions in the source are
+  somebody else's program. Carry what is declared with literals; report what is computed.
+  The one exception is something whose value is written right there, such as a variable
+  with a literal value.
+- **Keep runtime conditions at runtime.** A condition the tool evaluates on the node goes
+  in `runtime_when`, and only if your target supports `runtimeWhen`. Never decide one at
+  import time.
+
+### What `meridian-import` gives you
+
+A plugin's library may depend on [`meridian-import`](../../crates/meridian-import/src/lib.rs)
+as it does on the SDK. It depends on nothing of the compiler's.
+
+| | |
+|---|---|
+| `yaml::read` | YAML and JSON as a tree that keeps key order and line numbers, with YAML 1.1 or 1.2 scalar rules, whichever your tool reads by |
+| `hcl::parse` | HashiCorp's configuration language, in the shape its JSON syntax has, without evaluating expressions |
+| `tf::import` | the Terraform language, for a target that speaks it |
+| `Notes` | collects notes in the order raised |
+| `literal` | makes a value's text literal to a document: `${` in the tool's own file is not a reference, and is written `$${` |
+| `slug`, `unique_id` | turn a name in the source into a resource id, and keep ids unique |
+| `diff::assert_same`, `diff::Rules` | compare two configurations by meaning, for the round-trip test |
+
+Most targets fall into one of two shapes:
+
+- **The target takes the tool's own types** (Terraform, Kubernetes, Compose, DSC). The
+  importer is the emitter read backwards: each native object becomes a resource whose
+  type is the native type and whose params are its fields. Translate only what a document
+  says its own way (`dependsOn`, `notifies`, references) and only where the two mean
+  exactly the same. [`plugins/kubernetes/src/import.rs`](../../plugins/kubernetes/src/import.rs)
+  is the shortest example.
+- **The target takes the abstract types** (`package`, `service`, `file`, ...). The
+  importer maps the tool's vocabulary onto them, and reports everything outside it.
+  [`plugins/ansible/src/import.rs`](../../plugins/ansible/src/import.rs) is the example.
+
+### Testing an importer
+
+An importer is tested by going all the way round: import a realistic source, compile the
+document, and compare what was compiled with the source **by meaning**.
+`meridian-plugin-testkit` does the first two:
+
+```rust
+use meridian_import::diff::{assert_same, Rules};
+use meridian_plugin_testkit::{assert_golden_text, import_source, notes_text, round_trip};
+
+#[test]
+fn a_configuration_comes_back_meaning_the_same() {
+    let source = import_source(&testdata().join("web"), "web");
+    // Imports, renders each document, reads it back, validates and compiles it.
+    let (imported, trips) = round_trip(&MyToolImporter, &MyTool, &source);
+    assert_eq!(imported.needing_attention(), 0, "{}", notes_text(&imported));
+    assert_golden_text(&testdata(), "web.meridian.yaml", &trips[0].rendered.text);
+
+    let original = parse(&source.files["web.mytool"]);
+    let compiled = parse(&trips[0].emitted.artifact.files[OUTPUT_PATH]);
+    assert_same(&original, &compiled, Rules::default());
+}
+```
+
+`Rules` names the differences your tool does not care about, such as a key that is null
+and a key that is absent. Where the compiled output is spelled differently from the
+source on purpose (task names, a different syntax for the same language), compare with
+the same configuration written by hand in the target's spelling, and say so in the test.
+
+Write a second test for a source full of things a document cannot say, and assert on the
+notes. That test is the one that proves nothing is dropped quietly.
+
+Then document it: an **Importing** section on the target's page with the mapping as a
+table, everything that is reported and at which level, and links to the test's files.
+Add the importer to the plugin's `row(...)` in
+`crates/meridian-cli/tests/capability_matrix.rs` and record the matrix again.
 
 ## Step 6: tests
 

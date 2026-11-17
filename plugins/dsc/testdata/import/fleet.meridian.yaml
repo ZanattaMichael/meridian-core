@@ -1,0 +1,60 @@
+# Imported from the test source by `meridian import`.
+#
+# There are 8 things to look at before this document is applied. Each is
+#   marked with TODO(meridian-import), here or beside the resource it is
+#   about.
+#
+# TODO(meridian-import): not translated: the source does not name the host
+#   this configures. Replace CHANGE-ME.invalid under spec.targetHost with the
+#   host, or take it from an Infrastructure document's output.
+# TODO(meridian-import): not translated: Fleet.ps1:6: Configuration Fleet: the
+#   Node block is for $AllNodes.NodeName, which is worked out when the script
+#   runs, and a document configures one host that it names. Write one document
+#   for each machine
+# TODO(meridian-import): not translated: Fleet.ps1:6: Configuration Fleet: the
+#   configuration takes parameters, and a document has none. A property that
+#   reads one is marked: write the value in, or take it from data
+# TODO(meridian-import): not translated: Fleet.ps1:13: Configuration Fleet:
+#   this is PowerShell that runs when the configuration is compiled, and it
+#   was not read, nor anything declared inside it: if ($Role -eq 'web') {
+#   WindowsFeature IIS { Name = 'Web-Serv...
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: fleet
+spec:
+  target: dsc
+  targetVersion: "2"
+  targetHost:
+    from: inline
+    host: CHANGE-ME.invalid
+  resources:
+    # From Fleet.ps1:6
+    # TODO(meridian-import): changed: Fleet.ps1:6: configuration: the
+    #   configuration does not say how its machine is reached. The runner was
+    #   given target: WinRM, which is how a PowerShell configuration is
+    #   pushed; change it to SSH if that is how this machine is managed
+    - id: runner
+      type: runner
+      params:
+        target: WinRM
+
+    # From Fleet.ps1:7
+    # TODO(meridian-import): changed: Fleet.ps1:7: ModuleA/Thing "One": the
+    #   configuration imports several modules (ModuleA, ModuleB) and does not
+    #   say which one Thing comes from. Its type names the first; correct it
+    #   if that is wrong
+    # TODO(meridian-import): not translated: Fleet.ps1:7: ModuleA/Thing "One":
+    #   these properties are worked out by PowerShell when the configuration
+    #   is compiled, which a document does not do. The expression was carried
+    #   as the text it is, which is not what it meant; write the value in:
+    #   Path, Role, PsDscRunAsCredential
+    # TODO(meridian-import): not translated: Fleet.ps1:7: ModuleA/Thing "One":
+    #   it depends on [Thing]Missing, which is not a resource of this
+    #   configuration, so the dependency was left out
+    - id: One
+      type: ModuleA/Thing
+      params:
+        Path: '"$env:ProgramData\app"'
+        PsDscRunAsCredential: $Credential
+        Role: $Role

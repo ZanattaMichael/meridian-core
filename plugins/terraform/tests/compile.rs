@@ -108,7 +108,7 @@ fn a_type_that_is_not_terraforms_is_refused() {
     assert_eq!(
         err.msg,
         "\"package\" is not a Terraform resource type. Use a provider's own type, such as \
-         aws_instance, or one of: provider, backend, module, variable, data.<type>"
+         aws_instance, or one of: provider, backend, module, variable, local, data.<type>"
     );
 }
 
@@ -226,8 +226,7 @@ fn nothing_can_depend_on_a_variable() {
     assert_eq!(err.rule, "unsupported-dependency");
     assert_eq!(
         err.msg,
-        "\"region\" is a variable, which has its value before Terraform creates anything; \
-         nothing can depend on it or be ordered by it. Refer to it as ${region} where its value \
-         is wanted"
+        "\"region\" is a variable, which Terraform works out before or alongside everything \
+         else; nothing can depend on it or be ordered by it"
     );
 }

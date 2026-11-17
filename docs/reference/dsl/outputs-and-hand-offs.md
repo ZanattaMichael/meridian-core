@@ -248,8 +248,8 @@ imports, when it is compiled:
 the document imports "user_data", and target "ansible" has no way to hand a value from another document to its tool; remove spec.imports, or use a target that takes inputs
 ```
 
-The [capability matrix](../capability-matrix.md) has an `imports` column, and
-`meridian plugins` lists `imports` among what a plugin can do.
+The [capability matrix](../capability-matrix.md) has an `inputs` column, and
+`meridian plugins` lists `inputs` among what a plugin can do.
 
 A ResourceSet whose host comes from an Infrastructure document is also handed
 every output of that document, under the output's name. An import of the same

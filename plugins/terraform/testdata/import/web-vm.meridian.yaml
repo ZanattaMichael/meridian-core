@@ -1,0 +1,206 @@
+# Imported from the test source by `meridian import`.
+#
+# There are 6 things to look at before this document is applied. Each is
+#   marked with TODO(meridian-import), here or beside the resource it is
+#   about.
+#
+# TODO(meridian-import): not translated: main.tf:83: moved block: a moved
+#   block changes what the state records and has no counterpart in a document.
+#   Do it once with the tool before Meridian takes over, then it is not needed
+# TODO(meridian-import): not translated: outputs.tf:1: output "address": a
+#   document's output has a name and a value, so "description" was left out
+# TODO(meridian-import): not translated: outputs.tf:10: output "instance_ids":
+#   a document's output has a name and a value. `sensitive` was left out, so
+#   the value is shown in plans and logs unless what it reads is itself marked
+#   sensitive
+# TODO(meridian-import): not translated: versions.tf:1:
+#   terraform.required_version: the constraint ">= 1.6" on the tool's own
+#   version has nowhere to go in a document; pin the terraform binary Meridian
+#   runs instead
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: web-vm
+spec:
+  target: terraform
+  resources:
+    # From main.tf:2
+    - id: ubuntu
+      type: data.aws_ami
+      params:
+        filter:
+          name: name
+          values:
+            - ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*
+        most_recent: true
+        owners:
+          - "099720109477"
+
+    # From main.tf:12
+    - id: suffix
+      type: random_id
+      params:
+        byte_length: 4
+
+    # From main.tf:16
+    - id: web
+      type: aws_security_group
+      params:
+        dynamic:
+          ingress:
+            content:
+              cidr_blocks:
+                - 0.0.0.0/0
+              from_port: ${(ingress.value)}
+              protocol: tcp
+              to_port: ${(ingress.value)}
+            for_each: ${ports}
+        egress:
+          cidr_blocks:
+            - 0.0.0.0/0
+          from_port: 0
+          protocol: "-1"
+          to_port: 0
+        name: ${name}-${suffix.hex}
+      notifies:
+        - resource: web_aws_instance
+          action: replace
+
+    # From main.tf:37
+    # TODO(meridian-import): changed: main.tf:37: aws_instance.web: a
+    #   document's ids are unique and "web" was taken or reserved, so this is
+    #   "web_aws_instance" here and aws_instance.web_aws_instance once
+    #   compiled. An existing state still knows it as aws_instance.web: move
+    #   it with `terraform state mv aws_instance.web
+    #   aws_instance.web_aws_instance` before applying, or it is destroyed and
+    #   created again.
+    - id: web_aws_instance
+      type: aws_instance
+      params:
+        ami: ${ubuntu.id}
+        count: ${instance_count}
+        instance_type: '${var.region == "us-east-1" ? "t3.small" : "t3.micro"}'
+        lifecycle:
+          create_before_destroy: true
+          ignore_changes:
+            - ami
+        tags: ${merge(local.tags, { Index = count.index })}
+        user_data: |
+          #!/bin/sh
+          echo "hello from ${name}" > /etc/motd
+        vpc_security_group_ids:
+          - ${web.id}
+
+    # From main.tf:58
+    # TODO(meridian-import): changed: main.tf:58: aws_eip.web: a document's
+    #   ids are unique and "web" was taken or reserved, so this is
+    #   "web_aws_eip" here and aws_eip.web_aws_eip once compiled. An existing
+    #   state still knows it as aws_eip.web: move it with `terraform state mv
+    #   aws_eip.web aws_eip.web_aws_eip` before applying, or it is destroyed
+    #   and created again.
+    - id: web_aws_eip
+      type: aws_eip
+      params:
+        instance: ${web_aws_instance[0].id}
+
+    # From main.tf:62
+    - id: dns
+      type: module
+      params:
+        providers:
+          aws: aws.dns
+        records:
+          - name: www
+            records:
+              - ${web_aws_eip.public_ip}
+            ttl: 300
+            type: A
+        source: terraform-aws-modules/route53/aws//modules/records
+        version: ~> 2.0
+        zone_name: example.com
+      dependsOn:
+        - resource: web_aws_instance
+
+    # From variables.tf:1
+    - id: region
+      type: variable
+      params:
+        default: eu-west-1
+        description: Where the web server runs.
+        type: string
+
+    # From variables.tf:7
+    - id: instance_count
+      type: variable
+      params:
+        default: 2
+        type: number
+        validation:
+          condition: ${var.instance_count > 0}
+          error_message: At least one instance is needed.
+
+    # From variables.tf:17
+    - id: ports
+      type: variable
+      params:
+        default:
+          - 80
+          - 443
+        type: list(number)
+
+    # From variables.tf:22
+    - id: name
+      type: local
+      params:
+        value: web-${region}
+
+    # From variables.tf:22
+    - id: tags
+      type: local
+      params:
+        value:
+          Managed: terraform
+          Name: ${name}
+
+    # From versions.tf:1
+    - id: s3
+      type: backend
+      params:
+        bucket: example-tfstate
+        key: web/terraform.tfstate
+        region: us-east-1
+
+    # From versions.tf:21
+    - id: aws
+      type: provider
+      params:
+        default_tags:
+          tags: ${tags}
+        region: ${region}
+        source: hashicorp/aws
+        version: ~> 5.0
+
+    # From versions.tf:29
+    - id: aws_dns
+      type: provider
+      params:
+        alias: dns
+        name: aws
+        region: us-east-1
+
+    # From versions.tf:1
+    # versions.tf:1: required_providers.random: the configuration requires
+    #   this provider without configuring it, so this resource carries only
+    #   its source and version and compiles to an empty provider block
+    - id: random
+      type: provider
+      params:
+        source: hashicorp/random
+
+  outputs:
+    - name: address
+      value: ${web_aws_eip.public_ip}
+    - name: url
+      value: http://${web_aws_eip.public_dns}/
+    - name: instance_ids
+      value: ${web_aws_instance[*].id}

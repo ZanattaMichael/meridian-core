@@ -6,6 +6,8 @@
 //! for was done.
 
 use std::collections::BTreeMap;
+mod import;
+
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -140,6 +142,43 @@ enum Command {
         id: String,
         #[command(flatten)]
         state: State,
+    },
+    /// Turn a tool's existing configuration into Meridian documents
+    ///
+    /// Reads the files, or the files in the directories, and writes one
+    /// document for each thing the plugin finds in them. Whatever cannot be
+    /// carried over is reported and marked in the documents with
+    /// TODO(meridian-import); nothing is dropped quietly. Nothing is run and
+    /// nothing is changed: importing only reads.
+    Import {
+        /// The files to import, or directories holding them
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+        /// The tool the files belong to, as the name of its plugin, such as
+        /// terraform or ansible. Left out, it is worked out from the file
+        /// names when only one plugin claims them
+        #[arg(long, value_name = "TARGET")]
+        from: Option<String>,
+        /// What to call the imported document. Defaults to the name of the
+        /// directory or file
+        #[arg(long, value_name = "NAME")]
+        name: Option<String>,
+        /// Write the documents into this directory, one file each. Left out,
+        /// they are printed
+        #[arg(short, long, value_name = "DIR")]
+        out: Option<PathBuf>,
+        /// Look in the directories inside a directory too
+        #[arg(short, long)]
+        recursive: bool,
+        /// Replace a document that already exists in the output directory
+        #[arg(long)]
+        force: bool,
+        /// Exit with an error when anything was not carried over as written.
+        /// The documents are still written
+        #[arg(long)]
+        strict: bool,
+        #[command(flatten)]
+        plugins: PluginDirs,
     },
     /// List the plugins Meridian can find and what each can do
     Plugins {
@@ -441,6 +480,27 @@ fn main() -> ExitCode {
             from.as_deref(),
         ),
         Command::Unlock { id, state } => unlock(&state, &id),
+        Command::Import {
+            paths,
+            from,
+            name,
+            out,
+            recursive,
+            force,
+            strict,
+            plugins,
+        } => import_configuration(
+            &plugins,
+            &import::Request {
+                paths: &paths,
+                from: from.as_deref(),
+                name: name.as_deref(),
+                out: out.as_deref(),
+                recursive,
+                force,
+                strict,
+            },
+        ),
         Command::Plugins { plugins } => list_plugins(&plugins),
         Command::Rules {
             command:
@@ -1019,6 +1079,15 @@ fn registry(plugins: &PluginDirs) -> Result<Registry, Failure> {
     Ok(registry)
 }
 
+fn import_configuration(plugins: &PluginDirs, request: &import::Request) -> Result<(), Failure> {
+    let registry = registry(plugins)?;
+    let outcome = import::run(&registry, request);
+    if let Err(e) = registry.close() {
+        eprintln!("warning: {e}");
+    }
+    outcome
+}
+
 fn list_plugins(plugins: &PluginDirs) -> Result<(), Failure> {
     let registry = registry(plugins)?;
     let names = registry.names();
@@ -1042,7 +1111,10 @@ fn list_plugins(plugins: &PluginDirs) -> Result<(), Failure> {
             can.push("outputs");
         }
         if info.accepts_inputs {
-            can.push("imports");
+            can.push("inputs");
+        }
+        if !info.import_formats.is_empty() {
+            can.push("import");
         }
         println!("{name}");
         println!("  category:  {}", info.category);
@@ -1050,6 +1122,13 @@ fn list_plugins(plugins: &PluginDirs) -> Result<(), Failure> {
         println!("  resources: {}", info.resource_types.join(", "));
         if !info.target_versions.is_empty() {
             println!("  versions:  {}", info.target_versions.join(", "));
+        }
+        for format in &info.import_formats {
+            println!(
+                "  imports:   {} ({})",
+                format.description,
+                format.patterns.join(", ")
+            );
         }
         println!(
             "  sdk:       {} (protocol {})",

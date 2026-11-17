@@ -751,6 +751,7 @@ dependencies = [
  "clap",
  "meridian-expr",
  "meridian-graph",
+ "meridian-import",
  "meridian-ir",
  "meridian-module",
  "meridian-orchestrator",
@@ -802,6 +803,15 @@ name = "meridian-graph"
 version = "0.1.0"
 dependencies = [
  "meridian-ir",
+]
+
+[[package]]
+name = "meridian-import"
+version = "0.1.0"
+dependencies = [
+ "meridian-sdk",
+ "meridian-yaml",
+ "saphyr-parser",
 ]
 
 [[package]]
@@ -869,6 +879,7 @@ name = "meridian-plugin-testkit"
 version = "0.1.0"
 dependencies = [
  "meridian-ast",
+ "meridian-import",
  "meridian-ir",
  "meridian-plugin-host",
  "meridian-sdk",
@@ -949,6 +960,7 @@ dependencies = [
 name = "meridian-target-ansible"
 version = "0.1.0"
 dependencies = [
+ "meridian-import",
  "meridian-plugin-testkit",
  "meridian-sdk",
  "meridian-yaml",
@@ -1005,6 +1017,7 @@ dependencies = [
 name = "meridian-target-docker"
 version = "0.1.0"
 dependencies = [
+ "meridian-import",
  "meridian-plugin-host",
  "meridian-plugin-testkit",
  "meridian-sdk",
@@ -1015,6 +1028,7 @@ dependencies = [
 name = "meridian-target-dsc"
 version = "0.1.0"
 dependencies = [
+ "meridian-import",
  "meridian-plugin-testkit",
  "meridian-sdk",
  "meridian-yaml",
@@ -1040,6 +1054,7 @@ dependencies = [
 name = "meridian-target-kubernetes"
 version = "0.1.0"
 dependencies = [
+ "meridian-import",
  "meridian-plugin-testkit",
  "meridian-sdk",
  "meridian-yaml",
@@ -1049,6 +1064,7 @@ dependencies = [
 name = "meridian-target-opentofu"
 version = "0.1.0"
 dependencies = [
+ "meridian-import",
  "meridian-ir",
  "meridian-orchestrator",
  "meridian-plugin-host",
@@ -1116,6 +1132,7 @@ dependencies = [
 name = "meridian-target-terraform"
 version = "0.1.0"
 dependencies = [
+ "meridian-import",
  "meridian-plugin-host",
  "meridian-plugin-testkit",
  "meridian-sdk",

@@ -45,6 +45,11 @@ The documentation is published from `docs/` on every merge, as a
 | [`kubernetes`](docs/targets/kubernetes.md) | container orchestration | manifests | `kubectl apply` |
 | [`helm`](docs/targets/helm.md) | container orchestration | a Helm chart, with an optional Kustomize overlay | `helm upgrade --install`, with `kustomize build` for an overlay |
 
+Configuration that already exists can be brought in: `meridian import` reads Terraform and
+OpenTofu configuration, Ansible playbooks, Compose files, Kubernetes manifests and DSC
+configurations, writes the documents that describe the same thing, and marks whatever it
+could not carry over. See [importing existing configuration](docs/operations/importing.md).
+
 What each can and cannot express is in the generated
 [capability matrix](docs/reference/capability-matrix.md). To get started, read the
 [quickstart](docs/quickstart/install.md); there is a worked example for every plugin under
@@ -59,6 +64,7 @@ meridian plugins                            # what is installed, and what each c
 meridian compile site.yaml --out build      # write each target's own files; change nothing
 meridian plan site.yaml                     # ask each tool what applying would change
 meridian apply site.yaml                    # make it so
+meridian import ./compose.yaml -o imported  # turn a tool's existing configuration into documents
 ```
 
 Plugins are found beside the `meridian` binary, or in the directories named by `--plugin-dir`
@@ -102,8 +108,11 @@ The core is a Cargo workspace under `crates/`:
 - `meridian-graph` — dependency graph and topological sort
 - `meridian-ast` — the target-agnostic resource tree every plugin consumes
 - `meridian-value` — the dynamic value type and its canonical JSON form, shared by the core and the SDK
-- `meridian-sdk` — what a plugin author builds against: the `Emitter` and `Runner` traits, `serve`,
-  the wire conversion, and helpers for running a command-line tool
+- `meridian-sdk` — what a plugin author builds against: the `Emitter`, `Runner` and `Importer`
+  traits, `serve`, the wire conversion, and helpers for running a command-line tool
+- `meridian-import` — what importers share: readers for YAML and HCL that keep line numbers, the
+  writer that renders an imported document with its `TODO` markers, and the semantic diff the
+  round-trip tests compare with
 - `meridian-plugin-host` — launching, discovering and driving plugins
 - `meridian-orchestrator` — runs a workflow: compiles each document, drives its tool through a
   plugin, hands outputs from one stage to the next, and stops on the first failure
@@ -116,8 +125,9 @@ The core is a Cargo workspace under `crates/`:
 - `meridian-plugin-template` — a small working plugin that `tools/new_plugin.py` copies to start a new one
 
 The plugins are under `plugins/`, one crate each, built as a binary named
-`meridian-target-<name>`. A plugin's library depends on `meridian-sdk` and nothing else of
-Meridian's, which is the same position a third-party plugin is in.
+`meridian-target-<name>`. A plugin's library depends on `meridian-sdk` and, where it writes
+YAML or imports, on `meridian-yaml` and `meridian-import`: nothing of the compiler's, which is
+the same position a third-party plugin is in.
 
 A plugin is a separate process. The host launches the binary, reads one handshake line
 saying where it is listening, agrees a protocol version with it, and then talks to it over gRPC.
@@ -128,7 +138,9 @@ by hand: its stdout carries the protocol, and it exits when the host closes its 
 Every plugin compiles in four stages, in this order: transform (map each resource to the
 tool's own vocabulary, or refuse it), sort (apply the tool's ordering semantics), validate
 (the tool's own constraints) and emit (pure serialisation). Running the tool is a separate
-half of the plugin, so compiling stays free of side effects.
+half of the plugin, so compiling stays free of side effects. A third, optional half imports:
+it reads the tool's existing configuration and returns documents as data, which `meridian
+import` writes out.
 
 ## Tests
 

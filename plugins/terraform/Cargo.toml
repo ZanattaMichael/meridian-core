@@ -7,9 +7,11 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+meridian-import = { path = "../../crates/meridian-import" }
 meridian-sdk = { path = "../../crates/meridian-sdk" }
 
 [dev-dependencies]
+meridian-import = { path = "../../crates/meridian-import" }
 meridian-plugin-host = { path = "../../crates/meridian-plugin-host" }
 meridian-plugin-testkit = { path = "../../crates/meridian-plugin-testkit" }
 

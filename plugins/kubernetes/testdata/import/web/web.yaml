@@ -1,0 +1,84 @@
+# A web server: its namespace, its configuration, the Deployment that runs it
+# and the Service that exposes it. A Deployment and its Service sharing one
+# name is the usual way to write this.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-config
+  namespace: shop
+data:
+  nginx.conf: |
+    server {
+      listen 8080;
+      root /usr/share/nginx/html;
+    }
+  start.sh: |
+    #!/bin/sh
+    # A shell variable, which is nothing to do with Meridian.
+    echo "starting as ${USER} in ${HOME}"
+    exec nginx -g 'daemon off;'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: shop
+  labels:
+    app: web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27
+          args: ["-c", "/etc/nginx/conf.d/nginx.conf"]
+          env:
+            - name: VERBOSE
+              value: "yes"
+            - name: WORKERS
+              value: "4"
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          securityContext:
+            readOnlyRootFilesystem: yes
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/conf.d
+      volumes:
+        - name: config
+          configMap:
+            name: web-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: shop
+spec:
+  type: LoadBalancer
+  selector:
+    app: web
+  ports:
+    - port: 80
+      targetPort: 8080

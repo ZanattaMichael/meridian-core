@@ -22,6 +22,7 @@ flowchart TD
 | Golden files | `plugins/<name>/testdata/` | `cargo test -p meridian-target-<name>`; record with `UPDATE_GOLDEN=1` |
 | Property tests | `crates/meridian-cli/tests/properties.rs` | `cargo test -p meridian-cli --test properties` |
 | Placement tests | `crates/meridian-cli/tests/placement.rs`, `placement_properties.rs` | `cargo test -p meridian-cli --test placement --test placement_properties` |
+| Secret tests | `crates/meridian-cli/tests/secret_places.rs`, `secret_properties.rs`, `secrets.rs` | `cargo test -p meridian-cli --test secret_places --test secret_properties --test secrets` |
 | Conformance tests | `crates/meridian-cli/tests/conformance.rs` | `cargo test -p meridian-cli --test conformance` |
 | Robustness tests | `crates/meridian-cli/tests/robustness.rs` | `cargo test -p meridian-cli --test robustness` |
 | Examples | `crates/meridian-cli/tests/examples.rs` | `cargo test -p meridian-cli --test examples` |
@@ -85,9 +86,9 @@ short-circuiting and their errors. The model covers the core of the language:
 literals, paths into the data, `defined()`, `!`, `&&`, `||`, `==` and `!=`.
 The other operators and the functions are tested in `crates/meridian-expr`.
 
-An example that decides by `when` needs its data before it can be compiled,
-so the conformance and robustness tests, which build a tree straight from a
-file, pass over it. `examples.rs` compiles it through the command with its
+An example that decides by `when`, or interpolates a value, needs its data
+before it can be compiled, so the conformance and robustness tests, which
+build a tree straight from a file, pass over it. `examples.rs` compiles it through the command with its
 data files.
 
 When a property fails, the output ends with the smallest input that still
@@ -146,6 +147,47 @@ The table found one: a value from data ending in `$`, placed directly before a
 reference, turned the reference into literal text, because a `$` before `${` is
 how a plugin is told the text is literal. That is now refused, with a message
 that says to put a space between the two.
+
+### Secrets: who may read a value, and never the value
+
+[A secret](../reference/dsl/secrets.md) makes two promises. Its value is in
+nothing Meridian prints or writes, and marking a value as a secret changes
+nothing else about what a document means.
+
+`secret_properties.rs` holds the second. Its model is the expression engine
+itself: every generated expression is worked out twice from the same text,
+once where `secret.a` and `secret.b` are secrets and once where they are
+ordinary text with the same characters. A comparison must give the same yes or
+no. A secret must hold exactly the characters the plain reading gave. Anything
+readable that comes out must hold no secret. A function that is not on the
+short list must refuse a secret, name the functions that take one, and repeat
+nothing of the value, and must do its work when the same expression holds no
+secret. Nothing made from a secret may outlive the wipe.
+
+`secret_places.rs` holds the first, through the real command. It is a table
+of every place a document can ask a question of a secret:
+
+| Place | Written as |
+|---|---|
+| a resource | `when: secret.password != 'changeme'` |
+| the whole document | `spec.when` |
+| a named condition, and one that reads another | `conditions:` |
+| a variable that holds the answer | `variables:` with `${{ secret.password != 'changeme' }}` |
+| an output | `when:` on the output |
+| an edge | `when:` on a `dependsOn` or `notifies` entry |
+| a file's content | `${{ secret.password == 'changeme' ? 'default' : 'changed' }}` |
+
+Each row is planned with a password that makes the question true and one that
+makes it false, and must give both answers. `compile` must stop at that place
+and name it. With no password, every row must stop the same way. And after
+`plan`, `apply` and `plan` again, the password must be in nothing printed and
+in no file the run left behind, the state directory included. To cover a new
+place, add a `Place`.
+
+`secrets.rs` covers the providers and what each command does. The two examples
+that use secrets are tested in `examples.rs`: one is planned and applied for
+six machines that differ only in the secrets they have, the other is compiled
+with a password in the environment that must not appear in any file.
 
 ### Writing one
 
@@ -251,7 +293,10 @@ Every `.yaml` file under `examples/` is validated and compiled by the real
   one of the workflow's data sets, so no document goes untested;
 - `tenants.yaml` is checked for what each plan decides: which documents run,
   which resources and outputs they hold, the values functions work out, the
-  types those values keep, and that text from data reaches a file unchanged.
+  types those values keep, and that text from data reaches a file unchanged;
+- an example whose conditions read a secret cannot be compiled, because
+  `compile` fetches none. It must be refused for exactly that reason, and is
+  planned and applied with its secrets by a test of its own.
 
 An example the documentation shows is always one of these files, so it cannot
 rot.

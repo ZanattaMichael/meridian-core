@@ -474,3 +474,67 @@ fn a_rust_plugin_serves_when_the_temporary_directory_is_too_deep_for_a_socket() 
     assert_eq!(client.name(), "fake");
     client.close().unwrap();
 }
+
+#[test]
+fn an_import_crosses_the_boundary_whole_and_a_plugin_without_one_is_not_asked() {
+    use meridian_plugin_host::ImportFailure;
+    use meridian_sdk::{DocumentKind, ImportSource, NoteLevel};
+
+    let client = start();
+    assert_eq!(client.info().import_formats.len(), 1);
+    assert_eq!(client.info().import_formats[0].patterns, ["*.fake"]);
+
+    let source = ImportSource {
+        files: [(
+            "files.fake".to_owned(),
+            "motd = welcome\n? a link\n".to_owned(),
+        )]
+        .into_iter()
+        .collect(),
+        name: "legacy".to_owned(),
+        root: "/srv/legacy".to_owned(),
+    };
+    let imported = client.import(&source).expect("the import succeeds");
+    let document = &imported.documents[0];
+    assert_eq!(document.kind, DocumentKind::Infrastructure);
+    assert_eq!(document.name, "legacy");
+    // The plugin left the target to the host, which knows who it asked.
+    assert_eq!(document.target, "fake");
+    assert_eq!(document.resources[0].id, "motd");
+    assert_eq!(document.resources[0].origin, "files.fake:1");
+    assert_eq!(
+        document.resources[0].params["content"],
+        Value::from("welcome")
+    );
+    assert_eq!(imported.notes.len(), 1);
+    assert_eq!(imported.notes[0].level, NoteLevel::Untranslated);
+    assert_eq!(imported.notes[0].origin, "files.fake:2");
+
+    // A source the importer cannot read is the source's fault, with its place.
+    let broken = ImportSource {
+        files: [("files.fake".to_owned(), "BROKEN\n".to_owned())]
+            .into_iter()
+            .collect(),
+        ..ImportSource::default()
+    };
+    match client.import(&broken) {
+        Err(ImportFailure::Source(e)) => {
+            assert_eq!((e.file.as_str(), e.line), ("files.fake", 1));
+        }
+        other => panic!("expected the source to be refused, got {other:?}"),
+    }
+
+    // A plugin that offers no import says so in Describe and is never asked.
+    let mut env: Vec<(String, String)> = std::env::vars().collect();
+    env.push(("FAKE_IMPORT".to_owned(), "none".to_owned()));
+    let options = StartOptions {
+        env: Some(env),
+        ..StartOptions::default()
+    };
+    let plain = Client::start(&fake(), &options).expect("the fake plugin starts");
+    assert!(plain.info().import_formats.is_empty());
+    match plain.import(&source) {
+        Err(ImportFailure::Plugin(e)) => assert!(e.msg.contains("does not import"), "{e}"),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}

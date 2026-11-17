@@ -1,0 +1,91 @@
+# A web server: nginx, its configuration, the account the application runs
+# as, and the application's cache.
+- name: Web server
+  hosts: web01.example.com
+  vars:
+    app_user: deploy
+    app_home: /srv/app
+    workers: 4
+
+  pre_tasks:
+    - name: Install nginx
+      apt:
+        name: nginx
+        state: present
+
+  tasks:
+    - name: Deploy group
+      ansible.builtin.group:
+        name: "{{ app_user }}"
+        gid: 1200
+
+    - name: Deploy user
+      ansible.builtin.user:
+        name: "{{ app_user }}"
+        uid: 1200
+        groups: "{{ app_user }},sudo"
+        shell: /bin/bash
+
+    - name: Application directories
+      file:
+        path: "{{ app_home }}/{{ item }}"
+        state: directory
+        owner: "{{ app_user }}"
+        mode: 0750
+      loop:
+        - releases
+        - shared
+
+    - name: Configure nginx
+      copy:
+        dest: /etc/nginx/nginx.conf
+        owner: root
+        mode: "0644"
+        content: |
+          worker_processes {{ workers }};
+          # ${hostname} is nginx's own variable
+          events {}
+      notify: Restart nginx
+
+    - name: Site
+      copy:
+        dest: /etc/nginx/sites-enabled/app
+        content: |
+          server { server_name {{ ansible_facts['fqdn'] }}; }
+      notify:
+        - reload nginx
+
+    - name: Remove the default site
+      file: path=/etc/nginx/sites-enabled/default state=absent
+
+    - name: Debian only
+      when: ansible_facts['os_family'] == 'Debian'
+      block:
+        - name: Warm the cache
+          command: /usr/local/bin/warm-cache --all
+          args:
+            chdir: "{{ app_home }}"
+            creates: /var/cache/app/warm
+          when: ansible_facts['memtotal_mb'] > 1024
+
+        - name: Reindex
+          shell: reindex | tee /var/log/reindex.log
+
+  post_tasks:
+    - name: Start nginx
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: Restart nginx
+      service:
+        name: nginx
+        state: restarted
+
+    - name: Reload nginx on change
+      listen: reload nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded

@@ -1,0 +1,119 @@
+# Imported from the test source by `meridian import`.
+#
+# site.yml:3: play "Web server": a document has no play variables, so the
+#   value of each of these was written in wherever a task uses it: app_home,
+#   app_user, workers
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: web
+spec:
+  target: ansible
+  targetHost:
+    from: inline
+    host: web01.example.com
+  resources:
+    # From site.yml:11
+    - id: install_nginx
+      type: package
+      state: present
+      params:
+        name: nginx
+
+    # From site.yml:17
+    - id: deploy_group
+      type: group
+      state: present
+      params:
+        gid: 1200
+        name: deploy
+
+    # From site.yml:22
+    - id: deploy_user
+      type: user
+      state: present
+      params:
+        groups:
+          - deploy
+          - sudo
+        name: deploy
+        shell: /bin/bash
+        uid: 1200
+
+    # From site.yml:29
+    - id: application_directories_releases
+      type: file
+      state: directory
+      params:
+        mode: "0750"
+        owner: deploy
+        path: /srv/app/releases
+
+    # From site.yml:29
+    - id: application_directories_shared
+      type: file
+      state: directory
+      params:
+        mode: "0750"
+        owner: deploy
+        path: /srv/app/shared
+
+    # From site.yml:39
+    - id: configure_nginx
+      type: file
+      state: file
+      params:
+        content: |
+          worker_processes 4;
+          # $${hostname} is nginx's own variable
+          events {}
+        mode: "0644"
+        owner: root
+        path: /etc/nginx/nginx.conf
+      notifies:
+        - resource: start_nginx
+          action: restart
+
+    # From site.yml:50
+    - id: site
+      type: file
+      state: file
+      params:
+        content: |
+          server { server_name {{ ansible_facts['fqdn'] }}; }
+        path: /etc/nginx/sites-enabled/app
+      notifies:
+        - resource: start_nginx
+          action: reload
+
+    # From site.yml:58
+    - id: remove_the_default_site
+      type: file
+      state: absent
+      params:
+        path: /etc/nginx/sites-enabled/default
+
+    # From site.yml:64
+    - id: warm_the_cache
+      type: exec
+      params:
+        chdir: /srv/app
+        command: /usr/local/bin/warm-cache --all
+        creates: /var/cache/app/warm
+      runtimeWhen: (ansible_facts['os_family'] == 'Debian') and (ansible_facts['memtotal_mb'] > 1024)
+
+    # From site.yml:71
+    - id: reindex
+      type: exec
+      params:
+        command: reindex | tee /var/log/reindex.log
+        shell: true
+      runtimeWhen: ansible_facts['os_family'] == 'Debian'
+
+    # From site.yml:75
+    - id: start_nginx
+      type: service
+      state: running
+      params:
+        enabled: true
+        name: nginx

@@ -13,6 +13,8 @@
 //! | `aws_instance`, `azurerm_resource_group`, any `<provider>_<type>` | a `resource` block named by the resource's id |
 //! | `data.<type>` | a `data` block |
 //! | `module` | a `module` block |
+//! | `variable` | a `variable` block; a stage's inputs arrive through these |
+//! | `local` | one entry of `locals`, from the param `value` |
 //! | `provider` | a `provider` block; `source` and `version` go to `required_providers` |
 //! | `backend` | the `backend` block, whose type is the resource's id |
 //!
@@ -35,6 +37,7 @@
 #![allow(clippy::result_large_err)]
 
 mod emit;
+mod import;
 mod runner;
 mod sort;
 mod transform;
@@ -48,6 +51,7 @@ use meridian_sdk::{
 };
 
 pub use emit::CONFIG_PATH;
+pub use import::TerraformImporter;
 pub use runner::TerraformRunner;
 
 /// The target name a document selects with `spec.target`.
@@ -58,12 +62,33 @@ pub const NAME: &str = "terraform";
 pub(crate) enum Kind {
     Provider,
     Backend,
+    Variable,
+    Local,
     Data,
     Module,
-    /// An input variable, which is how a value from another document
-    /// arrives.
-    Variable,
     Managed,
+}
+
+impl Kind {
+    /// What a person calls a block of this kind, as it reads after "is".
+    pub fn described(self) -> &'static str {
+        match self {
+            Kind::Provider => "a provider block",
+            Kind::Backend => "a backend block",
+            Kind::Variable => "a variable",
+            Kind::Local => "a local value",
+            Kind::Data => "a data source",
+            Kind::Module => "a module",
+            Kind::Managed => "a resource",
+        }
+    }
+
+    /// Whether `depends_on` may name a block of this kind, or be written on
+    /// one. Settings, variables and local values have no place in an order:
+    /// Terraform works them out before, or as part of, everything else.
+    pub fn orderable(self) -> bool {
+        matches!(self, Kind::Managed | Kind::Data | Kind::Module)
+    }
 }
 
 /// One block of the configuration.
@@ -90,6 +115,7 @@ impl Block {
             Kind::Data => Some(format!("data.{}.{}", self.r#type, self.name)),
             Kind::Module => Some(format!("module.{}", self.name)),
             Kind::Variable => Some(format!("var.{}", self.name)),
+            Kind::Local => Some(format!("local.{}", self.name)),
             Kind::Provider | Kind::Backend => None,
         }
     }
@@ -143,6 +169,7 @@ impl Emitter for Terraform {
             "<provider>_<type>",
             "backend",
             "data.<type>",
+            "local",
             "module",
             "provider",
             "variable",

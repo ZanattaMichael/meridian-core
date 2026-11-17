@@ -911,6 +911,15 @@ fn a_dependency_is_written_before_what_depends_on_it() {
 
 /// Every example that holds one document, with the target it names: documents
 /// each target is known to compile.
+/// Whether a document holds an interpolation outside its comments. An
+/// escaped opening, written with two dollars, is not one.
+fn interpolates(text: &str) -> bool {
+    let (open, escaped) = (["$", "{{"].concat(), ["$$", "{{"].concat());
+    text.lines().any(|line| {
+        !line.trim_start().starts_with('#') && line.replace(&escaped, "").contains(&open)
+    })
+}
+
 fn examples() -> Vec<(String, String)> {
     let mut found = Vec::new();
     let root = repo_root();
@@ -936,6 +945,11 @@ fn examples() -> Vec<(String, String)> {
                 .lines()
                 .any(|line| line.trim_start().starts_with("when:"))
             {
+                continue;
+            }
+            // So does one that interpolates: its values are worked out from
+            // data, variables or secrets before any target sees it.
+            if interpolates(&text) {
                 continue;
             }
             // A workflow of several documents is the orchestrator's to test.

@@ -132,15 +132,35 @@ fn meridian(command: &str, file: &Path, data: &[PathBuf]) -> Command {
     meridian
 }
 
-fn run(mut command: Command, what: &str) -> String {
+/// Whether the command succeeded, and everything it printed.
+fn outcome(mut command: Command) -> (bool, String) {
     let output = command.output().unwrap();
     let text = format!(
         "{}{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(output.status.success(), "{what} failed:\n{text}");
+    (output.status.success(), text)
+}
+
+fn run(command: Command, what: &str) -> String {
+    let (succeeded, text) = outcome(command);
+    assert!(succeeded, "{what} failed:\n{text}");
     text
+}
+
+/// The examples whose conditions read a secret. `compile` never fetches one,
+/// so these are the examples it cannot decide.
+const DECIDED_BY_A_SECRET: &[&str] = &["examples/language/features-by-secret.yaml"];
+
+/// What `compile` says of a condition that reads a secret.
+const NOT_FETCHED: &str =
+    "is not fetched here: a secret is fetched by plan and apply, never by validate or compile";
+
+fn decided_by_a_secret(file: &Path) -> bool {
+    DECIDED_BY_A_SECRET
+        .iter()
+        .any(|example| repo_root().join(example) == file)
 }
 
 /// Every file `meridian compile --out` wrote for a workflow, by its path
@@ -198,11 +218,21 @@ fn every_example_validates_and_compiles_with_the_real_plugins() {
             &format!("validating {}", file.display()),
         );
         for data in data_sets(&file) {
-            run(
-                meridian("compile", &file, &data),
-                &format!("compiling {} with {data:?}", file.display()),
-            );
+            let what = format!("compiling {} with {data:?}", file.display());
+            if decided_by_a_secret(&file) {
+                // Its conditions read secrets, and compile fetches none, so
+                // it stops and says so. The example is planned with its
+                // secrets in `secrets_decide_an_example_and_are_written_nowhere`.
+                let (succeeded, said) = outcome(meridian("compile", &file, &data));
+                assert!(!succeeded, "{what} read a secret:\n{said}");
+                assert!(said.contains(NOT_FETCHED), "{what}:\n{said}");
+            } else {
+                run(meridian("compile", &file, &data), &what);
+            }
         }
+    }
+    for example in DECIDED_BY_A_SECRET {
+        assert!(repo_root().join(example).exists(), "{example} is gone");
     }
 }
 
@@ -473,4 +503,258 @@ fn a_plan_decides_documents_resources_and_values_in_the_tenants_workflow() {
         conf.contains("globex-enterprise") && !conf.contains("acme"),
         "{conf}"
     );
+}
+
+/// One machine for `features-by-secret.yaml`: which secrets it has, and the
+/// files a plan must then create.
+struct Machine {
+    what: &'static str,
+    password: &'static str,
+    license: Option<&'static str>,
+    token: Option<&'static str>,
+    env: &'static str,
+    creates: &'static [&'static str],
+}
+
+const LICENSE: &str = "LIC-7Q2M-not-a-real-licence-ZX90";
+const DEPLOY_TOKEN: &str = "dpl_4411-not-a-real-token-kk";
+const STRONG: &str = "c0rrect-h0rse-not-a-real-password";
+
+const MACHINES: &[Machine] = &[
+    Machine {
+        what: "every secret, in production",
+        password: STRONG,
+        license: Some(LICENSE),
+        token: Some(DEPLOY_TOKEN),
+        env: "prod",
+        creates: &[
+            "conf_dir",
+            "deploy_conf",
+            "hardening",
+            "premium_conf",
+            "site_conf",
+        ],
+    },
+    Machine {
+        what: "no licence",
+        password: STRONG,
+        license: None,
+        token: Some(DEPLOY_TOKEN),
+        env: "prod",
+        creates: &["conf_dir", "deploy_conf", "hardening", "site_conf"],
+    },
+    Machine {
+        what: "no deploy token",
+        password: STRONG,
+        license: Some(LICENSE),
+        token: None,
+        env: "prod",
+        creates: &["conf_dir", "hardening", "premium_conf", "site_conf"],
+    },
+    Machine {
+        what: "the default password",
+        password: "changeme",
+        license: Some(LICENSE),
+        token: Some(DEPLOY_TOKEN),
+        env: "prod",
+        // No deploys and no hardening on a default password, and a warning.
+        creates: &["conf_dir", "password_warning", "premium_conf", "site_conf"],
+    },
+    Machine {
+        what: "an empty password",
+        password: "",
+        license: None,
+        token: None,
+        env: "prod",
+        creates: &["conf_dir", "password_warning", "site_conf"],
+    },
+    Machine {
+        what: "a strong password outside production",
+        password: STRONG,
+        license: None,
+        token: None,
+        env: "dev",
+        creates: &["conf_dir", "site_conf"],
+    },
+];
+
+/// Every file under `dir`, as text.
+fn everything_under(dir: &Path) -> Vec<(PathBuf, String)> {
+    let mut found = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                let text = String::from_utf8_lossy(&fs::read(&path).unwrap()).into_owned();
+                found.push((path, text));
+            }
+        }
+    }
+    found
+}
+
+/// `features-by-secret.yaml` is planned and applied for six machines that
+/// differ only in the secrets they have. The example is the file from the
+/// repository with three things stood in, none of them part of the language
+/// being shown: the target is the test's own (a plan needs a tool, and the
+/// conditions are decided before any tool is involved), the licence is read
+/// from the test's directory, and the token is printed by `printf` instead of
+/// a password manager.
+#[test]
+fn secrets_decide_an_example_and_are_written_nowhere() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let example = repo_root().join(DECIDED_BY_A_SECRET[0]);
+    let source = fs::read_to_string(&example).unwrap();
+    let data = &data_sets(&example)[0];
+    for machine in MACHINES {
+        let name = format!("by-secret-{}", machine.what.replace([' ', ','], "-"));
+        let dir = scratch(env!("CARGO_TARGET_TMPDIR"), &name);
+        let token = match machine.token {
+            Some(token) => format!("command: [printf, \"%s\", \"{token}\"]"),
+            // A command that prints nothing: there is no token.
+            None => "command: [printf, \"\"]".to_owned(),
+        };
+        let stood_in = [
+            ("target: ansible", "target: fake".to_owned()),
+            (
+                "path: /etc/site/license.key",
+                "path: license.key".to_owned(),
+            ),
+            ("command: [pass, show, site/deploy-token]", token),
+        ]
+        .iter()
+        .fold(source.clone(), |text, (from, to)| {
+            assert!(text.contains(from), "the example no longer has {from:?}");
+            text.replace(from, to)
+        });
+        fs::write(dir.join("site.yaml"), stood_in).unwrap();
+        if let Some(license) = machine.license {
+            let path = dir.join("license.key");
+            fs::write(&path, format!("{license}\n")).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+
+        let meridian = |command: &str| {
+            let mut meridian = Command::new(env!("CARGO_BIN_EXE_meridian"));
+            meridian
+                .arg(command)
+                .arg("site.yaml")
+                .arg("--data")
+                .arg(&data[0])
+                .arg("--set")
+                .arg(format!("env={}", machine.env))
+                .current_dir(&dir)
+                .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())
+                .env_remove("MERIDIAN_STATE_DIR")
+                .env("SITE_DB_PASSWORD", machine.password);
+            meridian
+        };
+
+        let planned = run(meridian("plan"), &format!("planning for {}", machine.what));
+        let creates: BTreeSet<&str> = planned
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("+ create files/"))
+            .filter_map(|rest| rest.split(':').next())
+            .collect();
+        assert_eq!(
+            creates,
+            machine.creates.iter().copied().collect(),
+            "{}:\n{planned}",
+            machine.what
+        );
+        let applied = run(meridian("apply"), &format!("applying for {}", machine.what));
+
+        // The answer to a condition is not a secret, and is written.
+        let conf = everything_under(&dir.join(".meridian"))
+            .into_iter()
+            .find(|(path, _)| path.ends_with("files/site_conf"))
+            .map(|(_, text)| text)
+            .unwrap_or_else(|| panic!("{}: no site_conf was applied", machine.what));
+        assert!(
+            conf.contains(&format!("licensed = {}", machine.license.is_some())),
+            "{}: {conf}",
+            machine.what
+        );
+
+        // No secret is in anything the run printed or left behind. A
+        // password of "changeme" or "" is the document's own text, so those
+        // are not searched for.
+        let secrets = [
+            Some(machine.password).filter(|password| *password == STRONG),
+            machine.license,
+            machine.token,
+        ];
+        for secret in secrets.into_iter().flatten() {
+            for said in [&planned, &applied] {
+                assert!(!said.contains(secret), "{}:\n{said}", machine.what);
+            }
+            for (path, text) in everything_under(&dir) {
+                let own = path.ends_with("license.key") || path.ends_with("site.yaml");
+                assert!(
+                    own || !text.contains(secret),
+                    "{}: {} holds a secret",
+                    machine.what,
+                    path.display()
+                );
+            }
+        }
+    }
+}
+
+/// `secret-in-a-setting.yaml` places a secret in a file. `compile` writes
+/// the secret's name where it belongs and never reads the secret, and `plan`
+/// stops before anything could be written.
+#[test]
+fn a_secret_in_a_setting_is_compiled_as_its_name_and_never_planned() {
+    const CANARY: &str = "zzq-not-a-real-password-canary";
+    let example = repo_root().join("examples/language/secret-in-a-setting.yaml");
+    let data = &data_sets(&example)[0];
+    let out = scratch(env!("CARGO_TARGET_TMPDIR"), "secret-in-a-setting");
+
+    let mut compile = meridian("compile", &example, data);
+    compile
+        .arg("--out")
+        .arg(&out)
+        .env("APP_DB_PASSWORD", CANARY);
+    let said = run(compile, "compiling secret-in-a-setting.yaml");
+    let written: String = everything_under(&out)
+        .into_iter()
+        .map(|(_, text)| text)
+        .collect();
+    for line in [
+        "DATABASE_URL=postgres://app:urlEncode((secret db_password))@db.internal:5432/app",
+        "SIGNING_KEY=base64Encode((secret signing_key))",
+        "LOG_LEVEL=info",
+        "listen = 0.0.0.0:8080",
+    ] {
+        assert!(written.contains(line), "no {line:?} in:\n{written}");
+    }
+    assert!(!said.contains(CANARY) && !written.contains(CANARY));
+
+    let mut plan = meridian("plan", &example, data);
+    plan.current_dir(&out).env("APP_DB_PASSWORD", CANARY);
+    let (succeeded, said) = outcome(plan);
+    assert!(!succeeded, "{said}");
+    assert!(
+        said.contains(
+            "resource \"app_env\": params.content holds a secret, and target \"chef\" cannot \
+             be handed a secret yet"
+        ),
+        "{said}"
+    );
+    assert!(!said.contains(CANARY), "{said}");
+    for (path, text) in everything_under(&out) {
+        assert!(
+            !text.contains(CANARY),
+            "{} holds the secret",
+            path.display()
+        );
+    }
 }

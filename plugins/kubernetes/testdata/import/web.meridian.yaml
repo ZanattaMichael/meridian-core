@@ -1,0 +1,95 @@
+# Imported from the test source by `meridian import`.
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: web
+spec:
+  target: kubernetes
+  resources:
+    # From web.yaml:4
+    - id: shop
+      type: v1/Namespace
+      params: {}
+
+    # From web.yaml:9
+    - id: web_config
+      type: v1/ConfigMap
+      params:
+        data:
+          nginx.conf: |
+            server {
+              listen 8080;
+              root /usr/share/nginx/html;
+            }
+          start.sh: |
+            #!/bin/sh
+            # A shell variable, which is nothing to do with Meridian.
+            echo "starting as $${USER} in $${HOME}"
+            exec nginx -g 'daemon off;'
+        metadata:
+          namespace: shop
+
+    # From web.yaml:26
+    - id: web
+      type: apps/v1/Deployment
+      params:
+        metadata:
+          labels:
+            app: web
+          namespace: shop
+        spec:
+          replicas: 2
+          selector:
+            matchLabels:
+              app: web
+          template:
+            metadata:
+              labels:
+                app: web
+            spec:
+              containers:
+                - args:
+                    - -c
+                    - /etc/nginx/conf.d/nginx.conf
+                  env:
+                    - name: VERBOSE
+                      value: "yes"
+                    - name: WORKERS
+                      value: "4"
+                  image: nginx:1.27
+                  name: nginx
+                  ports:
+                    - containerPort: 8080
+                  readinessProbe:
+                    httpGet:
+                      path: /
+                      port: 8080
+                    periodSeconds: 5
+                  resources:
+                    limits:
+                      cpu: 500m
+                      memory: 128Mi
+                  securityContext:
+                    readOnlyRootFilesystem: true
+                  volumeMounts:
+                    - mountPath: /etc/nginx/conf.d
+                      name: config
+              volumes:
+                - configMap:
+                    name: web-config
+                  name: config
+
+    # From web.yaml:73
+    - id: web_service
+      type: v1/Service
+      params:
+        metadata:
+          name: web
+          namespace: shop
+        spec:
+          ports:
+            - port: 80
+              targetPort: 8080
+          selector:
+            app: web
+          type: LoadBalancer

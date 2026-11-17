@@ -35,13 +35,16 @@
 //! ```
 //!
 //! A plugin that also drives the real tool implements [`Runner`] and adds it
-//! with [`Plugin::with_runner`].
+//! with [`Plugin::with_runner`]. A plugin that can read its tool's existing
+//! configuration back into Meridian documents implements [`Importer`] and adds
+//! it with [`Plugin::with_importer`].
 
 // A refusal carries its position, resource and hint by value. Emit runs once
 // per target, so the size of the error path is not worth boxing the contract.
 #![allow(clippy::result_large_err)]
 
 pub mod expr;
+mod import;
 mod run;
 mod serve;
 pub mod tool;
@@ -57,6 +60,10 @@ pub mod pb {
     tonic::include_proto!("meridian.plugin.v1");
 }
 
+pub use import::{
+    DocumentKind, ImportError, ImportFormat, ImportNote, ImportSource, Imported, ImportedDocument,
+    ImportedNotify, ImportedOutput, ImportedResource, Importer, NoteLevel,
+};
 pub use meridian_value::{canonical_map, decode_map, decode_value, SecretRef, Value, SENSITIVE};
 pub use run::{
     Applied, Category, Change, ChangeAction, Log, LogLine, LogStream, NoLog, Operations, Output,
@@ -80,7 +87,9 @@ pub use version::PROTOCOLS_ENV;
 /// in the host's range.
 ///
 /// Version 2 added the plugin's category and operations to `Describe`, and
-/// the `Runner` service.
+/// the `Runner` service. The optional `Importer` service was added without a
+/// new version: a plugin built before it lists no import formats and is never
+/// asked to import.
 pub const PROTOCOL_VERSION: u32 = 2;
 
 /// The oldest wire protocol this SDK still speaks. It trails

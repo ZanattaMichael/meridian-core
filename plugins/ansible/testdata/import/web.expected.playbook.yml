@@ -1,0 +1,82 @@
+---
+- name: web
+  hosts: web01.example.com
+  tasks:
+    - name: install_nginx
+      ansible.builtin.package:
+        name: nginx
+        state: present
+    - name: deploy_group
+      ansible.builtin.group:
+        gid: 1200
+        name: deploy
+        state: present
+    - name: deploy_user
+      ansible.builtin.user:
+        groups:
+          - deploy
+          - sudo
+        name: deploy
+        shell: /bin/bash
+        state: present
+        uid: 1200
+    - name: application_directories_releases
+      ansible.builtin.file:
+        mode: "0750"
+        owner: deploy
+        path: /srv/app/releases
+        state: directory
+    - name: application_directories_shared
+      ansible.builtin.file:
+        mode: "0750"
+        owner: deploy
+        path: /srv/app/shared
+        state: directory
+    - name: configure_nginx
+      ansible.builtin.copy:
+        content: |
+          worker_processes 4;
+          # ${hostname} is nginx's own variable
+          events {}
+        dest: /etc/nginx/nginx.conf
+        mode: "0644"
+        owner: root
+      notify:
+        - restart start_nginx
+    - name: site
+      ansible.builtin.copy:
+        content: |
+          server { server_name {{ ansible_facts['fqdn'] }}; }
+        dest: /etc/nginx/sites-enabled/app
+      notify:
+        - reload start_nginx
+    - name: remove_the_default_site
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+    - name: warm_the_cache
+      ansible.builtin.command:
+        chdir: /srv/app
+        cmd: /usr/local/bin/warm-cache --all
+        creates: /var/cache/app/warm
+      when: (ansible_facts['os_family'] == 'Debian') and (ansible_facts['memtotal_mb'] > 1024)
+    - name: reindex
+      ansible.builtin.shell:
+        cmd: reindex | tee /var/log/reindex.log
+      when: ansible_facts['os_family'] == 'Debian'
+    - name: start_nginx
+      ansible.builtin.service:
+        enabled: true
+        name: nginx
+        state: started
+  handlers:
+    - name: reload start_nginx
+      ansible.builtin.service:
+        enabled: true
+        name: nginx
+        state: reloaded
+    - name: restart start_nginx
+      ansible.builtin.service:
+        enabled: true
+        name: nginx
+        state: restarted

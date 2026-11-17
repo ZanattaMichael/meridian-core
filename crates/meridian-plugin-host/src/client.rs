@@ -5,16 +5,17 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use meridian_sdk::pb::emitter_client::EmitterClient;
+use meridian_sdk::pb::importer_client::ImporterClient;
 use meridian_sdk::pb::runner_client::RunnerClient;
 use meridian_sdk::pb::{self, DescribeRequest};
 use meridian_sdk::{
-    version, wire, Applied, Artifact, Data, Emitted, LogLine, Output, Plan, ResourceGraph,
-    RunContext, HANDSHAKE_MAGIC, VERSION,
+    version, wire, Applied, Artifact, Data, Emitted, ImportSource, Imported, LogLine, Output, Plan,
+    ResourceGraph, RunContext, HANDSHAKE_MAGIC, VERSION,
 };
 use tokio::runtime::Runtime;
 use tonic::transport::{Channel, Endpoint};
 
-use crate::{EmitError, Error, Info, RunFailure};
+use crate::{EmitError, Error, ImportFailure, Info, RunFailure};
 
 /// How long a host waits for a plugin to announce itself. A plugin that has
 /// not printed its handshake line by then is either not a Meridian plugin or is
@@ -171,6 +172,7 @@ impl Client {
             target_versions: reply.target_versions,
             operations: wire::operations_from_wire(reply.operations),
             accepts_inputs: reply.accepts_inputs,
+            import_formats: wire::import_formats_from_wire(reply.import_formats),
             path: path.to_owned(),
         };
         Ok(Client {
@@ -231,6 +233,66 @@ impl Client {
                 ))
             }
         }
+    }
+
+    /// Reads a tool's existing configuration into Meridian documents. A
+    /// plugin that listed no import formats is never asked.
+    pub fn import(&self, source: &ImportSource) -> Result<Imported, ImportFailure> {
+        let fault = |msg: String, cause: String, stderr: String| {
+            ImportFailure::Plugin(Error {
+                plugin: self.info.name.clone(),
+                path: self.info.path.clone(),
+                msg,
+                cause,
+                stderr,
+            })
+        };
+        if self.info.import_formats.is_empty() {
+            return Err(fault(
+                "this target does not import".to_owned(),
+                String::new(),
+                String::new(),
+            ));
+        }
+        let Some(channel) = &self.channel else {
+            return Err(fault(
+                "the plugin has been shut down".to_owned(),
+                String::new(),
+                String::new(),
+            ));
+        };
+        let mut importer = ImporterClient::new(channel.clone());
+        let request = wire::import_request(source);
+        let reply = match self.runtime.block_on(importer.import(request)) {
+            Ok(reply) => reply.into_inner(),
+            Err(e) => {
+                let stderr = self
+                    .process
+                    .as_ref()
+                    .map(|p| p.stderr_after(Duration::from_secs(1)))
+                    .unwrap_or_default();
+                return Err(fault(
+                    "the plugin failed while importing".to_owned(),
+                    status(&e),
+                    stderr,
+                ));
+            }
+        };
+        let mut imported = wire::import_response_from_wire(reply)
+            .map_err(|cause| {
+                fault(
+                    "the plugin sent a result this host cannot read while importing".to_owned(),
+                    cause,
+                    String::new(),
+                )
+            })?
+            .map_err(ImportFailure::Source)?;
+        for document in &mut imported.documents {
+            if document.target.is_empty() {
+                document.target = self.info.name.clone();
+            }
+        }
+        Ok(imported)
     }
 
     /// Previews what applying an artifact would change. `log` receives the

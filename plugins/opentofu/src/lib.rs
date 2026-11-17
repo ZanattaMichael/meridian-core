@@ -55,6 +55,7 @@
 mod emit;
 mod encryption;
 mod expression;
+mod import;
 mod runner;
 mod sort;
 mod transform;
@@ -68,6 +69,7 @@ use meridian_sdk::{
 };
 
 pub use emit::CONFIG_PATH;
+pub use import::OpenTofuImporter;
 pub use runner::{OpenTofuRunner, PROGRAM_VARIABLE};
 
 /// The target name a document selects with `spec.target`.

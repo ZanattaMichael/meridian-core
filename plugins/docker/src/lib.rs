@@ -46,6 +46,7 @@
 
 mod check;
 mod emit;
+mod import;
 mod runner;
 mod sort;
 mod transform;
@@ -59,6 +60,7 @@ use meridian_sdk::{
 };
 
 pub use emit::{COMPOSE_PATH, PROJECT_PATH};
+pub use import::DockerImporter;
 pub use runner::DockerRunner;
 
 /// The target name a document selects with `spec.target`.

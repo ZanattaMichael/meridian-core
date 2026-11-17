@@ -11,8 +11,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
+use meridian_import::Rendered;
 use meridian_ir::{Bundle, Document};
-use meridian_sdk::{Artifact, Emitted, LogLine, Position, ResourceGraph};
+use meridian_sdk::{
+    Artifact, Data, Emitted, Emitter, ImportSource, Imported, Importer, LogLine, Position,
+    ResourceGraph, Value,
+};
 
 /// The repository root.
 pub fn repo_root() -> PathBuf {
@@ -151,6 +155,123 @@ fn assert_golden_files(dir: &Path, case: &str, got: &BTreeMap<String, String>) {
     for (name, text) in got {
         assert_eq!(text, &want[name], "{name}");
     }
+}
+
+/// Compares one piece of text with the golden file `<dir>/<name>`. Run with
+/// `UPDATE_GOLDEN=1` to record it instead.
+pub fn assert_golden_text(dir: &Path, name: &str, text: &str) {
+    let path = dir.join(name);
+    if std::env::var_os("UPDATE_GOLDEN").is_some() {
+        fs::create_dir_all(dir).expect("creating the golden directory");
+        fs::write(&path, text).expect("recording a golden file");
+        return;
+    }
+    let want =
+        fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
+    assert_eq!(text, want, "{name}");
+}
+
+/// The files directly inside a directory, as the source of an import named
+/// `name`.
+pub fn import_source(dir: &Path, name: &str) -> ImportSource {
+    let mut files = BTreeMap::new();
+    let entries = fs::read_dir(dir).unwrap_or_else(|e| panic!("listing {}: {e}", dir.display()));
+    for entry in entries {
+        let path = entry.expect("a directory entry").path();
+        if path.is_file() {
+            let text = fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
+            files.insert(
+                path.file_name()
+                    .expect("a file has a name")
+                    .to_string_lossy()
+                    .into_owned(),
+                text,
+            );
+        }
+    }
+    ImportSource {
+        files,
+        name: name.to_owned(),
+        root: String::new(),
+    }
+}
+
+/// An import source from path and content pairs.
+pub fn import_text(name: &str, files: &[(&str, &str)]) -> ImportSource {
+    ImportSource {
+        files: files
+            .iter()
+            .map(|(path, text)| ((*path).to_owned(), (*text).to_owned()))
+            .collect(),
+        name: name.to_owned(),
+        root: String::new(),
+    }
+}
+
+/// One imported document, taken all the way round: as the importer returned
+/// it, as the file `meridian import` would write, and as the target compiles
+/// that file.
+pub struct RoundTrip {
+    pub rendered: Rendered,
+    pub emitted: Emitted,
+}
+
+/// Imports a source, writes each document the way `meridian import` does,
+/// reads it back the way the core reads any document, and compiles it with
+/// the target.
+///
+/// That the written document parses, validates and compiles is itself half
+/// of what a round-trip test asserts. The other half is comparing what was
+/// compiled with the source, which only the test knows how to do.
+pub fn round_trip(
+    importer: &dyn Importer,
+    emitter: &dyn Emitter,
+    source: &ImportSource,
+) -> (Imported, Vec<RoundTrip>) {
+    let mut imported = importer
+        .import(source)
+        .unwrap_or_else(|e| panic!("importing: {e}"));
+    for document in &mut imported.documents {
+        if document.target.is_empty() {
+            document.target = emitter.name().to_owned();
+        }
+    }
+    let trips = meridian_import::render_all(&imported, "the test source")
+        .into_iter()
+        .map(|rendered| {
+            let graph = graph_from_text(&rendered.file_name, &rendered.text, emitter.name());
+            let emitted = emitter.emit(&graph, &Data::new()).unwrap_or_else(|e| {
+                panic!(
+                    "the imported document {} does not compile: {e}\n{}",
+                    rendered.file_name, rendered.text
+                )
+            });
+            RoundTrip { rendered, emitted }
+        })
+        .collect();
+    (imported, trips)
+}
+
+/// Reads JSON text as a value, for comparing with what a target compiled.
+pub fn json(text: &str) -> Value {
+    meridian_sdk::decode_value(text.as_bytes()).unwrap_or_else(|e| panic!("reading JSON: {e}"))
+}
+
+/// An importer's notes as the lines a report shows, for a golden file.
+pub fn notes_text(imported: &Imported) -> String {
+    imported
+        .notes
+        .iter()
+        .map(|n| {
+            let about = if n.resource.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", n.resource)
+            };
+            format!("{}{about}: {n}\n", n.level)
+        })
+        .collect()
 }
 
 /// An artifact from path and content pairs.

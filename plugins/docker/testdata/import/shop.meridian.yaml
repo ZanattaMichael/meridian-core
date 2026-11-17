@@ -1,0 +1,123 @@
+# Imported from the test source by `meridian import`.
+#
+# compose.yaml:5: x-logging: left out: an extension field is not part of the
+#   project. Anything that reused it through a YAML anchor was written out in
+#   full
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: shop
+spec:
+  target: docker
+  resources:
+    # From compose.yaml:12
+    - id: db
+      type: service
+      params:
+        environment:
+          POSTGRES_DB: shop
+          POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+        healthcheck:
+          interval: 10s
+          retries: 5
+          test:
+            - CMD-SHELL
+            - pg_isready -U postgres
+        image: postgres:16
+        logging:
+          driver: json-file
+          options:
+            max-size: 10m
+        networks:
+          - backend
+        secrets:
+          - db_password
+        volumes:
+          - db_data:/var/lib/postgresql/data
+      notifies:
+        - resource: app
+          action: restart
+
+    # From compose.yaml:29
+    - id: cache
+      type: service
+      params:
+        image: redis:7
+
+    # From compose.yaml:32
+    - id: migrate
+      type: service
+      params:
+        command:
+          - ./manage
+          - migrate
+        image: ghcr.io/example/shop:1.4.2
+        networks:
+          - backend
+      dependsOn:
+        - resource: db
+
+    # From compose.yaml:41
+    - id: app
+      type: service
+      params:
+        command:
+          - sh
+          - -c
+          - exec ./serve --workers $${WORKERS:-4} --home $HOME
+        depends_on:
+          migrate:
+            condition: service_completed_successfully
+        environment:
+          CACHE_HOST: cache
+          DATABASE_HOST: db
+        image: ghcr.io/example/shop:1.4.2
+        logging:
+          driver: json-file
+          options:
+            max-size: 10m
+        networks:
+          - backend
+      dependsOn:
+        - resource: cache
+
+    # From compose.yaml:61
+    - id: proxy
+      type: service
+      params:
+        configs:
+          - source: site
+            target: /etc/nginx/conf.d/default.conf
+        image: nginx:1.27
+        networks:
+          - backend
+        ports:
+          - 8080:80
+      dependsOn:
+        - resource: app
+
+    # From compose.yaml:73
+    - id: backend
+      type: network
+      params: {}
+
+    # From compose.yaml:76
+    - id: db_data
+      type: volume
+      params: {}
+
+    # From compose.yaml:80
+    - id: site
+      type: config
+      params:
+        content: |
+          server {
+            listen 80;
+            location / { proxy_pass http://app:8000; }
+          }
+
+    # From compose.yaml:88
+    - id: db_password
+      type: secret
+      params:
+        environment: DB_PASSWORD

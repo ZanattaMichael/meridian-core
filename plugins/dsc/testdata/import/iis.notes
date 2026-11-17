@@ -1,0 +1,2 @@
+note: WebServer.ps1:50: Configuration WebServer: what the script does outside the Configuration block, such as compiling it and starting it, was not read: Meridian does both
+changed [runner]: WebServer.ps1:9: configuration: the configuration does not say how "web01.example.com" is reached. The runner was given target: WinRM, which is how a PowerShell configuration is pushed; change it to SSH if that is how this machine is managed

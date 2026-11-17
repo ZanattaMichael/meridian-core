@@ -1,0 +1,7 @@
+not translated: Fleet.ps1:6: Configuration Fleet: the Node block is for $AllNodes.NodeName, which is worked out when the script runs, and a document configures one host that it names. Write one document for each machine
+not translated: Fleet.ps1:6: Configuration Fleet: the configuration takes parameters, and a document has none. A property that reads one is marked: write the value in, or take it from data
+not translated: Fleet.ps1:13: Configuration Fleet: this is PowerShell that runs when the configuration is compiled, and it was not read, nor anything declared inside it: if ($Role -eq 'web') { WindowsFeature IIS { Name = 'Web-Serv...
+changed [One]: Fleet.ps1:7: ModuleA/Thing "One": the configuration imports several modules (ModuleA, ModuleB) and does not say which one Thing comes from. Its type names the first; correct it if that is wrong
+not translated [One]: Fleet.ps1:7: ModuleA/Thing "One": these properties are worked out by PowerShell when the configuration is compiled, which a document does not do. The expression was carried as the text it is, which is not what it meant; write the value in: Path, Role, PsDscRunAsCredential
+changed [runner]: Fleet.ps1:6: configuration: the configuration does not say how its machine is reached. The runner was given target: WinRM, which is how a PowerShell configuration is pushed; change it to SSH if that is how this machine is managed
+not translated [One]: Fleet.ps1:7: ModuleA/Thing "One": it depends on [Thing]Missing, which is not a resource of this configuration, so the dependency was left out

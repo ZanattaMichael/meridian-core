@@ -1,0 +1,80 @@
+# Imported from the test source by `meridian import`.
+#
+# There is 1 thing to look at before this document is applied. Each is marked
+#   with TODO(meridian-import), here or beside the resource it is about.
+#
+# WebServer.ps1:50: Configuration WebServer: what the script does outside the
+#   Configuration block, such as compiling it and starting it, was not read:
+#   Meridian does both
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: webserver
+spec:
+  target: dsc
+  targetVersion: "2"
+  targetHost:
+    from: inline
+    host: web01.example.com
+  resources:
+    # From WebServer.ps1:9
+    # TODO(meridian-import): changed: WebServer.ps1:9: configuration: the
+    #   configuration does not say how "web01.example.com" is reached. The
+    #   runner was given target: WinRM, which is how a PowerShell
+    #   configuration is pushed; change it to SSH if that is how this machine
+    #   is managed
+    - id: runner
+      type: runner
+      params:
+        target: WinRM
+
+    # From WebServer.ps1:10
+    - id: IIS
+      type: PSDscResources/WindowsFeature
+      params:
+        Ensure: Present
+        Name: Web-Server
+
+    # From WebServer.ps1:15
+    - id: SiteRoot
+      type: PSDesiredStateConfiguration/File
+      params:
+        DestinationPath: C:\inetpub\app
+        Ensure: Present
+        Type: Directory
+      dependsOn:
+        - resource: IIS
+
+    # From WebServer.ps1:22
+    - id: SiteConfig
+      type: PSDesiredStateConfiguration/File
+      params:
+        Contents: |-
+          <configuration>
+            <appSettings><add key="price" value="$5" /></appSettings>
+          </configuration>
+        DestinationPath: C:\inetpub\app\web.config
+        Ensure: Present
+      dependsOn:
+        - resource: SiteRoot
+
+    # From WebServer.ps1:33
+    - id: AppPool
+      type: WebAdministrationDsc/WebAppPool
+      params:
+        Ensure: Present
+        Name: app
+        State: Started
+        autoStart: true
+        restartMemoryLimit: 536870912
+      dependsOn:
+        - resource: IIS
+        - resource: SiteRoot
+
+    # From WebServer.ps1:42
+    - id: W3SVC
+      type: PSDscResources/Service
+      params:
+        Name: W3SVC
+        StartupType: Automatic
+        State: Running

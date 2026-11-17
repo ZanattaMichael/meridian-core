@@ -53,6 +53,7 @@ on [its own page](../../concepts/secrets-in-memory.md).
 - [When a secret is fetched](#when-a-secret-is-fetched)
 - [What each command does](#what-each-command-does)
 - [Errors](#errors)
+- [Examples](#examples)
 
 ## Declaring a secret
 
@@ -237,3 +238,59 @@ a command's arguments.
 | The file can be read by others | `plan`, `apply` | `secret "token" (from: file): ... has mode 0644 ... allowWideMode: true` |
 | The command failed | `plan`, `apply` | `secret "flag" (from: exec): the command sh exited with status 4` |
 | A secret that is not base64 is given to `base64Decode` | `plan`, `apply` | `base64Decode(...): the secret is not base64` |
+
+## Examples
+
+Under [`examples/language/`](../../../examples/language), each with the data
+file it reads beside it:
+
+| Example | Shows |
+|---|---|
+| [`features-by-secret.yaml`](../../../examples/language/features-by-secret.yaml) | three secrets, one from each provider, read only by conditions: an optional licence, a default password that is warned about, a secret beside ordinary data. It can be planned and applied today |
+| [`secret-in-a-setting.yaml`](../../../examples/language/secret-in-a-setting.yaml) | a password placed in a database URL through a variable and `urlEncode`, and what `compile` writes in its place |
+
+The first is planned with its password in the environment:
+
+```
+SITE_DB_PASSWORD=... meridian plan examples/language/features-by-secret.yaml \
+    --data examples/language/features-by-secret.data.yaml
+```
+
+On a machine with no licence file and a password that is not the default, the
+plan reports each condition in the document's own words and no value:
+
+```
+site (ResourceSet, target ansible on web01.example.com)
+  when: 3 removed
+    resource "premium_conf": cond.licensed is false
+    resource "password_warning": cond.default_password is false
+    "deploy_conf" depends on "premium_conf": cond.licensed is false
+```
+
+What each machine is given:
+
+| The machine has | `premium_conf` | `password_warning` | `deploy_conf` | `hardening` |
+|---|---|---|---|---|
+| every secret, in production | kept | removed | kept | kept |
+| no licence | removed | removed | kept | kept |
+| no deploy token | kept | removed | removed | kept |
+| the default password | kept | kept | removed | removed |
+| a strong password outside production | removed | removed | removed | removed |
+
+The second is compiled, which reads no secret:
+
+```
+meridian compile examples/language/secret-in-a-setting.yaml \
+    --data examples/language/secret-in-a-setting.data.yaml --out out
+```
+
+```
+DATABASE_URL=postgres://app:urlEncode((secret db_password))@db.internal:5432/app
+SIGNING_KEY=base64Encode((secret signing_key))
+LOG_LEVEL=info
+```
+
+Both are held in place by tests: the first is planned and applied for each row
+of the table above and everything the runs print and leave behind is searched
+for the secrets; the second is compiled with a password in the environment
+that must not appear anywhere.

@@ -22,7 +22,9 @@ mod registry;
 
 use std::fmt;
 
-use meridian_sdk::{Capabilities, Category, CompileError, Operations, RunError};
+use meridian_sdk::{
+    Capabilities, Category, CompileError, ImportError, ImportFormat, Operations, RunError,
+};
 
 pub use client::{Client, StartOptions, HANDSHAKE_TIMEOUT};
 pub use registry::{binary_name, Registry, Target};
@@ -54,6 +56,9 @@ pub struct Info {
     /// The versions of its tool the target compiles for; empty when it does
     /// not say.
     pub target_versions: Vec<String>,
+    /// The kinds of existing configuration the target can turn into Meridian
+    /// documents; empty when it does not import.
+    pub import_formats: Vec<ImportFormat>,
     /// The binary the plugin was loaded from; empty for an in-process emitter.
     pub path: String,
 }
@@ -142,6 +147,29 @@ impl fmt::Display for RunFailure {
 }
 
 impl std::error::Error for RunFailure {}
+
+/// Why an import produced no documents.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ImportFailure {
+    /// The importer could not read the source: a syntax error, or a file that
+    /// is not its tool's. This is an answer about what the operator handed
+    /// over.
+    Source(ImportError),
+    /// The plugin mechanism failed: the target does not import, the process
+    /// died, or it sent something this host cannot read.
+    Plugin(Error),
+}
+
+impl fmt::Display for ImportFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ImportFailure::Source(e) => e.fmt(f),
+            ImportFailure::Plugin(e) => e.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for ImportFailure {}
 
 /// Converts the compiler's own tree into the public form a target consumes.
 ///

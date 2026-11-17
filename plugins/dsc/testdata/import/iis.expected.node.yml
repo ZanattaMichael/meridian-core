@@ -1,0 +1,60 @@
+# What WebServer.ps1 declares, written the way the target writes it.
+parameters: {}
+variables: {}
+resources:
+  - name: IIS
+    type: PSDscResources/WindowsFeature
+    target:
+      action: WinRM
+      computerName: web01.example.com
+    properties:
+      Ensure: Present
+      Name: Web-Server
+  - name: SiteRoot
+    type: PSDesiredStateConfiguration/File
+    dependsOn:
+      - PSDscResources/WindowsFeature/IIS
+    target:
+      action: WinRM
+      computerName: web01.example.com
+    properties:
+      Ensure: Present
+      Type: Directory
+      DestinationPath: C:\inetpub\app
+  - name: SiteConfig
+    type: PSDesiredStateConfiguration/File
+    dependsOn:
+      - PSDesiredStateConfiguration/File/SiteRoot
+    target:
+      action: WinRM
+      computerName: web01.example.com
+    properties:
+      Ensure: Present
+      DestinationPath: C:\inetpub\app\web.config
+      Contents: |-
+        <configuration>
+          <appSettings><add key="price" value="`$5" /></appSettings>
+        </configuration>
+  - name: AppPool
+    type: WebAdministrationDsc/WebAppPool
+    dependsOn:
+      - PSDscResources/WindowsFeature/IIS
+      - PSDesiredStateConfiguration/File/SiteRoot
+    target:
+      action: WinRM
+      computerName: web01.example.com
+    properties:
+      Ensure: Present
+      Name: app
+      State: Started
+      restartMemoryLimit: 536870912
+      autoStart: true
+  - name: W3SVC
+    type: PSDscResources/Service
+    target:
+      action: WinRM
+      computerName: web01.example.com
+    properties:
+      Name: W3SVC
+      State: Running
+      StartupType: Automatic

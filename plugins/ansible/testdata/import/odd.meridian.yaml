@@ -1,0 +1,88 @@
+# Imported from the test source by `meridian import`.
+#
+# There are 14 things to look at before this document is applied. Each is
+#   marked with TODO(meridian-import), here or beside the resource it is
+#   about.
+#
+# TODO(meridian-import): changed: site.yml:2: play "Odd": hosts is
+#   "webservers", which was taken as the name of a host. If it is an inventory
+#   group, write one document for each host in it
+# TODO(meridian-import): not translated: site.yml:2: play "Odd": the play
+#   applies the role(s) common, and a role's tasks live in other files. Import
+#   each role's tasks file and add its resources here
+# TODO(meridian-import): not translated: site.yml:2: play "Odd": a document
+#   has nothing for these play keywords, so they were left out: become.
+#   Connection settings such as become and remote_user belong in the runner's
+#   MERIDIAN_ANSIBLE_ARGS
+# site.yml:2: play "Odd": a document has no play variables, so the value of
+#   each of these was written in wherever a task uses it: port
+# TODO(meridian-import): not translated: site.yml:2: play "Odd": these play
+#   variables are lists, mappings or templates, and a document has no play
+#   variables to hold them: packages. A task that uses one is marked
+# TODO(meridian-import): not translated: site.yml:17: task "Template": no
+#   resource type of this target compiles to the module template, so the task
+#   was left out (the types are exec, file, group, package, service, user)
+# TODO(meridian-import): not translated: site.yml:32: task "Each": the task
+#   loops over something other than a list of plain values written in the
+#   playbook, so it was left out. Write one resource for each item
+# TODO(meridian-import): not translated: site.yml:36: task: include_tasks
+#   brings in "more.yml" by name, and it was not read. Import that file as
+#   well and add its resources here
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: odd
+spec:
+  target: ansible
+  targetHost:
+    from: inline
+    host: webservers
+  resources:
+    # From site.yml:11
+    # TODO(meridian-import): not translated: site.yml:11: task "Packages":
+    #   this uses the play variable(s) packages in a way that could not be
+    #   written in. A document has no play variables, so Ansible will find
+    #   them undefined: write the value where it is used
+    # TODO(meridian-import): not translated: site.yml:11: task "Packages": the
+    #   package resource type has no param for these arguments of apt, so they
+    #   were left out: update_cache
+    # TODO(meridian-import): not translated: site.yml:11: task "Packages": a
+    #   resource cannot carry these task keywords, so they were left out:
+    #   become, tags
+    - id: packages
+      type: package
+      state: present
+      params:
+        name: '{{ packages }}'
+
+    # From site.yml:22
+    # TODO(meridian-import): changed: site.yml:22: task "Enable app": the task
+    #   sets no state, only whether the service starts at boot, and a service
+    #   resource always has one. It was given `running`, so applying the
+    #   document starts the service
+    - id: enable_app
+      type: service
+      state: running
+      params:
+        enabled: true
+        name: app
+
+    # From site.yml:26
+    # TODO(meridian-import): not translated: site.yml:26: task "Open the
+    #   port": this uses the play variable(s) port in a way that could not be
+    #   written in. A document has no play variables, so Ansible will find
+    #   them undefined: write the value where it is used
+    # TODO(meridian-import): not translated: site.yml:26: notify "Flush": the
+    #   handler "Flush" (site.yml:42) calls command, and a notification can
+    #   only restart, reload, start or stop a service. Write what it does as a
+    #   resource of its own
+    # TODO(meridian-import): not translated: site.yml:26: notify "Missing": no
+    #   handler of the play has that name or listens for it, so the
+    #   notification was left out
+    - id: open_the_port
+      type: exec
+      params:
+        command: open-port {{ port | int + 1 }}
+      notifies:
+        - resource: enable_app
+          action: restart

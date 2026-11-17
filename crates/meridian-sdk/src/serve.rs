@@ -18,15 +18,19 @@ use tokio_stream::Stream;
 use tonic::{Request, Response, Status};
 
 use crate::pb::emitter_server::{Emitter as EmitterService, EmitterServer};
+use crate::pb::importer_server::{Importer as ImporterService, ImporterServer};
 use crate::pb::runner_server::{Runner as RunnerService, RunnerServer};
 use crate::{
-    pb, version, wire, Emitter, Log, LogLine, Operations, Runner, HANDSHAKE_MAGIC, VERSION,
+    pb, version, wire, Emitter, Importer, Log, LogLine, Operations, Runner, HANDSHAKE_MAGIC,
+    VERSION,
 };
 
-/// What a plugin binary serves: an emitter, and optionally a runner.
+/// What a plugin binary serves: an emitter, and optionally a runner and an
+/// importer.
 pub struct Plugin {
     emitter: Arc<dyn Emitter + Send + Sync>,
     runner: Option<Arc<dyn Runner>>,
+    importer: Option<Arc<dyn Importer>>,
 }
 
 impl Plugin {
@@ -35,7 +39,15 @@ impl Plugin {
         Plugin {
             emitter: Arc::new(emitter),
             runner: None,
+            importer: None,
         }
+    }
+
+    /// Adds the half that reads the tool's existing configuration back into
+    /// Meridian documents.
+    pub fn with_importer(mut self, importer: impl Importer + 'static) -> Self {
+        self.importer = Some(Arc::new(importer));
+        self
     }
 
     /// Adds the half that drives the real tool.
@@ -117,12 +129,18 @@ async fn serve_async(plugin: Plugin) -> Result<(), ServeError> {
         emitter: Arc::clone(&plugin.emitter),
         operations,
         accepts_inputs: plugin.runner.as_ref().is_some_and(|r| r.accepts_inputs()),
+        importer: plugin.importer.clone(),
         protocol,
     });
     let mut router = tonic::transport::Server::builder().add_service(emitter);
     if let Some(runner) = &plugin.runner {
         router = router.add_service(RunnerServer::new(RunnerHandler {
             runner: Arc::clone(runner),
+        }));
+    }
+    if let Some(importer) = &plugin.importer {
+        router = router.add_service(ImporterServer::new(ImporterHandler {
+            importer: Arc::clone(importer),
         }));
     }
 
@@ -223,6 +241,8 @@ struct EmitterHandler {
     emitter: Arc<dyn Emitter + Send + Sync>,
     operations: Operations,
     accepts_inputs: bool,
+    /// Kept only to describe it: importing is served by its own handler.
+    importer: Option<Arc<dyn Importer>>,
     /// The protocol version agreed with the host.
     protocol: u32,
 }
@@ -245,6 +265,12 @@ impl EmitterService for EmitterHandler {
             target_versions: self.emitter.target_versions(),
             operations: Some(wire::operations_to_wire(self.operations)),
             accepts_inputs: self.accepts_inputs,
+            import_formats: wire::import_formats_to_wire(
+                self.importer
+                    .as_ref()
+                    .map(|i| i.formats())
+                    .unwrap_or_default(),
+            ),
         }))
     }
 
@@ -261,6 +287,27 @@ impl EmitterService for EmitterHandler {
             .await
             .map_err(|e| Status::internal(format!("the emitter panicked: {e}")))?;
         Ok(Response::new(wire::emit_response(outcome)))
+    }
+}
+
+struct ImporterHandler {
+    importer: Arc<dyn Importer>,
+}
+
+#[tonic::async_trait]
+impl ImporterService for ImporterHandler {
+    async fn import(
+        &self,
+        request: Request<pb::ImportRequest>,
+    ) -> Result<Response<pb::ImportResponse>, Status> {
+        let source = wire::import_request_from_wire(request.into_inner());
+        let importer = Arc::clone(&self.importer);
+        // An importer parses whatever it is handed, so a panic in it must
+        // reach the host as this call failing, not take the plugin down.
+        let outcome = tokio::task::spawn_blocking(move || importer.import(&source))
+            .await
+            .map_err(|e| Status::internal(format!("the importer panicked: {e}")))?;
+        Ok(Response::new(wire::import_response(outcome)))
     }
 }
 

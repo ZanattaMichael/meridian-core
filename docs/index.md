@@ -40,6 +40,10 @@ byte. The reasons, the layout and the order of work are in
 | [A two-stage workflow](quickstart/first-two-stage.md) | one tool creates a machine, another configures it |
 | [Worked workflows](quickstart/workflows.md) | seven workflows across every target: three tiers on four tools, a cluster platform, a golden image, Windows on Azure, an edge site, one file for every environment, and one file for every customer |
 
+| Bringing in what you have | |
+|---|---|
+| [Importing existing configuration](operations/importing.md) | `meridian import`: Terraform, OpenTofu, Ansible, Compose, Kubernetes and DSC configuration into documents, with everything that could not be carried over marked |
+
 | Concepts | |
 |---|---|
 | [Documents, resources and targets](concepts/ir-overview.md) | the two kinds of document, and the two families of resource types |

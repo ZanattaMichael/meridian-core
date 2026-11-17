@@ -1,9 +1,10 @@
 //! Compiles a Meridian resource tree into an Ansible playbook and inventory,
 //! and runs it with `ansible-playbook`.
 //!
-//! The library depends on `meridian-sdk` and nothing else of Meridian's. If
-//! this target can be written against the public SDK alone, so can one
-//! Meridian's authors never anticipated. The binary that serves it over the
+//! The library depends on `meridian-sdk` and on the two crates plugins share
+//! for writing YAML and importing, and on nothing of the compiler's. If this
+//! target can be written against the public SDK, so can one Meridian's
+//! authors never anticipated. The binary that serves it over the
 //! plugin protocol is `main.rs`; the library is ordinary code, so the emitter
 //! can be tested without a process boundary.
 //!
@@ -15,6 +16,7 @@
 #![allow(clippy::result_large_err)]
 
 mod emit;
+mod import;
 mod runner;
 mod sort;
 mod transform;
@@ -28,6 +30,7 @@ use meridian_sdk::{
 };
 
 pub use emit::{INVENTORY_PATH, PLAYBOOK_PATH};
+pub use import::AnsibleImporter;
 pub use runner::AnsibleRunner;
 pub use transform::supported_resource_types;
 

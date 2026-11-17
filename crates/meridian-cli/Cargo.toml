@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive", "env"] }
+meridian-import = { path = "../meridian-import" }
 meridian-ir = { path = "../meridian-ir" }
 meridian-module = { path = "../meridian-module" }
 meridian-orchestrator = { path = "../meridian-orchestrator" }

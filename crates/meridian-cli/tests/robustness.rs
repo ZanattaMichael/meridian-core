@@ -47,6 +47,15 @@ fn examples() -> Vec<(String, String)> {
             {
                 continue;
             }
+            // Nor can one that interpolates outside its comments: its
+            // values are worked out before any target sees it. An escaped
+            // opening, written with two dollars, is not an interpolation.
+            let (open, escaped) = (["$", "{{"].concat(), ["$$", "{{"].concat());
+            if text.lines().any(|line| {
+                !line.trim_start().starts_with('#') && line.replace(&escaped, "").contains(&open)
+            }) {
+                continue;
+            }
             if let [target] = targets[..] {
                 let path = file.strip_prefix(&root).unwrap().to_str().unwrap();
                 found.push((path.to_owned(), target.trim().to_owned()));

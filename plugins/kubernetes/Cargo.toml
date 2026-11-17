@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+meridian-import = { path = "../../crates/meridian-import" }
 meridian-sdk = { path = "../../crates/meridian-sdk" }
 meridian-yaml = { path = "../../crates/meridian-yaml" }
 

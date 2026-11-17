@@ -1,0 +1,15 @@
+[package]
+name = "meridian-import"
+description = "What Meridian importers share: readers for YAML and HCL, the writer that turns an imported document into Meridian's own syntax, and a semantic diff for round-trip tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+meridian-sdk = { path = "../meridian-sdk" }
+meridian-yaml = { path = "../meridian-yaml" }
+saphyr-parser = "0.3"
+
+[lints]
+workspace = true

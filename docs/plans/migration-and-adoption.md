@@ -13,7 +13,14 @@ adopted.
 
 ## 1. Scope decision: forward-compiling only
 
-**Decision: Meridian is strictly forward-compiling. Reverse-compilation of native
+> **Amended 2026-11-17.** The project owner asked for importing to be built, which
+> reverses the decision recorded in this section. `meridian import` now exists and is
+> described in [importing existing configuration](../operations/importing.md). The
+> original text is kept below because its four objections are the design constraints the
+> importer was built against; [§1.4](#14-how-the-importer-answers-these-objections) says
+> how each is answered, and where one is only partly answered.
+
+**Original decision: Meridian is strictly forward-compiling. Reverse-compilation of native
 configuration into Meridian IR is out of scope, permanently, not deferred.**
 
 This is the largest scope decision in the project and it is made deliberately here, not
@@ -73,6 +80,23 @@ $ meridian assess ./playbooks/webserver.yml
 It never emits IR. It answers "what would this cost" without pretending to do it, and it
 is honest by construction because reporting a gap is the whole output rather than an
 error case.
+
+### 1.4 How the importer answers these objections
+
+`meridian import` was built on the owner's instruction of 2026-11-17. Each objection in
+§1.1 still describes a real risk, so each is answered by something the importer does and
+a test holds it to, not by argument.
+
+| Objection | What the importer does | What remains true |
+|---|---|---|
+| It inverts the compile-time guarantee: a runtime `when:` cannot become a compile-time one | It does not try. Since this plan was written the language gained `runtimeWhen`, which the tool evaluates on the node. An Ansible `when:` and a runner `preCondition` are imported as `runtimeWhen`, unchanged. Nothing that depends on a fact is decided at import time | A target with no runtime condition cannot take such a document; that is the capability model working, and the refusal is at compile time |
+| Native configuration is more expressive than the IR, and a converter that emits `exec` for a third of a playbook has not converted it | The importer never emits `exec` for something that was not a command. A task, block or statement with no counterpart is **reported and left out**, with a `TODO(meridian-import)` marker saying what it was and where. Passthrough targets (Terraform, OpenTofu, Kubernetes, Compose, DSC) take the tool's own types, so little is lost there | For the six abstract resource types the loss on a real Ansible estate is large, and the report says so. An import is a starting point for that estate, not a conversion of it |
+| Users will expect `native → IR → native` to be an identity, and it will not be | The promise is stated narrowly and tested: identity **by meaning**, for what was carried over, and a marker wherever it is not. Each importer has a round-trip test that imports a realistic source, compiles the document and compares the result with the original semantically. The guide says in as many words that comments, key order and task names are not preserved | It is still not a textual identity, and a team that wants one will not get it |
+| It would consume the roadmap: six importers, each a parser for a language the project does not control | Each importer belongs to its target's plugin, behind an optional part of the protocol, so the core carries no tool's parser and a plugin without an importer is complete. The parsers are the subset each configuration is declared in: HCL's syntax without evaluating its functions, PowerShell's `Configuration` block without interpreting the script | The importers are code that follows other people's languages and will need maintaining. Six exist; the rest are optional |
+
+The advisory linter of §1.3 is subsumed: `meridian import --strict` writes nothing a
+later step depends on, exits non-zero when anything was lost, and its report is the
+assessment §1.3 describes, with file and line.
 
 ---
 

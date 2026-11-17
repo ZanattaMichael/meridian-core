@@ -89,7 +89,28 @@ pub(crate) fn validate(config: &Config) -> Result<(), CompileError> {
                     ));
                 }
             }
-            Kind::Data | Kind::Managed | Kind::Variable => {}
+            Kind::Local => {
+                if !block.body.contains_key("value") {
+                    return Err(refuse_at(
+                        &block.name,
+                        &block.pos,
+                        "missing-param",
+                        "resource type \"local\" requires param \"value\" on this target"
+                            .to_owned(),
+                    ));
+                }
+                if let Some(extra) = block.body.keys().find(|k| *k != "value") {
+                    return Err(refuse_at(
+                        &block.name,
+                        &block.pos,
+                        "invalid-param",
+                        format!(
+                            "a local value has one param, \"value\"; {extra:?} has nowhere to go"
+                        ),
+                    ));
+                }
+            }
+            Kind::Variable | Kind::Data | Kind::Managed => {}
         }
     }
 

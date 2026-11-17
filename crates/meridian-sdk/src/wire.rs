@@ -6,6 +6,7 @@
 
 use meridian_value::{canonical_map, decode_map, decode_value};
 
+use crate::import::*;
 use crate::pb;
 use crate::run::*;
 use crate::types::*;
@@ -494,4 +495,207 @@ pub fn outputs_response_from_wire(
         return Ok(Err(run_error_from_wire(e, Vec::new())));
     }
     Ok(Ok(outputs_from_wire(r.outputs)?))
+}
+
+pub fn import_formats_to_wire(formats: Vec<ImportFormat>) -> Vec<pb::ImportFormat> {
+    formats
+        .into_iter()
+        .map(|f| pb::ImportFormat {
+            name: f.name,
+            description: f.description,
+            patterns: f.patterns,
+        })
+        .collect()
+}
+
+pub fn import_formats_from_wire(formats: Vec<pb::ImportFormat>) -> Vec<ImportFormat> {
+    formats
+        .into_iter()
+        .map(|f| ImportFormat {
+            name: f.name,
+            description: f.description,
+            patterns: f.patterns,
+        })
+        .collect()
+}
+
+pub fn import_request(source: &ImportSource) -> pb::ImportRequest {
+    pb::ImportRequest {
+        files: source.files.clone().into_iter().collect(),
+        name: source.name.clone(),
+        root: source.root.clone(),
+    }
+}
+
+pub fn import_request_from_wire(request: pb::ImportRequest) -> ImportSource {
+    ImportSource {
+        files: request.files.into_iter().collect(),
+        name: request.name,
+        root: request.root,
+    }
+}
+
+/// Builds the protocol response for the outcome of an import.
+pub fn import_response(outcome: Result<Imported, ImportError>) -> pb::ImportResponse {
+    let imported = match outcome {
+        Ok(imported) => imported,
+        Err(e) => {
+            return pb::ImportResponse {
+                documents: Vec::new(),
+                notes: Vec::new(),
+                error: Some(pb::ImportError {
+                    msg: e.msg,
+                    file: e.file,
+                    line: to_i32(e.line),
+                }),
+            }
+        }
+    };
+    pb::ImportResponse {
+        documents: imported
+            .documents
+            .into_iter()
+            .map(|d| pb::ImportedDocument {
+                kind: match d.kind {
+                    DocumentKind::Infrastructure => pb::DocumentKind::Infrastructure,
+                    DocumentKind::ResourceSet => pb::DocumentKind::ResourceSet,
+                } as i32,
+                name: d.name,
+                target: d.target,
+                target_version: d.target_version,
+                host: d.host,
+                resources: d
+                    .resources
+                    .into_iter()
+                    .map(|r| pb::ImportedResource {
+                        id: r.id,
+                        r#type: r.r#type,
+                        state: r.state,
+                        params_json: canonical_map(&r.params).into_bytes(),
+                        depends_on: r.depends_on,
+                        notifies: r
+                            .notifies
+                            .into_iter()
+                            .map(|n| pb::ImportedNotify {
+                                resource: n.resource,
+                                action: n.action,
+                            })
+                            .collect(),
+                        runtime_when: r.runtime_when,
+                        origin: r.origin,
+                    })
+                    .collect(),
+                outputs: d
+                    .outputs
+                    .into_iter()
+                    .map(|o| pb::ImportedOutput {
+                        name: o.name,
+                        value: o.value,
+                    })
+                    .collect(),
+            })
+            .collect(),
+        notes: imported
+            .notes
+            .into_iter()
+            .map(|n| pb::ImportNote {
+                level: match n.level {
+                    NoteLevel::Info => pb::NoteLevel::Info,
+                    NoteLevel::Changed => pb::NoteLevel::Changed,
+                    NoteLevel::Untranslated => pb::NoteLevel::Untranslated,
+                } as i32,
+                origin: n.origin,
+                subject: n.subject,
+                msg: n.msg,
+                document: n.document,
+                resource: n.resource,
+            })
+            .collect(),
+        error: None,
+    }
+}
+
+/// The outer error is a malformed message; the inner one is the importer
+/// refusing the source.
+///
+/// A document of unspecified kind is refused, not defaulted: the two kinds
+/// run at different points of a workflow. A note of a level this protocol
+/// version does not define is read as the most serious one, so a newer
+/// plugin's warning is never shown as less than it is.
+pub fn import_response_from_wire(
+    response: pb::ImportResponse,
+) -> Result<Result<Imported, ImportError>, String> {
+    if let Some(e) = response.error {
+        return Ok(Err(ImportError {
+            msg: e.msg,
+            file: e.file,
+            line: from_i32(e.line),
+        }));
+    }
+    let mut imported = Imported::default();
+    for d in response.documents {
+        let kind = match pb::DocumentKind::try_from(d.kind) {
+            Ok(pb::DocumentKind::Infrastructure) => DocumentKind::Infrastructure,
+            Ok(pb::DocumentKind::ResourceSet) => DocumentKind::ResourceSet,
+            _ => {
+                return Err(format!(
+                    "document {:?}: kind {} is not one this protocol version defines",
+                    d.name, d.kind
+                ))
+            }
+        };
+        let mut resources = Vec::with_capacity(d.resources.len());
+        for r in d.resources {
+            let params = decode_map(&r.params_json)
+                .map_err(|e| format!("document {:?}: resource {:?}: {e}", d.name, r.id))?;
+            resources.push(ImportedResource {
+                id: r.id,
+                r#type: r.r#type,
+                state: r.state,
+                params,
+                depends_on: r.depends_on,
+                notifies: r
+                    .notifies
+                    .into_iter()
+                    .map(|n| ImportedNotify {
+                        resource: n.resource,
+                        action: n.action,
+                    })
+                    .collect(),
+                runtime_when: r.runtime_when,
+                origin: r.origin,
+            });
+        }
+        imported.documents.push(ImportedDocument {
+            kind,
+            name: d.name,
+            target: d.target,
+            target_version: d.target_version,
+            host: d.host,
+            resources,
+            outputs: d
+                .outputs
+                .into_iter()
+                .map(|o| ImportedOutput {
+                    name: o.name,
+                    value: o.value,
+                })
+                .collect(),
+        });
+    }
+    for n in response.notes {
+        imported.notes.push(ImportNote {
+            level: match pb::NoteLevel::try_from(n.level) {
+                Ok(pb::NoteLevel::Info) => NoteLevel::Info,
+                Ok(pb::NoteLevel::Changed) => NoteLevel::Changed,
+                _ => NoteLevel::Untranslated,
+            },
+            origin: n.origin,
+            subject: n.subject,
+            msg: n.msg,
+            document: n.document,
+            resource: n.resource,
+        });
+    }
+    Ok(Ok(imported))
 }

@@ -1,0 +1,36 @@
+# Imported from the test source by `meridian import`.
+#
+# machine.dsc.yaml:2: configuration: the configuration names no machine, so
+#   the document configures localhost: the machine Meridian runs on
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: machine
+spec:
+  target: dsc
+  targetVersion: "3"
+  targetHost:
+    from: inline
+    host: localhost
+  resources:
+    # From machine.dsc.yaml:4
+    # machine.dsc.yaml:4: Microsoft.Windows/Registry "Launch key": a
+    #   resource's id is letters, digits and underscores, and it is the
+    #   instance's name in the compiled configuration, so "Launch key" became
+    #   "launch_key"
+    - id: launch_key
+      type: Microsoft.Windows/Registry
+      params:
+        keyPath: HKLM\Software\Example
+        valueData:
+          String: '[not an expression]'
+        valueName: Launch
+
+    # From machine.dsc.yaml:11
+    - id: Tooling
+      type: Microsoft.WinGet/Package
+      params:
+        id: Git.Git
+        source: winget
+      dependsOn:
+        - resource: launch_key

@@ -1,0 +1,88 @@
+# A shop: a database, the application that uses it, a worker, and the proxy
+# in front.
+name: shop
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+
+services:
+  db:
+    image: postgres:16
+    logging: *logging
+    environment:
+      POSTGRES_DB: shop
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    networks:
+      - backend
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      retries: 5
+
+  cache:
+    image: redis:7
+
+  migrate:
+    image: ghcr.io/example/shop:1.4.2
+    command: ["./manage", "migrate"]
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    image: ghcr.io/example/shop:1.4.2
+    logging: *logging
+    # One dollar sign for the shell inside the container, written the way
+    # Compose wants a literal one.
+    command: ["sh", "-c", "exec ./serve --workers $${WORKERS:-4} --home $$HOME"]
+    environment:
+      DATABASE_HOST: db
+      CACHE_HOST: cache
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+      cache:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+
+  proxy:
+    image: nginx:1.27
+    ports:
+      - "8080:80"
+    configs:
+      - source: site
+        target: /etc/nginx/conf.d/default.conf
+    networks:
+      - backend
+    depends_on:
+      - app
+
+networks:
+  backend:
+
+volumes:
+  db_data:
+
+configs:
+  site:
+    content: |
+      server {
+        listen 80;
+        location / { proxy_pass http://app:8000; }
+      }
+
+secrets:
+  db_password:
+    environment: DB_PASSWORD
