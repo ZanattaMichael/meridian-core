@@ -224,6 +224,17 @@ fn read_package(document: &Value, full: &[String]) -> Read {
                     types,
                 );
                 params.extend(outputs(resource.get("properties"), &params, types));
+                // Every resource has these, and no package lists them.
+                for (name, description) in [
+                    ("id", "The provider-assigned unique id of the resource."),
+                    ("urn", "The resource's URN in the stack."),
+                ] {
+                    if !params.iter().any(|p| p.name == name) {
+                        params.push(
+                            ParamSchema::new(name, ParamKind::String, description).computed(),
+                        );
+                    }
+                }
                 params.push(resource_options());
                 params.sort_by(|a, b| a.name.cmp(&b.name));
                 ResourceSchema::closed(token, &description).with_params(params)
@@ -613,6 +624,7 @@ mod tests {
             "an output-only property is read, not written"
         );
         assert_eq!(p("id").description, "The random pet name.");
+        assert!(p("urn").computed, "what every resource has is there too");
         assert!(p("legacy").deprecated);
         assert_eq!(p("legacy").description, "Do not use.");
         assert!(p("secretly").sensitive);
