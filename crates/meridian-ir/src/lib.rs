@@ -30,4 +30,4 @@ pub use types::{
     API_VERSION_V1, IMPORT_FROM_ARTIFACT, IMPORT_FROM_OUTPUT, NOTIFY_ON_CHANGED,
     TARGET_HOST_FROM_INFRASTRUCTURE, TARGET_HOST_FROM_INLINE,
 };
-pub use validate::{load, validate, Bundle};
+pub use validate::{is_document_name, load, validate, Bundle, MAX_DOCUMENT_NAME};

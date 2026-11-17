@@ -5,6 +5,8 @@ use std::path::Path;
 
 use meridian_ir::Value;
 
+use crate::manifest::valid_name;
+use crate::project::normalize;
 use crate::Error;
 
 /// The lockfile's name, beside the manifest.
@@ -173,6 +175,41 @@ impl Lock {
             if locked.name.is_empty() || locked.source.is_empty() {
                 return Err(bad(format!("modules[{i}]: needs a name and a source")));
             }
+            // The lockfile is input, like the manifest and a fetched archive:
+            // a project is cloned from elsewhere. `name` and `version` become
+            // directory names under the state directory, so each is held to
+            // what `meridian module install` would have written.
+            if !valid_name(&locked.name) {
+                return Err(bad(format!(
+                    "modules[{i}].name: {:?} is not a module name",
+                    locked.name
+                )));
+            }
+            if !locked.version.is_empty() && semver::Version::parse(&locked.version).is_err() {
+                return Err(bad(format!(
+                    "modules[{i}].version: {:?} is not a version",
+                    locked.version
+                )));
+            }
+            if let Some(path) = locked.source.strip_prefix("path+") {
+                if path.is_empty() || path != normalize(Path::new(path)) {
+                    return Err(bad(format!(
+                        "modules[{i}].source: {:?} is not a path as `meridian module install` \
+                         writes it",
+                        locked.source
+                    )));
+                }
+            }
+            if locked
+                .resolved
+                .contains(|c: char| c.is_control() || c.is_whitespace())
+                || locked.resolved.starts_with('-')
+            {
+                return Err(bad(format!(
+                    "modules[{i}].resolved: {:?} is not a commit or a digest",
+                    locked.resolved
+                )));
+            }
             lock.modules.push(locked);
         }
         lock.modules.sort_by(|a, b| a.name.cmp(&b.name));
@@ -255,14 +292,77 @@ mod tests {
             let lock = Lock {
                 modules: vec![Locked {
                     name: "a".into(),
-                    version: value.into(),
-                    source: "path+x".into(),
-                    resolved: value.into(),
+                    source: value.into(),
+                    integrity: value.into(),
                     ..Locked::default()
                 }],
             };
             let read = Lock::parse("meridian.lock", lock.render().as_bytes()).unwrap();
             assert_eq!(read, lock, "{value}");
+        }
+    }
+
+    #[test]
+    fn a_lockfile_cannot_name_a_directory_outside_the_store() {
+        // Issue 132: `name` and `version` become directory names under the
+        // state directory, and `module install` deletes and replaces that
+        // directory. Each is held to what install would have written.
+        let entry = |name: &str, version: &str, source: &str, resolved: &str| {
+            format!(
+                "lockVersion: 1\nmodules:\n  - name: {name:?}\n    version: {version:?}\n    \
+                 source: {source:?}\n    resolved: {resolved:?}\n    integrity: \"h1:0\"\n"
+            )
+        };
+        for (text, want) in [
+            (
+                entry("evil", "../../../../victim", "git+x#main", "abc"),
+                "modules[0].version: \"../../../../victim\" is not a version",
+            ),
+            (
+                entry("evil", "1.0.0/../..", "git+x#main", "abc"),
+                "modules[0].version: \"1.0.0/../..\" is not a version",
+            ),
+            (
+                entry("../victim", "1.0.0", "git+x#main", "abc"),
+                "modules[0].name: \"../victim\" is not a module name",
+            ),
+            (
+                entry("Evil", "1.0.0", "git+x#main", "abc"),
+                "modules[0].name: \"Evil\" is not a module name",
+            ),
+            (
+                entry("a", "", "path+./x/../y/", ""),
+                "modules[0].source: \"path+./x/../y/\" is not a path as `meridian module \
+                 install` writes it",
+            ),
+            (
+                entry("a", "", "path+", ""),
+                "modules[0].source: \"path+\" is not a path as `meridian module install` \
+                 writes it",
+            ),
+            (
+                entry("a", "1.0.0", "git+x#main", "--upload-pack=touch x"),
+                "modules[0].resolved: \"--upload-pack=touch x\" is not a commit or a digest",
+            ),
+        ] {
+            let err = Lock::parse("meridian.lock", text.as_bytes())
+                .unwrap_err()
+                .to_string();
+            assert_eq!(err, format!("meridian.lock: {want}"));
+        }
+        // What install writes is read back: a plain version, a `..` path
+        // between sibling directories, a bare `ref` pin.
+        for text in [
+            entry("acme/nginx", "1.4.2+build.7", "git+x#main", "abc"),
+            entry("acme/local", "", "path+../local dir", ""),
+            entry(
+                "a",
+                "",
+                "git+x#main",
+                "4f2a9c1e5b3d8f6a7c2e4b1d0f9a8c79c1d7be0a",
+            ),
+        ] {
+            Lock::parse("meridian.lock", text.as_bytes()).unwrap();
         }
     }
 

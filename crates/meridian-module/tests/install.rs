@@ -481,6 +481,77 @@ fn a_ref_pins_a_commit_until_it_is_updated() {
 }
 
 #[test]
+fn a_hostile_lockfile_cannot_point_the_store_outside_the_state_directory() {
+    // Issue 132: `name` and `version` from the lockfile became directory
+    // names, and install deleted and replaced that directory.
+    let root = scratch("hostile-lock");
+    let repo = Repo::new(root.join("evil.git"));
+    let commit = repo.release("", &[("meridian.yaml", &manifest("evil", "", ""))]);
+    let victim = root.join("victim");
+    write(&victim.join("keep.txt"), "precious\n");
+    let site = Site::new(
+        &root,
+        &format!(
+            "    - name: evil\n      git: {}\n      ref: main\n",
+            repo.url()
+        ),
+    );
+    // A repository can ship this directory, or an earlier run creates it.
+    fs::create_dir_all(site.state.join("modules/evil")).unwrap();
+    let lock = |name: &str, version: &str| {
+        format!(
+            "lockVersion: 1\nmodules:\n  - name: {name:?}\n    version: {version:?}\n    \
+             source: \"git+{}#main\"\n    resolved: {commit}\n    integrity: \"h1:0000\"\n",
+            repo.url()
+        )
+    };
+    for (name, version, want) in [
+        (
+            "evil",
+            "../../../../victim",
+            "modules[0].version: \"../../../../victim\" is not a version",
+        ),
+        (
+            "../../victim",
+            "1.0.0",
+            "modules[0].name: \"../../victim\" is not a module name",
+        ),
+    ] {
+        write(&site.dir.join(LOCK_FILE), &lock(name, version));
+        for mode in [Mode::Install, Mode::Locked] {
+            let err = site.install(mode).unwrap_err();
+            assert!(err.ends_with(want), "{err}");
+        }
+        let err = Modules::load(&site.project()).unwrap_err().to_string();
+        assert!(err.ends_with(want), "{err}");
+        assert_eq!(
+            fs::read_to_string(victim.join("keep.txt")).unwrap(),
+            "precious\n"
+        );
+        assert!(!victim.join("meridian.yaml").exists());
+    }
+
+    // A `path` source in the lockfile is held to the form install writes.
+    write(
+        &site.dir.join(LOCK_FILE),
+        "lockVersion: 1\nmodules:\n  - name: evil\n    source: \"path+/etc/../victim/\"\n",
+    );
+    let err = site.install(Mode::Locked).unwrap_err();
+    assert!(
+        err.contains("is not a path as `meridian module install` writes it"),
+        "{err}"
+    );
+
+    // Without the lockfile, the same project installs as usual.
+    fs::remove_file(site.dir.join(LOCK_FILE)).unwrap();
+    site.install(Mode::Install).unwrap();
+    assert!(site
+        .state
+        .join(format!("modules/evil/ref-{}/meridian.yaml", &commit[..12]))
+        .is_file());
+}
+
+#[test]
 fn a_path_module_is_read_where_it_is_and_never_hashed() {
     let root = scratch("path");
     write(

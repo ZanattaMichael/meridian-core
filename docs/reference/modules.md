@@ -130,8 +130,11 @@ Content is found by directory. Nothing has to be listed in the manifest.
 | `README.md` | What the module is for and how to use it |
 
 The directory names are a convention: `@<module>:<path>` reaches any file in
-the module. A module cannot hold a symbolic link. `.git` and `.meridian` at the
-top of a module are never part of it.
+the module. A module cannot hold a symbolic link, or a file whose name has a
+control character (such as a line break) in it: packing, fetching, verifying
+and copying all refuse one, because the [content hash](#integrity) is taken
+over a listing with one line per file. `.git` and `.meridian` at the top of a
+module are never part of it.
 
 ## Requiring a module
 
@@ -280,6 +283,13 @@ modules:
 | `requires` | The modules this one requires |
 
 A `path` module has no `resolved` and no `integrity`: it is a working copy.
+
+The lockfile is read as carefully as a fetched module is, since a project is
+usually cloned from somewhere else. `name` must be a module name, `version` a
+version, `resolved` a commit or a digest, and a `path+` source the normalized
+relative path install writes. `name` and `version` become directory names under
+`.meridian/modules`, so a lockfile that fails these checks is refused before
+anything is fetched or removed.
 
 The file is sorted and holds no timestamps, so the same resolution always
 writes the same bytes and a diff shows only what moved. Commit it. With it,

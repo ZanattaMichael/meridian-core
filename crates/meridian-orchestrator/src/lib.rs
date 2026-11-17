@@ -2141,6 +2141,15 @@ impl Run<'_> {
         host: &str,
         inputs: Data,
     ) -> Result<RunContext, String> {
+        // The bundle was validated, which refuses a name that is not one
+        // path segment; this keeps a caller that skipped it inside the
+        // state directory all the same.
+        if !meridian_ir::is_document_name(&id.name) {
+            return Err(format!(
+                "{:?} is not a safe directory name; run `meridian validate`",
+                id.name
+            ));
+        }
         let work_dir = work_dir(&self.options.state_dir, id, target);
         std::fs::create_dir_all(&work_dir)
             .map_err(|e| format!("creating the work directory {}: {e}", work_dir.display()))?;

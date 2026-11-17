@@ -48,6 +48,40 @@ fn rejects_self_reference() {
 }
 
 #[test]
+fn rejects_a_document_name_that_is_not_one_directory_name() {
+    // Issue 133: the name becomes a directory under `--out` and under the
+    // state directory, so it must be one plain path segment.
+    let v = "apiVersion: meridian/v1\nkind: ResourceSet\n";
+    let doc = |name: &str| {
+        format!(
+            "{v}metadata:\n  name: {name:?}\nspec:\n  target: ansible\n  resources:\n    - \
+             {{id: a, type: package}}\n"
+        )
+    };
+    for bad in [
+        "../../esc",
+        "a/b",
+        "a\\b",
+        "a b;c",
+        ".hidden",
+        "..",
+        "-flag",
+        "caf\u{e9}",
+        "a\nb",
+        &"x".repeat(129),
+    ] {
+        let err = validate(&parse_one(&doc(bad))).unwrap_err().to_string();
+        assert!(
+            err.contains("metadata.name") && err.contains("cannot name a document"),
+            "{bad:?}: {err}"
+        );
+    }
+    for good in ["web", "web-vm_1.2", "0", "A.B", &"x".repeat(128)] {
+        validate(&parse_one(&doc(good))).unwrap_or_else(|e| panic!("{good:?}: {e}"));
+    }
+}
+
+#[test]
 fn rejects_missing_required_fields() {
     let v = "apiVersion: meridian/v1\nkind: ResourceSet\n";
     for (name, doc, want) in [

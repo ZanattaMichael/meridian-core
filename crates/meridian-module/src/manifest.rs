@@ -110,10 +110,14 @@ pub fn valid_name(name: &str) -> bool {
     }) && count <= 3
 }
 
-/// A relative path that stays where it is put: no `..`, nothing absolute.
+/// A relative path that stays where it is put: no `..`, nothing absolute,
+/// and no control character. A line break in a name would let one file's
+/// name spell out another file's line in the listing the content hash is
+/// taken over, so two different trees could share one hash.
 pub(crate) fn safe_relative(path: &str) -> bool {
     !path.is_empty()
         && !path.contains('\\')
+        && !path.contains(char::is_control)
         && Path::new(path)
             .components()
             .all(|c| matches!(c, std::path::Component::Normal(_)))

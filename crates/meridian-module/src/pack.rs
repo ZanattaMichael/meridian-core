@@ -71,6 +71,11 @@ pub fn unpack(archive: &[u8], dest: &Path) -> Result<(), Error> {
                 "holds {relative:?}, which is not a regular file"
             )));
         }
+        if relative.contains(char::is_control) {
+            return Err(bad(format!(
+                "holds the path {relative:?}, which has a control character in it"
+            )));
+        }
         if !safe_relative(&relative) {
             return Err(bad(format!(
                 "holds the path {relative:?}, which would leave the module"
@@ -180,6 +185,11 @@ mod tests {
                 "symlink",
                 vec![("data", Symlink, &b""[..])],
                 "the module archive holds \"data\", which is not a regular file",
+            ),
+            (
+                "newline",
+                vec![("policy.yaml\nabc  zz.yaml", Regular, &b"x"[..])],
+                "which has a control character in it",
             ),
             (
                 "twice",
