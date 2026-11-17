@@ -363,6 +363,13 @@ impl Bundle {
             TARGET_HOST_FROM_INLINE => {
                 if th.host.is_empty() {
                     fail("spec.targetHost.host", "missing required field for from: inline".into());
+                } else if !meridian_expr::has_interpolation(&th.host) {
+                    // A host is handed to ssh, an inventory, a manifest: it
+                    // has to be a name, and nothing a tool reads as more.
+                    // One an interpolation places is checked once placed.
+                    if let Err(why) = meridian_value::host::check(&th.host) {
+                        fail("spec.targetHost.host", why);
+                    }
                 }
             }
             TARGET_HOST_FROM_INFRASTRUCTURE => {

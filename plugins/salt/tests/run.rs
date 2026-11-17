@@ -440,3 +440,23 @@ fn a_state_removed_from_the_artifact_is_removed_from_the_file_root() {
     assert!(!dir.join("work/states/web.sls").exists());
     assert!(dir.join("work/states/app.sls").exists());
 }
+
+#[test]
+fn a_host_salt_ssh_would_read_as_an_option_is_refused_before_it_runs() {
+    // Issue 134: the core refuses such a host first; the runner is the last
+    // thing between it and the command line and the roster.
+    let dir = scratch(TMP, "hostile-host");
+    let err = runner(&dir, "exit 9")
+        .plan(
+            &context(&dir, "-oProxyCommand=touch /tmp/pwned"),
+            &compiled(),
+            &KeptLog::default(),
+        )
+        .expect_err("refused");
+    assert!(
+        err.to_string()
+            .contains("salt-ssh cannot be given this host"),
+        "{err}"
+    );
+    assert!(!dir.join("args").exists());
+}

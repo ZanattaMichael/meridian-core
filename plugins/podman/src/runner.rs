@@ -158,11 +158,8 @@ impl PodmanRunner {
             Tool::new(&self.shell).args(["-c", READ_AND_RUN])
         } else {
             let host = context.host.as_str();
-            if host.starts_with('-') || host.contains(char::is_whitespace) {
-                return Err(RunError::new(format!(
-                    "{host:?} is not a host name ssh can be given"
-                )));
-            }
+            meridian_sdk::check_host(host)
+                .map_err(|why| RunError::new(format!("ssh cannot be given this host: {why}")))?;
             Tool::new(&self.ssh)
                 // A run has nobody to answer a password prompt.
                 .args(["-o", "BatchMode=yes"])

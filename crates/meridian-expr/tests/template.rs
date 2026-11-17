@@ -358,6 +358,86 @@ fn a_placed_value_cannot_join_with_its_neighbour_into_a_reference() {
 }
 
 #[test]
+fn a_placed_value_cannot_open_an_expression_the_target_declared() {
+    use meridian_value::PlacedEscape;
+    // What Ansible declares: Jinja's three openings, anywhere in a value.
+    let jinja = [
+        PlacedEscape::anywhere("{{", "{{ '{{' }}"),
+        PlacedEscape::anywhere("{%", "{{ '{%' }}"),
+        PlacedEscape::anywhere("{#", "{{ '{#' }}"),
+    ];
+    // What ARM declares: `[` at the start of a value, written `[[`.
+    let arm = [PlacedEscape::at_start("[", "[[")];
+    let scope = Scope::new().with(
+        "data",
+        map(&[
+            ("motd", text("hello {{ lookup('pipe','id') }}")),
+            ("tag", text("{% raw %}x{# c #}")),
+            ("expr", text("[resourceGroup().id]")),
+            (
+                "list",
+                Value::List(vec![text("[listKeys(x)]"), text("plain")]),
+            ),
+            ("open", text("{")),
+            ("close", text("{ x }}")),
+            ("bracket", text("[")),
+            ("shell", text("${HOME}/bin")),
+        ]),
+    );
+    let with = |source: &str, rules: &[PlacedEscape]| {
+        Template::parse(source)
+            .unwrap()
+            .eval_literal_with(&scope, rules)
+            .unwrap()
+    };
+
+    // The whole value, and inside longer text.
+    assert_eq!(
+        with("${{ data.motd }}", &jinja),
+        text("hello {{ '{{' }} lookup('pipe','id') }}")
+    );
+    assert_eq!(
+        with("motd: ${{ data.motd }}!", &jinja),
+        text("motd: hello {{ '{{' }} lookup('pipe','id') }}!")
+    );
+    // Each opening once: what `{%` is written as is not escaped again.
+    assert_eq!(
+        with("${{ data.tag }}", &jinja),
+        text("{{ '{%' }} raw %}x{{ '{#' }} c #}")
+    );
+    // What the author wrote stays an expression.
+    assert_eq!(
+        with("{{ inventory_hostname }} ${{ data.open }}", &jinja),
+        text("{{ inventory_hostname }} {")
+    );
+    // Two halves, one placed, cannot meet as an opening.
+    assert_eq!(with("{${{ data.close }}", &jinja), text("{{ '{{' }} x }}"));
+    assert_eq!(
+        with("${{ data.open }}{ x }}", &jinja),
+        text("{{ '{{' }} x }}")
+    );
+
+    // An opening that counts only at the start counts only there.
+    assert_eq!(
+        with("${{ data.expr }}", &arm),
+        text("[[resourceGroup().id]")
+    );
+    assert_eq!(with("${{ data.bracket }}x]", &arm), text("[[x]"));
+    assert_eq!(
+        with("id: ${{ data.expr }}", &arm),
+        text("id: [resourceGroup().id]")
+    );
+    assert_eq!(with("[${{ data.bracket }}]", &arm), text("[[]"));
+    // However deep the value is: each string is a value of its own.
+    assert_eq!(
+        with("${{ data.list }}", &arm),
+        Value::List(vec![text("[[listKeys(x)]"), text("plain")])
+    );
+    // Meridian's own escape still applies alongside.
+    assert_eq!(with("${{ data.shell }}", &jinja), text("$${HOME}/bin"));
+}
+
+#[test]
 fn sole_source_is_the_expression_when_the_text_is_nothing_else() {
     let sole = |s: &str| Template::parse(s).unwrap().sole_source().map(str::to_owned);
     assert_eq!(sole("${{ data.a == 1 }}"), Some("data.a == 1".to_owned()));

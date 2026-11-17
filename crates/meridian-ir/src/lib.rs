@@ -20,10 +20,12 @@ mod validate;
 pub use api::{api_version_name, ApiVersion, Status, Unsupported, VersionTable, API_GROUP};
 pub use condition::{prune, Condition, Data};
 pub use error::{Error, ErrorList, Position};
-pub use meridian_value::{canonical_map, Value};
+pub use meridian_value::{canonical_map, PlacedEscape, Value};
 pub use migrate::{migrate, Decisions, MigrateError, Migrated, Step, STEPS};
 pub use parse::{parse, parse_file, parse_stream, parse_value};
-pub use resolve::{resolve, resolve_with, resolved_labels, Removed, Resolution, Secrets};
+pub use resolve::{
+    resolve, resolve_for, resolve_with, resolved_labels, Removed, Resolution, Secrets,
+};
 pub use types::{
     Dependency, Document, IfMissing, Import, Infrastructure, InfrastructureSpec, Kind, Metadata,
     Notification, Output, Resource, ResourceSet, ResourceSetSpec, Secret, TargetHost,

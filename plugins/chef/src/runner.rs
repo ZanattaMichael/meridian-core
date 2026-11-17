@@ -218,6 +218,11 @@ impl Runner for ChefRunner {
         let changes = match self.transport_for(&context.host) {
             Transport::Local => self.converge_here(context, &cookbook, false, log)?,
             Transport::Remote => {
+                // The core checked the host already; this runner is the
+                // last thing between it and chef-run's command line.
+                meridian_sdk::check_host(&context.host).map_err(|why| {
+                    RunError::new(format!("chef-run cannot be given this host: {why}"))
+                })?;
                 Tool::new(&self.run)
                     .arg(&context.host)
                     .arg(format!("cookbooks/{cookbook}"))

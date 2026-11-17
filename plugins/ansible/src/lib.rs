@@ -25,8 +25,8 @@ mod validate;
 use std::collections::BTreeMap;
 
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, Value,
+    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, PlacedEscape, Position,
+    Resource, ResourceGraph, Value,
 };
 
 pub use emit::{INVENTORY_PATH, PLAYBOOK_PATH};
@@ -107,6 +107,21 @@ impl Emitter for Ansible {
             synthetic_notify: false,
             runtime_condition: true,
         }
+    }
+
+    /// Ansible renders every string in a task's arguments through Jinja on
+    /// the control machine, so a value placed from data that holds `{{`
+    /// would be an expression, and `lookup('pipe', ...)` in it a command.
+    /// Each Jinja opening is written as an expression that yields itself,
+    /// which Jinja renders back to the text. What the author wrote in the
+    /// document is untouched: a Jinja expression written there is passed
+    /// through, as the target's page says.
+    fn placed_text(&self) -> Vec<PlacedEscape> {
+        vec![
+            PlacedEscape::anywhere("{{", "{{ '{{' }}"),
+            PlacedEscape::anywhere("{%", "{{ '{%' }}"),
+            PlacedEscape::anywhere("{#", "{{ '{#' }}"),
+        ]
     }
 
     fn category(&self) -> Category {

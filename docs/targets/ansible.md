@@ -28,6 +28,21 @@ A notify becomes a handler named after the action and the resource, such as
 `reload nginx_svc`. Handlers run once, at the end of the play, only when a task
 that notifies them changed something.
 
+Ansible renders every string in a task through Jinja on the control machine,
+so a Jinja expression written in the document, such as
+`{{ ansible_facts['os_family'] }}`, is passed through and evaluated when the
+play runs. A value Meridian places from `--data`, `--set`, a data layer or
+`env()` is not: the plugin declares Jinja's openings (`{{`, `{%`, `{#`), and
+the core writes each one in a placed value as an expression that yields itself
+(`{{ '{{' }}`), which Jinja renders back to the text. So a data value holding
+`{{ lookup('pipe', 'id') }}` reaches the node as that text, and never runs
+`id` on the control machine
+([values from data are literal](../reference/dsl/interpolation.md#a-tools-own-expressions)).
+
+The host in `inventory.ini` is one line, so the plugin refuses a host that is
+not a name (rule `invalid-host`); the core refuses one before it gets this far
+([`targetHost`](../reference/dsl/outputs-and-hand-offs.md#rules)).
+
 `runtimeWhen` is copied into the task's `when:` as written, so it is an Ansible
 expression:
 

@@ -100,6 +100,39 @@ fn id(kind: StageKind, name: &str) -> StageId {
     }
 }
 
+#[test]
+fn an_output_that_is_not_a_host_name_fails_the_stage_that_needs_it() {
+    // Issue 134: an output is whatever the tool returned, and it is about
+    // to be handed to ssh. One that ssh would read as an option stops the
+    // ResourceSet before its plugin is called, and names the output.
+    let registry = registry();
+    let options = options("hostile-output");
+    let hostile = WORKFLOW.replace(
+        "content: 10.0.0.5",
+        "content: \"-oProxyCommand=touch /tmp/pwned\"",
+    );
+    let report = run(
+        &bundle(&hostile),
+        &registry,
+        Mode::Apply,
+        &options,
+        &mut Quiet,
+    );
+    let web = report
+        .stages
+        .iter()
+        .find(|s| s.id == id(StageKind::ResourceSet, "web"))
+        .unwrap();
+    let why = failure(web.outcome.clone());
+    assert!(
+        why.contains("output \"address\"")
+            && why.contains("cannot be this document's target host")
+            && why.contains("starts with \"-\""),
+        "{why}"
+    );
+    assert!(web.artifact.is_none(), "nothing was compiled for the host");
+}
+
 /// Records what an observer is told, in order.
 #[derive(Default)]
 struct Recorder {

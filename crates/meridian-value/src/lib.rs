@@ -5,7 +5,12 @@
 //! it. The core builds values from documents; a plugin receives them over the
 //! wire. Neither should have to depend on the other to name the type.
 
+pub mod host;
+pub mod placed;
+
 use std::collections::BTreeMap;
+
+pub use placed::PlacedEscape;
 
 /// A free-form value as it appears under a resource's `params`.
 ///

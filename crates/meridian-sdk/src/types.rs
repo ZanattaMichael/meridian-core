@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
 
-use meridian_value::{canonical_map, Value};
+use meridian_value::{canonical_map, PlacedEscape, Value};
 
 use crate::run::Category;
 use crate::schema::ResourceSchema;
@@ -307,6 +307,20 @@ pub trait Emitter {
     fn supported_resource_types(&self) -> Vec<String>;
     /// What this target can express natively.
     fn capabilities(&self) -> Capabilities;
+    /// The openings of the tool's own expression syntax, and how each is
+    /// written as literal text. The core applies them to every value an
+    /// interpolation places from data before `emit` sees it, so data can
+    /// never open an expression the tool evaluates: Ansible declares Jinja's
+    /// `{{`, `{%` and `{#`; ARM declares a leading `[`, written `[[`.
+    ///
+    /// The default, an empty list, is right for a tool whose files hold no
+    /// expression syntax beyond the `${` reference, which the core always
+    /// escapes. A target that renders its files through a template engine
+    /// must declare the engine's openings, or a value from `--data` is as
+    /// live as one the author wrote.
+    fn placed_text(&self) -> Vec<PlacedEscape> {
+        Vec::new()
+    }
     /// The kind of tool this target drives. The default exists so an emitter
     /// written before categories does not stop compiling; every real target
     /// should say.

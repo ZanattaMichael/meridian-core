@@ -73,10 +73,12 @@ impl Operand {
     fn from_template(text: &str) -> Operand {
         match expression::inner(text) {
             Some(inner) => Operand::Expr(inner.to_owned()),
-            // `[[` at the start is how a template writes a literal `[`.
-            None if text.starts_with("[[") && text.ends_with(']') => {
-                Operand::Literal(text[1..].to_owned())
-            }
+            // `[[` at the start is how a template writes a literal `[`, and
+            // how the core hands over a value from data that opens with
+            // one. It is read as the literal whether or not the text ends
+            // with `]`, so that what is written back (`[[` only where the
+            // text would otherwise be an expression) means the same.
+            None if text.starts_with("[[") => Operand::Literal(text[1..].to_owned()),
             None => Operand::Literal(text.to_owned()),
         }
     }
@@ -338,14 +340,23 @@ impl Resolver<'_> {
             let (operand, text) = self.reference(expression, site, refs)?;
             return Ok((operand.template(), text));
         }
+        // `[[` at the start is a literal `[`: how a template writes one,
+        // and how the core hands over a value from data that opens with
+        // one. It is kept where Resource Manager needs it to read the string
+        // as text, and dropped where the string could never be an
+        // expression, so that the deployed value is the literal either way.
+        let escaped = text.starts_with("[[");
         let references = parts.iter().any(|p| matches!(p, Part::Expr(_)));
         if !references {
-            let literal: String = parts
+            let mut literal: String = parts
                 .iter()
                 .map(|p| match p {
                     Part::Text(t) | Part::Expr(t) => t.as_str(),
                 })
                 .collect();
+            if escaped && !literal.ends_with(']') {
+                literal.remove(0);
+            }
             let text = expression::inner(&literal).is_none();
             return Ok((literal, text));
         }
@@ -367,12 +378,18 @@ impl Resolver<'_> {
             return Ok((out, false));
         }
 
-        // References inside plain text: one format().
+        // References inside plain text: one format(). What format() gives
+        // is never read as an expression again, so the escape is dropped.
         let mut pattern = String::new();
         let mut arguments = Vec::new();
-        for part in &parts {
+        for (i, part) in parts.iter().enumerate() {
             match part {
                 Part::Text(literal) => {
+                    let literal = if i == 0 && escaped {
+                        &literal[1..]
+                    } else {
+                        literal
+                    };
                     pattern.push_str(&literal.replace('{', "{{").replace('}', "}}"));
                 }
                 Part::Expr(expression) => {

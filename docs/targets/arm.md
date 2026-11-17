@@ -206,7 +206,17 @@ keys: "[listKeys(${logs}, ${logs.apiVersion}).keys[0].value]"
 ```
 
 To write literal text that starts with `[` and ends with `]`, start it with `[[`, as in
-any ARM template.
+any ARM template. The plugin reads `[[` at the start of any string as a literal `[`, and
+writes the doubled bracket back only where Resource Manager would otherwise read an
+expression, so `"[[not closed"` is deployed as `[not closed`.
+
+A value Meridian places from `--data`, `--set`, a data layer or `env()` is never an
+expression, whatever it holds: the plugin declares the opening `[`, and the core hands a
+placed value that starts with one over as `[[`. A data value of `[listKeys(...)]` is
+deployed as that text, and reads nothing from the subscription
+([values from data are literal](../reference/dsl/interpolation.md#a-tools-own-expressions)).
+A reference the author wrote inside an expression is an argument, as above; data placed
+inside an expression the author wrote is placed as text within it.
 
 ## Ordering
 
