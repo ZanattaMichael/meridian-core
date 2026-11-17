@@ -206,6 +206,8 @@ fn secrets_reach_ansible_playbook_in_a_private_file_and_nowhere_else() {
         fs::read_to_string(dir.join("vars")).unwrap(),
         "{\"meridian_secret_db_password\":\"hunter2\"}\n"
     );
+    // Only the owner may read the file. Windows has no Unix mode to read.
+    #[cfg(unix)]
     assert_eq!(fs::read_to_string(dir.join("mode")).unwrap().trim(), "600");
     // The command line named the file and nothing more, the environment
     // held nothing, and the file is gone now the run is over.
