@@ -109,6 +109,14 @@ plugins.
 | [Run safety](plans/run-safety.md) | State and locking, resume, rollback, drift, policy checks, values handed between stages |
 | [Language expansion](plans/language-expansion.md) (accepted, being built) | Expressions and functions, conditions, templating, configurations with inputs, endpoints and inventory, secrets, workflows |
 
+## Research
+
+Not plans: nothing on these pages is decided or built.
+
+| Document | Contents |
+|---|---|
+| [Ideas to improve Meridian](research/improvement-ideas.md) | A ranked report of new capabilities worth considering, with what comparable tools do, feasibility and effort for each |
+
 ## Contributing
 
 | | |
