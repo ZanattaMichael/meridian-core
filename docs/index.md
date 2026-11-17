@@ -64,6 +64,7 @@ byte. The reasons, the layout and the order of work are in
 | [The formatter](tooling/formatter.md) | `meridian fmt`: one layout, and the guarantee that it changes nothing else |
 | [The linter](tooling/linter.md) | `meridian lint`: every error in a project, plus probable mistakes |
 | [The JSON Schema](tooling/json-schema.md) | `meridian schema`: validation for editors that only know YAML |
+| [Tool schemas](tooling/schema-sync.md) | `meridian schema sync`: a tool's own types, read once from the tool and cached, so the editor completes and checks them |
 
 | Reference | |
 |---|---|

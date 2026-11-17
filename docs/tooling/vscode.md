@@ -45,7 +45,8 @@ with `meridian/` and leaves every other YAML file alone.
 
 | To | Do |
 |---|---|
-| Complete a field, type, param or reference | type, or press `Ctrl+Space` |
+| Complete a field, type, param, function or reference | type, or press `Ctrl+Space` |
+| Complete and check a tool's own types (`aws_instance`, `apps/v1/Deployment`) | run **Meridian: Sync Tool Schemas** once; see [Tool schemas](schema-sync.md) |
 | Read the documentation of a field, type or param | hover over it |
 | See every problem in the workspace's open files | open the Problems panel (`Ctrl+Shift+M`) |
 | Apply a quick fix | click the light bulb, or press `Ctrl+.` |
@@ -80,6 +81,7 @@ untouched.
 | `meridian.pluginDirs` | `[]` | Directories to load target plugins from, searched before the directory the command is in. |
 | `meridian.lint.enabled` | `true` | Show [lint findings](../reference/lint.md) alongside the compiler's errors. |
 | `meridian.format.sortFields` | `true` | When formatting, write fields in the language's own order. Turn it off for `meridian fmt --keep-order`. |
+| `meridian.stateDir` | `.meridian` | Where each workspace folder's [synced tool schemas](schema-sync.md) are read from, relative to the folder; the `--state-dir` the sync was run with. |
 | `meridian.trace.server` | `off` | Log the messages exchanged with the server to the Meridian output channel: `off`, `messages` or `verbose`. |
 
 `${workspaceFolder}` and a leading `~` are expanded in `meridian.path` and
@@ -99,6 +101,7 @@ Changing a setting restarts the server.
 |---|---|
 | **Meridian: Restart Language Server** | stops the server and starts it again |
 | **Meridian: Reload Target Plugins** | loads the plugins again, after you install or rebuild one |
+| **Meridian: Sync Tool Schemas** | runs `meridian schema sync` on the workspace folder in a terminal, so the tools' output is in front of you; the server reads the result when it is written |
 | **Meridian: Show Language Server Output** | opens the output channel, where the server's messages go |
 
 ## With the YAML extension

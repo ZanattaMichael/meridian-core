@@ -266,6 +266,38 @@ fn param_schema(param: &meridian_sdk::ParamSchema) -> Value {
     if !param.values.is_empty() {
         out.insert("enum".into(), param.values.clone().into());
     }
+    // What a mapping holds, or each item of a list, when the schema says.
+    if !param.params.is_empty() {
+        let mut props = Map::new();
+        for p in param.params.iter().filter(|p| !p.computed) {
+            props.insert(p.name.clone(), param_schema(p));
+        }
+        let required: Vec<&str> = param
+            .params
+            .iter()
+            .filter(|p| p.required)
+            .map(|p| p.name.as_str())
+            .collect();
+        let mut object = Map::new();
+        object.insert("properties".into(), props.into());
+        if !param.open {
+            object.insert("additionalProperties".into(), false.into());
+        }
+        if !required.is_empty() {
+            object.insert("required".into(), json!(required));
+        }
+        match param.kind {
+            ParamKind::List => {
+                out.insert(
+                    "items".into(),
+                    json!({ "anyOf": [object, scalar_as_text()] }),
+                );
+            }
+            _ => {
+                out.extend(object);
+            }
+        }
+    }
     out.into()
 }
 
@@ -299,7 +331,8 @@ fn resource_for(target: &Target) -> Value {
         if !t.open || !t.params.is_empty() {
             let mut params = Map::new();
             let mut props = Map::new();
-            for param in &t.params {
+            // What the tool sets is not written by a document.
+            for param in t.params.iter().filter(|p| !p.computed) {
                 props.insert(param.name.clone(), param_schema(param));
             }
             params.insert("properties".into(), props.into());

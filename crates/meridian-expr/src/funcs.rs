@@ -115,6 +115,151 @@ pub fn function_names() -> Vec<&'static str> {
     FUNCTIONS.iter().map(|(name, _, _)| *name).collect()
 }
 
+/// What each function is, in the words of the reference
+/// (`docs/reference/dsl/expressions.md`): name, how it is called, what it
+/// gives, an example, and the section it is listed under. Editors show
+/// these beside a completion; a test keeps the table and the reference in
+/// step.
+const FUNCTION_DOCS: &[(&str, &str, &str, &str, &str)] = &[
+    ("defined", "defined(path)", "whether the path is set. Takes a path, not a value", "", "Presence"),
+    ("coalesce", "coalesce(a, b, ...)", "the first argument that is set and not null; `null` if none", "", "Presence"),
+    ("default", "default(value, fallback)", "`value`, or `fallback` when it is not set or null", "", "Presence"),
+    ("required", "required(value, 'message')", "`value`, or an error with your message when it is null", "", "Presence"),
+    ("lower", "lower(text)", "the text in one case", "`upper('web')` is `'WEB'`", "Text"),
+    ("upper", "upper(text)", "the text in one case", "`upper('web')` is `'WEB'`", "Text"),
+    ("title", "title(text)", "each word capitalised", "`title('hello world')` is `'Hello World'`", "Text"),
+    ("trim", "trim(text)", "without spaces and line breaks at the ends", "", "Text"),
+    ("trimPrefix", "trimPrefix(text, prefix)", "without that start or end, if it has it", "`trimSuffix('a.conf', '.conf')` is `'a'`", "Text"),
+    ("trimSuffix", "trimSuffix(text, suffix)", "without that start or end, if it has it", "`trimSuffix('a.conf', '.conf')` is `'a'`", "Text"),
+    ("replace", "replace(text, from, to)", "every `from` replaced", "`replace('a-b', '-', '_')` is `'a_b'`", "Text"),
+    ("split", "split(text, separator)", "a list of the parts. Empty text gives an empty list", "`split('a,b', ',')` is `['a', 'b']`", "Text"),
+    ("join", "join(list, separator)", "the items as one text. Items are text, numbers or booleans", "`join(['a', 'b'], '-')` is `'a-b'`", "Text"),
+    ("format", "format(template, values...)", "the template with `%s` (any single value) and `%d` (a whole number) filled in order; `%%` is a percent sign", "`format('%s-%d', 'web', 3)` is `'web-3'`", "Text"),
+    ("startsWith", "startsWith(text, prefix)", "true or false", "", "Text"),
+    ("endsWith", "endsWith(text, suffix)", "true or false", "", "Text"),
+    ("contains", "contains(holder, item)", "whether text holds text, a list holds an item, or a mapping has a key", "`contains([80, 443], 443)` is `true`", "Text"),
+    ("substr", "substr(text, start), substr(text, start, length)", "part of the text, counted in characters from 0", "`substr('abcdef', 1, 3)` is `'bcd'`", "Text"),
+    ("indent", "indent(text, spaces)", "every line that is not empty moved right", "", "Text"),
+    ("quote", "quote(text)", "the text in double quotes, with `\"` and `\\` escaped", "", "Text"),
+    ("regexMatch", "regexMatch(text, pattern)", "whether the [pattern](#patterns) matches", "", "Text"),
+    ("regexReplace", "regexReplace(text, pattern, to)", "every match replaced; `$1` is the first group", "`regexReplace('web01', '[0-9]+', 'N')` is `'webN'`", "Text"),
+    ("regexFind", "regexFind(text, pattern)", "the first match, or `null`", "", "Text"),
+    ("min", "min(a, b, ...)", "the smallest or largest. Also takes one list: `max(data.ports)`", "", "Numbers"),
+    ("max", "max(a, b, ...)", "the smallest or largest. Also takes one list: `max(data.ports)`", "", "Numbers"),
+    ("abs", "abs(n)", "without its sign", "", "Numbers"),
+    ("floor", "floor(n)", "the whole number below or above", "", "Numbers"),
+    ("ceil", "ceil(n)", "the whole number below or above", "", "Numbers"),
+    ("round", "round(n), round(n, places)", "the nearest whole number, or to 0 to 15 decimal places. A half rounds away from zero", "", "Numbers"),
+    ("sum", "sum(list)", "the total of a list of numbers; `0` for an empty list", "", "Numbers"),
+    ("length", "length(x)", "the characters of text, the items of a list, the keys of a mapping", "", "Lists and mappings"),
+    ("keys", "keys(map)", "the keys, or the values, in key order", "", "Lists and mappings"),
+    ("values", "values(map)", "the keys, or the values, in key order", "", "Lists and mappings"),
+    ("entries", "entries(map)", "a list of `{key, value}`", "", "Lists and mappings"),
+    ("merge", "merge(a, b, ...)", "one mapping; a later argument's key replaces an earlier one's, whole", "`merge({a: {x: 1}}, {a: {y: 2}})` is `{a: {y: 2}}`", "Lists and mappings"),
+    ("deepMerge", "deepMerge(a, b, ...)", "the same, but mappings inside mappings are merged key by key. Lists are replaced", "`deepMerge({a: {x: 1}}, {a: {y: 2}})` is `{a: {x: 1, y: 2}}`", "Lists and mappings"),
+    ("concat", "concat(a, b, ...)", "the lists one after another", "", "Lists and mappings"),
+    ("flatten", "flatten(list)", "lists inside the list opened up, one level", "`flatten([[1, 2], 3])` is `[1, 2, 3]`", "Lists and mappings"),
+    ("unique", "unique(list)", "without repeats; the first of each is kept", "", "Lists and mappings"),
+    ("sort", "sort(list)", "in order. All numbers, or all text", "", "Lists and mappings"),
+    ("reverse", "reverse(x)", "a list or text, backwards", "", "Lists and mappings"),
+    ("first", "first(list)", "one item. An empty list is an error", "", "Lists and mappings"),
+    ("last", "last(list)", "one item. An empty list is an error", "", "Lists and mappings"),
+    ("slice", "slice(list, start), slice(list, start, end)", "the items from `start` up to but not including `end`. Negative counts from the end", "`slice([1, 2, 3, 4], 1, 3)` is `[2, 3]`", "Lists and mappings"),
+    ("range", "range(n), range(start, end), range(start, end, step)", "whole numbers from `start` up to but not including `end`. At most 10000", "`range(3)` is `[0, 1, 2]`", "Lists and mappings"),
+    ("zip", "zip(a, b)", "pairs, as long as the shorter list", "`zip([1, 2], ['a', 'b'])` is `[[1, 'a'], [2, 'b']]`", "Lists and mappings"),
+    ("lookup", "lookup(map, key), lookup(map, key, fallback)", "the value of the key; without a fallback a missing key is an error", "", "Lists and mappings"),
+    ("pick", "pick(map, keys)", "the mapping with only, or without, those keys", "", "Lists and mappings"),
+    ("omit", "omit(map, keys)", "the mapping with only, or without, those keys", "", "Lists and mappings"),
+    ("any", "any(list)", "whether any, or every, item is true. `any([])` is false and `all([])` is true", "", "Lists and mappings"),
+    ("all", "all(list)", "whether any, or every, item is true. `any([])` is false and `all([])` is true", "", "Lists and mappings"),
+    ("map", "map(list, 'name', expression)", "a list of the expression's value for each item, which the expression reads by the name given", "`map([1, 2], 'n', n * 2)` is `[2, 4]`", "Lists and mappings"),
+    ("filter", "filter(list, 'name', condition)", "the items the condition is true for", "`filter(data.ports, 'p', p > 1000)`", "Lists and mappings"),
+    ("where", "where(list, 'field', value)", "the items whose field equals the value", "", "Selection"),
+    ("pluck", "pluck(list, 'field')", "that field of every item that has it", "", "Selection"),
+    ("groupBy", "groupBy(list, 'field')", "a mapping from each value of the field, as text, to the items that have it", "", "Selection"),
+    ("type", "type(x)", "`'null'`, `'bool'`, `'number'`, `'string'`, `'list'` or `'map'`", "", "Types"),
+    ("toString", "toString(x)", "text, a number or a boolean as text. A list or mapping has no single text form: use `join` or `toJson`", "", "Types"),
+    ("toNumber", "toNumber(x)", "a number, from a number or from text holding one. Anything else is an error", "", "Types"),
+    ("toBool", "toBool(x)", "from `true`, `false`, `'true'` or `'false'`. Nothing else: `'yes'` is refused", "", "Types"),
+    ("toJson", "toJson(x)", "the value as compact JSON text, keys in order", "", "Types"),
+    ("fromJson", "fromJson(text)", "the value the JSON text holds", "", "Types"),
+    ("base64Encode", "base64Encode(text)", "standard base64. Decoding something that is not base64, or not text once decoded, is an error", "", "Encoding"),
+    ("base64Decode", "base64Decode(text)", "standard base64. Decoding something that is not base64, or not text once decoded, is an error", "", "Encoding"),
+    ("urlEncode", "urlEncode(text)", "the text safe for a URL: everything but letters, digits and `-_.~` percent-encoded", "", "Encoding"),
+    ("sha256", "sha256(text)", "the SHA-256 of the text, as 64 hexadecimal characters", "", "Encoding"),
+    ("cidrHost", "cidrHost(network, n)", "the nth address of the network; negative counts from the end", "`cidrHost('10.0.0.0/24', 5)` is `'10.0.0.5'`", "Networks"),
+    ("cidrSubnet", "cidrSubnet(network, bits, n)", "the nth subnet made by adding `bits` to the prefix", "`cidrSubnet('10.0.0.0/16', 8, 3)` is `'10.0.3.0/24'`", "Networks"),
+    ("cidrNetmask", "cidrNetmask(network)", "the netmask of an IPv4 network", "`cidrNetmask('10.0.0.0/20')` is `'255.255.240.0'`", "Networks"),
+    ("cidrContains", "cidrContains(network, address)", "whether the address is inside the network", "", "Networks"),
+    ("semverCompare", "semverCompare(a, b)", "`-1`, `0` or `1`", "", "Versions"),
+    ("semverSatisfies", "semverSatisfies(version, range)", "whether the version meets every requirement of the range. Requirements are separated by spaces and start with `>=`, `<=`, `>`, `<`, `=` or `!=`: `'>=1.6 <2'`", "", "Versions"),
+    ("basename", "basename(path)", "the last part: `'nginx.conf'`", "", "Paths"),
+    ("dirname", "dirname(path)", "everything before it: `'/etc/nginx'`", "", "Paths"),
+    ("joinPath", "joinPath(a, b, ...)", "the parts joined with one `/` between each", "", "Paths"),
+    ("env", "env('NAME'), env('NAME', fallback)", "the environment variable of the `meridian` process. Not set is an error", "", "Environment"),
+    ("matchesSelector", "matchesSelector(labels, 'tier=web,env!=dev')", "whether a mapping of labels meets a selector, in the language of [`-l`](index.md#labels-and-selectors): `key=value`, `key!=value`, `key`, `!key`, separated by commas", "", "Selectors"),
+];
+
+/// One function, as an editor describes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FunctionInfo {
+    pub name: &'static str,
+    /// How it is called: `substr(text, start, length)`.
+    pub signature: &'static str,
+    /// What it gives, as the reference puts it.
+    pub gives: &'static str,
+    /// An example, or empty.
+    pub example: &'static str,
+    /// The reference section: `Text`, `Numbers`, ...
+    pub category: &'static str,
+    /// The fewest and the most arguments it takes.
+    pub min_args: usize,
+    pub max_args: usize,
+}
+
+impl FunctionInfo {
+    /// The documentation as Markdown, for a hover or a completion.
+    pub fn markdown(&self) -> String {
+        let mut out = format!(
+            "**`{}`** · {}\n\n{}",
+            self.signature, self.category, self.gives
+        );
+        if !self.example.is_empty() {
+            out.push_str(&format!("\n\nExample: {}", self.example));
+        }
+        out
+    }
+}
+
+/// Every function with its documentation, in the order the reference
+/// lists them.
+pub fn functions() -> Vec<FunctionInfo> {
+    FUNCTIONS
+        .iter()
+        .map(|(name, min, max)| {
+            let (_, signature, gives, example, category) = FUNCTION_DOCS
+                .iter()
+                .find(|(n, ..)| n == name)
+                .copied()
+                .unwrap_or((name, name, "", "", ""));
+            FunctionInfo {
+                name,
+                signature,
+                gives,
+                example,
+                category,
+                min_args: *min,
+                max_args: *max,
+            }
+        })
+        .collect()
+}
+
+/// The function called `name`, if there is one.
+pub fn function(name: &str) -> Option<FunctionInfo> {
+    functions().into_iter().find(|f| f.name == name)
+}
+
 pub(crate) fn check_arity(name: &str, given: usize) -> Result<(), String> {
     let Some((_, min, max)) = FUNCTIONS.iter().find(|(n, _, _)| *n == name) else {
         // The nearest name, for a slip of the hand or of the case.

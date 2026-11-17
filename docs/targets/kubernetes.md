@@ -152,6 +152,23 @@ document, and compares the manifests it compiles to with the originals, object f
 object. The imported document is
 [`web.meridian.yaml`](../../plugins/kubernetes/testdata/import/web.meridian.yaml).
 
+## Editor schemas
+
+`meridian schema sync` asks the cluster for its OpenAPI document (`kubectl
+get --raw /openapi/v2`, against the `context` and `kubeconfig` the `cluster`
+resource names), so an editor completes and checks the fields of every kind
+the server knows, custom resources included
+([Tool schemas](../tooling/schema-sync.md)).
+
+| | |
+|---|---|
+| Described in full | the `<apiVersion>/<Kind>` types the documents use: every field, `$ref`s followed, `status` marked as set by the cluster, `apiVersion` and `kind` left out because the type gives them |
+| Listed by name | every other kind the server describes, with its description; `*List` kinds are left out |
+| Pinned | the server's version, and the context |
+
+A kind that the server does not describe, because its API group is not
+installed, is reported in a note.
+
 ## Running
 
 | | |

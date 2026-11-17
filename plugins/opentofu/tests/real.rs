@@ -27,7 +27,7 @@ use meridian_plugin_host::{Client, RunFailure, StartOptions};
 use meridian_plugin_testkit::{graph_from_file, graph_from_text, plugin_binary, scratch};
 use meridian_sdk::{
     Applied, Artifact, Change, ChangeAction, Data, LogLine, Output, Plan, ResourceGraph,
-    RunContext, Value,
+    RunContext, SchemaRequest, Value,
 };
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -420,4 +420,71 @@ fn a_provider_from_the_registry_and_an_ephemeral_resource_work() {
     // An ephemeral value is in no state.
     let state = fs::read_to_string(context.work_dir.join("terraform.tfstate")).unwrap();
     assert!(!state.contains("random_password"), "{state}");
+}
+
+#[test]
+fn the_providers_schemas_are_exported_for_an_editor() {
+    let Some(program) = tofu() else { return };
+    let dir = scratch(TMP, "real-schemas");
+    let client = start(&program);
+    assert!(
+        client.info().exports_schemas,
+        "the plugin says it exports schemas"
+    );
+
+    // The built-in provider needs no download, so this part runs offline.
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: builtin\nspec:\n  target: opentofu\n  resources:\n    - id: config\n      type: terraform_data\n      params:\n        input: v1\n";
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_text("builtin.yaml", text, "opentofu")],
+    );
+    let export = client
+        .export_schemas(&request)
+        .unwrap_or_else(|e| panic!("{}", explain("exporting schemas", &e, &[])));
+    assert_eq!(export.tool, "opentofu");
+    assert!(
+        export
+            .tool_version
+            .starts_with(|c: char| c.is_ascii_digit()),
+        "{:?}",
+        export.tool_version
+    );
+    let data = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "terraform_data")
+        .unwrap_or_else(|| panic!("terraform_data is described: {:?}", export.notes));
+    assert!(data.find_param("input").is_some_and(|p| !p.computed));
+    assert!(data.find_param("output").is_some_and(|p| p.computed));
+
+    if std::env::var_os("MERIDIAN_TEST_TOFU_NETWORK").is_none() {
+        eprintln!("skipped the registry part: MERIDIAN_TEST_TOFU_NETWORK is not set");
+        return;
+    }
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: provider\nspec:\n  target: opentofu\n  resources:\n    - id: local\n      type: provider\n      params:\n        source: hashicorp/local\n        version: \">= 2.5.0\"\n    - id: motd\n      type: local_file\n      params:\n        filename: motd\n        content: hello\n";
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_text("provider.yaml", text, "opentofu")],
+    );
+    let export = client
+        .export_schemas(&request)
+        .unwrap_or_else(|e| panic!("{}", explain("exporting the registry provider", &e, &[])));
+    let pinned = export
+        .pins
+        .get("hashicorp/local")
+        .unwrap_or_else(|| panic!("hashicorp/local is pinned: {:?}", export.pins));
+    assert!(pinned.starts_with("2."), "{pinned}");
+    let types: Vec<&str> = export.schemas.iter().map(|s| s.r#type.as_str()).collect();
+    assert!(
+        types.contains(&"local_file") && types.contains(&"data.local_file"),
+        "{types:?}"
+    );
+    let file = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "local_file")
+        .unwrap();
+    assert_eq!(file.source, format!("hashicorp/local {pinned}"));
+    assert!(file.find_param("filename").is_some_and(|p| p.required));
+    client.close().expect("the plugin exits cleanly");
 }

@@ -211,6 +211,28 @@ directory, so keep that directory.
 
 An output Terraform marks sensitive is reported as sensitive and never printed.
 
+## Editor schemas
+
+`meridian schema sync` asks Terraform for the providers' own schemas, so an
+editor completes and checks `aws_instance`'s arguments as it does a plugin's
+own types ([Tool schemas](../tooling/schema-sync.md)). The plugin writes a
+configuration into its work directory that requires every provider the
+documents use (the `source` and `version` of each `provider` resource, or
+`hashicorp/<name>` for a provider only named by a type's prefix), runs
+`terraform init -backend=false` there and reads `terraform providers schema
+-json`.
+
+| | |
+|---|---|
+| Described in full | the `<provider>_<type>` and `data.<type>` types the documents use: every attribute with its type, whether it is required, optional or set by the provider, sensitive or deprecated; every nested block; and Terraform's meta-arguments `count`, `for_each`, `provider`, `lifecycle`, `provisioner` and `connection` |
+| Listed by name | every other resource and data source of those providers, with its description, and `terraform_data` |
+| Pinned | each provider's version, from the `.terraform.lock.hcl` that `init` writes in the work directory |
+
+An attribute that is both optional and computed is described as one the
+provider sets when the document leaves it out, and is not an error to write.
+An attribute that is only computed, such as `arn`, is: a document reads it
+with `${id.arn}`.
+
 The runner is tested against the real `terraform` command (1.13) on every pull
 request that touches it, and the same tests run again with `tofu`: a plan that
 creates nothing, an apply checked on disk, a second plan that is in sync, an

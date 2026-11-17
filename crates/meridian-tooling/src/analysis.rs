@@ -24,6 +24,7 @@ pub enum CompletionKind {
     Reference,
     Type,
     Snippet,
+    Function,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -247,16 +248,25 @@ fn field_markdown(path: &str, field: &Field) -> String {
     out
 }
 
-fn param_markdown(target: &str, type_name: &str, param: &meridian_sdk::ParamSchema) -> String {
+fn param_markdown(target: &str, type_name: &str, path: &str, param: &ParamSchema) -> String {
+    let mut words = vec![if param.required {
+        "required"
+    } else if param.computed {
+        "set by the tool"
+    } else {
+        "optional"
+    }];
+    words.push(param.kind.as_str());
+    if param.deprecated {
+        words.push("deprecated");
+    }
+    if param.sensitive {
+        words.push("sensitive");
+    }
     let mut out = format!(
-        "**{}** · {} · {}\n\nParam of {} on target {}.",
-        code(&param.name),
-        if param.required {
-            "required"
-        } else {
-            "optional"
-        },
-        param.kind.as_str(),
+        "**{}** · {}\n\nParam of {} on target {}.",
+        code(path),
+        words.join(" · "),
         code(type_name),
         code(target)
     );
@@ -267,8 +277,46 @@ fn param_markdown(target: &str, type_name: &str, param: &meridian_sdk::ParamSche
         let values: Vec<String> = param.values.iter().map(|v| code(v)).collect();
         out.push_str(&format!("\n\nAccepts: {}", values.join(", ")));
     }
+    if !param.params.is_empty() {
+        let what = if param.kind == ParamKind::List {
+            "Each item holds"
+        } else {
+            "Holds"
+        };
+        out.push_str(&format!("\n\n{what}: {}", param_list(&param.params)));
+        if param.open {
+            out.push_str(", and any other key");
+        }
+    }
+    if param.computed {
+        out.push_str(&format!(
+            "\n\nThe tool sets it; read it with `${{id.{}}}`.",
+            path
+        ));
+    }
     out
 }
+
+/// A type's params as one line: required ones first and bold, at most
+/// [`MAX_LISTED`] named.
+fn param_list(params: &[ParamSchema]) -> String {
+    let mut names: Vec<String> = params
+        .iter()
+        .filter(|p| p.required)
+        .map(|p| format!("**{}**", code(&p.name)))
+        .collect();
+    names.extend(params.iter().filter(|p| !p.required).map(|p| code(&p.name)));
+    if names.len() > MAX_LISTED {
+        let more = names.len() - MAX_LISTED;
+        names.truncate(MAX_LISTED);
+        names.push(format!("and {more} more"));
+    }
+    names.join(", ")
+}
+
+/// How many params a hover names before it stops. A tool's type can take
+/// a hundred; the list is a reminder, not the reference.
+const MAX_LISTED: usize = 40;
 
 fn type_markdown(target: &Target, schema: &ResourceSchema) -> String {
     let mut out = format!(
@@ -279,15 +327,40 @@ fn type_markdown(target: &Target, schema: &ResourceSchema) -> String {
     if !schema.description.is_empty() {
         out.push_str(&format!("\n\n{}", schema.description));
     }
+    if !schema.source.is_empty() {
+        out.push_str(&format!("\n\nDescribed by {}.", schema.source));
+        if schema.open && schema.params.is_empty() {
+            out.push_str(
+                " Its params are read once a document uses the type and \
+                 `meridian schema sync` is run again.",
+            );
+        }
+    }
     if !schema.params.is_empty() {
         out.push_str("\n\n| Param | Value | |\n|---|---|---|");
-        for p in &schema.params {
+        // What must be given first, then the rest in the tool's order; a
+        // long type's table stops at a count rather than filling the screen.
+        let mut params: Vec<&ParamSchema> = schema.params.iter().collect();
+        params.sort_by_key(|p| (!p.required, p.computed));
+        for p in params.iter().take(MAX_LISTED) {
+            let note = if p.required {
+                "**required.** "
+            } else if p.computed {
+                "set by the tool. "
+            } else {
+                ""
+            };
+            let description = first_sentence(&p.description).replace('|', "\\|");
             out.push_str(&format!(
-                "\n| {} | {} | {}{} |",
+                "\n| {} | {} | {note}{description} |",
                 code(&p.name),
                 p.kind.as_str(),
-                if p.required { "**required.** " } else { "" },
-                p.description.replace('|', "\\|")
+            ));
+        }
+        if params.len() > MAX_LISTED {
+            out.push_str(&format!(
+                "\n| … | | and {} more |",
+                params.len() - MAX_LISTED
             ));
         }
     }
@@ -319,6 +392,15 @@ fn type_markdown(target: &Target, schema: &ResourceSchema) -> String {
     out
 }
 
+/// The first sentence of a description, for a table cell.
+fn first_sentence(text: &str) -> String {
+    let text = text.lines().next().unwrap_or("").trim();
+    match text.find(". ") {
+        Some(end) => text[..=end].to_owned(),
+        None => text.to_owned(),
+    }
+}
+
 fn target_markdown(target: &Target) -> String {
     let mut out = format!(
         "**{}** · {} target\n\nCan: {}",
@@ -331,8 +413,27 @@ fn target_markdown(target: &Target) -> String {
         out.push_str(&format!("\n\nTool versions: {}", versions.join(", ")));
     }
     if target.knows_types() {
-        let types: Vec<String> = target.types.iter().map(|t| code(&t.r#type)).collect();
+        let mut types: Vec<String> = target
+            .types
+            .iter()
+            .filter(|t| t.source.is_empty())
+            .map(|t| code(&t.r#type))
+            .collect();
+        if types.len() > MAX_LISTED {
+            let more = types.len() - MAX_LISTED;
+            types.truncate(MAX_LISTED);
+            types.push(format!("and {more} more"));
+        }
         out.push_str(&format!("\n\nResource types: {}", types.join(", ")));
+    }
+    if let Some(cache) = &target.cache {
+        out.push_str(&format!(
+            "\n\nTool schemas: {} types described by {}, synced {} ({}).",
+            cache.types,
+            cache.versions,
+            cache.synced_at,
+            cache.freshness.describe()
+        ));
     }
     out
 }
@@ -377,6 +478,31 @@ fn open_reference(line: &str, col: usize) -> Option<(usize, &str)> {
         return None;
     }
     Some((open + 2, inside))
+}
+
+/// A `${{ ... }}` expression the cursor is inside: where the text after
+/// `${{` starts, and that text up to the cursor.
+fn open_interpolation(line: &str, col: usize) -> Option<(usize, &str)> {
+    let before = line.get(..col)?;
+    let open = before.rfind("${{")?;
+    // `$${{` is literal text, not an expression.
+    if open > 0 && before.as_bytes()[open - 1] == b'$' {
+        return None;
+    }
+    let inside = &before[open + 3..];
+    if inside.contains("}}") {
+        return None;
+    }
+    Some((open + 3, inside))
+}
+
+/// The identifier being typed at the end of an expression: letters, digits,
+/// `_` and `.`, so `data.env` is one word and `upper(da` ends in `da`.
+fn expression_word(inside: &str) -> &str {
+    let start = inside
+        .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '.'))
+        .map_or(0, |i| i + 1);
+    &inside[start..]
 }
 
 /// The `${...}` reference that covers `col`, whole: its text and span.
@@ -545,13 +671,15 @@ impl Completer<'_> {
             self.fields(shape, &shown, &present, bare);
             return;
         }
-        if w.field.map(|f| f.role) == Some(Role::ResourceParams) && w.beyond.is_empty() {
-            self.params(&path, &present, bare);
+        if w.field.map(|f| f.role) == Some(Role::ResourceParams) {
+            self.params(&path, &w.beyond, &present, bare);
         }
     }
 
-    /// The params the resource's type takes that are not set yet.
-    fn params(&mut self, path: &[Seg], present: &[String], bare: bool) {
+    /// The params the resource's type takes that are not set yet, at the
+    /// level of `params` the cursor is in: the type's own, or those of the
+    /// mapping (or list item) the keys in `beyond` lead to.
+    fn params(&mut self, path: &[Seg], beyond: &[Seg], present: &[String], bare: bool) {
         let Some(resource) = self.scope.resource_at(path) else {
             return;
         };
@@ -559,21 +687,38 @@ impl Completer<'_> {
         let Some(schema) = self.scope.schema_of(type_name) else {
             return;
         };
+        let keys = param_keys(beyond);
+        let Some(level) = schema.at_path(&keys) else {
+            return;
+        };
+        let (listed, prefix) = match level {
+            None => (&schema.params, String::new()),
+            Some(p) => (&p.params, format!("{}.", keys.join("."))),
+        };
         let target = self.scope.target_name.to_owned();
         // What must be given is offered first; the rest keep the order the
-        // plugin lists them in.
-        let mut params: Vec<&ParamSchema> = schema.params.iter().collect();
-        params.sort_by_key(|p| !p.required);
+        // plugin lists them in. What the tool sets is not offered: a
+        // document does not write it.
+        let mut params: Vec<&ParamSchema> = listed.iter().filter(|p| !p.computed).collect();
+        params.sort_by_key(|p| (!p.required, p.deprecated));
         for param in params {
             if present.contains(&param.name) && self.cursor.word != param.name {
                 continue;
             }
-            let doc = param_markdown(&target, type_name, param);
-            let detail = if param.required {
+            let doc = param_markdown(
+                &target,
+                type_name,
+                &format!("{prefix}{}", param.name),
+                param,
+            );
+            let mut detail = if param.required {
                 format!("required · {}", param.kind.as_str())
             } else {
                 param.kind.as_str().to_owned()
             };
+            if param.deprecated {
+                detail.push_str(" · deprecated");
+            }
             if bare {
                 self.push(
                     &param.name,
@@ -586,6 +731,15 @@ impl Completer<'_> {
             }
             let insert = match param.kind {
                 ParamKind::Bool => format!("{}: ${{1|true,false|}}", param.name),
+                ParamKind::List if !param.params.is_empty() => {
+                    let first = param
+                        .params
+                        .iter()
+                        .find(|p| p.required)
+                        .or(param.params.first())
+                        .map_or("", |p| p.name.as_str());
+                    format!("{}:\n  - {first}: $0", param.name)
+                }
                 ParamKind::List => format!("{}:\n  - $0", param.name),
                 ParamKind::Map => format!("{}:\n  $0", param.name),
                 // Quoted, so a mode is never read as a number.
@@ -692,16 +846,17 @@ impl Completer<'_> {
         let resource = self.scope.resource_at(&path);
 
         if !w.beyond.is_empty() {
-            // A value inside params.
-            if field.role != Role::ResourceParams || w.beyond.len() != 1 {
+            // A value inside params: the param the keys lead to, however
+            // deep. An expression being typed in it is completed as one.
+            if field.role != Role::ResourceParams {
                 return;
             }
-            let Seg::Key(name) = &w.beyond[0] else { return };
+            let keys = param_keys(&w.beyond);
             let type_name = resource.and_then(|r| r.text("type")).unwrap_or("");
-            let Some(param) = self
+            let Some(Some(param)) = self
                 .scope
                 .schema_of(type_name)
-                .and_then(|s| s.find_param(name))
+                .and_then(|s| s.at_path(&keys))
             else {
                 return;
             };
@@ -886,9 +1041,83 @@ impl Completer<'_> {
                 for (label, what) in declared {
                     self.value(&label, what, "");
                 }
+                self.functions();
             }
             _ => {}
         }
+    }
+
+    /// Every function of the expression language, as a snippet that opens
+    /// its parentheses, with the reference's words beside it.
+    fn functions(&mut self) {
+        for f in meridian_expr::functions() {
+            let insert = if f.min_args == 0 {
+                format!("{}()", f.name)
+            } else {
+                format!("{}($1)", f.name)
+            };
+            self.snippet(
+                &format!("{}()", f.name),
+                CompletionKind::Function,
+                &f.signature[f.name.len()..],
+                &f.markdown(),
+                &insert,
+            );
+        }
+    }
+
+    /// Inside `${{`: the names an expression may read, and the functions.
+    fn interpolation(&mut self, start: usize, inside: &str) {
+        let line = self.cursor.span.start.line;
+        let word = expression_word(inside);
+        let col = start + inside.len();
+        self.cursor.span = Span::on_line(line, col - word.len(), col);
+        self.cursor.word = word.to_owned();
+        let spec = self.scope.root.and_then(|r| r.child("spec"));
+        self.snippet(
+            "data.",
+            CompletionKind::Reference,
+            "a value given with --data or --set",
+            "Reads a value from the data, as in `data.env`. Give them with `--data` or `--set`.",
+            "data.${1:key}",
+        );
+        for (prefix, field, what) in [
+            ("var", "variables", "a variable of this document"),
+            ("cond", "conditions", "a named condition of this document"),
+        ] {
+            for entry in spec
+                .and_then(|s| s.child(field))
+                .map_or(&[][..], Node::entries)
+            {
+                let value = entry
+                    .value
+                    .as_ref()
+                    .and_then(Node::scalar)
+                    .map_or(String::new(), |s| s.text.clone());
+                self.push(
+                    &format!("{prefix}.{}", entry.key),
+                    CompletionKind::Reference,
+                    what,
+                    &format!("**{prefix}.{}**: {}", entry.key, code(&value)),
+                    &format!("{prefix}.{}", entry.key),
+                );
+            }
+        }
+        for item in spec
+            .and_then(|s| s.child("secrets"))
+            .map_or(&[][..], Node::items)
+        {
+            if let Some(name) = item.value.as_ref().and_then(|v| v.text("name")) {
+                self.push(
+                    &format!("secret.{name}"),
+                    CompletionKind::Reference,
+                    "a secret of this document",
+                    "A reference to the secret; its value is never shown.",
+                    &format!("secret.{name}"),
+                );
+            }
+        }
+        self.functions();
     }
 
     /// Inside `${`: resource ids, then the params of the one named.
@@ -922,13 +1151,52 @@ impl Completer<'_> {
                             .collect()
                     })
                     .unwrap_or_default();
+                let written: Vec<String> = keys.iter().map(|(k, _)| k.clone()).collect();
                 for (key, value) in keys {
                     self.push(&key, CompletionKind::Reference, &value, "", &key);
+                }
+                // What the type's schema says can be read from the resource
+                // beyond what is written: what the tool sets, and the rest
+                // of its params.
+                let target = self.scope.target_name.to_owned();
+                let type_name = r.r#type.to_owned();
+                let mut extra: Vec<ParamSchema> = self
+                    .scope
+                    .schema_of(&type_name)
+                    .map(|s| {
+                        s.params
+                            .iter()
+                            .filter(|p| !written.contains(&p.name))
+                            .cloned()
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                extra.sort_by_key(|p| !p.computed);
+                for p in extra {
+                    let detail = if p.computed {
+                        format!("set by the tool · {}", p.kind.as_str())
+                    } else {
+                        p.kind.as_str().to_owned()
+                    };
+                    let doc = param_markdown(&target, &type_name, &p.name, &p);
+                    self.push(&p.name, CompletionKind::Reference, &detail, &doc, &p.name);
                 }
             }
         }
         true
     }
+}
+
+/// The keys of a path inside `params`, with list indexes left out: an
+/// item of a list is described by the list's own params.
+fn param_keys(beyond: &[Seg]) -> Vec<&str> {
+    beyond
+        .iter()
+        .filter_map(|s| match s {
+            Seg::Key(k) => Some(k.as_str()),
+            Seg::Index(_) => None,
+        })
+        .collect()
 }
 
 fn strip_indexes(path: &str) -> String {
@@ -984,6 +1252,10 @@ pub fn complete(workspace: &Workspace, catalog: &Catalog, name: &str, pos: Pos) 
         hang,
         out: Vec::new(),
     };
+    if let Some((start, inside)) = open_interpolation(line, pos.col) {
+        completer.interpolation(start, inside);
+        return completer.out;
+    }
     if let Some((start, inside)) = open_reference(line, pos.col) {
         completer.reference(start, inside);
         return completer.out;
@@ -1060,11 +1332,52 @@ fn infrastructure(
     })
 }
 
+/// The function name under `col` inside an expression: `upper` of
+/// `upper(data.x)` when the cursor is on it, with its span.
+fn function_at(line: &str, line_no: usize, col: usize) -> Option<(&str, Span)> {
+    let is_word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let col = col.min(line.len());
+    let start = line[..col]
+        .rfind(|c: char| !is_word(c))
+        .map_or(0, |i| i + 1);
+    let end = line[col..]
+        .find(|c: char| !is_word(c))
+        .map_or(line.len(), |i| col + i);
+    let word = &line[start..end];
+    if word.is_empty() || !line[end..].trim_start().starts_with('(') {
+        return None;
+    }
+    // Only inside an expression: a `when` value, or `${{ }}`.
+    Some((word, Span::on_line(line_no, start, end)))
+}
+
 /// Documentation for whatever is at `pos`.
 pub fn hover(workspace: &Workspace, catalog: &Catalog, name: &str, pos: Pos) -> Option<Hover> {
     let file = workspace.file(name)?;
     let cursor = file.file.cursor(pos)?;
     let scope = Scope::new(file, cursor.doc, catalog);
+
+    // A function of the expression language, where an expression can be.
+    if let Some(line) = file.file.lines.get(pos.line) {
+        let w = walk(scope.shape, &cursor.path);
+        let in_condition = cursor.place == Place::Value
+            && w.beyond.is_empty()
+            && w.field.map(|f| f.role) == Some(Role::Condition);
+        let in_interpolation = open_interpolation(line, pos.col).is_some()
+            || line[..pos.col.min(line.len())]
+                .rfind("${{")
+                .is_some_and(|open| line[open..].contains("}}"));
+        if in_condition || in_interpolation {
+            if let Some((word, span)) = function_at(line, pos.line, pos.col) {
+                if let Some(f) = meridian_expr::function(word) {
+                    return Some(Hover {
+                        span,
+                        markdown: f.markdown(),
+                    });
+                }
+            }
+        }
+    }
 
     if let Some((referent, span)) = referent(&scope, &cursor, pos) {
         let markdown = match referent {
@@ -1125,12 +1438,14 @@ pub fn hover(workspace: &Workspace, catalog: &Catalog, name: &str, pos: Pos) -> 
                     });
                 }
             }
-            if w.field.map(|f| f.role) == Some(Role::ResourceParams) && w.beyond.is_empty() {
+            if w.field.map(|f| f.role) == Some(Role::ResourceParams) {
                 let type_name = scope.resource_at(&cursor.path)?.text("type")?;
-                let param = scope.schema_of(type_name)?.find_param(&cursor.word)?;
+                let mut keys = param_keys(&w.beyond);
+                keys.push(cursor.word.as_str());
+                let param = scope.schema_of(type_name)?.at_path(&keys)??;
                 return Some(Hover {
                     span: cursor.span,
-                    markdown: param_markdown(scope.target_name, type_name, param),
+                    markdown: param_markdown(scope.target_name, type_name, &keys.join("."), param),
                 });
             }
             None

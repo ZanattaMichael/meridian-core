@@ -400,6 +400,18 @@ An output that reads a `variable` marked `sensitive: true` is itself written wit
 `sensitive = true`. OpenTofu refuses to plan an output that could reveal a secret unless
 the output says so, and Meridian masks a sensitive output wherever it is shown.
 
+## Editor schemas
+
+`meridian schema sync` asks OpenTofu for the providers' schemas, exactly as
+the [Terraform target](terraform.md#editor-schemas) does with `terraform`:
+the plugin writes a configuration requiring the providers the documents use
+into its work directory, runs `tofu init -backend=false` and reads `tofu
+providers schema -json`. The types the documents use are described in full,
+including `ephemeral.<type>` resources; the rest of each provider is listed
+by name; each provider's version is pinned from `.terraform.lock.hcl`. The
+cache records the tool as `opentofu`, so a project that uses both targets
+keeps one cache for each. See [Tool schemas](../tooling/schema-sync.md).
+
 ## What running does
 
 | Step | Command |
