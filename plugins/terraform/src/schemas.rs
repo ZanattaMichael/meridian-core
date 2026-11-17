@@ -78,6 +78,14 @@ impl TerraformSchemas {
 
 impl SchemaSource for TerraformSchemas {
     fn export(&self, request: &SchemaRequest, log: &dyn Log) -> Result<SchemaExport, RunError> {
+        // The work directory is the tool's working directory from the first
+        // call on, so it exists before anything is run.
+        fs::create_dir_all(&request.work_dir).map_err(|e| {
+            RunError::new(format!(
+                "could not create {}: {e}",
+                request.work_dir.display()
+            ))
+        })?;
         let version = self
             .tool(&request.work_dir)
             .arg("version")
@@ -87,12 +95,6 @@ impl SchemaSource for TerraformSchemas {
         let mut export = SchemaExport::new(&self.tool, &version);
 
         let providers = providers_in(&request.graphs);
-        fs::create_dir_all(&request.work_dir).map_err(|e| {
-            RunError::new(format!(
-                "could not create {}: {e}",
-                request.work_dir.display()
-            ))
-        })?;
         let probe = request.work_dir.join(PROBE_PATH);
         fs::write(&probe, probe_config(&providers))
             .map_err(|e| RunError::new(format!("could not write {}: {e}", probe.display())))?;
