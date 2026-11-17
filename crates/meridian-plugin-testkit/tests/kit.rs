@@ -70,6 +70,18 @@ fn recording(f: impl FnOnce()) {
     }
 }
 
+/// Runs `f` with `UPDATE_GOLDEN` unset, holding the same lock, so a
+/// comparison cannot run while another test is recording and be turned
+/// into a recording itself.
+fn comparing(f: impl FnOnce()) {
+    let _held = ENV.lock().unwrap_or_else(|e| e.into_inner());
+    assert!(
+        std::env::var_os("UPDATE_GOLDEN").is_none(),
+        "UPDATE_GOLDEN is set outside a recording; the kit's own tests need it unset"
+    );
+    f();
+}
+
 #[test]
 fn recording_a_case_again_removes_its_stale_golden_files_and_nothing_else() {
     let dir = scratch(TMP, "golden-update");
@@ -112,7 +124,7 @@ fn recording_a_case_again_removes_its_stale_golden_files_and_nothing_else() {
 
     // Comparing reads only the golden files, so the input beside them is
     // not an "extra file".
-    assert_golden(&dir, "web", &emitted(&[("playbook.yml", "two\n")]));
+    comparing(|| assert_golden(&dir, "web", &emitted(&[("playbook.yml", "two\n")])));
 }
 
 #[test]
@@ -120,11 +132,13 @@ fn recording_a_case_again_removes_its_stale_golden_files_and_nothing_else() {
 fn a_missing_golden_file_is_reported_by_name() {
     let dir = scratch(TMP, "golden-missing");
     recording(|| assert_golden(&dir, "web", &emitted(&[("playbook.yml", "one\n")])));
-    assert_golden(
-        &dir,
-        "web",
-        &emitted(&[("playbook.yml", "one\n"), ("inventory.ini", "hosts\n")]),
-    );
+    comparing(|| {
+        assert_golden(
+            &dir,
+            "web",
+            &emitted(&[("playbook.yml", "one\n"), ("inventory.ini", "hosts\n")]),
+        )
+    });
 }
 
 #[test]
@@ -142,7 +156,7 @@ fn a_refusal_is_recorded_as_one_file() {
         fs::read_to_string(dir.join("web.refused")).unwrap(),
         format!("{refusal}\n")
     );
-    assert_golden_refusal(&dir, "web", &refusal);
+    comparing(|| assert_golden_refusal(&dir, "web", &refusal));
 }
 
 #[test]
