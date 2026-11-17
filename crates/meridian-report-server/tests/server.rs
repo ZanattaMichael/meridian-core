@@ -477,3 +477,31 @@ fn the_server_does_not_start_without_a_real_write_token() {
     assert!(said.contains("shorter than 16 characters"), "{said}");
     assert!(!said.contains("hunter2"), "{said}");
 }
+
+/// The store reads only directories that resolve to a place inside its data
+/// directory. A link planted inside it that points outside is listed as a
+/// project but never followed: its runs are not read, and no event comes
+/// back for it.
+#[cfg(unix)]
+#[test]
+fn a_link_out_of_the_data_directory_is_never_followed() {
+    use meridian_report_server::store::Store;
+
+    let base = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("server")
+        .join("link-out");
+    let _ = fs::remove_dir_all(&base);
+    let outside = base.join("outside").join("runs");
+    let run = outside.join("2026-11-17T09-14-03Z-7f3a");
+    fs::create_dir_all(&run).unwrap();
+    fs::write(run.join("events.jsonl"), "{}\n").unwrap();
+    let data = base.join("data");
+    let projects = data.join("projects");
+    fs::create_dir_all(&projects).unwrap();
+    std::os::unix::fs::symlink(base.join("outside"), projects.join("planted")).unwrap();
+
+    let store = Store::new(&data, 10);
+    assert_eq!(store.projects(), vec!["planted".to_owned()]);
+    assert!(store.runs("planted").is_empty());
+    assert_eq!(store.events("planted", "2026-11-17T09-14-03Z-7f3a"), None);
+}

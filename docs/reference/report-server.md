@@ -139,3 +139,8 @@ One file per run, one event per line. There is no database and no index:
 back the directory up, move it, or read a run with
 `meridian report --from <data>/projects/shop/runs/<run>/events.jsonl`.
 Removing a run's directory removes the run.
+
+The server reads nothing outside the data directory. A project or run named
+in a request is only ever matched against what the directory lists, and a
+directory is read only when it resolves to a place inside the data
+directory, so a link planted in it that points elsewhere is not followed.

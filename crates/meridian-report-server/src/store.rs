@@ -75,6 +75,17 @@ impl Store {
         self.root.join("projects")
     }
 
+    /// `dir`, once it is known to be inside the data directory: both are
+    /// resolved on the file system (so a link or a `..` cannot stand in for
+    /// a place outside it) and the resolved directory must start with the
+    /// resolved root. Anything else, including a directory that does not
+    /// exist, is not read. Every read of the store passes through here.
+    fn inside(&self, dir: &Path) -> Option<PathBuf> {
+        let root = fs::canonicalize(&self.root).ok()?;
+        let dir = fs::canonicalize(dir).ok()?;
+        dir.starts_with(&root).then_some(dir)
+    }
+
     fn runs_dir(&self, project: &str) -> PathBuf {
         self.projects_dir().join(project).join("runs")
     }
@@ -174,7 +185,8 @@ impl Store {
     /// therefore always one the file system itself listed inside the data
     /// directory, whatever a request asked for: the check on names is not
     /// the only thing between a URL and the disk.
-    fn child(dir: &Path, name: &str) -> Option<PathBuf> {
+    fn child(&self, dir: &Path, name: &str) -> Option<PathBuf> {
+        let dir = self.inside(dir)?;
         for entry in fs::read_dir(dir).ok()?.filter_map(Result::ok) {
             // The name only chooses among what was listed. The path comes
             // from the listing.
@@ -191,7 +203,7 @@ impl Store {
         if !is_name(project) {
             return None;
         }
-        Self::child(&self.projects_dir(), project)
+        self.child(&self.projects_dir(), project)
     }
 
     /// The directory of a run that exists.
@@ -199,11 +211,13 @@ impl Store {
         if !time::is_run_id(run) {
             return None;
         }
-        Self::child(&self.found_project(project)?.join("runs"), run)
+        self.child(&self.found_project(project)?.join("runs"), run)
     }
 
-    fn names(dir: &Path, fits: fn(&str) -> bool) -> Vec<String> {
-        let mut names: Vec<String> = fs::read_dir(dir)
+    fn names(&self, dir: &Path, fits: fn(&str) -> bool) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .inside(dir)
+            .and_then(|dir| fs::read_dir(dir).ok())
             .into_iter()
             .flatten()
             .filter_map(Result::ok)
@@ -217,14 +231,14 @@ impl Store {
 
     /// Every project, by name.
     pub fn projects(&self) -> Vec<String> {
-        Self::names(&self.projects_dir(), is_name)
+        self.names(&self.projects_dir(), is_name)
     }
 
     /// A project's runs, oldest first. A run's id starts with when it
     /// started, so the order of the names is the order of the runs.
     pub fn runs(&self, project: &str) -> Vec<String> {
         match self.found_project(project) {
-            Some(dir) => Self::names(&dir.join("runs"), time::is_run_id),
+            Some(dir) => self.names(&dir.join("runs"), time::is_run_id),
             None => Vec::new(),
         }
     }
