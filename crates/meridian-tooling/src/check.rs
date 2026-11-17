@@ -84,6 +84,23 @@ pub struct Source {
     pub text: String,
 }
 
+impl Source {
+    /// A source from text as it was read. A byte order mark at the start,
+    /// which Windows tools often write, is not part of the document and is
+    /// dropped here, so that every tool sees the same text.
+    pub fn new(name: impl Into<String>, text: &str) -> Source {
+        Source {
+            name: name.into(),
+            text: strip_bom(text).to_owned(),
+        }
+    }
+}
+
+/// `text` without a leading byte order mark.
+pub fn strip_bom(text: &str) -> &str {
+    text.strip_prefix('\u{feff}').unwrap_or(text)
+}
+
 /// One document that parsed, and where it is.
 #[derive(Clone, Debug)]
 pub struct ParsedDoc {
@@ -108,6 +125,7 @@ pub struct Parsed {
 /// Whether text looks like it holds a Meridian document: some line gives an
 /// `apiVersion` in the `meridian/` group.
 pub fn is_meridian(text: &str) -> bool {
+    let text = strip_bom(text);
     let value_of = |line: &str, key: &str| -> Option<String> {
         let line = line.trim_start_matches(['{', ' ', '\t', '"', '\'']);
         line.strip_prefix(key).map(|rest| {

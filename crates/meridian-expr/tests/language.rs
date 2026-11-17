@@ -491,6 +491,55 @@ fn an_expression_nested_too_deep_is_refused_and_does_not_overflow() {
     assert!(Expr::parse(&deep).is_err());
     let deep = format!("{}1{}", "[".repeat(5000), "]".repeat(5000));
     assert!(Expr::parse(&deep).is_err());
+}
+
+#[test]
+fn a_long_chain_of_operators_is_refused_and_does_not_overflow() {
+    // A chain is not nested, but its tree is as deep as it is long.
+    for chain in [
+        format!("{}true", "true || ".repeat(10_000)),
+        format!("{}1", "1 + ".repeat(10_000)),
+        format!("{}1", "1 * ".repeat(10_000)),
+        format!("x{}", ".a".repeat(10_000)),
+        format!("x{}", "[0]".repeat(10_000)),
+        format!("{}1", "true ? 1 : ".repeat(10_000)),
+    ] {
+        let err = Expr::parse(&chain).expect_err("a long chain");
+        assert!(
+            err.contains("more than 1000 operators") || err.contains("nested more than"),
+            "{err}"
+        );
+    }
+    // The longest chain allowed is read and evaluated on a small stack
+    // (smaller than any thread's, in a debug build), so the chain itself
+    // costs no stack: an editor's worker thread survives it too.
+    let handle = std::thread::Builder::new()
+        .stack_size(512 << 10)
+        .spawn(|| {
+            let scope = Scope::new();
+            let chain = format!("{}1", "1 + ".repeat(1000));
+            let expr = Expr::parse(&chain).unwrap();
+            assert_eq!(expr.eval(&scope).unwrap(), Value::Int(1001));
+            let chain = format!("{}false", "true && ".repeat(999));
+            let expr = Expr::parse(&chain).unwrap();
+            assert_eq!(expr.eval(&scope).unwrap(), Value::Bool(false));
+            let chain = format!("{}'last'", "null ?? ".repeat(1000));
+            let expr = Expr::parse(&chain).unwrap();
+            assert_eq!(expr.eval(&scope).unwrap(), Value::String("last".to_owned()));
+            let path = format!("data{}", ".a".repeat(1000));
+            let expr = Expr::parse(&path).unwrap();
+            let err = expr.eval(&scope).unwrap_err();
+            assert!(err.contains("data"), "{err}");
+            let path = format!("data{}", "[0]".repeat(1000));
+            let expr = Expr::parse(&path).unwrap();
+            let err = expr.eval(&scope).unwrap_err();
+            assert!(err.contains("data"), "{err}");
+            let chain = format!("{}3", "1 + 2 * ".repeat(500));
+            let expr = Expr::parse(&chain).unwrap();
+            assert_eq!(expr.eval(&scope).unwrap(), Value::Int(1 + 499 * 2 + 2 * 3));
+        })
+        .unwrap();
+    handle.join().unwrap();
     // What a person writes is far inside the limit.
     let fine = format!("{}1{}", "(".repeat(12), ")".repeat(12));
     assert_eq!(eval(&fine), Ok(Value::Int(1)));

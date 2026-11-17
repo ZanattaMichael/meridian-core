@@ -339,17 +339,11 @@ impl Server<'_> {
             let mut sources: Vec<Source> = self
                 .open
                 .iter()
-                .map(|(name, text)| Source {
-                    name: name.clone(),
-                    text: text.clone(),
-                })
+                .map(|(name, text)| Source::new(name.clone(), text))
                 .collect();
             for (name, text) in &self.disk {
                 if !self.open.contains_key(name) {
-                    sources.push(Source {
-                        name: name.clone(),
-                        text: text.clone(),
-                    });
+                    sources.push(Source::new(name.clone(), text));
                 }
             }
             self.workspace = Workspace::new(&sources);

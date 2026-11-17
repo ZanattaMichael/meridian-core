@@ -24,7 +24,8 @@ Three things are true of every expression:
 
 - **It always ends.** There are no loops and no recursion. The two functions
   that take an expression, `map` and `filter`, run it once per item of a list.
-  Nesting is limited to 64 levels.
+  Nesting is limited to 64 levels, and one expression to 1,000 operators,
+  field reads and indexes.
 - **It is pure.** The same expression over the same values gives the same
   result. The only function that looks outside is `env`.
 - **It never guesses.** A name that is not set, two types that do not go
@@ -301,7 +302,7 @@ disk.
 | Function | Gives |
 |---|---|
 | `basename(path)` | the last part: `'nginx.conf'` |
-| `dirname(path)` | everything before it: `'/etc/nginx'` |
+| `dirname(path)` | everything before it: `'/etc/nginx'`; `'.'` when there is nothing before it, and `'/'` for the root itself |
 | `joinPath(a, b, ...)` | the parts joined with one `/` between each |
 
 ### Environment
@@ -339,6 +340,7 @@ Inside a document it is reported with the file, line and field.
 | Not a yes or a no | `data.count is a number, not true or false; compare it with == or !=` |
 | Division by zero | `data.count is divided by zero` |
 | Too deep | `the condition is nested more than 64 levels deep` |
+| Too long | `the condition has more than 1000 operators` |
 
 The first five are found by `meridian validate`, with no data. The rest need
 the values, so `compile`, `plan` and `apply` find them.

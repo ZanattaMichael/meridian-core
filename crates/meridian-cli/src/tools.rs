@@ -152,8 +152,7 @@ pub fn format(args: &FmtArgs) -> Result<(), Failure> {
                 ))
             };
         }
-        // A reader that stops early, such as `head`, is not an error.
-        let _ = std::io::stdout().write_all(formatted.as_bytes());
+        let _ = crate::Stdout.write_all(formatted.as_bytes());
         return Ok(());
     }
 
@@ -174,11 +173,11 @@ pub fn format(args: &FmtArgs) -> Result<(), Failure> {
             Ok(formatted) => {
                 changed += 1;
                 if args.check {
-                    println!("{name}");
+                    outln!("{name}");
                 } else {
                     std::fs::write(path, formatted)
                         .map_err(|e| Failure::Message(format!("writing {name}: {e}")))?;
-                    println!("formatted {name}");
+                    outln!("formatted {name}");
                 }
             }
             Err(e) => {
@@ -196,10 +195,10 @@ pub fn format(args: &FmtArgs) -> Result<(), Failure> {
                 count(changed, "file")
             );
         } else if failed == 0 {
-            println!("{} formatted", count(checked, "file"));
+            outln!("{} formatted", count(checked, "file"));
         }
     } else if failed == 0 {
-        println!(
+        outln!(
             "{} formatted, {} already formatted",
             count(changed, "file"),
             unchanged
@@ -215,10 +214,7 @@ pub fn format(args: &FmtArgs) -> Result<(), Failure> {
 fn workspace(files: &[(PathBuf, String)]) -> Workspace {
     let sources: Vec<Source> = files
         .iter()
-        .map(|(path, text)| Source {
-            name: path.to_string_lossy().into_owned(),
-            text: text.clone(),
-        })
+        .map(|(path, text)| Source::new(path.to_string_lossy(), text))
         .collect();
     Workspace::new(&sources)
 }
@@ -284,7 +280,7 @@ pub fn lint(args: &LintArgs) -> Result<(), Failure> {
         eprintln!("warning: {e}");
     }
 
-    let mut out = std::io::stdout().lock();
+    let mut out = crate::Stdout;
     for d in &found {
         let _ = if args.json {
             writeln!(out, "{}", to_json(d))
@@ -363,7 +359,7 @@ pub fn schema(args: &SchemaArgs) -> Result<(), Failure> {
         Some(path) => std::fs::write(path, text)
             .map_err(|e| Failure::Message(format!("writing {}: {e}", path.display()))),
         None => {
-            let _ = std::io::stdout().write_all(text.as_bytes());
+            let _ = crate::Stdout.write_all(text.as_bytes());
             Ok(())
         }
     }

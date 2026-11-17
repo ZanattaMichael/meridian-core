@@ -115,8 +115,8 @@ fn a_failed_apply_is_shown_by_status_and_finished_by_resume() {
     let first = last_run(&dir);
     assert!(
         stderr(&failed).contains(&format!(
-            "run {first} failed. Once the cause is fixed, `meridian apply --resume` with the \
-             same documents continues from the stage that failed"
+            "run {first} failed. Once the cause is fixed, `meridian apply --resume site.yaml` \
+             continues from the stage that failed"
         )),
         "{}",
         stderr(&failed)
@@ -144,9 +144,10 @@ fn a_failed_apply_is_shown_by_status_and_finished_by_resume() {
     // What the tool said is on the terminal of the run, not in the record.
     assert!(!text.contains("disk on fire"), "{text}");
 
-    // Fix the document that failed, and continue.
+    // Fix the document that failed, and continue, by pasting the hint: the
+    // file after `--resume` is a file, not the run to resume.
     write(&dir, "welcome");
-    let resumed = meridian(&dir, &["apply", "site.yaml", "--resume"]);
+    let resumed = meridian(&dir, &["apply", "--resume", "site.yaml"]);
     assert!(resumed.status.success(), "{}", stderr(&resumed));
     assert_eq!(
         stdout(&resumed),
@@ -190,7 +191,7 @@ fn a_failed_apply_is_shown_by_status_and_finished_by_resume() {
     assert_eq!(stdout(&again), "");
 
     // A run can also be named.
-    let named = meridian(&dir, &["apply", "site.yaml", "--resume", "nonsense"]);
+    let named = meridian(&dir, &["apply", "site.yaml", "--resume=nonsense"]);
     assert_eq!(
         stderr(&named),
         "error: there is no run nonsense in this state\n"
@@ -342,7 +343,7 @@ fn a_run_killed_mid_way_shows_as_interrupted_and_can_be_resumed() {
     );
 
     write(&dir, "welcome");
-    let resumed = meridian(&dir, &["apply", "site.yaml", "--resume", &run]);
+    let resumed = meridian(&dir, &["apply", "site.yaml", &format!("--resume={run}")]);
     assert!(resumed.status.success(), "{}", stderr(&resumed));
     assert!(
         stdout(&resumed).contains(&format!("already applied by run {run}")),
