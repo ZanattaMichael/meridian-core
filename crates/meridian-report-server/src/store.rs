@@ -163,8 +163,40 @@ impl Store {
     fn prune(&self, project: &str) {
         let runs = self.runs(project);
         for old in runs.iter().take(runs.len().saturating_sub(self.keep)) {
-            let _ = fs::remove_dir_all(self.runs_dir(project).join(old));
+            if let Some(dir) = self.found_run(project, old) {
+                let _ = fs::remove_dir_all(dir);
+            }
         }
+    }
+
+    /// The directory inside `dir` that is named `name`, found by reading
+    /// `dir` and never by joining `name` onto it. A path the store reads is
+    /// therefore always one the file system itself listed inside the data
+    /// directory, whatever a request asked for: the check on names is not
+    /// the only thing between a URL and the disk.
+    fn child(dir: &Path, name: &str) -> Option<PathBuf> {
+        fs::read_dir(dir)
+            .ok()?
+            .filter_map(Result::ok)
+            .find(|entry| entry.file_name().to_str() == Some(name))
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+    }
+
+    /// The directory of a project that exists.
+    fn found_project(&self, project: &str) -> Option<PathBuf> {
+        if !is_name(project) {
+            return None;
+        }
+        Self::child(&self.projects_dir(), project)
+    }
+
+    /// The directory of a run that exists.
+    fn found_run(&self, project: &str, run: &str) -> Option<PathBuf> {
+        if !time::is_run_id(run) {
+            return None;
+        }
+        Self::child(&self.found_project(project)?.join("runs"), run)
     }
 
     fn names(dir: &Path, fits: fn(&str) -> bool) -> Vec<String> {
@@ -188,19 +220,16 @@ impl Store {
     /// A project's runs, oldest first. A run's id starts with when it
     /// started, so the order of the names is the order of the runs.
     pub fn runs(&self, project: &str) -> Vec<String> {
-        if !is_name(project) {
-            return Vec::new();
+        match self.found_project(project) {
+            Some(dir) => Self::names(&dir.join("runs"), time::is_run_id),
+            None => Vec::new(),
         }
-        Self::names(&self.runs_dir(project), time::is_run_id)
     }
 
     /// A run's events, in the order of their sequence numbers; `None` when
     /// there is no such run.
     pub fn events(&self, project: &str, run: &str) -> Option<Vec<Event>> {
-        if !is_name(project) || !time::is_run_id(run) {
-            return None;
-        }
-        let text = fs::read_to_string(self.events_file(project, run)).ok()?;
+        let text = fs::read_to_string(self.found_run(project, run)?.join("events.jsonl")).ok()?;
         let mut events = event::from_jsonl(&text);
         // Batches can arrive out of order when a sender retries.
         events.sort_by_key(|event| event.seq);
