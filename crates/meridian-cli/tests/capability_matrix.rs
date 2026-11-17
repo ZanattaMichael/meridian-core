@@ -5,7 +5,7 @@
 use std::fs;
 
 use meridian_plugin_testkit::repo_root;
-use meridian_sdk::{Emitter, Importer, Runner};
+use meridian_sdk::{Emitter, Importer, Runner, SchemaSource};
 
 const PATH: &str = "docs/reference/capability-matrix.md";
 
@@ -34,10 +34,18 @@ compiled, with the reason. Each target's own page says how it does what it can.
 - **import** is what `meridian import` can read of the tool's existing
   configuration and turn into a document for the target. See
   [Importing existing configuration](../operations/importing.md).
+- **schemas** says the plugin exports its tool's own resource schemas, so
+  `meridian schema sync` can cache them for the editor tools. See
+  [Tool schemas](../tooling/schema-sync.md).
 
 ";
 
-fn row(emitter: &dyn Emitter, runner: &dyn Runner, importer: Option<&dyn Importer>) -> String {
+fn row(
+    emitter: &dyn Emitter,
+    runner: &dyn Runner,
+    importer: Option<&dyn Importer>,
+    schemas: Option<&dyn SchemaSource>,
+) -> String {
     let capabilities = emitter.capabilities();
     let notifies = match (capabilities.native_notify, capabilities.synthetic_notify) {
         (true, true) => "native and synthetic",
@@ -62,7 +70,8 @@ fn row(emitter: &dyn Emitter, runner: &dyn Runner, importer: Option<&dyn Importe
         None => "no".to_owned(),
     };
     format!(
-        "| [{name}](../targets/{name}.md) | {category} | {types} | {notifies} | {runtime} | {plan} | {apply} | {outputs} | {inputs} | {import} |\n",
+        "| [{name}](../targets/{name}.md) | {category} | {types} | {notifies} | {runtime} | {plan} | {apply} | {outputs} | {inputs} | {import} | {schemas} |\n",
+        schemas = yes(schemas.is_some()),
         name = emitter.name(),
         category = emitter.category(),
         types = types.join(", "),
@@ -80,96 +89,119 @@ fn matrix() -> String {
             &meridian_target_ansible::Ansible,
             &meridian_target_ansible::AnsibleRunner::from_env(),
             Some(&meridian_target_ansible::AnsibleImporter),
+            None,
         ),
         row(
             &meridian_target_arm::Arm,
             &meridian_target_arm::ArmRunner::from_env(),
+            None,
             None,
         ),
         row(
             &meridian_target_bicep::Bicep,
             &meridian_target_bicep::BicepRunner::from_env(),
             None,
+            None,
         ),
         row(
             &meridian_target_chef::Chef,
             &meridian_target_chef::ChefRunner::from_env(),
+            None,
             None,
         ),
         row(
             &meridian_target_cloud_init::CloudInit,
             &meridian_target_cloud_init::CloudInitRunner::from_env(),
             None,
+            None,
         ),
         row(
             &meridian_target_cloudformation::CloudFormation,
             &meridian_target_cloudformation::CloudFormationRunner::from_env(),
+            None,
             None,
         ),
         row(
             &meridian_target_docker::Docker,
             &meridian_target_docker::DockerRunner::from_env(),
             Some(&meridian_target_docker::DockerImporter),
+            None,
         ),
         row(
             &meridian_target_dsc::Dsc,
             &meridian_target_dsc::DscRunner::from_env(),
             Some(&meridian_target_dsc::DscImporter),
+            Some(&meridian_target_dsc::DscSchemas::from_env()),
         ),
         row(
             &meridian_target_helm::Helm,
             &meridian_target_helm::HelmRunner::from_env(),
+            None,
             None,
         ),
         row(
             &meridian_target_kubernetes::Kubernetes,
             &meridian_target_kubernetes::KubernetesRunner::from_env(),
             Some(&meridian_target_kubernetes::KubernetesImporter),
+            Some(&meridian_target_kubernetes::KubernetesSchemas::from_env()),
         ),
         row(
             &meridian_target_opentofu::OpenTofu,
             &meridian_target_opentofu::OpenTofuRunner::from_env(),
             Some(&meridian_target_opentofu::OpenTofuImporter),
+            Some(&meridian_target_terraform::TerraformSchemas::new(
+                "tofu", "opentofu",
+            )),
         ),
         row(
             &meridian_target_packer::Packer,
             &meridian_target_packer::PackerRunner::from_env(),
+            None,
             None,
         ),
         row(
             &meridian_target_podman::Podman,
             &meridian_target_podman::PodmanRunner::from_env(),
             None,
+            None,
         ),
         row(
             &meridian_target_pulumi::Pulumi,
             &meridian_target_pulumi::PulumiRunner::from_env(),
             None,
+            Some(&meridian_target_pulumi::PulumiSchemas::from_env()),
         ),
         row(
             &meridian_target_openvox::OpenVox,
             &meridian_target_openvox::OpenVoxRunner::from_env(),
+            None,
             None,
         ),
         row(
             &meridian_target_puppet::Puppet,
             &meridian_target_puppet::PuppetRunner::from_env(),
             None,
+            None,
         ),
         row(
             &meridian_target_salt::Salt,
             &meridian_target_salt::SaltRunner::from_env(),
+            None,
             None,
         ),
         row(
             &meridian_target_terraform::Terraform,
             &meridian_target_terraform::TerraformRunner::from_env(),
             Some(&meridian_target_terraform::TerraformImporter),
+            Some(&meridian_target_terraform::TerraformSchemas::new(
+                "terraform",
+                "terraform",
+            )),
         ),
     ];
     rows.sort();
     format!(
-        "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | apply | outputs | inputs | import |\n|---|---|---|---|---|---|---|---|---|---|\n{}",
+        "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | apply | outputs | inputs | import | schemas |\n|---|---|---|---|---|---|---|---|---|---|---|\n{}",
         rows.concat()
     )
 }

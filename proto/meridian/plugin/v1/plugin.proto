@@ -16,6 +16,12 @@
 // thing. A plugin that serves it lists the formats it reads in Describe. It
 // was added without changing the protocol version, because a plugin built
 // before it existed lists no formats and is simply never asked.
+//
+// SchemaSource is a fourth, optional service: it asks the installed tool for
+// the schemas of the resource types a document uses, so that editors can
+// complete and check a tool's own types ahead of a compile. A plugin that
+// serves it says so in Describe; one built before it existed does not, and
+// is never asked.
 syntax = "proto3";
 
 package meridian.plugin.v1;
@@ -212,6 +218,11 @@ message DescribeResponse {
   // field existed reports none, and an editor then knows only the names in
   // resource_types, so the protocol version did not change.
   repeated ResourceSchema resource_schemas = 20;
+  // exports_schemas says the plugin serves SchemaSource: it can ask its
+  // installed tool for the schemas of the tool's own resource types. A
+  // plugin built before this field existed reports false, so the protocol
+  // version did not change.
+  bool exports_schemas = 21;
 }
 
 // ParamSchema is one param of a resource type.
@@ -224,6 +235,20 @@ message ParamSchema {
   bool required = 4;
   // values lists what the param accepts when that is a fixed set.
   repeated string values = 5;
+  // params describes what a param of kind "mapping" or "list" holds, when
+  // that is known: the keys of the mapping, or of each item of the list.
+  // Empty means any content.
+  repeated ParamSchema params = 6;
+  // open says a mapping accepts keys beyond the listed ones. Meaningless
+  // for a param that lists none.
+  bool open = 7;
+  // computed says the tool sets the value: a document never writes it, but
+  // a reference such as `${id.name}` may read it.
+  bool computed = 8;
+  // deprecated says the tool still takes the param but warns about it.
+  bool deprecated = 9;
+  // sensitive says the tool treats the value as a secret.
+  bool sensitive = 10;
 }
 
 // ResourceSchema is one resource type as a target takes it.
@@ -239,6 +264,53 @@ message ResourceSchema {
   bool open = 6;
   // actions lists the notify actions the type can perform.
   repeated string actions = 7;
+  // source says where the schema came from, when it was read from a tool:
+  // "registry.terraform.io/hashicorp/aws 5.60.0", "kubernetes v1.31.0".
+  // Empty for a schema the plugin itself declares.
+  string source = 8;
+}
+
+message ExportSchemasRequest {
+  // work_dir is a directory the host created for this target and keeps
+  // between syncs. The plugin may initialise the tool there and keep what it
+  // downloaded (providers, say) in it. The host never reads it.
+  string work_dir = 1;
+  // graphs are the documents that use this target, compiled to trees, so the
+  // plugin can read from them which types, providers and versions the
+  // project uses. Every compile-time `when` has already been decided.
+  repeated ResourceGraph graphs = 2;
+  // types lists the resource types the documents use, deduplicated and
+  // sorted, for a plugin that does not need the whole trees.
+  repeated string types = 3;
+}
+
+message ExportSchemasResponse {
+  // schemas is one entry per resource type the tool described, with the
+  // exact type name as a document writes it (never a pattern). A type the
+  // tool could not describe is simply left out.
+  repeated ResourceSchema schemas = 1;
+  // tool and tool_version say what produced the schemas: "terraform",
+  // "1.13.1".
+  string tool = 2;
+  string tool_version = 3;
+  // pins are the exact versions of the parts the schemas were read from,
+  // keyed by the tool's own name for each: a provider, a package, an API
+  // server. The host records them so a cache can be told apart from one
+  // read from other versions.
+  map<string, string> pins = 4;
+  // notes are things the plugin wants the operator to know: a type that
+  // could not be described, a provider that was skipped.
+  repeated string notes = 5;
+  // error is set when the tool could not export anything. When it is set,
+  // the other fields are meaningless.
+  RunError error = 6;
+}
+
+// SchemaSource asks the installed tool for the schemas of its own resource
+// types. It may run the tool and the network (to fetch providers, say), but
+// it changes nothing outside work_dir.
+service SchemaSource {
+  rpc ExportSchemas(ExportSchemasRequest) returns (ExportSchemasResponse);
 }
 
 message EmitRequest {

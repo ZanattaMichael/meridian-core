@@ -17,6 +17,7 @@ import {
   initializationOptions,
   serverCommand,
   startFailure,
+  syncCommand,
 } from "./settings";
 
 let client: LanguageClient | undefined;
@@ -30,7 +31,21 @@ function settings(): Settings {
     pluginDirs: config.get<string[]>("pluginDirs", []),
     lintEnabled: config.get<boolean>("lint.enabled", true),
     sortFields: config.get<boolean>("format.sortFields", true),
+    stateDir: config.get<string>("stateDir", ".meridian"),
   };
+}
+
+/**
+ * Runs `meridian schema sync` in a terminal, where its output and any
+ * prompt from the tools can be seen. The server never runs a tool itself;
+ * it reads the cache the sync writes, and picks it up on the next save or
+ * on "Reload Target Plugins".
+ */
+function syncSchemas(): void {
+  const folder = workspaceFolder();
+  const terminal = vscode.window.createTerminal({ name: "Meridian", cwd: folder });
+  terminal.show();
+  terminal.sendText(syncCommand(settings(), folder, os.homedir()));
 }
 
 function workspaceFolder(): string | undefined {
@@ -120,6 +135,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     status,
     vscode.commands.registerCommand("meridian.restartServer", restart),
     vscode.commands.registerCommand("meridian.showOutput", () => output?.show()),
+    vscode.commands.registerCommand("meridian.syncSchemas", syncSchemas),
     // `meridian.reloadPlugins` is the server's own command; the client
     // registers it once the server has said it handles it.
     vscode.workspace.onDidChangeConfiguration(async (event) => {
@@ -128,7 +144,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         event.affectsConfiguration("meridian.path") ||
         event.affectsConfiguration("meridian.pluginDirs") ||
         event.affectsConfiguration("meridian.lint") ||
-        event.affectsConfiguration("meridian.format")
+        event.affectsConfiguration("meridian.format") ||
+        event.affectsConfiguration("meridian.stateDir")
       ) {
         await restart();
       }

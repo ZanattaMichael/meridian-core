@@ -4,6 +4,7 @@ fn main() -> Result<(), meridian_sdk::ServeError> {
     meridian_sdk::serve(
         meridian_sdk::Plugin::new(meridian_target_kubernetes::Kubernetes)
             .with_runner(meridian_target_kubernetes::KubernetesRunner::from_env())
-            .with_importer(meridian_target_kubernetes::KubernetesImporter),
+            .with_importer(meridian_target_kubernetes::KubernetesImporter)
+            .with_schema_source(meridian_target_kubernetes::KubernetesSchemas::from_env()),
     )
 }

@@ -43,6 +43,12 @@ struct Editor {
 
 impl Editor {
     fn start() -> Editor {
+        Editor::start_in(None)
+    }
+
+    /// Starts the server with a workspace folder, so it reads the tool
+    /// schemas cached under it.
+    fn start_in(root: Option<&std::path::Path>) -> Editor {
         let (server, client) = Connection::memory();
         let handle = std::thread::spawn(move || {
             let mut registry = Registry::new();
@@ -59,7 +65,12 @@ impl Editor {
             server: Some(handle),
             next: 0,
         };
-        let reply = editor.request("initialize", json!({ "capabilities": {} }));
+        let mut params = json!({ "capabilities": {} });
+        if let Some(root) = root {
+            let uri = lsp_types::Url::from_directory_path(root).unwrap();
+            params["workspaceFolders"] = json!([{ "uri": uri, "name": "project" }]);
+        }
+        let reply = editor.request("initialize", params);
         assert_eq!(reply["serverInfo"]["name"], "meridian");
         assert_eq!(reply["capabilities"]["hoverProvider"], true);
         editor.notify("initialized", json!({}));
@@ -285,5 +296,84 @@ fn yaml_that_is_not_meridian_is_left_alone() {
         editor.request("textDocument/formatting", format),
         Value::Null
     );
+    editor.stop();
+}
+
+/// A Terraform document that uses a type the plugin knows only by shape.
+const TERRAFORM_DOC: &str = "\
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: web
+spec:
+  target: terraform
+  resources:
+    - id: web
+      type: aws_instance
+      params:
+        ami: ami-123
+        colour: blue
+";
+
+#[test]
+fn cached_tool_schemas_are_read_from_the_workspace() {
+    use meridian_sdk::{ParamKind, ParamSchema, ResourceSchema, SchemaExport};
+    use meridian_tooling::schemas::{Cached, Store};
+
+    let root = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("protocol-schemas");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let mut export = SchemaExport::new("terraform", "1.13.1");
+    export.pin("hashicorp/aws", "5.60.0");
+    export.schemas.push(
+        ResourceSchema::closed("aws_instance", "Provides an EC2 instance resource.")
+            .param(ParamSchema::new("ami", ParamKind::String, "AMI to use.").required())
+            .param(
+                ParamSchema::new("instance_type", ParamKind::String, "Instance type.").required(),
+            )
+            .param(ParamSchema::new("arn", ParamKind::String, "The ARN.").computed()),
+    );
+    Store::new(&root.join(".meridian"))
+        .save(&Cached::from_export("terraform", export))
+        .unwrap();
+
+    let mut editor = Editor::start_in(Some(&root));
+
+    // A param the provider's schema does not list, and a required one it
+    // does that is missing, are reported without any tool being run.
+    let published = editor.open(TERRAFORM_DOC);
+    let found = published["diagnostics"].as_array().unwrap().clone();
+    let codes: Vec<&str> = found.iter().map(|d| d["code"].as_str().unwrap()).collect();
+    assert!(codes.contains(&"unsupported-param"), "{found:#?}");
+    assert!(codes.contains(&"missing-param"), "{found:#?}");
+
+    // Completion under params offers what the schema lists and is not set,
+    // leaving out what the tool sets.
+    editor.change(&TERRAFORM_DOC.replace("        colour: blue\n", "        \n"));
+    assert_eq!(
+        editor.diagnostics()["diagnostics"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let items = editor.request("textDocument/completion", Editor::at(11, 8));
+    let labels: Vec<&str> = items
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["label"].as_str().unwrap())
+        .collect();
+    assert_eq!(labels, ["instance_type"]);
+
+    // Hover on the type says where its description came from.
+    let hover = editor.request("textDocument/hover", Editor::at(8, 14));
+    let text = hover["contents"]["value"].as_str().unwrap();
+    assert!(
+        text.contains("Provides an EC2 instance resource."),
+        "{text}"
+    );
+    assert!(text.contains("hashicorp/aws 5.60.0"), "{text}");
+
     editor.stop();
 }

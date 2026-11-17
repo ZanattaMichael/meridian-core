@@ -18,6 +18,7 @@ use meridian_plugin_host::{Registry, StartOptions};
 use meridian_tooling::analysis::{self, CompletionKind, SymbolKind};
 use meridian_tooling::catalog::Catalog;
 use meridian_tooling::check::{self, Diagnostic, Env, Severity, Source, Workspace};
+use meridian_tooling::schemas::{self, Store};
 use meridian_tooling::syntax::{Pos, Span};
 use meridian_tooling::{fmt, lint};
 
@@ -44,7 +45,14 @@ struct Options {
     lint: Option<bool>,
     /// Whether `fmt` writes fields in the language's order.
     sort_fields: Option<bool>,
+    /// Meridian's state directory, where `meridian schema sync` keeps the
+    /// tool schemas it cached. Relative to each workspace folder; the
+    /// default is `.meridian`.
+    state_dir: Option<PathBuf>,
 }
+
+/// The state directory when the client names none.
+const DEFAULT_STATE_DIR: &str = ".meridian";
 
 /// Loads every plugin found in `dirs`. A directory that cannot be read is
 /// reported and skipped: an editor is still useful with fewer targets.
@@ -132,12 +140,17 @@ pub fn serve(connection: &Connection, plugins: Plugins) -> Result<(), Error> {
         published: BTreeSet::new(),
         lint: options.lint.unwrap_or(true),
         sort_fields: options.sort_fields.unwrap_or(true),
+        state_dir: options
+            .state_dir
+            .unwrap_or_else(|| PathBuf::from(DEFAULT_STATE_DIR)),
+        cache_stamp: Vec::new(),
         workspace: Workspace::default(),
         stale: true,
     };
     for problem in problems {
         server.show(lsp::MessageType::WARNING, &problem);
     }
+    server.read_schemas(true);
     if server.catalog.is_empty() {
         server.show(
             lsp::MessageType::INFO,
@@ -212,6 +225,11 @@ struct Server<'a> {
     published: BTreeSet<String>,
     lint: bool,
     sort_fields: bool,
+    /// Where the cached tool schemas are, relative to each root.
+    state_dir: PathBuf,
+    /// The cache files and when they last changed, so the cache is read
+    /// again only when a sync wrote it.
+    cache_stamp: Vec<(PathBuf, Option<std::time::SystemTime>)>,
     workspace: Workspace,
     /// Whether `workspace` is behind the text.
     stale: bool,
@@ -280,6 +298,96 @@ impl Server<'_> {
             .send(Message::Response(Response::new_ok(id, result)));
     }
 
+    /// The cache stores: one per workspace folder, or the one directory
+    /// when the client gave an absolute path.
+    fn stores(&self) -> Vec<(PathBuf, Store)> {
+        if self.state_dir.is_absolute() {
+            let root = self.roots.first().cloned().unwrap_or_default();
+            return vec![(root, Store::new(&self.state_dir))];
+        }
+        self.roots
+            .iter()
+            .map(|root| (root.clone(), Store::new(&root.join(&self.state_dir))))
+            .collect()
+    }
+
+    /// The cache files as they stand on disk.
+    fn stamp(&self) -> Vec<(PathBuf, Option<std::time::SystemTime>)> {
+        let mut out = Vec::new();
+        for (root, store) in self.stores() {
+            let mut files: Vec<PathBuf> = std::fs::read_dir(store.dir())
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+                .collect();
+            files.push(root.join(meridian_module::LOCK_FILE));
+            files.sort();
+            for file in files {
+                let modified = std::fs::metadata(&file).and_then(|m| m.modified()).ok();
+                out.push((file, modified));
+            }
+        }
+        out
+    }
+
+    /// Reads the tool schemas `meridian schema sync` cached into the
+    /// catalog, when they changed since last time or `force` says so, and
+    /// says once what cannot be read or is missing.
+    fn read_schemas(&mut self, force: bool) {
+        let stamp = self.stamp();
+        if !force && stamp == self.cache_stamp {
+            return;
+        }
+        self.cache_stamp = stamp;
+        let mut catalog = Catalog::from_registry(&self.registry);
+        let mut messages = Vec::new();
+        for (root, store) in self.stores() {
+            let lock = schemas::lock_in(&root);
+            for problem in catalog.read_cache(&store, lock.as_ref()) {
+                messages.push((lsp::MessageType::WARNING, problem));
+            }
+            if let Some(lock) = &lock {
+                let missing = catalog.missing_caches(lock);
+                if !missing.is_empty() {
+                    messages.push((
+                        lsp::MessageType::INFO,
+                        format!(
+                            "Meridian: tool schemas for {} are recorded in {} but not cached \
+                             here, so their types are known by name only. Run `meridian schema \
+                             sync` in {}.",
+                            missing.join(", "),
+                            meridian_module::LOCK_FILE,
+                            root.display()
+                        ),
+                    ));
+                }
+            }
+        }
+        for target in catalog.targets() {
+            if let Some(cache) = &target.cache {
+                if cache.freshness != schemas::Freshness::Current
+                    && cache.freshness != schemas::Freshness::Unrecorded
+                {
+                    messages.push((
+                        lsp::MessageType::INFO,
+                        format!(
+                            "Meridian: the cached tool schemas for {} are {}.",
+                            target.name,
+                            cache.freshness.describe()
+                        ),
+                    ));
+                }
+            }
+        }
+        self.catalog = catalog;
+        self.stale = true;
+        for (kind, message) in messages {
+            self.show(kind, &message);
+        }
+    }
+
     /// Finds the Meridian documents in the workspace folders, so a
     /// reference to a document in a file that is not open still resolves.
     fn scan(&mut self) {
@@ -331,6 +439,7 @@ impl Server<'_> {
         }
         self.disk = found;
         self.stale = true;
+        self.read_schemas(false);
     }
 
     /// The workspace as it stands: open files as typed, the rest from disk.
@@ -516,6 +625,10 @@ impl Server<'_> {
                 if let Ok(options) = serde_json::from_value::<Options>(settings) {
                     self.lint = options.lint.unwrap_or(self.lint);
                     self.sort_fields = options.sort_fields.unwrap_or(self.sort_fields);
+                    if let Some(dir) = options.state_dir {
+                        self.state_dir = dir;
+                        self.read_schemas(true);
+                    }
                 }
             }
             _ => return false,
@@ -684,14 +797,18 @@ impl Server<'_> {
             }
             lsp::request::ExecuteCommand::METHOD => {
                 let p = params!(lsp::request::ExecuteCommand);
+                if p.command == RELOAD_PLUGINS && self.plugin_dirs.is_empty() {
+                    // Compiled-in plugins stay; the cache may have changed.
+                    self.read_schemas(true);
+                }
                 if p.command == RELOAD_PLUGINS && !self.plugin_dirs.is_empty() {
                     let (registry, problems) = load_plugins(&self.plugin_dirs);
                     let old = std::mem::replace(&mut self.registry, registry);
                     let _ = old.close();
-                    self.catalog = Catalog::from_registry(&self.registry);
                     for problem in problems {
                         self.show(lsp::MessageType::WARNING, &problem);
                     }
+                    self.read_schemas(true);
                     self.show(
                         lsp::MessageType::INFO,
                         &format!(
@@ -733,6 +850,7 @@ impl Server<'_> {
                 CompletionKind::Reference => lsp::CompletionItemKind::REFERENCE,
                 CompletionKind::Type => lsp::CompletionItemKind::CLASS,
                 CompletionKind::Snippet => lsp::CompletionItemKind::SNIPPET,
+                CompletionKind::Function => lsp::CompletionItemKind::FUNCTION,
             }),
             detail: (!c.detail.is_empty()).then_some(c.detail),
             documentation: (!c.doc.is_empty()).then_some(lsp::Documentation::MarkupContent(

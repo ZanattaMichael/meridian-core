@@ -7,10 +7,11 @@ use std::time::{Duration, Instant};
 use meridian_sdk::pb::emitter_client::EmitterClient;
 use meridian_sdk::pb::importer_client::ImporterClient;
 use meridian_sdk::pb::runner_client::RunnerClient;
+use meridian_sdk::pb::schema_source_client::SchemaSourceClient;
 use meridian_sdk::pb::{self, DescribeRequest};
 use meridian_sdk::{
     version, wire, Applied, Artifact, Data, Emitted, ImportSource, Imported, LogLine, Output, Plan,
-    ResourceGraph, RunContext, HANDSHAKE_MAGIC, VERSION,
+    ResourceGraph, RunContext, SchemaExport, SchemaRequest, HANDSHAKE_MAGIC, VERSION,
 };
 use tokio::runtime::Runtime;
 use tonic::transport::{Channel, Endpoint};
@@ -195,6 +196,7 @@ impl Client {
             operations: wire::operations_from_wire(reply.operations),
             accepts_inputs: reply.accepts_inputs,
             import_formats: wire::import_formats_from_wire(reply.import_formats),
+            exports_schemas: reply.exports_schemas,
             path: path.to_owned(),
             signature,
         };
@@ -316,6 +318,52 @@ impl Client {
             }
         }
         Ok(imported)
+    }
+
+    /// Asks the plugin's tool for the schemas of the types in `request`. A
+    /// plugin that did not say it exports schemas is never asked.
+    pub fn export_schemas(&self, request: &SchemaRequest) -> Result<SchemaExport, RunFailure> {
+        let fault = |msg: String, cause: String, stderr: String| {
+            RunFailure::Plugin(Error {
+                plugin: self.info.name.clone(),
+                path: self.info.path.clone(),
+                msg,
+                cause,
+                stderr,
+            })
+        };
+        if !self.info.exports_schemas {
+            return Err(fault(
+                "this target does not export schemas".to_owned(),
+                String::new(),
+                String::new(),
+            ));
+        }
+        let Some(channel) = &self.channel else {
+            return Err(fault(
+                "the plugin has been shut down".to_owned(),
+                String::new(),
+                String::new(),
+            ));
+        };
+        let mut source = SchemaSourceClient::new(channel.clone());
+        let request = wire::export_schemas_request(request);
+        let reply = match self.runtime.block_on(source.export_schemas(request)) {
+            Ok(reply) => reply.into_inner(),
+            Err(e) => {
+                let stderr = self
+                    .process
+                    .as_ref()
+                    .map(|p| p.stderr_after(Duration::from_secs(1)))
+                    .unwrap_or_default();
+                return Err(fault(
+                    "the plugin failed while exporting schemas".to_owned(),
+                    status(&e),
+                    stderr,
+                ));
+            }
+        };
+        wire::export_schemas_response_from_wire(reply).map_err(RunFailure::Tool)
     }
 
     /// Previews what applying an artifact would change. `log` receives the

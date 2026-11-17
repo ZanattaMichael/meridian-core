@@ -250,7 +250,8 @@ enum Command {
     Fmt(tools::FmtArgs),
     /// Report errors, and things that compile but are probably mistakes
     Lint(tools::LintArgs),
-    /// Print a JSON Schema of the document language, for YAML editors
+    /// Print a JSON Schema of the document language, for YAML editors; or
+    /// sync, show and clean the cache of each tool's own resource schemas
     Schema(tools::SchemaArgs),
     /// Run the language server, for editors, on standard input and output
     Lsp(tools::LspArgs),
@@ -1416,6 +1417,9 @@ fn list_plugins(plugins: &PluginDirs) -> Result<(), Failure> {
         }
         if !info.import_formats.is_empty() {
             can.push("import");
+        }
+        if info.exports_schemas {
+            can.push("schemas");
         }
         println!("{name}");
         println!("  category:  {}", info.category);

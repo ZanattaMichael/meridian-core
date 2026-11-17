@@ -73,6 +73,7 @@ loaded plugins declare. It is never written by hand.
 | That `target` is a target that exists | the loaded plugins |
 | That a resource's `type` is one its target has, by name or by shape (`<provider>_<type>` becomes a pattern) | each plugin |
 | For targets that describe their types (ansible, puppet, openvox, chef, salt, cloud-init): the params a type takes, which are required, their kinds and fixed values, and the states the type takes | each plugin |
+| For a tool's own types, once `meridian schema sync` has run: the same, nested params included, with a param the tool sets left out so a document cannot write it | the [synced tool schemas](schema-sync.md) under `--state-dir` |
 
 Every field carries its documentation as a `description`, which editors show
 on hover.
