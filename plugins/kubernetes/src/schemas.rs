@@ -197,12 +197,9 @@ fn read_openapi(document: &Value, full: &[String]) -> Read {
             if kind.is_empty() || version.is_empty() {
                 continue;
             }
-            if kind.ends_with("List")
-                && map
-                    .get("properties")
-                    .and_then(Value::as_map)
-                    .is_some_and(|p| p.contains_key("items"))
-            {
+            // `DeploymentList`, `APIResourceList` and the rest are what the
+            // server answers, never what a document declares.
+            if kind.ends_with("List") {
                 continue;
             }
             let name = if group.is_empty() {
