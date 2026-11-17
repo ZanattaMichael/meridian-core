@@ -235,6 +235,22 @@ fn a_module_changed_after_it_was_pinned_stops_the_run() {
     assert!(out.ends_with("ok      local\n"), "{out}");
     assert_eq!(err, "error: 1 module failed verification\n");
 
+    // A reader that goes away (`meridian module verify | head -0`) ends the
+    // printing, not the verdict: the exit status still says it failed.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .args(["module", "verify"])
+        .current_dir(&site)
+        .env_remove("MERIDIAN_STATE_DIR")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take());
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(err, "error: 1 module failed verification\n");
+
     // Installing again fetches what was pinned.
     ok(&site, &["module", "install", "--locked"]);
     ok(&site, &["module", "verify"]);

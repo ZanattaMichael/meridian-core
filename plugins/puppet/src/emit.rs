@@ -36,9 +36,13 @@ pub(crate) fn serialise(manifest: &Manifest) -> Result<BTreeMap<String, String>,
     }
     body.push_str("}\n");
 
+    // The host is a Puppet string like any other, so a quote in it cannot
+    // end the node statement. One that is not a host name at all was
+    // refused by transform.
     let site = format!(
-        "{HEADER}\nnode '{}' {{\n  include {}\n}}\n",
-        manifest.host, manifest.class
+        "{HEADER}\nnode {} {{\n  include {}\n}}\n",
+        quote(&manifest.host),
+        manifest.class
     );
     Ok(BTreeMap::from([
         (MANIFEST_PATH.to_owned(), body),

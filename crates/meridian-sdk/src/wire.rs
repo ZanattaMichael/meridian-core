@@ -5,7 +5,9 @@
 //! generated type.
 
 use meridian_secret::SecretValue;
-use meridian_value::{canonical_map, decode_map, decode_value, SecretRef, Value, SENSITIVE};
+use meridian_value::{
+    canonical_map, decode_map, decode_value, PlacedEscape, SecretRef, Value, SENSITIVE,
+};
 
 use crate::import::*;
 use crate::pb;
@@ -260,6 +262,28 @@ pub fn capabilities_to_wire(c: Capabilities) -> pb::Capabilities {
         runtime_condition: c.runtime_condition,
         secrets: c.secrets,
     }
+}
+
+pub fn placed_text_to_wire(escapes: &[PlacedEscape]) -> Vec<pb::PlacedEscape> {
+    escapes
+        .iter()
+        .map(|e| pb::PlacedEscape {
+            text: e.text.clone(),
+            written: e.written.clone(),
+            only_at_start: e.only_at_start,
+        })
+        .collect()
+}
+
+pub fn placed_text_from_wire(escapes: Vec<pb::PlacedEscape>) -> Vec<PlacedEscape> {
+    escapes
+        .into_iter()
+        .map(|e| PlacedEscape {
+            text: e.text,
+            written: e.written,
+            only_at_start: e.only_at_start,
+        })
+        .collect()
 }
 
 pub fn capabilities_from_wire(c: Option<pb::Capabilities>) -> Capabilities {

@@ -4,7 +4,7 @@
 meridian validate <files>...
 meridian compile  <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--out DIR]
 meridian plan     <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets]
-meridian apply    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets] [--resume [RUN]] [--on-failure stop|rollback]
+meridian apply    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets] [--resume | --resume=RUN] [--on-failure stop|rollback]
 meridian drift    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE]
 meridian rollback <files>... [--run RUN]
 meridian status
@@ -122,11 +122,13 @@ continue:
 web (ResourceSet, target ansible on 203.0.113.10)
   ~ update nginx_conf
   FAILED: the play failed (ran `ansible-playbook ...`, exit status 2)
-run 2026-11-17T09-14-03Z-0cc7 failed. Once the cause is fixed, `meridian apply --resume` with the same documents continues from the stage that failed
+run 2026-11-17T09-14-03Z-0cc7 failed. Once the cause is fixed, `meridian apply --resume site.yaml` continues from the stage that failed
 ```
 
 `--resume` continues the last apply that failed or was interrupted, and
-`--resume <run>` a named one. Stages that run already applied, from documents
+`--resume=<run>` a named one. The run's id is joined to the flag with `=`, so
+that a file after `--resume` is always a file; `--resume` may come before or
+after the documents. Stages that run already applied, from documents
 that still compile to the same artifact, are left alone; the rest are applied.
 [Picking up where a run stopped](../concepts/run-safety.md#picking-up-where-a-run-stopped)
 has the rules.
@@ -468,7 +470,10 @@ description: [The JSON Schema](../tooling/json-schema.md).
 ### `lsp`
 
 Runs the language server on standard input and output. An editor starts it;
-there is nothing to see when it is run by hand. Full description:
+there is nothing to see when it is run by hand. It takes the plugin options
+(`--plugin-dir`, `--plugin-signatures`, `--trusted-key`) like every command,
+plus `--trust-editor-plugin-dirs` to load unsigned plugins from directories the
+editor names. Full description:
 [The language server](../tooling/language-server.md).
 
 ### `signing`
@@ -501,7 +506,7 @@ meridian signing verify --trusted-key acme.pub meridian-target-acme
 | `--backend NAME` | `MERIDIAN_BACKEND` | `local` | where Meridian's own record (the lock, the run-state, the runs) is kept: `local`, or a [backend program](state.md#writing-a-backend) |
 | `--backend-config KEY=VALUE` | | | a setting for the backend; may be repeated |
 | `--lock-timeout DURATION` | | `0s` | `plan`, `apply`, `drift`, `rollback`: how long to wait for another run to release the lock, as in `30s`, `5m`, `1h`. By default a locked state is refused at once |
-| `--resume [RUN]` | | | `apply` only: continue the last apply, or the run named |
+| `--resume`, `--resume=RUN` | | | `apply` only: continue the last apply, or the run named (joined with `=`) |
 | `--on-failure ACTION` | | `stop` | `apply` only: `stop` leaves what was applied in place; `rollback` puts back every stage the run changed |
 | `--run RUN` | | the last apply | `rollback` only: the apply to put back |
 | `--policy PATH` | | no policy | `plan`, `apply`: a [policy](policy.md) file or directory every stage is checked against before anything is applied; may be repeated |
@@ -620,6 +625,12 @@ line itself, and from `drift` when a stage has drifted.
 `import` exits `0` when it wrote its documents, whatever it reported about
 them; `1` when the source could not be read or no plugin imports it, and, with
 `--strict`, when anything was changed or not translated.
+
+A reader that stops early, as in `meridian plugins | head`, ends the printing
+and nothing else: the command still runs to its end and exits with the status
+above, so `meridian module verify | head -1` still fails on a tampered module.
+If standard output cannot be written for any other reason, such as a full
+disk, the command says so on standard error and exits `1`.
 
 ## Plugins and their tools
 

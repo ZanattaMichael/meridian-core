@@ -68,7 +68,10 @@ pub use import::{
     ImportedNotify, ImportedOutput, ImportedResource, Importer, NoteLevel,
 };
 pub use meridian_secret::{Part, SecretFile, SecretValue};
-pub use meridian_value::{canonical_map, decode_map, decode_value, SecretRef, Value, SENSITIVE};
+pub use meridian_value::host::check as check_host;
+pub use meridian_value::{
+    canonical_map, decode_map, decode_value, PlacedEscape, SecretRef, Value, SENSITIVE,
+};
 pub use run::{
     Applied, Category, Change, ChangeAction, Log, LogLine, LogStream, NoLog, Operations, Output,
     Plan, RunContext, RunError, Runner,

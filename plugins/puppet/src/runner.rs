@@ -172,6 +172,10 @@ impl PuppetRunner {
         noop: bool,
         log: &dyn Log,
     ) -> Result<Report, RunError> {
+        // The core checked the host already; this runner is the last thing
+        // between it and Bolt's command line.
+        meridian_sdk::check_host(&context.host)
+            .map_err(|why| RunError::new(format!("bolt cannot be given this target: {why}")))?;
         let mut tool = Tool::new(&self.bolt)
             .args(["apply", APPLY_PATH, "--targets", &context.host])
             .args(["--format", "json"])

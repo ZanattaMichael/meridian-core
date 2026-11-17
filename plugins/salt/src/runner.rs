@@ -106,6 +106,13 @@ impl SaltRunner {
                 "salt-ssh needs a host to connect to, and the document names none",
             ));
         }
+        if transport == Transport::Ssh {
+            // The core checked the host already; this runner is the last
+            // thing between it and salt-ssh's command line and roster.
+            meridian_sdk::check_host(&context.host).map_err(|why| {
+                RunError::new(format!("salt-ssh cannot be given this host: {why}"))
+            })?;
+        }
 
         // Salt wants its file root as an absolute path, and the work
         // directory can only be made absolute once it exists.

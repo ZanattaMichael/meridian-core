@@ -185,6 +185,7 @@ impl Client {
             name: reply.name,
             resource_types: reply.resource_types,
             capabilities: wire::capabilities_from_wire(reply.capabilities),
+            placed_text: wire::placed_text_from_wire(reply.placed_text),
             category: wire::category_from_wire(reply.category),
             target_versions: reply.target_versions,
             resource_schemas: reply

@@ -122,7 +122,8 @@ flowchart LR
     Q3 -->|"yes"| SKIP["left alone;<br/>outputs read back from the tool"]
 ```
 
-- `--resume` continues the last apply; `--resume <run>` names one.
+- `--resume` continues the last apply; `--resume=<run>` names one, with the
+  `=`, so that a file after the flag is read as a file.
 - "The same" means the same compiled artifact, by its hash. A document you
   edited is applied again. One you did not touch is not.
 - A stage that is left alone still hands on its outputs. They are read from

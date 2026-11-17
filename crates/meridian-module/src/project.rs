@@ -110,7 +110,7 @@ fn label(locked: &Locked) -> String {
 
 /// Resolves `.` and `..` in a path without touching the disk, with `/`
 /// between the parts.
-fn normalize(path: &Path) -> String {
+pub(crate) fn normalize(path: &Path) -> String {
     let mut parts: Vec<String> = Vec::new();
     let mut prefix = String::new();
     for component in path.components() {
@@ -150,6 +150,19 @@ fn store_dir(state_dir: &Path, locked: &Locked) -> PathBuf {
         // `+` and build metadata are fine in a directory name.
         locked.version.clone()
     };
+    // Every part is one plain path segment: the name is checked by
+    // `Lock::parse` and the manifest reader, and a version or a `ref-` leaf
+    // cannot hold a separator. Anything else would leave `<state>/modules`.
+    let segment = |s: &str| {
+        !s.is_empty()
+            && s != "."
+            && s != ".."
+            && !s.contains(|c: char| matches!(c, '/' | '\\') || c.is_control())
+    };
+    assert!(
+        locked.name.split('/').all(segment) && segment(&leaf),
+        "a module's store directory is built from a name and version that were not checked"
+    );
     let mut dir = state_dir.join("modules");
     dir.extend(locked.name.split('/'));
     dir.join(leaf)
@@ -760,6 +773,15 @@ pub fn install(project: &Project<'_>, mode: Mode) -> Result<Report, Error> {
 /// if anything is.
 fn locate(project: &Project<'_>, module: &Locked) -> Result<(PathBuf, Signature), String> {
     if let Some(path) = module.source.strip_prefix("path+") {
+        // `Lock::parse` holds the path to what `normalize` writes; a `Locked`
+        // built by hand is held to the same.
+        if path.is_empty() || path != normalize(Path::new(path)) {
+            return Err(format!(
+                "{} is required from {:?}, which is not a path as `meridian module install` \
+                 writes it",
+                module.name, module.source
+            ));
+        }
         let dir = project.dir.join(path);
         return if dir.join(MANIFEST_FILE).is_file() {
             Ok((dir, Signature::NotChecked))

@@ -24,6 +24,9 @@ Every plugin states a few facts about its tool:
 - its category: infrastructure as code, configuration management,
   containerization or container orchestration
 - the versions of its tool it compiles for, if that matters for the tool
+- the openings of its tool's own expression syntax, if it has any beyond
+  `${`, so that a value placed from data is written as text and never as an
+  expression ([values from data are literal](../reference/dsl/interpolation.md#a-tools-own-expressions))
 
 `meridian plugins` prints them, and the
 [capability matrix](../reference/capability-matrix.md) is generated from them.

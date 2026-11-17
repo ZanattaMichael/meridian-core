@@ -148,6 +148,13 @@ impl Emitter for Template {
     // `spec.targetVersion` for this target is refused, which is the right
     // answer for a plugin that would not act on the version.
 
+    // TODO(plugin): if the tool reads expression syntax of its own in the
+    // files you write (a template engine's `{{`, for instance), implement
+    // `placed_text` with each opening and how the tool writes it as literal
+    // text. The core applies them to every value placed from data before
+    // `emit` sees it, so data can never open an expression the tool
+    // evaluates. Leave it out for a tool with no such syntax.
+
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
         // A `${id.param}` in a param is a reference to another resource. This
         // tool has nothing to read at apply time, so each one is settled now,
