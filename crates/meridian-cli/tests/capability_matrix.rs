@@ -95,121 +95,19 @@ fn row(
 }
 
 fn matrix() -> String {
-    let mut rows = vec![
-        row(
-            &meridian_target_ansible::Ansible,
-            &meridian_target_ansible::AnsibleRunner::from_env(),
-            Some(&meridian_target_ansible::AnsibleImporter),
-            None,
-        ),
-        row(
-            &meridian_target_arm::Arm,
-            &meridian_target_arm::ArmRunner::from_env(),
-            None,
-            None,
-        ),
-        row(
-            &meridian_target_bicep::Bicep,
-            &meridian_target_bicep::BicepRunner::from_env(),
-            None,
-            None,
-        ),
-        row(
-            &meridian_target_chef::Chef,
-            &meridian_target_chef::ChefRunner::from_env(),
-            None,
-            None,
-        ),
-        row(
-            &meridian_target_cloud_init::CloudInit,
-            &meridian_target_cloud_init::CloudInitRunner::from_env(),
-            None,
-            None,
-        ),
-        row(
-            &meridian_target_cloudformation::CloudFormation,
-            &meridian_target_cloudformation::CloudFormationRunner::from_env(),
-            None,
-            None,
-        ),
-        row(
-            &meridian_target_docker::Docker,
-            &meridian_target_docker::DockerRunner::from_env(),
-            Some(&meridian_target_docker::DockerImporter),
-            None,
-        ),
-        row(
-            &meridian_target_dsc::Dsc,
-            &meridian_target_dsc::DscRunner::from_env(),
-            Some(&meridian_target_dsc::DscImporter),
-            Some(&meridian_target_dsc::DscSchemas::from_env()),
-        ),
-        row(
-            &meridian_target_helm::Helm,
-            &meridian_target_helm::HelmRunner::from_env(),
-            None,
-            None,
-        ),
-        row(
-            &meridian_target_kubernetes::Kubernetes,
-            &meridian_target_kubernetes::KubernetesRunner::from_env(),
-            Some(&meridian_target_kubernetes::KubernetesImporter),
-            Some(&meridian_target_kubernetes::KubernetesSchemas::from_env()),
-        ),
-        row(
-            &meridian_target_opentofu::OpenTofu,
-            &meridian_target_opentofu::OpenTofuRunner::from_env(),
-            Some(&meridian_target_opentofu::OpenTofuImporter),
-            Some(&meridian_target_terraform::TerraformSchemas::new(
-                "tofu", "opentofu",
-            )),
-        ),
-        row(
-            &meridian_target_packer::Packer,
-            &meridian_target_packer::PackerRunner::from_env(),
-            None,
-            None,
-        ),
-        row(
-            &meridian_target_podman::Podman,
-            &meridian_target_podman::PodmanRunner::from_env(),
-            None,
-            None,
-        ),
-        row(
-            &meridian_target_pulumi::Pulumi,
-            &meridian_target_pulumi::PulumiRunner::from_env(),
-            None,
-            Some(&meridian_target_pulumi::PulumiSchemas::from_env()),
-        ),
-        row(
-            &meridian_target_openvox::OpenVox,
-            &meridian_target_openvox::OpenVoxRunner::from_env(),
-            None,
-            None,
-        ),
-        row(
-            &meridian_target_puppet::Puppet,
-            &meridian_target_puppet::PuppetRunner::from_env(),
-            None,
-            None,
-        ),
-        row(
-            &meridian_target_salt::Salt,
-            &meridian_target_salt::SaltRunner::from_env(),
-            None,
-            None,
-        ),
-        row(
-            &meridian_target_terraform::Terraform,
-            &meridian_target_terraform::TerraformRunner::from_env(),
-            Some(&meridian_target_terraform::TerraformImporter),
-            Some(&meridian_target_terraform::TerraformSchemas::new(
-                "terraform",
-                "terraform",
-            )),
-        ),
-    ];
+    let mut rows: Vec<String> = meridian_all_targets::ALL
+        .iter()
+        .map(|target| {
+            let importer = target.importer();
+            let schemas = target.schemas();
+            row(
+                target.emitter().as_ref(),
+                target.runner().as_ref(),
+                importer.as_deref().map(|i| i as &dyn Importer),
+                schemas.as_deref(),
+            )
+        })
+        .collect();
     rows.sort();
     format!(
         "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | apply | outputs | inputs | secrets | credentials | import | schemas |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n{}",

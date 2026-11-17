@@ -9,7 +9,7 @@ repository.workspace = true
 [dependencies]
 meridian-sdk = { path = "../meridian-sdk" }
 meridian-yaml = { path = "../meridian-yaml" }
-saphyr-parser = "0.3"
+saphyr-parser = { workspace = true }
 
 [lints]
 workspace = true

@@ -116,14 +116,23 @@ That produces the `meridian` command and one binary per plugin, all in
 ```
 meridian
 meridian-target-ansible
+meridian-target-arm
+meridian-target-bicep
+meridian-target-chef
 meridian-target-cloud-init
-meridian-target-openvox
-meridian-target-terraform
-meridian-target-opentofu
-meridian-target-pulumi
+meridian-target-cloudformation
+meridian-target-docker
+meridian-target-dsc
 meridian-target-helm
+meridian-target-kubernetes
+meridian-target-opentofu
+meridian-target-openvox
 meridian-target-packer
-...
+meridian-target-podman
+meridian-target-pulumi
+meridian-target-puppet
+meridian-target-salt
+meridian-target-terraform
 ```
 
 `meridian` finds plugins in the directory it sits in, so the build output works

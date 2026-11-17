@@ -47,6 +47,8 @@ use meridian_plugin_host::{
     signature::signature_path, Policy as SignaturePolicy, PublicKey, Registry, SecretKey,
     Signature, StartOptions, Verification,
 };
+use meridian_report::sink::{self, Dispatcher};
+use meridian_report::{Format, Report};
 use meridian_sdk::{ChangeAction, Data, LogLine, LogStream, Output};
 
 #[derive(Parser)]
@@ -195,6 +197,25 @@ enum Command {
         /// whole family; may be given more than once
         #[arg(long = "type", value_name = "TYPE")]
         types: Vec<String>,
+        #[command(flatten)]
+        state: State,
+    },
+    /// Write a report of a recorded run, or of a file of events: JSON,
+    /// JUnit XML, Markdown or HTML
+    Report {
+        /// The run; the last one when not given
+        run: Option<String>,
+        /// The report's format: json, junit, markdown or html
+        #[arg(short, long, value_name = "FORMAT", default_value = "markdown", value_parser = Format::parse)]
+        format: Format,
+        /// Write the report to this file and not to standard output
+        #[arg(short, long, value_name = "FILE")]
+        out: Option<PathBuf>,
+        /// Read the events from this file, one JSON object per line as
+        /// `--events json` writes them, and not from the state; `-` reads
+        /// standard input
+        #[arg(long, value_name = "FILE", conflicts_with = "run")]
+        from: Option<PathBuf>,
         #[command(flatten)]
         state: State,
     },
@@ -572,6 +593,30 @@ struct Workflow {
     /// JSON object per line. The report for people moves to standard error
     #[arg(long, value_name = "FORMAT")]
     events: Option<EventFormat>,
+    /// Write a report of the run when it ends, as FORMAT=FILE; the formats
+    /// are json, junit, markdown and html; may be given more than once
+    #[arg(long, value_name = "FORMAT=FILE")]
+    report: Vec<String>,
+    /// Send every event of the run, as it happens, to this sink: `command`,
+    /// or the name of a sink program, meridian-notify-<NAME>, in a plugin
+    /// directory; may be given more than once
+    #[arg(
+        long,
+        value_name = "NAME",
+        env = "MERIDIAN_SINKS",
+        value_delimiter = ','
+    )]
+    sink: Vec<String>,
+    /// A setting for a sink, as SINK.KEY=VALUE; may be given more than
+    /// once. The sink program reads it as MERIDIAN_NOTIFY_<KEY>. Two keys
+    /// are Meridian's own: `on`, the event types to send, as in
+    /// run.*,step.failed, and `required`, true to fail the run when the
+    /// sink fails
+    #[arg(long, value_name = "SINK.KEY=VALUE")]
+    sink_config: Vec<String>,
+    /// How long a sink has to finish sending after the run's last event
+    #[arg(long, value_name = "DURATION", default_value = "30s", value_parser = parse_duration)]
+    sink_timeout: Duration,
     /// How many runs' records to keep; older ones are removed when a run ends
     #[arg(long, value_name = "N", default_value_t = meridian_orchestrator::DEFAULT_KEEP_RUNS)]
     keep_runs: usize,
@@ -701,6 +746,19 @@ fn main() -> ExitCode {
         Command::Status { state } => status(&state),
         Command::Runs { state } => runs(&state),
         Command::Events { run, types, state } => events(&state, run.as_deref(), &types),
+        Command::Report {
+            run,
+            format,
+            out,
+            from,
+            state,
+        } => report(
+            &state,
+            run.as_deref(),
+            format,
+            out.as_deref(),
+            from.as_deref(),
+        ),
         Command::Unlock { id, state } => unlock(&state, &id),
         Command::Import {
             paths,
@@ -1702,6 +1760,21 @@ fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Result<(), Fai
             "no document's labels match the selector {selector}"
         )));
     }
+    // Where the reports go and who is sent the events are settled before
+    // anything runs, so a misspelt format cannot cost a finished apply its
+    // report.
+    let reports = workflow
+        .report
+        .iter()
+        .map(|text| parse_report(text))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Failure::Message)?;
+    let sinks = sink::specs(
+        &workflow.sink,
+        &workflow.sink_config,
+        &plugin_dirs(&workflow.state.plugins),
+    )
+    .map_err(Failure::Message)?;
     // What was typed, for the record: the files and the selection. Backend
     // settings are left out, because one of them can be a credential.
     let mut command = vec![mode.as_str().to_owned()];
@@ -1772,8 +1845,37 @@ fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Result<(), Fai
         mode,
         out,
         events: workflow.events.is_some(),
+        seen: Vec::new(),
+        sinks: Dispatcher::start(sinks, workflow.sink_timeout).map_err(Failure::Message)?,
     };
     let report = run_selected(&bundle, &registry, mode, &options, &selector, &mut printer);
+    // The sinks are closed and the reports written whatever the run did: a
+    // failed run is the one most worth hearing about.
+    let mut sink_failed = false;
+    for delivery in printer.sinks.finish() {
+        if let Some(problem) = delivery.problem() {
+            if delivery.required {
+                sink_failed = true;
+                eprintln!("error: {problem}");
+            } else {
+                eprintln!("warning: {problem}");
+            }
+        }
+    }
+    if !printer.seen.is_empty() {
+        let mut folded = Report::from_events(&printer.seen);
+        if let Some(backend) = &options.backend {
+            if let Ok(Some(record)) = record::load_run(backend.as_ref(), &report.run_id) {
+                folded = folded.with_record(&record);
+            }
+        }
+        for (format, path) in &reports {
+            match write_report(&folded, *format, path) {
+                Ok(()) => eprintln!("report: wrote {} to {}", format.as_str(), path.display()),
+                Err(why) => eprintln!("warning: {why}"),
+            }
+        }
+    }
     // A plugin that will not exit is worth a warning, not a failed run.
     if let Err(e) = registry.close() {
         eprintln!("warning: {e}");
@@ -1841,7 +1943,93 @@ fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Result<(), Fai
     if report.drifted() {
         return Err(Failure::Drifted);
     }
+    if sink_failed {
+        return Err(Failure::Reported);
+    }
     Ok(())
+}
+
+/// Reads one `--report FORMAT=FILE`.
+fn parse_report(text: &str) -> Result<(Format, PathBuf), String> {
+    match text.split_once('=') {
+        Some((format, path)) if !path.is_empty() => Ok((Format::parse(format)?, path.into())),
+        _ => Err(format!(
+            "--report {text:?} is not FORMAT=FILE, as in junit=meridian.xml"
+        )),
+    }
+}
+
+/// Writes a report to a file, making the directory it goes in.
+fn write_report(report: &Report, format: Format, path: &Path) -> Result<(), String> {
+    let failed = |e: std::io::Error| {
+        format!(
+            "the {} report could not be written to {}: {e}",
+            format.as_str(),
+            path.display()
+        )
+    };
+    if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(failed)?;
+    }
+    std::fs::write(path, meridian_report::render(report, format)).map_err(failed)
+}
+
+/// Reports on a recorded run, or on a file of events.
+fn report(
+    state: &State,
+    run: Option<&str>,
+    format: Format,
+    out: Option<&Path>,
+    from: Option<&Path>,
+) -> Result<(), Failure> {
+    let folded = match from {
+        Some(path) => {
+            let text = if path == Path::new("-") {
+                std::io::read_to_string(std::io::stdin())
+            } else {
+                std::fs::read_to_string(path)
+            }
+            .map_err(|e| Failure::Message(format!("reading {}: {e}", path.display())))?;
+            let events = meridian_orchestrator::event::from_jsonl(&text);
+            if events.is_empty() {
+                return Err(Failure::Message(format!(
+                    "{} holds no events; it should be what `--events json` wrote",
+                    path.display()
+                )));
+            }
+            Report::from_events(&events)
+        }
+        None => {
+            let backend = backend(state)?;
+            let backend = backend.as_ref();
+            let record = match run {
+                Some(id) => record::load_run(backend, id)
+                    .map_err(Failure::Message)?
+                    .ok_or_else(|| {
+                        Failure::Message(format!("there is no run {id} in {}", backend.describe()))
+                    })?,
+                None => record::last_run(backend, None)
+                    .map_err(Failure::Message)?
+                    .ok_or_else(|| {
+                        Failure::Message(format!(
+                            "no run has been recorded in {}",
+                            backend.describe()
+                        ))
+                    })?,
+            };
+            let events = record::load_events(backend, &record.id).map_err(Failure::Message)?;
+            Report::from_events(&events).with_record(&record)
+        }
+    };
+    match out {
+        Some(path) => write_report(&folded, format, path).map_err(Failure::Message),
+        None => {
+            let _ = std::io::stdout()
+                .lock()
+                .write_all(meridian_report::render(&folded, format).as_bytes());
+            Ok(())
+        }
+    }
 }
 
 /// Shows the current or last run, and whether the state is locked.
@@ -1996,6 +2184,10 @@ struct Printer<'a> {
     /// Whether standard output carries the events, which moves the report
     /// for people to standard error.
     events: bool,
+    /// Every event so far, which is what the run's reports are made from.
+    seen: Vec<Event>,
+    /// Where the events are sent as they happen.
+    sinks: Dispatcher,
 }
 
 impl Observer for Printer<'_> {
@@ -2021,6 +2213,8 @@ impl Observer for Printer<'_> {
         if self.events {
             let _ = writeln!(Stdout, "{}", event.to_json());
         }
+        self.sinks.send(event);
+        self.seen.push(event.clone());
     }
 
     fn rollback_finished(&mut self, report: &RollbackReport) {

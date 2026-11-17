@@ -10,30 +10,19 @@ use meridian_tooling::syntax::Pos;
 /// through, registered in-process exactly as the CLI's own tests do.
 pub fn registry() -> Registry {
     let mut registry = Registry::new();
-    registry
-        .register(Box::new(meridian_target_ansible::Ansible))
-        .unwrap();
-    registry
-        .register(Box::new(meridian_target_puppet::Puppet))
-        .unwrap();
-    registry
-        .register(Box::new(meridian_target_openvox::OpenVox))
-        .unwrap();
-    registry
-        .register(Box::new(meridian_target_chef::Chef))
-        .unwrap();
-    registry
-        .register(Box::new(meridian_target_salt::Salt))
-        .unwrap();
-    registry
-        .register(Box::new(meridian_target_cloud_init::CloudInit))
-        .unwrap();
-    registry
-        .register(Box::new(meridian_target_terraform::Terraform))
-        .unwrap();
-    registry
-        .register(Box::new(meridian_target_dsc::Dsc))
-        .unwrap();
+    for name in [
+        "ansible",
+        "puppet",
+        "openvox",
+        "chef",
+        "salt",
+        "cloud-init",
+        "terraform",
+        "dsc",
+    ] {
+        let target = meridian_all_targets::target(name).expect("a shipped target");
+        registry.register(target.emitter()).unwrap();
+    }
     registry
 }
 

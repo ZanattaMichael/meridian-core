@@ -421,7 +421,7 @@ Every refusal carries a rule and, where it is about one resource, that resource 
   the plugin protocol, as the `meridian` command does.
 - `plugins/pulumi/tests/real.rs` plans, applies, changes and reads outputs with the real
   `pulumi` and its random provider. It runs in the `pulumi` workflow, or locally with
-  `MERIDIAN_REAL_PULUMI=1 cargo test -p meridian-target-pulumi --test real`.
+  `MERIDIAN_TEST_REAL_PULUMI=1 cargo test -p meridian-target-pulumi --test real`.
 
 To record the golden files again after an intended change:
 `UPDATE_GOLDEN=1 cargo test -p meridian-target-pulumi`.

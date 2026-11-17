@@ -1,0 +1,23 @@
+[package]
+name = "meridian-report-server"
+description = "An optional server that is sent the events of Meridian runs and shows them: a list of runs, each run's report, and every report format over HTTP"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "meridian-report-server"
+path = "src/main.rs"
+
+[dependencies]
+axum = { workspace = true }
+base64 = { workspace = true }
+clap = { workspace = true }
+meridian-orchestrator = { path = "../meridian-orchestrator" }
+meridian-report = { path = "../meridian-report" }
+meridian-sdk = { path = "../meridian-sdk" }
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "signal", "macros"] }
+
+[lints]
+workspace = true

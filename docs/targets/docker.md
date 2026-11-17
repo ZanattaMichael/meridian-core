@@ -844,11 +844,11 @@ brought up, its outputs are read and the page it serves is fetched, a service is
 changed and another removed, and a container stopped behind Compose's back is
 found by the next plan. Those tests run wherever `docker compose` and a daemon
 are available, which includes CI, and are skipped with a note where they are
-not. `MERIDIAN_REAL_DOCKER=1` makes a missing Docker a failure, and
-`MERIDIAN_REAL_DOCKER=0` skips them.
+not. `MERIDIAN_TEST_REAL_DOCKER=1` makes a missing Docker a failure, and
+`MERIDIAN_TEST_REAL_DOCKER=0` skips them.
 
 ```console
 $ cargo test -p meridian-target-docker                              # everything; real Docker when present
-$ MERIDIAN_REAL_DOCKER=0 cargo test -p meridian-target-docker       # without Docker
+$ MERIDIAN_TEST_REAL_DOCKER=0 cargo test -p meridian-target-docker       # without Docker
 $ UPDATE_GOLDEN=1 cargo test -p meridian-target-docker              # record the golden files again
 ```

@@ -647,8 +647,8 @@ notes. That test is the one that proves nothing is dropped quietly.
 
 Then document it: an **Importing** section on the target's page with the mapping as a
 table, everything that is reported and at which level, and links to the test's files.
-Add the importer to the plugin's `row(...)` in
-`crates/meridian-cli/tests/capability_matrix.rs` and record the matrix again.
+Add the importer to the plugin's `target!` entry in
+`crates/meridian-all-targets/src/lib.rs` and record the matrix again.
 
 ## A schema source
 
@@ -657,6 +657,10 @@ resource types are the tool's own: a Terraform provider's, a Kubernetes API
 server's, a Pulumi package's, a DSC module's. A plugin with no schema source
 is complete, and `meridian schema sync` says the target does not export
 schemas and moves on.
+
+A plugin that has one names it in its entry in
+`crates/meridian-all-targets/src/lib.rs` (the `schemas` field), which puts
+it in the capability matrix.
 
 A schema source is the fourth half: given the documents that use the target,
 it asks the installed tool what each resource type takes and returns resource
@@ -774,12 +778,17 @@ output once, by hand, and paste it into the stand-in, so the test is honest
 about what the tool says.
 
 **Real-tool tests** are welcome but not required for a first pull request. If
-you add one, gate it behind an environment variable and give it its own
-workflow file, as [`terraform.yml`](../../.github/workflows/terraform.yml)
-and [`kubernetes.yml`](../../.github/workflows/kubernetes.yml) do.
-[Real-tool tests](real-tool-tests.md) gives the shape one should have and lists
-the existing ones. A plugin that has only been tested against a stand-in must
-say so on its documentation page.
+you add one, mark each test `#[ignore = "needs a real <tool>; see
+docs/contributing/real-tool-tests.md"]`, switch it on with
+`meridian_plugin_testkit::real_tool_asked("<TOOL>")`, which reads
+`MERIDIAN_TEST_REAL_<TOOL>`, and give it its own workflow file that runs it
+with `-- --ignored` and `MERIDIAN_TEST_REAL_REQUIRED=1`, as
+[`puppet.yml`](../../.github/workflows/puppet.yml) and
+[`kubernetes.yml`](../../.github/workflows/kubernetes.yml) do. A test in
+`crates/meridian-all-targets` fails when a plugin has an ignored test and no
+workflow. [Real-tool tests](real-tool-tests.md) gives the shape one should
+have and lists the existing ones. A plugin that has only been tested against
+a stand-in must say so on its documentation page.
 
 ## Step 7: documentation
 
@@ -804,10 +813,11 @@ Then list the new target where users look for targets. Each is one line:
 | [`docs/quickstart/install.md`](../quickstart/install.md) | what the target needs installed |
 | [`docs/concepts/ir-overview.md`](../concepts/ir-overview.md) and [`dependencies.md`](../concepts/dependencies.md) | the target, where the others of its category are listed |
 | the page for its category under [`docs/reference/dsl/`](../reference/dsl/index.md) | a row for the target, saying how the language reads on it |
-| `crates/meridian-cli/tests/capability_matrix.rs` | a `row(...)` for the plugin, and a dev-dependency on it in `crates/meridian-cli/Cargo.toml` |
-| `crates/meridian-cli/tests/support/mod.rs` | the plugin's emitter in `emitters()`, which enrols it in the [conformance tests](#the-conformance-tests) |
+| `crates/meridian-all-targets/src/lib.rs` | a `target!` entry in `ALL`, in name order, and a dependency on the plugin in that crate's `Cargo.toml`. This is the one list of targets: it enrols the plugin in the capability matrix, the [conformance tests](#the-conformance-tests) and the tooling tests, and its own tests fail until every row above is done |
 
-The capability matrix itself is generated. After adding the row, record it:
+The workspace lists `plugins/*`, so the crate needs no line in the root
+`Cargo.toml`. The capability matrix itself is generated. After adding the
+entry, record it:
 
 ```
 UPDATE_GOLDEN=1 cargo test -p meridian-cli --test capability_matrix
@@ -816,7 +826,7 @@ UPDATE_GOLDEN=1 cargo test -p meridian-cli --test capability_matrix
 ### The conformance tests
 
 `crates/meridian-cli/tests/conformance.rs` holds every target to the rules that
-are the same for all of them. Once your emitter is in `emitters()`, each of your
+are the same for all of them. Once your plugin is in `ALL`, each of your
 examples under `examples/<name>/` is used to check that:
 
 - the example compiles to the same files twice, at relative paths;

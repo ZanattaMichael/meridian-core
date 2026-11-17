@@ -19,15 +19,20 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request replaces the run in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   real:
     name: plan and apply with tofu
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the stable toolchain
-        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: ./.github/actions/setup-rust
 
       # The wrapper script the action can install rewrites tofu's output, which
       # would break reading its JSON.
@@ -41,6 +46,6 @@ jobs:
 
       - name: Test against tofu
         env:
-          MERIDIAN_TEST_TOFU: tofu
-          MERIDIAN_TEST_TOFU_NETWORK: '1'
-        run: cargo test -p meridian-target-opentofu --locked --test real --test imports -- --nocapture
+          MERIDIAN_TEST_REAL_TOFU: tofu
+          MERIDIAN_TEST_REAL_TOFU_NETWORK: '1'
+        run: cargo test -p meridian-target-opentofu --locked --test real --test imports -- --ignored --nocapture
