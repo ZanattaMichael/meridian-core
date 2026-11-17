@@ -447,7 +447,10 @@ fn a_secret_reaches_openvox_through_hiera_and_is_in_nothing_it_prints_or_the_plu
     let plan = runner
         .plan(&context, &artifact, &log)
         .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
-    assert_eq!(resources(&plan), [("env_file", ChangeAction::Create)]);
+    // With the content Sensitive, the tool redacts the one line that would
+    // have said the file is new ("defined content as ..."), so the change
+    // reads as an update of the content: the redaction is the point.
+    assert_eq!(resources(&plan), [("env_file", ChangeAction::Update)]);
     assert!(
         !log.text().iter().any(|line| line.contains(SECRET)),
         "{:?}",
