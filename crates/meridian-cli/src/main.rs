@@ -70,7 +70,7 @@ static TRUSTED_KEYS: OnceLock<TrustedKeys> = OnceLock::new();
 static MODULE_SIGNATURES: OnceLock<meridian_module::Verification> = OnceLock::new();
 
 /// Every key to trust: the release's own, then the ones named.
-fn trusted_keys() -> Result<Vec<PublicKey>, Failure> {
+pub(crate) fn trusted_keys() -> Result<Vec<PublicKey>, Failure> {
     match TRUSTED_KEYS.get() {
         Some(keys) => keys.read(),
         None => TrustedKeys::default().read(),
