@@ -2016,7 +2016,17 @@ impl Printer<'_> {
                 match (self.mode, self.out) {
                     (Mode::Compile, Some(dir)) => {
                         let dir = dir.join(&report.id.name);
-                        match write_artifact(&dir, report) {
+                        let written = if meridian_ir::is_document_name(&report.id.name) {
+                            write_artifact(&dir, report)
+                        } else {
+                            // Validation refuses such a name; this is the
+                            // last line of defence for the output directory.
+                            Err(std::io::Error::new(
+                                std::io::ErrorKind::InvalidInput,
+                                format!("{:?} is not a safe directory name", report.id.name),
+                            ))
+                        };
+                        match written {
                             Ok(()) => writeln!(
                                 out,
                                 "  compiled {} into {}",

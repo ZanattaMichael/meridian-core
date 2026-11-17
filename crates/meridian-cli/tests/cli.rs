@@ -137,6 +137,32 @@ fn compile_writes_each_documents_files_and_applies_nothing() {
 }
 
 #[test]
+fn a_document_name_cannot_write_outside_the_output_directory() {
+    // Issue 133.
+    let dir = scratch(
+        "escaping-name",
+        &WORKFLOW.replace("name: network", "name: ../../esc"),
+    );
+    for args in [
+        &["validate", "site.yaml"][..],
+        &["compile", "site.yaml", "--out", "build"],
+        &["apply", "site.yaml"],
+    ] {
+        let out = meridian(&dir, args);
+        assert!(!out.status.success(), "{args:?}: {}", stdout(&out));
+        let err = stderr(&out);
+        assert!(
+            err.contains("metadata.name: \"../../esc\" cannot name a document"),
+            "{args:?}: {err}"
+        );
+    }
+    assert!(!dir.join("build").exists());
+    assert!(!dir.join(".meridian").exists());
+    assert!(!dir.parent().unwrap().join("esc").exists());
+    assert!(!dir.parent().unwrap().parent().unwrap().join("esc").exists());
+}
+
+#[test]
 fn plan_then_apply_then_plan_tells_the_whole_story() {
     let dir = scratch("lifecycle", WORKFLOW);
 

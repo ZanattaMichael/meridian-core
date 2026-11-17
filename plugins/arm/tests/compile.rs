@@ -550,7 +550,9 @@ fn a_deployment_is_named_by_the_document_unless_told() {
     assert!(files["deployment.json"].contains("\"mode\": \"Incremental\""));
     assert!(!files["template.json"].contains("net-rg"));
 
-    let err = compile_named("web vm!", &spec(VNET)).unwrap_err();
+    // The core refuses a name that is not a file name (issue 133), so what
+    // is left for ARM is a name Azure cannot take: longer than 64 characters.
+    let err = compile_named(&"a".repeat(65), &spec(VNET)).unwrap_err();
     assert_eq!(err.rule, "invalid-deployment-name");
 }
 
