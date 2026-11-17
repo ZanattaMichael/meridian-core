@@ -50,6 +50,17 @@ pub(crate) fn files(root: &Path) -> Result<Vec<(String, PathBuf)>, Error> {
             if prefix.is_empty() && EXCLUDED.contains(&name) {
                 continue;
             }
+            // The hash is over a listing with one line per file, so a line
+            // break in a name could spell out another file's line. Refusing
+            // every control character here keeps hashing, packing, copying
+            // and unpacking in agreement.
+            if name.contains(char::is_control) {
+                return Err(Error::new(format!(
+                    "{} holds a file whose name has a control character in it, and a module \
+                     cannot hold one: {name:?}",
+                    dir.display()
+                )));
+            }
             let relative = if prefix.is_empty() {
                 name.to_owned()
             } else {
@@ -192,6 +203,43 @@ mod tests {
             assert_ne!(hash_dir(other).unwrap(), base);
         }
         for dir in [a, b, c, d] {
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_name_cannot_spell_out_another_listing_line() {
+        // Issue 137: with a line break in a name, one file could stand in
+        // for two lines of the listing, and two different trees would hash
+        // the same. Any control character in a name is refused instead.
+        let a = tree(
+            "lines-a",
+            &[
+                ("meridian.yaml", "x"),
+                ("policy.yaml", "rules"),
+                ("zz.yaml", "x"),
+            ],
+        );
+        let forged = format!("policy.yaml\n{}  zz.yaml", sha256_hex(b"x"));
+        let b = tree("lines-b", &[("meridian.yaml", "x"), (&forged, "rules")]);
+        let hash_a = hash_dir(&a).unwrap();
+        let err = hash_dir(&b).unwrap_err().to_string();
+        assert!(
+            err.contains("has a control character in it, and a module cannot hold one"),
+            "{err}"
+        );
+        assert_ne!(err, hash_a);
+        assert!(files(&b).is_err());
+        let copy = b.with_extension("copy");
+        let _ = fs::remove_dir_all(&copy);
+        assert!(copy_tree(&b, &copy).is_err());
+        for name in ["a\rb", "a\tb", "a\u{1b}b"] {
+            let c = tree("lines-c", &[("meridian.yaml", "x"), (name, "y")]);
+            assert!(hash_dir(&c).is_err(), "{name:?}");
+            let _ = fs::remove_dir_all(c);
+        }
+        for dir in [a, b, copy] {
             let _ = fs::remove_dir_all(dir);
         }
     }

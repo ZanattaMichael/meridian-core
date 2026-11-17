@@ -363,6 +363,13 @@ impl Bundle {
             TARGET_HOST_FROM_INLINE => {
                 if th.host.is_empty() {
                     fail("spec.targetHost.host", "missing required field for from: inline".into());
+                } else if !meridian_expr::has_interpolation(&th.host) {
+                    // A host is handed to ssh, an inventory, a manifest: it
+                    // has to be a name, and nothing a tool reads as more.
+                    // One an interpolation places is checked once placed.
+                    if let Err(why) = meridian_value::host::check(&th.host) {
+                        fail("spec.targetHost.host", why);
+                    }
                 }
             }
             TARGET_HOST_FROM_INFRASTRUCTURE => {
@@ -439,6 +446,22 @@ fn is_variable_name(name: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// The longest `metadata.name` accepted: it becomes one path segment, and
+/// every common file system takes 255 bytes in one.
+pub const MAX_DOCUMENT_NAME: usize = 128;
+
+/// Whether `name` can be `metadata.name`: one path segment that stays where
+/// it is put. Letters, digits, `.`, `_` and `-`, starting with a letter or a
+/// digit, at most [`MAX_DOCUMENT_NAME`] bytes. The name becomes a directory
+/// under `--out` and under the state directory, so `/`, `\`, `..`, a leading
+/// `.` and anything a shell or a tool would read specially are all refused.
+pub fn is_document_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && name.len() <= MAX_DOCUMENT_NAME
+}
+
 fn validate_document(doc: &Document, errs: &mut ErrorList) {
     let pos = doc.position();
     let mut fail =
@@ -446,6 +469,18 @@ fn validate_document(doc: &Document, errs: &mut ErrorList) {
 
     if doc.name().is_empty() {
         fail(pos, "metadata.name".into(), "missing required field".into());
+    } else if !is_document_name(doc.name()) {
+        fail(
+            pos,
+            "metadata.name".into(),
+            format!(
+                "{:?} cannot name a document: it becomes a directory under the output and \
+                 state directories, so it must start with a letter or a digit, hold only \
+                 letters, digits, `.`, `_` and `-`, and be at most {MAX_DOCUMENT_NAME} \
+                 characters",
+                doc.name()
+            ),
+        );
     }
     if doc.target().is_empty() {
         fail(pos, "spec.target".into(), "missing required field".into());

@@ -175,8 +175,9 @@ fn two_resources_managing_one_thing_are_refused() {
 
 #[test]
 fn a_document_name_that_cannot_be_a_cookbook_is_refused() {
+    // A file-safe name the core accepts (issue 133), but not a cookbook name.
     let err = compile_named(
-        "Web Server",
+        "Web-Server",
         "    - id: a\n      type: package\n      params: {name: nginx}\n",
     )
     .unwrap_err();

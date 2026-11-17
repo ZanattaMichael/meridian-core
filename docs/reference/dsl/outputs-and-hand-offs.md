@@ -100,7 +100,7 @@ targetHost:
 | Field | Required | Value |
 |---|---|---|
 | `from` | yes | `inline` |
-| `host` | yes | a host name or address, as you would give it to the tool |
+| `host` | yes | a host name, an address, or `user@host`, as you would give it to the tool: letters, digits and `. - _ : @ [ ] %`, not starting with `-` |
 
 The document needs no other document. It compiles straight away.
 
@@ -129,6 +129,17 @@ targetHost:
 | the document named exists | `validate` | `no Infrastructure document named "machine" is loaded` |
 | it declares that output | `validate` | `Infrastructure "machine" declares no output "address"` |
 | a ResourceSet has a `targetHost` at all | `compile` | `document "web" declares no targetHost` |
+| the host is a name and nothing a tool reads as more | `validate` for a host written inline; `compile` for one an interpolation places; `apply` for one read from an output | `"-oProxyCommand=..." starts with "-", which a tool would read as an option and not as a host` |
+
+The last rule is what keeps the host a host. It goes to `ssh`, Bolt,
+`chef-run` and `salt-ssh` as an argument, where a leading `-` is an option;
+into an Ansible inventory as a line, where a space starts a host variable; and
+into a Puppet `site.pp` as a string, where a quote ends it. Whitespace, control
+characters, quotes and other punctuation are refused wherever the host came
+from, and an output that is not a name fails the stage that needs it before
+its plugin is called. The plugins that run a tool against the host check it
+once more, and the ones that write it into a file refuse one that reaches
+them any other way (rule `invalid-host`).
 
 Both documents must be given to the same command. The link is by name, within
 one workflow, and nowhere else.

@@ -9,7 +9,7 @@
 use std::collections::BTreeSet;
 
 use meridian_secret::Piece;
-use meridian_value::{SecretRef, Value};
+use meridian_value::{PlacedEscape, SecretRef, Value};
 
 use crate::{Expr, Names, Scope};
 
@@ -167,7 +167,21 @@ impl Template {
     /// data can never turn into a reference the tool resolves. What the
     /// author wrote around the interpolation is left as written.
     pub fn eval_literal(&self, scope: &Scope) -> Result<Value, String> {
-        self.decide(scope, true)
+        self.decide(scope, Some(&[]))
+    }
+
+    /// [`Template::eval_literal`], for a target that has expression syntax
+    /// of its own. Each [`PlacedEscape`] the target declares is applied to
+    /// every placed value as well, so text from data cannot open one of the
+    /// tool's expressions either: Jinja's `{{` for Ansible, a leading `[` for
+    /// an ARM template. An opening that two pieces would form between them,
+    /// one of them placed, is made literal too.
+    pub fn eval_literal_with(
+        &self,
+        scope: &Scope,
+        escapes: &[PlacedEscape],
+    ) -> Result<Value, String> {
+        self.decide(scope, Some(escapes))
     }
 
     /// Decides the text.
@@ -177,11 +191,15 @@ impl Template {
     /// stays a list. An interpolation inside longer text must be text, a
     /// number or a boolean, and is placed as text.
     pub fn eval(&self, scope: &Scope) -> Result<Value, String> {
-        self.decide(scope, false)
+        self.decide(scope, None)
     }
 
-    fn decide(&self, scope: &Scope, literal: bool) -> Result<Value, String> {
-        let placed = |value: Value| if literal { escape(value) } else { value };
+    /// With `escapes`, every placed value is made literal: for Meridian's
+    /// own `${` always, and for each opening the target declared.
+    fn decide(&self, scope: &Scope, escapes: Option<&[PlacedEscape]>) -> Result<Value, String> {
+        let literal = escapes.is_some();
+        let rules = escapes.unwrap_or(&[]);
+        let placed = |value: Value| if literal { escape(value, rules) } else { value };
         if let Some((source, expr)) = self.only() {
             return expr
                 .eval(scope)
@@ -224,6 +242,16 @@ impl Template {
             {
                 out.push('$');
             }
+            // The same for an opening of the tool's own: two halves, one of
+            // them placed, must not meet as an expression nobody wrote.
+            let mut text = text;
+            if literal && (is_placed || last_placed) {
+                if let Some((k, rule)) = straddles(out, text, rules) {
+                    out.truncate(out.len() - k);
+                    out.push_str(&rule.written);
+                    text = &text[rule.text.len() - k..];
+                }
+            }
             out.push_str(text);
             last_placed = is_placed;
             Ok(())
@@ -235,10 +263,16 @@ impl Template {
                 Part::Expr { source, expr } => {
                     let fail = |why: String| format!("in {OPEN} {source} {CLOSE}: {why}");
                     match expr.eval(scope).map_err(fail)? {
-                        value @ Value::String(_) => {
-                            if let Value::String(s) = placed(value) {
-                                add(&mut out, &s, true)?;
-                            }
+                        Value::String(s) => {
+                            let s = if literal {
+                                // A value is at the start of the text only
+                                // when nothing, not even a secret, came
+                                // before it.
+                                escape_text(&s, rules, out.is_empty() && pieces.is_empty())
+                            } else {
+                                s
+                            };
+                            add(&mut out, &s, true)?;
                         }
                         value @ (Value::Bool(_)
                         | Value::Int(_)
@@ -288,14 +322,79 @@ impl Template {
 const REFERENCE: &str = concat!("$", "{");
 const ESCAPED: &str = concat!("$$", "{");
 
-/// Makes every reference opening in a placed value literal, however deep.
-fn escape(value: Value) -> Value {
+/// Makes every reference opening in a placed value literal, however deep,
+/// and every opening of the target's own with it.
+fn escape(value: Value, rules: &[PlacedEscape]) -> Value {
     match value {
-        Value::String(s) if s.contains(REFERENCE) => Value::String(s.replace(REFERENCE, ESCAPED)),
-        Value::List(items) => Value::List(items.into_iter().map(escape).collect()),
-        Value::Map(entries) => {
-            Value::Map(entries.into_iter().map(|(k, v)| (k, escape(v))).collect())
-        }
+        Value::String(s) => Value::String(escape_text(&s, rules, true)),
+        Value::List(items) => Value::List(items.into_iter().map(|v| escape(v, rules)).collect()),
+        Value::Map(entries) => Value::Map(
+            entries
+                .into_iter()
+                .map(|(k, v)| (k, escape(v, rules)))
+                .collect(),
+        ),
         other => other,
     }
+}
+
+/// One placed string, made literal. `at_start` says whether the string
+/// begins the value it is placed in, which is where an opening that counts
+/// only at the start can count.
+///
+/// The openings are found in one pass, so what one is written as is never
+/// read as another: `{%` written as `{{ '{%' }}` must not then have its
+/// `{{` escaped again.
+fn escape_text(text: &str, rules: &[PlacedEscape], at_start: bool) -> String {
+    let text = if text.contains(REFERENCE) {
+        text.replace(REFERENCE, ESCAPED)
+    } else {
+        text.to_owned()
+    };
+    if rules.is_empty() {
+        return text;
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+    let mut first = at_start;
+    while !rest.is_empty() {
+        let rule = rules.iter().find(|r| {
+            !r.text.is_empty() && (first || !r.only_at_start) && rest.starts_with(r.text.as_str())
+        });
+        match rule {
+            Some(rule) => {
+                out.push_str(&rule.written);
+                rest = &rest[rule.text.len()..];
+            }
+            None => {
+                let c = rest.chars().next().unwrap_or_default();
+                out.push(c);
+                rest = &rest[c.len_utf8()..];
+            }
+        }
+        first = false;
+    }
+    out
+}
+
+/// Whether an opening is formed across the join of `before` and `after`:
+/// `before` ends with the first `k` bytes of a rule's text and `after`
+/// begins with the rest. Gives `k` and the rule.
+fn straddles<'a>(
+    before: &str,
+    after: &str,
+    rules: &'a [PlacedEscape],
+) -> Option<(usize, &'a PlacedEscape)> {
+    for rule in rules.iter().filter(|r| !r.only_at_start) {
+        let text = rule.text.as_str();
+        for k in (1..text.len()).rev() {
+            if text.is_char_boundary(k)
+                && before.ends_with(&text[..k])
+                && after.starts_with(&text[k..])
+            {
+                return Some((k, rule));
+            }
+        }
+    }
+    None
 }

@@ -184,6 +184,31 @@ does not end in a dollar, both are kept.
 Each tool gets its own spelling of the literal: Terraform, for instance, is
 given `$${HOME}`, which is how Terraform writes a literal `${HOME}`.
 
+### A tool's own expressions
+
+Some tools read more than `${` as an expression. Ansible renders every string
+in a task through Jinja, so `{{ ... }}` is live; in an ARM template a string
+that starts with `[` and ends with `]` is evaluated by Resource Manager. What
+the author writes in the document in that syntax is passed through, as each
+target's page says. What the data supplies is not: each plugin declares the
+openings its tool reads, and Meridian writes a placed value so the tool reads
+it as text, however the value got there.
+
+| The document says | The data says | Ansible is given | Ansible writes to the file |
+|---|---|---|---|
+| `${{ data.motd }}` | `motd: hi {{ lookup('pipe', 'id') }}` | `hi {{ '{{' }} lookup('pipe', 'id') }}` | `hi {{ lookup('pipe', 'id') }}`, as text |
+| `{{ inventory_hostname }}` | | `{{ inventory_hostname }}` | the host's name |
+
+| The document says | The data says | ARM is given | Azure deploys |
+|---|---|---|---|
+| `${{ data.loc }}` | `loc: "[resourceGroup().location]"` | `[[resourceGroup().location]` | the text `[resourceGroup().location]` |
+| `"[resourceGroup().location]"` | | `[resourceGroup().location]` | the resource group's location |
+
+A join is made literal here too: a placed `{` directly before a `{` the
+author wrote cannot open a Jinja expression nobody wrote. Which openings a
+target declares is on its page; a target that declares none has no expression
+syntax of its own beyond `${`.
+
 ## Writing one in YAML
 
 A value that starts with `${{` needs no quotes in YAML as long as the

@@ -866,12 +866,14 @@ fn compile(file: &Parsed, parsed: &ParsedDoc, bundle: &Bundle, env: &Env<'_>) ->
                 );
             }
             // An editor has no applied infrastructure to read a host from,
-            // so the output's declaration stands in for its value.
+            // so the output's declaration stands in for its value, where it
+            // can pass for a host name; a reference such as `${vm.ip}`
+            // cannot, and a plain name stands in instead.
             let host = bundle
                 .resolve_target_host(rs)
                 .map(|(_, output)| output.value.clone())
                 .ok()
-                .filter(|host| !host.is_empty())
+                .filter(|host| meridian_sdk::check_host(host).is_ok())
                 .unwrap_or_else(|| "host".to_owned());
             ResourceGraph::build(rs, &host)
         }

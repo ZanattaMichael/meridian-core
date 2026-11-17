@@ -470,7 +470,10 @@ description: [The JSON Schema](../tooling/json-schema.md).
 ### `lsp`
 
 Runs the language server on standard input and output. An editor starts it;
-there is nothing to see when it is run by hand. Full description:
+there is nothing to see when it is run by hand. It takes the plugin options
+(`--plugin-dir`, `--plugin-signatures`, `--trusted-key`) like every command,
+plus `--trust-editor-plugin-dirs` to load unsigned plugins from directories the
+editor names. Full description:
 [The language server](../tooling/language-server.md).
 
 ### `signing`

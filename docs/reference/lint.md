@@ -169,7 +169,8 @@ metadata:
 ```
 
 The name becomes a directory under `--out` and under the state directory. Keep
-it to letters, digits, `.`, `_` and `-`.
+it to letters, digits, `.`, `_` and `-`. `meridian validate` refuses such a
+name outright; the lint points at it in the editor first.
 
 ## `unused-resource-set-host`
 

@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::{CompileError, EdgeKind, Resource, ResourceGraph, ResourceSchema, Value};
 
-use crate::{refuse, Playbook, Task};
+use crate::{refuse, Playbook, Task, NAME};
 
 const COPY: &str = "ansible.builtin.copy";
 
@@ -247,6 +247,19 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Playbook, CompileError>
         let mut task = task_for(resource, &resource.state)?;
         task.notify = notify.remove(&resource.id).unwrap_or_default();
         tasks.push(task);
+    }
+    // The host is written into inventory.ini, where a space starts a host
+    // variable and a line break a section. The core holds a host to what a
+    // name can be before a plugin sees it; this is the plugin's own line of
+    // defence, for a tree that did not come through the core.
+    if !graph.host.is_empty() {
+        meridian_sdk::check_host(&graph.host).map_err(|why| CompileError {
+            target: NAME.to_owned(),
+            resource: String::new(),
+            rule: "invalid-host".to_owned(),
+            msg: format!("the target host cannot be written into the inventory: {why}"),
+            pos: Default::default(),
+        })?;
     }
     Ok(Playbook {
         name: graph.name.clone(),

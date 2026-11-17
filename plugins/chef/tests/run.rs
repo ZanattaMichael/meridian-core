@@ -168,3 +168,23 @@ fn a_failed_run_keeps_what_chef_said_and_what_it_had_changed() {
     );
     assert_eq!(err.changes.len(), 1);
 }
+
+#[test]
+fn a_host_chef_run_would_read_as_an_option_is_refused_before_it_runs() {
+    // Issue 134: the core refuses such a host first; the runner is the last
+    // thing between it and the command line.
+    let dir = scratch(TMP, "hostile-host");
+    let err = runner(&dir, "exit 9", "echo converged")
+        .apply(
+            &context(&dir, "-oProxyCommand=touch /tmp/pwned"),
+            &compiled(),
+            &KeptLog::default(),
+        )
+        .expect_err("refused");
+    assert!(
+        err.to_string()
+            .contains("chef-run cannot be given this host"),
+        "{err}"
+    );
+    assert!(!dir.join("chef-run.args").exists());
+}

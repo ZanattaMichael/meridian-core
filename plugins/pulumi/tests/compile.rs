@@ -444,17 +444,9 @@ fn options_must_be_a_map() {
     assert_eq!(err.msg, "the resource option \"dependsOn\" must be a list");
 }
 
-#[test]
-fn a_document_name_pulumi_cannot_use_is_refused() {
-    let err = compile_named(
-        "\"web vm\"",
-        "  resources:\n    - id: vm\n      type: aws:ec2:Instance\n      params: {ami: ami-1}\n",
-    )
-    .unwrap_err();
-    assert_eq!(err.rule, "invalid-name");
-    assert!(err.msg.contains("Pulumi project name"), "{}", err.msg);
-}
-
+// A document name Pulumi cannot use is one the core refuses first (issue 133:
+// every name of letters, digits, `.`, `_` and `-` is a Pulumi project name),
+// so the plugin's own check is covered by its unit test alone.
 #[test]
 fn runtime_when_is_refused() {
     let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: net\nspec:\n  target: pulumi\n  resources:\n    - id: vm\n      type: aws:ec2:Instance\n      params: {ami: ami-1}\n";

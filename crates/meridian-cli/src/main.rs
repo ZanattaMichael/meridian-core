@@ -89,7 +89,7 @@ static TRUSTED_KEYS: OnceLock<TrustedKeys> = OnceLock::new();
 static MODULE_SIGNATURES: OnceLock<meridian_module::Verification> = OnceLock::new();
 
 /// Every key to trust: the release's own, then the ones named.
-fn trusted_keys() -> Result<Vec<PublicKey>, Failure> {
+pub(crate) fn trusted_keys() -> Result<Vec<PublicKey>, Failure> {
     match TRUSTED_KEYS.get() {
         Some(keys) => keys.read(),
         None => TrustedKeys::default().read(),
@@ -2127,7 +2127,17 @@ impl Printer<'_> {
                 match (self.mode, self.out) {
                     (Mode::Compile, Some(dir)) => {
                         let dir = dir.join(&report.id.name);
-                        match write_artifact(&dir, report) {
+                        let written = if meridian_ir::is_document_name(&report.id.name) {
+                            write_artifact(&dir, report)
+                        } else {
+                            // Validation refuses such a name; this is the
+                            // last line of defence for the output directory.
+                            Err(std::io::Error::new(
+                                std::io::ErrorKind::InvalidInput,
+                                format!("{:?} is not a safe directory name", report.id.name),
+                            ))
+                        };
+                        match written {
                             Ok(()) => writeln!(
                                 out,
                                 "  compiled {} into {}",

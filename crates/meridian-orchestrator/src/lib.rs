@@ -1682,7 +1682,19 @@ impl Run<'_> {
     fn read(&self, stage: Stage<'_>, fetch: bool) -> Read {
         let document = stage.document();
         let mut secrets = Secrets::declared(&document);
-        let mut resolution = meridian_ir::resolve_with(&document, &self.options.data, &secrets);
+        // What the target's plugin declares of its tool's own expression
+        // syntax, so that a value placed from data is literal to the tool
+        // as well as to Meridian. A target no plugin provides gets only
+        // Meridian's own escape, and is refused for want of a plugin later.
+        let registry = self.registry;
+        let escapes_for = |target: &str| {
+            registry
+                .target(target)
+                .map(|t| t.info().placed_text.clone())
+                .unwrap_or_default()
+        };
+        let mut resolution =
+            meridian_ir::resolve_for(&document, &self.options.data, &secrets, &escapes_for);
         let fetches = fetch
             && self.mode != Mode::Compile
             && !document.secrets().is_empty()
@@ -1701,7 +1713,9 @@ impl Run<'_> {
                 Ok(())
             });
             resolution = match fetched {
-                Ok(()) => meridian_ir::resolve_with(&document, &self.options.data, &secrets),
+                Ok(()) => {
+                    meridian_ir::resolve_for(&document, &self.options.data, &secrets, &escapes_for)
+                }
                 Err(why) => Err(meridian_ir::Error {
                     pos: document.position().clone(),
                     path: "spec.secrets".to_owned(),
@@ -2072,6 +2086,14 @@ impl Run<'_> {
                 output.value.describe()
             )));
         };
+        // The output is whatever the tool or the cloud returned. It is
+        // about to be handed to ssh, an inventory or a manifest, so it is
+        // held to what a host name can be before any tool sees it.
+        if let Err(why) = meridian_sdk::check_host(host) {
+            return Err(Halt::Failed(format!(
+                "output {wanted:?} of {source} cannot be this document's target host: {why}"
+            )));
+        }
         let inputs = outputs
             .iter()
             .map(|o| (o.name.clone(), o.value.clone()))
@@ -2141,6 +2163,15 @@ impl Run<'_> {
         host: &str,
         inputs: Data,
     ) -> Result<RunContext, String> {
+        // The bundle was validated, which refuses a name that is not one
+        // path segment; this keeps a caller that skipped it inside the
+        // state directory all the same.
+        if !meridian_ir::is_document_name(&id.name) {
+            return Err(format!(
+                "{:?} is not a safe directory name; run `meridian validate`",
+                id.name
+            ));
+        }
         let work_dir = work_dir(&self.options.state_dir, id, target);
         std::fs::create_dir_all(&work_dir)
             .map_err(|e| format!("creating the work directory {}: {e}", work_dir.display()))?;

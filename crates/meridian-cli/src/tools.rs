@@ -7,11 +7,13 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use clap::Args;
+use meridian_lsp::Discovery;
+use meridian_plugin_host::{Policy as SignaturePolicy, StartOptions, Verification};
 use meridian_tooling::catalog::Catalog;
 use meridian_tooling::check::{self, Diagnostic, Env, Severity, Source, Workspace};
 use meridian_tooling::{fmt, jsonschema, lint};
 
-use crate::{apply_sets, count, read_data, registry, Failure, PluginDirs};
+use crate::{apply_sets, count, read_data, registry, trusted_keys, Failure, PluginDirs};
 
 #[derive(Args)]
 pub struct FmtArgs {
@@ -80,6 +82,12 @@ pub struct SchemaArgs {
 pub struct LspArgs {
     #[command(flatten)]
     plugins: PluginDirs,
+    /// Load plugins from the directories the editor names in its settings
+    /// under the same --plugin-signatures policy as the rest. Without this,
+    /// a plugin in such a directory is started only when it is signed by a
+    /// trusted key, since an editor's settings can come with a project
+    #[arg(long, env = "MERIDIAN_LSP_TRUST_EDITOR_PLUGIN_DIRS")]
+    trust_editor_plugin_dirs: bool,
 }
 
 /// Whether a path names a YAML or JSON file by its extension.
@@ -374,5 +382,25 @@ pub fn lsp(args: &LspArgs) -> Result<(), Failure> {
             .ok()
             .and_then(|exe| exe.parent().map(Path::to_path_buf)),
     );
-    meridian_lsp::run_stdio(dirs).map_err(|e| Failure::Message(e.to_string()))
+    let options = StartOptions {
+        verification: args.plugins.verification()?,
+        ..StartOptions::default()
+    };
+    let editor_options = if args.trust_editor_plugin_dirs {
+        options.clone()
+    } else {
+        StartOptions {
+            verification: Verification {
+                policy: SignaturePolicy::Require,
+                trusted: trusted_keys()?,
+            },
+            ..StartOptions::default()
+        }
+    };
+    meridian_lsp::run_stdio(Discovery {
+        dirs,
+        options,
+        editor_options,
+    })
+    .map_err(|e| Failure::Message(e.to_string()))
 }
