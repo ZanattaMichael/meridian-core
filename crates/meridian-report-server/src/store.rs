@@ -175,12 +175,15 @@ impl Store {
     /// directory, whatever a request asked for: the check on names is not
     /// the only thing between a URL and the disk.
     fn child(dir: &Path, name: &str) -> Option<PathBuf> {
-        fs::read_dir(dir)
-            .ok()?
-            .filter_map(Result::ok)
-            .find(|entry| entry.file_name().to_str() == Some(name))
-            .map(|entry| entry.path())
-            .filter(|path| path.is_dir())
+        for entry in fs::read_dir(dir).ok()?.filter_map(Result::ok) {
+            // The name only chooses among what was listed. The path comes
+            // from the listing.
+            if entry.file_name().to_str() == Some(name) {
+                let path = entry.path();
+                return path.is_dir().then_some(path);
+            }
+        }
+        None
     }
 
     /// The directory of a project that exists.
