@@ -32,7 +32,7 @@ mod project;
 mod signature;
 
 pub use integrity::hash_dir;
-pub use lock::{Lock, Locked, LOCK_FILE, LOCK_VERSION};
+pub use lock::{Lock, Locked, LockedSchemas, LOCK_FILE, LOCK_VERSION};
 pub use manifest::{valid_name, Manifest, Requirement, Source, MANIFEST_FILE};
 pub use oci::{push, Pushed, ARTIFACT_TYPE, LAYER_MEDIA_TYPE};
 pub use pack::{pack, unpack, MAX_UNPACKED_BYTES};

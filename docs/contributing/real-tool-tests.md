@@ -51,6 +51,10 @@ Two rules keep a green job honest:
 | `terraform` | `terraform.yml` | `terraform`, and the same tests again with `tofu` | `MERIDIAN_TEST_REAL_TERRAFORM=1` |
 
 Each target's page says, under its running section, what its real-tool test covers.
+A target that exports [tool schemas](../tooling/schema-sync.md) (terraform,
+opentofu, kubernetes, pulumi, dsc) has a schema export test in the same file,
+switched on by the same variable, that runs the export against the installed
+tool and checks a type it knows.
 
 ## What a real-tool test should do
 

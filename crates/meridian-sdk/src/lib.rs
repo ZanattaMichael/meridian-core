@@ -48,6 +48,7 @@ mod import;
 mod listen;
 mod run;
 pub mod schema;
+mod schemas;
 mod secrets;
 mod serve;
 pub mod tool;
@@ -77,6 +78,7 @@ pub use run::{
     Plan, RunContext, RunError, Runner,
 };
 pub use schema::{ParamKind, ParamSchema, ResourceSchema};
+pub use schemas::{version_in, SchemaExport, SchemaRequest, SchemaSource};
 pub use secrets::{SecretName, Secrets};
 pub use serve::{serve, Plugin, ServeError};
 pub use types::{
@@ -96,11 +98,12 @@ pub use version::PROTOCOLS_ENV;
 /// in the host's range.
 ///
 /// Version 2 added the plugin's category and operations to `Describe`, and
-/// the `Runner` service. The optional `Importer` service was added without a
-/// new version: a plugin built before it lists no import formats and is never
-/// asked to import. Secrets were added the same way: a plugin built before
-/// them declares no [`Capabilities::secrets`], is refused a document that
-/// puts a secret in a param, and is sent no secret.
+/// the `Runner` service. The optional `Importer` and `SchemaSource` services
+/// were added without a new version: a plugin built before them lists no
+/// import formats and does not say it exports schemas, and is never asked.
+/// Secrets were added the same way: a plugin built before them declares no
+/// [`Capabilities::secrets`], is refused a document that puts a secret in a
+/// param, and is sent no secret.
 pub const PROTOCOL_VERSION: u32 = 2;
 
 /// The oldest wire protocol this SDK still speaks. It trails

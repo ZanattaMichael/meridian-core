@@ -11,6 +11,8 @@ build = "build.rs"
 meridian-secret = { path = "../meridian-secret" }
 meridian-value = { path = "../meridian-value" }
 prost = "0.14"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "signal", "macros"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic = "0.14"

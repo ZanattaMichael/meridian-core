@@ -72,6 +72,9 @@ pub struct Info {
     /// The kinds of existing configuration the target can turn into Meridian
     /// documents; empty when it does not import.
     pub import_formats: Vec<ImportFormat>,
+    /// Whether the target can ask its installed tool for the schemas of the
+    /// tool's own resource types, for `meridian schema sync`.
+    pub exports_schemas: bool,
     /// The binary the plugin was loaded from; empty for an in-process emitter.
     pub path: String,
     /// What checking the binary's signature found, before it was started.

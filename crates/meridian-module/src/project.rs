@@ -360,7 +360,12 @@ impl Resolver<'_> {
                 .map(|name| self.chosen[name].locked.clone())
                 .collect();
             modules.sort_by(|a, b| a.name.cmp(&b.name));
-            return Ok(Lock { modules });
+            // What `meridian schema sync` recorded is not the resolver's to
+            // change.
+            return Ok(Lock {
+                modules,
+                schemas: self.previous.schemas.clone(),
+            });
         }
         Err(Error::new(
             "the module requirements did not settle; this is a bug in meridian",
@@ -740,7 +745,7 @@ pub fn install(project: &Project<'_>, mode: Mode) -> Result<Report, Error> {
     let differs = match &on_disk {
         Some(text) => *text != rendered,
         // A project with no modules needs no lockfile.
-        None => !lock.modules.is_empty(),
+        None => !lock.is_empty(),
     };
     if differs && mode == Mode::Locked {
         let moved: Vec<String> = changes

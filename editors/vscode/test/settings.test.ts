@@ -5,9 +5,10 @@ import {
   initializationOptions,
   serverCommand,
   startFailure,
+  syncCommand,
 } from "../src/settings";
 
-const defaults = { path: "meridian", pluginDirs: [], lintEnabled: true, sortFields: true };
+const defaults = { path: "meridian", pluginDirs: [], lintEnabled: true, sortFields: true, stateDir: ".meridian" };
 
 test("the default command is `meridian lsp`", () => {
   assert.deepEqual(serverCommand(defaults, "/work", "/home/me"), {
@@ -29,7 +30,7 @@ test("the workspace folder and the home directory are expanded", () => {
 
 test("the options match what the server reads", () => {
   const options = initializationOptions(
-    { path: "meridian", pluginDirs: ["${workspaceFolder}/plugins", " ", "~/p"], lintEnabled: false, sortFields: false },
+    { path: "meridian", pluginDirs: ["${workspaceFolder}/plugins", " ", "~/p"], lintEnabled: false, sortFields: false, stateDir: " " },
     "/work",
     "/home/me",
   );
@@ -37,11 +38,24 @@ test("the options match what the server reads", () => {
     pluginDirs: ["/work/plugins", "/home/me/p"],
     lint: false,
     sortFields: false,
+    stateDir: ".meridian",
   });
+  assert.equal(
+    initializationOptions({ ...defaults, stateDir: "${workspaceFolder}/.state" }, "/work", undefined).stateDir,
+    "/work/.state",
+  );
 });
 
 test("a missing command is explained", () => {
   const error = Object.assign(new Error("spawn meridian ENOENT"), { code: "ENOENT" });
   assert.match(startFailure("meridian", error), /could not find the `meridian` command/);
   assert.match(startFailure("meridian", new Error("boom")), /boom/);
+});
+
+test("the sync command names the state directory only when it is not the default", () => {
+  assert.equal(syncCommand(defaults, "/work", "/home/me"), "meridian schema sync .");
+  assert.equal(
+    syncCommand({ ...defaults, path: "~/bin/meridian", stateDir: "${workspaceFolder}/my state" }, "/work", "/home/me"),
+    'meridian schema sync --state-dir "/work/my state" .'.replace("meridian", "/home/me/bin/meridian"),
+  );
 });

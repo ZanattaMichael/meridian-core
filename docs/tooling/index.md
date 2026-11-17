@@ -11,6 +11,7 @@ Meridian comes with the tools an author needs while writing, all in the one
 | [Formatter](formatter.md) | `meridian fmt` | one standard layout, so diffs show changes and not taste |
 | [Linter](linter.md) | `meridian lint` | the compiler's errors for a whole project, plus things that compile and are probably mistakes |
 | [JSON Schema](json-schema.md) | `meridian schema` | validation in editors that only know YAML |
+| [Tool schemas](schema-sync.md) | `meridian schema sync` | completion and checking of a tool's own types (`aws_instance`, `apps/v1/Deployment`), read once from the tool and cached |
 
 ![Writing a resource with completion: the type, its params, and an error for a param the target does not take](images/writing-a-resource.gif)
 
@@ -24,6 +25,7 @@ reads those:
 flowchart LR
     tables["The language's field tables<br/>(meridian-ir)"]
     plugins["What each target plugin declares<br/>(resource types, params, states)"]
+    cache["What each tool says about its own types<br/>(.meridian/schemas, from meridian schema sync)"]
     compiler["meridian compile"]
     lsp["meridian lsp"]
     fmt["meridian fmt"]
@@ -38,6 +40,9 @@ flowchart LR
     plugins --> lsp
     plugins --> lint
     plugins --> schema
+    cache --> lsp
+    cache --> lint
+    cache --> schema
 ```
 
 - **The language's fields** (`apiVersion`, `kind`, `spec.resources`,
@@ -50,6 +55,11 @@ flowchart LR
   plugin says what it takes when it is loaded, and the tools ask the plugins
   you have installed. A plugin that is added or updated changes what your
   editor offers, with no change to the tools.
+- **A tool's own types** (`aws_instance`, `apps/v1/Deployment`,
+  `random:index:RandomPet`, `PSDscResources/Service`) come from the tool,
+  through its plugin: `meridian schema sync` asks once and caches the answer
+  in the project, and the editor tools read the cache. See
+  [Tool schemas](schema-sync.md).
 - **Errors** are the compiler's. The language server and the linter validate
   your documents with the same code as `meridian validate`, and then hand each
   one to its target's real plugin, exactly as `meridian compile` does, without
@@ -66,7 +76,8 @@ says about itself.
 | Targets | What the tools know |
 |---|---|
 | ansible, puppet, openvox, chef, salt, cloud-init | Every resource type, every param with its meaning and kind, which are required, the states and the notify actions. An unknown param or state is an error in the editor. |
-| terraform, opentofu, cloudformation, bicep, arm, pulumi, packer, docker, podman, kubernetes, helm, dsc | The resource types by name or by shape (such as `<provider>_<type>`). Params belong to the tool's own providers and are not listed, so they are not completed or checked in the editor. The plugin still checks them when the document is compiled, and those errors are shown. |
+| terraform, opentofu, kubernetes, pulumi, dsc | The resource types by name or by shape (such as `<provider>_<type>`) from the plugin, and, once `meridian schema sync` has run, the tool's own types with every param, read from the tool itself: see [Tool schemas](schema-sync.md). Before a sync, params are not completed or checked in the editor. |
+| cloudformation, bicep, arm, packer, docker, podman, helm | The resource types by name or by shape. Params belong to the tool's own providers and are not listed, so they are not completed or checked in the editor. The plugin still checks them when the document is compiled, and those errors are shown. |
 
 A plugin author adds descriptions with one method; see
 [Writing a plugin](../contributing/writing-a-plugin.md#describe-your-resource-types-for-editors).

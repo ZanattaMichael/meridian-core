@@ -39,6 +39,7 @@
 mod emit;
 mod import;
 mod runner;
+mod schemas;
 mod sort;
 mod transform;
 mod validate;
@@ -53,6 +54,7 @@ use meridian_sdk::{
 pub use emit::CONFIG_PATH;
 pub use import::TerraformImporter;
 pub use runner::TerraformRunner;
+pub use schemas::{TerraformSchemas, PROBE_PATH};
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "terraform";

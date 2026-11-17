@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
 use meridian_sdk::{
-    Applied, Artifact, Data, Emitted, Emitter, ImportSource, Imported, Importer, LogLine,
-    Operations, Output, Plan, ResourceGraph, RunContext, PROTOCOL_VERSION, VERSION,
+    Applied, Artifact, Data, Emitted, Emitter, ImportSource, Imported, Importer, LogLine, NoLog,
+    Operations, Output, Plan, ResourceGraph, RunContext, SchemaExport, SchemaRequest, SchemaSource,
+    PROTOCOL_VERSION, VERSION,
 };
 
 use crate::client::{Client, StartOptions};
@@ -16,8 +17,15 @@ pub struct Target {
 }
 
 enum Kind {
-    InProcess(Box<dyn Emitter + Send + Sync>, Option<Box<dyn Importer>>),
+    InProcess(InProcess),
     Plugin(Box<Client>),
+}
+
+/// A compiled-in target: its emitter, and whichever optional halves it has.
+struct InProcess {
+    emitter: Box<dyn Emitter + Send + Sync>,
+    importer: Option<Box<dyn Importer>>,
+    schemas: Option<Box<dyn SchemaSource>>,
 }
 
 impl Target {
@@ -33,7 +41,7 @@ impl Target {
             // A compiled-in emitter does not know its own registered name is
             // what the reader needs to see, so it is stamped here, exactly as
             // it is for a refusal that crossed the process boundary.
-            Kind::InProcess(emitter, _) => emitter.emit(graph, data).map_err(|mut e| {
+            Kind::InProcess(t) => t.emitter.emit(graph, data).map_err(|mut e| {
                 e.target = self.info.name.clone();
                 EmitError::Refused(e)
             }),
@@ -45,7 +53,10 @@ impl Target {
     pub fn import(&self, source: &ImportSource) -> Result<Imported, ImportFailure> {
         match &self.kind {
             Kind::Plugin(client) => client.import(source),
-            Kind::InProcess(_, Some(importer)) => {
+            Kind::InProcess(InProcess {
+                importer: Some(importer),
+                ..
+            }) => {
                 let mut imported = importer.import(source).map_err(ImportFailure::Source)?;
                 for document in &mut imported.documents {
                     if document.target.is_empty() {
@@ -54,9 +65,27 @@ impl Target {
                 }
                 Ok(imported)
             }
-            Kind::InProcess(_, None) => Err(ImportFailure::Plugin(Error {
+            Kind::InProcess(_) => Err(ImportFailure::Plugin(Error {
                 plugin: self.info.name.clone(),
                 msg: "this target does not import".to_owned(),
+                ..Error::default()
+            })),
+        }
+    }
+
+    /// Asks the target's tool for the schemas of the types in `request`.
+    /// What the source logs is dropped for a compiled-in target; a plugin's
+    /// log goes to its stderr.
+    pub fn export_schemas(&self, request: &SchemaRequest) -> Result<SchemaExport, RunFailure> {
+        match &self.kind {
+            Kind::Plugin(client) => client.export_schemas(request),
+            Kind::InProcess(InProcess {
+                schemas: Some(source),
+                ..
+            }) => source.export(request, &NoLog).map_err(RunFailure::Tool),
+            Kind::InProcess(_) => Err(RunFailure::Plugin(Error {
+                plugin: self.info.name.clone(),
+                msg: "this target does not export schemas".to_owned(),
                 ..Error::default()
             })),
         }
@@ -132,6 +161,17 @@ impl Registry {
         emitter: Box<dyn Emitter + Send + Sync>,
         importer: Option<Box<dyn Importer>>,
     ) -> Result<(), Error> {
+        self.register_parts(emitter, importer, None)
+    }
+
+    /// Adds a compiled-in emitter with whichever optional halves it has: an
+    /// importer, and a schema source that asks its tool for schemas.
+    pub fn register_parts(
+        &mut self,
+        emitter: Box<dyn Emitter + Send + Sync>,
+        importer: Option<Box<dyn Importer>>,
+        schemas: Option<Box<dyn SchemaSource>>,
+    ) -> Result<(), Error> {
         let name = emitter.name().to_owned();
         if name.is_empty() {
             return Err(Error {
@@ -151,6 +191,7 @@ impl Registry {
             target_versions: emitter.target_versions(),
             resource_schemas: emitter.resource_schemas(),
             import_formats: importer.as_ref().map(|i| i.formats()).unwrap_or_default(),
+            exports_schemas: schemas.is_some(),
             operations: Operations::COMPILE_ONLY,
             accepts_inputs: false,
             path: String::new(),
@@ -160,7 +201,11 @@ impl Registry {
             name,
             Target {
                 info,
-                kind: Kind::InProcess(emitter, importer),
+                kind: Kind::InProcess(InProcess {
+                    emitter,
+                    importer,
+                    schemas,
+                }),
             },
         );
         Ok(())

@@ -30,7 +30,7 @@ use meridian_secret::SecretTable;
 
 use meridian_value::Value;
 
-pub use funcs::function_names;
+pub use funcs::{function, function_names, functions, FunctionInfo};
 use parse::Node;
 pub use template::{has_interpolation, Template};
 

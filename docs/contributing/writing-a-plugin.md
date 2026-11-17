@@ -26,13 +26,14 @@ flowchart LR
     r --> tool[the real tool]
 ```
 
-A plugin has two halves, and they never mix. A third is optional.
+A plugin has two halves, and they never mix. A third and a fourth are optional.
 
 | Half | Trait | What it does | Side effects |
 |---|---|---|---|
 | Compiling | [`Emitter`](../../crates/meridian-sdk/src/types.rs) | turns a `ResourceGraph` into an `Artifact` (paths and file contents, as data), or refuses | none, ever |
 | Running | [`Runner`](../../crates/meridian-sdk/src/run.rs) | writes the artifact to a work directory and drives the tool to `plan`, `apply` and report `outputs` | whatever the tool does |
 | Importing, optional | [`Importer`](../../crates/meridian-sdk/src/import.rs) | reads the tool's existing configuration, handed to it as text, and returns documents as data with notes on what it could not carry over. See [An importer](#an-importer) | none, ever |
+| Describing the tool's types, optional | [`SchemaSource`](../../crates/meridian-sdk/src/schemas.rs) | asks the installed tool for the schemas of its own resource types, so editors complete and check them. Called by `meridian schema sync` only, never by an editor. See [A schema source](#a-schema-source) | runs the tool, inside a work directory the host gives it |
 
 By the time a document reaches your plugin, the core has already parsed it,
 validated it, resolved the target host to a literal and put the resources in an
@@ -337,6 +338,12 @@ fn resource_schemas(&self) -> Vec<ResourceSchema> {
   same way. The template plugin does this, and so do the first-party
   configuration management plugins.
 
+A type whose params belong to the tool, not to Meridian, such as
+`aws_instance` or `apps/v1/Deployment`, is better described by the tool
+itself; that is what [a schema source](#a-schema-source) is for. The two
+compose: a cached tool schema refines a type the plugin only names and
+leaves one the plugin describes param by param alone.
+
 Build the description from the same tables your transform stage reads, never
 from a second list, so the two cannot disagree. The description is advice to
 editors and never replaces your checks: the host does not enforce it when
@@ -603,6 +610,100 @@ Then document it: an **Importing** section on the target's page with the mapping
 table, everything that is reported and at which level, and links to the test's files.
 Add the importer to the plugin's `row(...)` in
 `crates/meridian-cli/tests/capability_matrix.rs` and record the matrix again.
+
+## A schema source
+
+This step is optional too, and it only makes sense for a target whose
+resource types are the tool's own: a Terraform provider's, a Kubernetes API
+server's, a Pulumi package's, a DSC module's. A plugin with no schema source
+is complete, and `meridian schema sync` says the target does not export
+schemas and moves on.
+
+A schema source is the fourth half: given the documents that use the target,
+it asks the installed tool what each resource type takes and returns resource
+schemas, the same [`ResourceSchema`](../../crates/meridian-sdk/src/schema.rs)
+your `resource_schemas()` returns, under the exact name a document writes.
+`meridian schema sync` calls it once, caches what it returns under the
+project's state directory and records the versions in `meridian.lock`; the
+language server, `meridian lint` and `meridian schema` read the cache and
+never call you. What the operator sees is in
+[Tool schemas](../tooling/schema-sync.md).
+
+```rust
+use meridian_sdk::{Log, RunError, SchemaExport, SchemaRequest, SchemaSource};
+
+pub struct MyToolSchemas;
+
+impl SchemaSource for MyToolSchemas {
+    fn export(&self, request: &SchemaRequest, log: &dyn Log) -> Result<SchemaExport, RunError> {
+        // request.work_dir   a directory the host keeps for you between syncs
+        // request.graphs     the documents, as `emit` would get them
+        // request.types      the resource types they use, sorted and deduplicated
+        let shown = Tool::new("mytool")
+            .args(["describe", "--json"])
+            .dir(&request.work_dir)
+            .capture_stdout()
+            .run_ok("mytool describe failed", log)?;
+        let mut export = SchemaExport::new("mytool", &version_in(&shown.stdout).unwrap_or_default());
+        export.schemas = read_schemas(&shown.stdout, &request.types);
+        export.pin("my-provider", "2.5.2");
+        export.note("3 other types listed by name only");
+        export.tidy();
+        Ok(export)
+    }
+}
+```
+
+and in `main.rs`:
+
+```rust
+meridian_sdk::serve(
+    meridian_sdk::Plugin::new(MyTool)
+        .with_runner(MyToolRunner::from_env())
+        .with_schema_source(MyToolSchemas),
+)
+```
+
+What you return:
+
+| Field | What it holds |
+|---|---|
+| `schemas` | one `ResourceSchema` per type, under the exact name a document writes, never a pattern. A param carries its kind, whether it is required, its values, its own nested params for a map or a list of maps, and the flags `computed` (the tool sets it; a document reads it with `${id.path}` and must not write it), `sensitive` and `deprecated` |
+| `tool`, `tool_version` | the tool that answered and its version |
+| `pins` | the exact versions of the parts the schemas came from, by the tool's own name for each: a provider, a package, a server. The host records them in `meridian.lock`, so a cache from other versions is told apart |
+| `notes` | what the operator should know: a type that could not be described, a provider that was skipped |
+
+The rules a schema source keeps:
+
+- **It is advice.** `emit` and the tool remain the judges of what compiles
+  and applies. Never promise in a schema what the tool refuses, and never
+  reject in a schema what the tool accepts. A type you cannot describe is
+  left out, with a note, and the editor then knows it by name as before.
+- **It changes nothing outside `request.work_dir`.** Initialise the tool
+  there, download into it, keep its lock file in it; the host keeps the
+  directory between syncs and never reads it.
+- **It may be slow and may use the network**, because it is run by a person
+  who asked for a sync, never by an editor. Say what you are doing through
+  `log`, which `meridian schema sync` shows.
+- **Describe in full what the documents use, and by name the rest.** A
+  provider with a thousand types would make a cache too big for an editor
+  to read at each start. The types in `request.types` get their params; the
+  others get a `ResourceSchema::open(name, description)` so completion offers
+  them, and the next sync after a document uses one describes it. Say in a
+  note how many were listed by name.
+- **Read the tool's own schema format.** Many tools publish JSON Schema:
+  `meridian_sdk::schema::params_from_json_schema` reads it into params,
+  following `$ref`s through a resolver you give it, and stops at a depth so
+  a recursive schema ends. `meridian_sdk::version_in` finds the version in
+  what `tool --version` prints.
+
+Test it twice: a unit test that reads a saved sample of the tool's output
+into schemas, and a [real-tool test](real-tool-tests.md) in `tests/real.rs`
+that runs the source against the installed tool, gated by the same variable
+as the runner's tests, and asserts on a type it knows. Then document it: a
+section on the target's page saying what the sync asks the tool, what is
+described in full and what by name, and what is pinned, and the row for the
+target in [Tool schemas](../tooling/schema-sync.md#what-each-target-exports).
 
 ## Step 6: tests
 
