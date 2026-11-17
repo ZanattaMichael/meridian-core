@@ -134,6 +134,8 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
+ "hyper",
+ "hyper-util",
  "itoa",
  "matchit",
  "memchr",
@@ -142,6 +144,7 @@ dependencies = [
  "pin-project-lite",
  "serde_core",
  "sync_wrapper",
+ "tokio",
  "tower",
  "tower-layer",
  "tower-service",
@@ -1188,6 +1191,7 @@ dependencies = [
  "meridian-orchestrator",
  "meridian-plugin-host",
  "meridian-plugin-testkit",
+ "meridian-report",
  "meridian-resolve",
  "meridian-rules",
  "meridian-sdk",
@@ -1328,6 +1332,27 @@ dependencies = [
  "meridian-plugin-host",
  "meridian-target-fake",
  "meridian-value",
+]
+
+[[package]]
+name = "meridian-report"
+version = "0.1.0"
+dependencies = [
+ "meridian-orchestrator",
+ "meridian-sdk",
+]
+
+[[package]]
+name = "meridian-report-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "clap",
+ "meridian-orchestrator",
+ "meridian-report",
+ "meridian-sdk",
+ "tokio",
 ]
 
 [[package]]

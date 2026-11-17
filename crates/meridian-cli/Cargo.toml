@@ -20,6 +20,7 @@ meridian-lsp = { path = "../meridian-lsp" }
 meridian-module = { path = "../meridian-module" }
 meridian-orchestrator = { path = "../meridian-orchestrator" }
 meridian-plugin-host = { path = "../meridian-plugin-host" }
+meridian-report = { path = "../meridian-report" }
 meridian-resolve = { path = "../meridian-resolve" }
 meridian-rules = { path = "../meridian-rules" }
 meridian-sdk = { path = "../meridian-sdk" }

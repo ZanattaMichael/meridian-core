@@ -73,6 +73,8 @@ byte. The reasons, the layout and the order of work are in
 | [Plugin signatures](reference/plugin-signatures.md) | how `meridian` decides a plugin may be started, trusting a plugin from elsewhere, and signing your own |
 | [Policy checks](reference/policy.md) | asking a policy before a change is made: the options, the input a policy sees, Rego with Open Policy Agent, and how to write an engine |
 | [State, runs and backends](reference/state.md) | what Meridian keeps about its runs, the events, and how to write a state backend |
+| [Reports and sinks](reference/reporting.md) | report files in JSON, JUnit, Markdown and HTML, sending a run's events elsewhere as they happen, and how to write a sink |
+| [The report server](reference/report-server.md) | an optional server that collects the runs of every project and shows them; running it, securing it, its HTTP interface |
 | [The Meridian language](reference/dsl/index.md) | every field of a document, what it must hold, and which check happens when |
 | [How it fits together](reference/dsl/how-it-fits-together.md) | a document's path from file to running tool, with diagrams and a worked example |
 | The language item by item | [resources](reference/dsl/resources.md), [`dependsOn`](reference/dsl/dependson.md), [`notifies`](reference/dsl/notifies.md), [conditions](reference/dsl/conditions.md), [references](reference/dsl/references.md), [outputs and hand-offs](reference/dsl/outputs-and-hand-offs.md) |
@@ -108,6 +110,7 @@ plugins.
 | [Modules and versioning](plans/modules-and-versioning.md) | Built, awaiting the owner's review: shareable modules (sources, lockfile, integrity), how `apiVersion` is enforced, protocol negotiation |
 | [Security & secrets handling](plans/security.md) | Threat model, `secret: true` guarantees, disclosure process |
 | [Run safety](plans/run-safety.md) | Built: state and locking, resume, rollback, drift, policy checks, values handed between stages |
+| [Reporting](plans/reporting.md) | Built: streaming, report files, sinks, and the report server |
 | [Language expansion](plans/language-expansion.md) (accepted; phases 1, 2 and most of 6a built) | Expressions and functions, conditions, templating, configurations with inputs, endpoints and inventory, secrets, workflows |
 | [Decision records](decisions/README.md) | Design choices made while building, one record each, with whether the owner has accepted them |
 

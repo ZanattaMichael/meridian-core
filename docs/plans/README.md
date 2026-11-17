@@ -21,6 +21,7 @@ issue — it is closed and is a historical record of how the plan was first stat
 | `release-and-versioning.md` | #7 | accepted |
 | `security.md` | #8 | accepted |
 | `run-safety.md` | written as a pull request; amends design plan §11.5 | built (pull request 60, closes #47); its decisions R1 to R7 await the owner |
+| `reporting.md` | written as a pull request | built (pull request 70); the owner chose its direction on 2026-11-17 |
 | `language-expansion.md` | pull request #59 | accepted by the owner on 2026-11-17; phases 1, 2 and most of 6a built |
 | `modules-and-versioning.md` | written as a pull request | built (pull requests 62, 67, 83, 85, 131); not reviewed by the owner |
 

@@ -10,6 +10,7 @@ meridian rollback <files>... [--run RUN]
 meridian status
 meridian runs
 meridian events   [RUN] [--type TYPE]
+meridian report   [RUN] [--format FORMAT] [--out FILE] [--from FILE]
 meridian unlock   <ID>
 meridian plugins
 meridian import   <paths>... [--from TARGET] [--name NAME] [-o DIR] [-r] [--force] [--strict]
@@ -221,6 +222,19 @@ family as `'step.*'`, and may be repeated.
 
 ```
 meridian events --type step.failed --type 'resource.*'
+```
+
+### `report`
+
+Writes a [report](reporting.md) of a recorded run, the last one when no run
+is named: `--format` is `json`, `junit`, `markdown` (the default) or `html`,
+and `--out` names a file to write instead of standard output. `--from FILE`
+reports on a file of events, as `--events json` wrote them, and not on the
+state; `-` reads standard input.
+
+```
+meridian report --format junit --out meridian.xml
+meridian apply site.yaml --events json | meridian report --from - --format html --out run.html
 ```
 
 ### `unlock`
@@ -536,6 +550,10 @@ meridian signing verify --trusted-key acme.pub meridian-target-acme
 | `--policy PATH` | | no policy | `plan`, `apply`: a [policy](policy.md) file or directory every stage is checked against before anything is applied; may be repeated |
 | `--policy-engine NAME` | `MERIDIAN_POLICY_ENGINE` | `opa` | `plan`, `apply`: the program `meridian-policy-<NAME>` that reads the policies |
 | `--events json` | | | `compile`, `plan`, `apply`, `drift`, `rollback`: write every [event](state.md#events) to standard output as it happens, one JSON object per line. The report for people moves to standard error |
+| `--report FORMAT=FILE` | | | `compile`, `plan`, `apply`, `drift`, `rollback`: write a [report](reporting.md#--report) of the run when it ends, as `json`, `junit`, `markdown` or `html`; may be repeated |
+| `--sink NAME` | `MERIDIAN_SINKS` (separated by `,`) | | the same commands: send every event, as it happens, to a [sink](reporting.md#sinks); may be repeated |
+| `--sink-config SINK.KEY=VALUE` | | | a setting for a sink; may be repeated. `on` chooses the event types and `required=true` fails the run when the sink fails |
+| `--sink-timeout DURATION` | | `30s` | how long a sink has to finish sending after the run's last event |
 | `--keep-runs N` | | `50` | `plan`, `apply`, `drift`, `rollback`: how many runs' records to keep |
 | `--out DIR` | | | `compile` only: where to write the compiled files |
 | `-l SELECTOR`, `--selector SELECTOR` | | every document | `compile`, `plan`, `apply`: run only the documents whose `metadata.labels` match, as in `tier=web,env!=prod`. May be repeated; every requirement must hold. [Labels and selectors](dsl/index.md#labels-and-selectors) |
@@ -642,9 +660,10 @@ No version is deprecated today.
 not compile, a tool failed, a policy denied a change or could not be asked, a
 stage could not be rolled back, or the run was
 refused because the state is locked or there was nothing to resume or roll
-back; when `fmt --check` found a file that is not formatted; and when `lint`
-found an error, or a warning with `--strict`. `2` for a mistake in the command
-line itself, and from `drift` when a stage has drifted.
+back, or a [sink](reporting.md#sinks) marked `required` failed; when
+`fmt --check` found a file that is not formatted; and when `lint` found an
+error, or a warning with `--strict`. `2` for a mistake in the command line
+itself, and from `drift` when a stage has drifted.
 
 `import` exits `0` when it wrote its documents, whatever it reported about
 them; `1` when the source could not be read or no plugin imports it, and, with

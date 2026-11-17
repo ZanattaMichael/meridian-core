@@ -1,0 +1,24 @@
+#!/bin/sh
+# The smallest sink there is: every event it is sent becomes a line of a
+# file. It is the reference for the contract in docs/reference/reporting.md,
+# and what Meridian's own tests run.
+#
+#   meridian apply site.yaml --sink file --sink-config file.path=events.jsonl
+#
+# Contract, version 1: events arrive on standard input, one JSON object per
+# line, as they happen. The input closes when the run is over. Settings
+# arrive as MERIDIAN_NOTIFY_<SETTING>. Exit 0 when everything was delivered.
+set -eu
+
+if [ "${MERIDIAN_NOTIFY_PROTOCOL:-}" != "1" ]; then
+    echo "meridian-notify-file speaks protocol 1, not ${MERIDIAN_NOTIFY_PROTOCOL:-none}" >&2
+    exit 1
+fi
+if [ -z "${MERIDIAN_NOTIFY_PATH:-}" ]; then
+    echo "set the file to write: --sink-config file.path=FILE" >&2
+    exit 1
+fi
+
+while IFS= read -r event; do
+    printf '%s\n' "$event" >> "$MERIDIAN_NOTIFY_PATH"
+done
