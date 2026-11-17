@@ -48,7 +48,8 @@ Someone who can read CI logs, someone who can read the repository containing emi
 artifacts, and someone who can read Meridian's run-state file. Not assumed: an
 adversary with live memory access to the running Meridian process. Protecting plaintext
 in process memory from a local root adversary is not a goal, and claiming it would
-require guarantees Go's runtime does not offer.
+require guarantees a general-purpose process does not offer. (The Rust core zeroizes
+secret buffers on drop, which narrows the window but does not change this statement.)
 
 ---
 
@@ -179,6 +180,9 @@ rather than by review.
 A plugin claiming secrets support must satisfy all of the following. This is mirrored in
 the `Capabilities{}` struct so the claim is machine-checkable, per design plan §11.4.
 
+The declaration below is written in the original Go notation. The field set is what is
+normative; design plan §11.4 gives the Rust spelling.
+
 ```go
 type Capabilities struct {
     NativeNotify     bool
@@ -199,7 +203,7 @@ type Capabilities struct {
 Obligations of a plugin with a non-empty `SecretsBackend`:
 
 1. **Never call `Reveal()` outside its secrets-routing function.** One call site, greppable,
-   reviewed. A plugin with `Reveal()` scattered through `transform.go` fails review.
+   reviewed. A plugin with `Reveal()` scattered through `transform.rs` fails review.
 2. **Emit secrets only into the named backend.** Never into a task parameter, a manifest
    literal, an `exec` argument, or a generated comment.
 3. **Pass the shared secrets contract suite**, which runs `fixture_secret_value.yaml`

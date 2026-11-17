@@ -19,9 +19,12 @@ degrades silently. See [the capability model](plans/design-plan.md#8-the-notifie
 
 ## Project status
 
-Pre-implementation. The planning documents below are accepted and are the specification
-that the first code is written against. No emitters exist yet; build sequencing is in
-[design plan §12](plans/design-plan.md#12-build-sequencing-milestones).
+Early implementation, and changing language. Milestones 1 to 3 and half of milestone 4
+were built in Go: the compiler core, the plugin protocol, and Ansible and Puppet targets.
+On 2026-11-17 the core language was changed to Rust. The Go code remains as the reference
+until the Rust core reproduces its output. The reasons, the layout and the order of work
+are in [design plan §11](plans/design-plan.md#11-system-architecture-rust) and
+[§12.1](plans/design-plan.md#121-rust-migration-sequencing).
 
 ## Planning documents
 

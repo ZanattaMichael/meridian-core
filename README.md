@@ -37,6 +37,14 @@ output like any other.
 
 There is no CLI and no runner yet.
 
+### Moving to Rust
+
+Everything described above is written in Go. The core is being rewritten in Rust; the
+decision and the order of work are in the
+[design plan](docs/plans/design-plan.md#121-rust-migration-sequencing). The plugin protocol
+does not change, so the Go Ansible and Puppet plugins keep working behind a Rust host, and
+the Go core stays in the repository until the Rust core reproduces its golden files.
+
 ### Building and running the target plugins
 
 ```

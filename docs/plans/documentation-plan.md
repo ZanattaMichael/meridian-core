@@ -124,7 +124,7 @@ This is the single highest-risk doc in the set, because it's also the thing most
 
 - **Format**: Markdown throughout, consistent with the repo's existing design/testing plan docs — no new toolchain dependency for the doc source itself.
 - **Static site generation**: a standard docs generator (e.g. Docusaurus, mkdocs-material, or Hugo) that supports include/transclusion (needed for the fixture-as-example principle in Section 3.3) and versioning (needed once Meridian itself has multiple released versions, given the orchestrator run-state schema upgrade concern from the design plan).
-- **API/SDK reference**: generated from Go doc comments (`godoc`/`pkgsite`-style) for `pkg/sdk`, kept separate from the prose SDK guide — reference and guide serve different needs and shouldn't be forced into one document.
+- **API/SDK reference**: generated from Rust doc comments (`rustdoc`) for the `meridian-sdk` crate, kept separate from the prose SDK guide — reference and guide serve different needs and shouldn't be forced into one document.
 - **Versioning**: docs versioned alongside Meridian releases from the first tagged release onward, since IR schema changes or capability changes between versions (e.g., DSC v3 gaining a native notify primitive, per the open question in the design plan) would otherwise leave no way to read docs matching an older deployed version.
 - **Search**: full-text search across the whole doc set is a hard requirement given the size of the target-specific + troubleshooting sections — this is not a nice-to-have once 5+ target docs and a growing troubleshooting section exist.
 

@@ -85,7 +85,7 @@ Pure functions, no I/O, no target awareness. These live in `internal/ir`, `inter
 
 - Valid DAGs topologically sort correctly.
 - Cycles are detected and reported with the **full cycle path** in the error (not just "a cycle exists somewhere").
-- **Determinism / tiebreak test**: construct a graph with genuinely independent nodes (no edges between them), run topological sort 50+ times, assert identical output ordering every time, driven by declaration-index tiebreak — not by Go map iteration.
+- **Determinism / tiebreak test**: construct a graph with genuinely independent nodes (no edges between them), run topological sort 50+ times, assert identical output ordering every time, driven by declaration-index tiebreak — not by hash-map iteration order.
 - `HardOrder` vs `Notify` edge kinds are distinguished correctly when both exist between overlapping resource pairs.
 - Self-referencing `dependsOn` (a resource depending on itself) is rejected at graph-build time with a clear error.
 
@@ -95,30 +95,30 @@ Pure functions, no I/O, no target awareness. These live in `internal/ir`, `inter
 
 Applied identically across `plugins/ansible`, `plugins/puppet`, `plugins/terraform`, `plugins/dsc-classic`, `plugins/dsc-v3`, `plugins/chef`. Each plugin owns its own test suite, but the **shape** of the suite is standardized so coverage gaps are visible at a glance.
 
-### 4.1 `transform.go`
+### 4.1 `transform.rs`
 
 - Every entry in `SupportedResourceTypes()` has at least one test asserting correct native-type + param mapping.
 - An IR resource type **not** in the support list produces a specific "unsupported resource type on this target" error — not a generic failure, not a best-effort guess.
 - Param translation edge cases: missing optional params get target-appropriate defaults; state-value mapping (`present`/`running` → target vocabulary) is exhaustively tested for every declared state value.
 
-### 4.2 `sort.go`
+### 4.2 `sort.rs`
 
 - Target-specific ordering semantics match the table in the design plan (Section 7) — e.g. explicitly assert Ansible's sort **flattens** to a strict sequence while Puppet's/DSC's **preserves** graph structure as metaparameters.
 - Cycle propagation: a cycle that reaches the sort stage (shouldn't happen if Tier 1 graph tests are solid, but test defensively) fails loudly here too.
 - Flattening-with-parallelism-loss: when independent resources exist, assert the plan-time warning is emitted for targets that lose parallelism info (Ansible), and **not** emitted for targets that preserve it (Puppet/DSC/Terraform).
 
-### 4.3 `emit.go`
+### 4.3 `emit.rs`
 
 - **Golden file tests**: for each supported resource type (and realistic combinations), assert emitted output matches a checked-in golden file exactly.
 - Emit performs **no logic** — test this indirectly by confirming identical AST input always produces identical output regardless of how it was constructed (i.e., emit is a pure function of its input, nothing hidden in template state).
 - Every emitted artifact for every fixture must contain **zero conditional constructs** — automated check: grep/parse emitted output for target-native conditional syntax (`when:` in YAML output for Ansible beyond structural keys, `if` in Puppet manifests, etc.) and fail the test if found, since `when` should always have been pruned upstream.
 
-### 4.4 `validate.go`
+### 4.4 `validate.rs`
 
 - Target-specific constraint violations are caught pre-emit: Puppet global title uniqueness, DSC resource name character restrictions, Terraform address collisions.
 - Validation errors include the offending resource `id` and the specific rule violated.
 
-### 4.5 `runner.go`
+### 4.5 `runner.rs`
 
 - Mocked CLI invocation: assert correct command/args construction for `apply`/`plan` per target, without actually shelling out (use an injectable command executor interface).
 - Output/state parsing: feed canned real CLI output (captured once from a real run, checked in as a fixture) and assert `Outputs`/`Diff` parse correctly.
@@ -171,7 +171,7 @@ Explicit tests asserting the two DSC plugins are **not** assumed to share behavi
 
 ## 6. Tier 4 — Integration Tests (real CLIs, containerized)
 
-These invoke actual target tool binaries against actual (ephemeral, containerized) hosts — no more mocking `runner.go`. Runs nightly and pre-merge to `main`, not on every commit, given the cost.
+These invoke actual target tool binaries against actual (ephemeral, containerized) hosts — no more mocking `runner.rs`. Runs nightly and pre-merge to `main`, not on every commit, given the cost.
 
 ### 6.1 Environment
 
