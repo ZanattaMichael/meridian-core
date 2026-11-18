@@ -1,9 +1,8 @@
 # Meridian on Windows
 
-Meridian runs on Windows as it does on Linux and macOS: the same command, the
-same documents, the same plugins. The whole test suite runs on Windows on
-every change. This page is what is different there, and what to expect of
-each target.
+Meridian runs on Windows with the same command, documents and plugins as on
+Linux and macOS. The full test suite runs on Windows on every change. This page
+covers what differs and what to expect of each target.
 
 ## Install
 
@@ -11,15 +10,14 @@ each target.
 irm https://github.com/ZanattaMichael/meridian-core/releases/latest/download/install.ps1 | iex
 ```
 
-or Scoop, winget or a build from source: see [Install](install.md). Releases
-are built for x86-64 and for arm64 Windows.
+or another method from [Install](install.md). Releases are built for x86-64 and
+arm64 Windows.
 
 ## What is different
 
-**Paths.** Give paths the Windows way or with forward slashes; both work. A
-list of directories in an environment variable is separated by `;`, as `PATH`
-is, where the other systems use `:`. That applies to `MERIDIAN_PLUGIN_DIR` and
-`MERIDIAN_TRUSTED_KEYS`:
+**Paths.** Backslashes and forward slashes both work. Directory lists in
+environment variables use `;`, as `PATH` does, instead of `:`. This applies to
+`MERIDIAN_PLUGIN_DIR` and `MERIDIAN_TRUSTED_KEYS`:
 
 ```
 $env:MERIDIAN_PLUGIN_DIR = 'C:\meridian\plugins;D:\more-plugins'
@@ -28,36 +26,32 @@ $env:MERIDIAN_PLUGIN_DIR = 'C:\meridian\plugins;D:\more-plugins'
 **Plugin binaries** are named `meridian-target-<name>.exe`, and a plugin's
 signature is `meridian-target-<name>.exe.sig`.
 
-**Finding a tool.** Meridian runs each target's tool by name, and on Windows a
-tool is as often a script as a program: `az` is `az.cmd`, and Puppet and Chef
-install `.bat` files. Meridian looks a name up as a Windows shell does, through
-`PATH`, trying `.exe`, `.cmd`, `.bat` and `.com` in that order in each
-directory. So a tool that runs when you type its name in a terminal runs for
-Meridian too. To use a tool that is not on the `PATH`, give its full path in
-the target's own variable, such as `MERIDIAN_TERRAFORM`; each
-[target page](../index.md#user-documentation) names its variable.
+**Finding a tool.** On Windows many tools are scripts: `az` is `az.cmd`, and
+Puppet and Chef install `.bat` files. Meridian looks names up as a Windows
+shell does, through `PATH`, trying `.exe`, `.cmd`, `.bat` and `.com` in that
+order. If a tool runs when you type its name, it runs for Meridian. For a tool
+not on `PATH`, set its full path in the target's variable, such as
+`MERIDIAN_TERRAFORM`; each [target page](../index.md#user-documentation) names
+it.
 
-**The work directory** a tool is given is a plain path such as
-`C:\work\.meridian\work\web`, never the `\\?\C:\...` form, which many
-command-line tools do not accept.
+**Work directories** are plain paths such as `C:\work\.meridian\work\web`,
+never the `\\?\C:\...` form, which many tools reject.
 
 **How a plugin is reached.** `meridian` starts each plugin as a process and
-talks to it over a private channel. On Linux and macOS that is a Unix socket
-in a directory only you can enter. On Windows it is a named pipe: it refuses
-connections from other machines, and only your own account, administrators
-and the system can write to it, so no other account can send a plugin a
-request. Another local account can still open the pipe for reading, which
-gets it nothing a plugin says unasked, since a plugin only answers requests.
-Nothing is left on disk when the plugin exits. Nothing listens on a network
-port on any system.
+talks to it over a private channel. On Linux and macOS that is a Unix socket in
+a directory only you can enter. On Windows it is a named pipe that refuses
+remote connections and that only your account, administrators and SYSTEM can
+write to, so no other account can send a plugin a request. Other local accounts
+can open it for reading, which yields nothing, since a plugin only answers
+requests. Nothing is left on disk when the plugin exits, and nothing listens on
+a network port on any system.
 
 ## Which targets make sense on Windows
 
-Compiling works for every target on every system: it needs nothing but
-Meridian. Planning and applying run the target's own tool on the machine
-Meridian runs on, so they work where that tool does. The table says what to
-expect from how each tool behaves on Windows; [the next section](#what-has-and-has-not-been-tested-on-windows)
-says what has actually been run there.
+Compiling works for every target on every system. Planning and applying run the
+target's tool locally, so they work wherever that tool does. The table shows
+what to expect; [the next section](#what-has-and-has-not-been-tested-on-windows)
+shows what has actually been run.
 
 | Target | Expected on Windows |
 |---|---|
@@ -75,18 +69,15 @@ says what has actually been run there.
 
 ## What has and has not been tested on Windows
 
-Every plugin's compile tests, the plugin protocol, the orchestrator, the
-command line and plugin signatures run on Windows in CI, on every pull
-request. The runner tests, which drive a stand-in for each tool, run there
-too.
+CI runs every plugin's compile tests, the plugin protocol, the orchestrator, the
+command line, plugin signatures and the runner tests (against stand-ins) on
+Windows for every pull request.
 
-What has not been done on Windows is a run against the real tools. The
-workflows that install a real tool and apply with it are Linux jobs. If a
-target misbehaves on Windows with its real tool,
-[open an issue](https://github.com/ZanattaMichael/meridian-core/issues) and say
-which tool and version.
+No real tool has been run on Windows: the real-tool workflows are Linux jobs. If
+a target misbehaves on Windows with its real tool,
+[open an issue](https://github.com/ZanattaMichael/meridian-core/issues) with the
+tool and version.
 
-A few tests are left out on Windows, each with its reason beside it in the
-source: the ones that drive a real tool, and the host's tests of a broken
-plugin, whose broken plugins are shell scripts that Windows cannot start as
-programs.
+A few tests are skipped on Windows, each with its reason in the source: those
+that drive a real tool, and the host's broken-plugin tests, whose plugins are
+shell scripts Windows cannot run.
