@@ -477,6 +477,7 @@ fn a_secret_reaches_salt_as_pillar_data_and_is_in_nothing_salt_prints_or_the_plu
         "{:?}",
         log.text()
     );
-    assert_eq!(fs::read_to_string(&path).unwrap(), SECRET);
+    // Salt ends a managed file with a newline, as it does for any content.
+    assert_eq!(fs::read_to_string(&path).unwrap(), format!("{SECRET}\n"));
     nothing_under_work_holds(&dir, SECRET);
 }
