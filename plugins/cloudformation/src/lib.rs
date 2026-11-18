@@ -27,6 +27,7 @@
 // A refusal carries its position and resource by value, as the SDK's does.
 #![allow(clippy::result_large_err)]
 
+mod common;
 mod emit;
 mod runner;
 mod schemas;
@@ -193,9 +194,17 @@ impl Emitter for CloudFormation {
     }
 
     fn supported_resource_types(&self) -> Vec<String> {
-        ["<Vendor>::<Service>::<Type>", "stack"]
-            .map(str::to_owned)
-            .to_vec()
+        [
+            "<Vendor>::<Service>::<Type>",
+            "address",
+            "firewall",
+            "network",
+            "stack",
+            "subnet",
+            "vm",
+        ]
+        .map(str::to_owned)
+        .to_vec()
     }
 
     /// CloudFormation cannot act on one resource because another changed,
@@ -213,7 +222,19 @@ impl Emitter for CloudFormation {
         Category::InfrastructureAsCode
     }
 
+    /// The common infrastructure types, described for editors. AWS's own
+    /// types come from `meridian schema sync`.
+    fn resource_schemas(&self) -> Vec<meridian_sdk::ResourceSchema> {
+        meridian_sdk::infra::common_type_names()
+            .into_iter()
+            .map(|name| meridian_sdk::infra::common_schema(name, &common::params(name)))
+            .collect()
+    }
+
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        // The common types become AWS resources first, so every later stage
+        // sees CloudFormation types only.
+        let graph = &common::lower(graph)?;
         // A secret in a param is written as a reference to a NoEcho
         // parameter, which the runner gives its value from a private file.
         refuse_secret_in(

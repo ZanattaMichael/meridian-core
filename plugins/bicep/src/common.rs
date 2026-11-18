@@ -16,7 +16,7 @@ use meridian_sdk::infra::{
 use meridian_sdk::rules;
 use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
 
-use crate::{refuse, NAME};
+use crate::{Dialect, NAME};
 
 /// The API version every mapped network and compute type is written at.
 pub const NETWORK_API: &str = "2023-09-01";
@@ -56,16 +56,112 @@ pub fn params(name: &str) -> Vec<&'static str> {
     infra::common_params(name).iter().map(|(p, _)| *p).collect()
 }
 
-fn network_type(name: &str) -> String {
-    format!("Microsoft.Network/{name}@{NETWORK_API}")
+/// One target's way of writing Azure resources: Bicep puts the API version in
+/// the type and reads a resource's id as `${x.id}`; an ARM template gives
+/// the version as an `apiVersion` param and reads the id as `${x}`.
+#[derive(Clone, Copy)]
+struct Azure {
+    dialect: Dialect,
+    target: &'static str,
+}
+
+impl Azure {
+    /// The type of a resource and, on ARM, the `apiVersion` param it needs.
+    fn resource(
+        self,
+        common: &Resource,
+        suffix: Option<&str>,
+        provider: &str,
+        version: &str,
+        mut body: BTreeMap<String, Value>,
+    ) -> Resource {
+        let r#type = match self.dialect {
+            Dialect::Bicep => format!("{provider}@{version}"),
+            Dialect::Arm => {
+                body.insert("apiVersion".to_owned(), Value::from(version));
+                provider.to_owned()
+            }
+        };
+        match suffix {
+            Some(suffix) => helper(common, suffix, &r#type, body),
+            None => primary(common, &r#type, body),
+        }
+    }
+
+    fn network(
+        self,
+        common: &Resource,
+        suffix: Option<&str>,
+        name: &str,
+        body: BTreeMap<String, Value>,
+    ) -> Resource {
+        self.resource(
+            common,
+            suffix,
+            &format!("Microsoft.Network/{name}"),
+            NETWORK_API,
+            body,
+        )
+    }
+
+    /// How a reference to another resource's id is written.
+    fn id(self, id: &str) -> String {
+        match self.dialect {
+            Dialect::Bicep => format!("${{{id}.id}}"),
+            Dialect::Arm => format!("${{{id}}}"),
+        }
+    }
+
+    fn id_value(self, id: &str) -> Value {
+        Value::String(self.id(id))
+    }
+
+    /// Where a resource goes when the document gives no location.
+    fn group_location(self) -> &'static str {
+        match self.dialect {
+            Dialect::Bicep => "${resourceGroup().location}",
+            Dialect::Arm => "[resourceGroup().location]",
+        }
+    }
+
+    fn location(self, r: &Resource) -> Value {
+        r.params
+            .get("location")
+            .cloned()
+            .unwrap_or_else(|| Value::from(self.group_location()))
+    }
+
+    /// Name, location and tags: what every top-level Azure resource has.
+    fn top(self, r: &Resource, mut body: BTreeMap<String, Value>) -> BTreeMap<String, Value> {
+        body.insert("name".to_owned(), cloud_name(r));
+        body.insert("location".to_owned(), self.location(r));
+        if let Some(tags) = r.params.get("tags") {
+            body.insert("tags".to_owned(), tags.clone());
+        }
+        body
+    }
+
+    fn refuse(self, r: &Resource, rule: &rules::Rule, msg: String) -> CompileError {
+        CompileError {
+            target: self.target.to_owned(),
+            ..CompileError::for_resource(r, rule, msg)
+        }
+    }
+
+    fn refuse_param(self, r: &Resource, name: &str, why: &str) -> CompileError {
+        self.refuse(
+            r,
+            &rules::UNSUPPORTED_PARAM,
+            format!(
+                "param {name:?} of a {} cannot be expressed here: {why}",
+                r.r#type
+            ),
+        )
+    }
 }
 
 fn map(pairs: Vec<(&str, Value)>) -> BTreeMap<String, Value> {
     pairs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect()
-}
-
-fn reference(id: &str, attribute: &str) -> Value {
-    Value::String(format!("${{{id}.{attribute}}}"))
 }
 
 fn ref_param(r: &Resource, name: &str) -> Option<String> {
@@ -76,34 +172,6 @@ fn param(r: &Resource, name: &str) -> Value {
     r.params.get(name).cloned().unwrap_or(Value::Null)
 }
 
-fn location(r: &Resource) -> Value {
-    r.params
-        .get("location")
-        .cloned()
-        .unwrap_or_else(|| Value::from("${resourceGroup().location}"))
-}
-
-/// Name, location and tags: what every top-level Azure resource has.
-fn top(r: &Resource, mut body: BTreeMap<String, Value>) -> BTreeMap<String, Value> {
-    body.insert("name".to_owned(), cloud_name(r));
-    body.insert("location".to_owned(), location(r));
-    if let Some(tags) = r.params.get("tags") {
-        body.insert("tags".to_owned(), tags.clone());
-    }
-    body
-}
-
-fn refuse_param(r: &Resource, name: &str, why: &str) -> CompileError {
-    refuse(
-        r,
-        &rules::UNSUPPORTED_PARAM,
-        format!(
-            "param {name:?} of a {} cannot be expressed here: {why}",
-            r.r#type
-        ),
-    )
-}
-
 fn outputs(pairs: &[(&str, String)]) -> BTreeMap<String, String> {
     pairs
         .iter()
@@ -111,23 +179,27 @@ fn outputs(pairs: &[(&str, String)]) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// Replaces the common resources of the tree with Azure's own.
-pub(crate) fn lower(graph: &ResourceGraph) -> Result<ResourceGraph, CompileError> {
-    let lowered = infra::lower(graph, |r, _| {
-        infra::check_common(r).map_err(|e| CompileError {
-            target: NAME.to_owned(),
-            ..e
-        })?;
-        expand(r)
-    })
-    .map_err(|e| CompileError {
-        target: NAME.to_owned(),
+/// Replaces the common resources of the tree with Azure's own, written the
+/// way `dialect` writes them. The ARM target lowers through this too.
+pub fn lower_for(
+    graph: &ResourceGraph,
+    dialect: Dialect,
+    target: &'static str,
+) -> Result<ResourceGraph, CompileError> {
+    let azure = Azure { dialect, target };
+    let stamp = |e: CompileError| CompileError {
+        target: target.to_owned(),
         ..e
-    })?;
+    };
+    let lowered = infra::lower(graph, |r, _| {
+        infra::check_common(r).map_err(stamp)?;
+        expand(azure, r)
+    })
+    .map_err(stamp)?;
     let mut seen = std::collections::BTreeSet::new();
     for r in &lowered.resources {
         if !seen.insert(r.id.as_str()) {
-            return Err(refuse(
+            return Err(azure.refuse(
                 r,
                 &rules::DUPLICATE_RESOURCE,
                 format!(
@@ -141,15 +213,21 @@ pub(crate) fn lower(graph: &ResourceGraph) -> Result<ResourceGraph, CompileError
     Ok(lowered)
 }
 
-fn expand(r: &Resource) -> Result<Expansion, CompileError> {
+pub(crate) fn lower(graph: &ResourceGraph) -> Result<ResourceGraph, CompileError> {
+    lower_for(graph, Dialect::Bicep, NAME)
+}
+
+fn expand(azure: Azure, r: &Resource) -> Result<Expansion, CompileError> {
     let id = r.id.as_str();
-    let own_id = || outputs(&[("id", format!("${{{id}.id}}"))]);
+    let own_id = || outputs(&[("id", azure.id(id))]);
     Ok(match r.r#type.as_str() {
         "network" => Expansion {
-            resources: vec![primary(
+            order: Vec::new(),
+            resources: vec![azure.network(
                 r,
-                &network_type("virtualNetworks"),
-                top(
+                None,
+                "virtualNetworks",
+                azure.top(
                     r,
                     map(vec![(
                         "properties",
@@ -167,7 +245,7 @@ fn expand(r: &Resource) -> Result<Expansion, CompileError> {
         },
         "subnet" => {
             if matches!(r.params.get("public"), Some(Value::Bool(true))) {
-                return Err(refuse_param(
+                return Err(azure.refuse_param(
                     r,
                     "public",
                     "an Azure subnet gives no machine a public address of its own; attach an \
@@ -175,29 +253,44 @@ fn expand(r: &Resource) -> Result<Expansion, CompileError> {
                 ));
             }
             if r.params.contains_key("tags") {
-                return Err(refuse_param(r, "tags", "an Azure subnet carries no tags"));
+                return Err(azure.refuse_param(r, "tags", "an Azure subnet carries no tags"));
             }
             if r.params.contains_key("location") {
-                return Err(refuse_param(
+                return Err(azure.refuse_param(
                     r,
                     "location",
                     "an Azure subnet is wherever its network is; give the network the location",
                 ));
             }
             let network = ref_param(r, "network").unwrap_or_default();
-            Expansion {
-                resources: vec![primary(
-                    r,
-                    &network_type("virtualNetworks/subnets"),
+            let properties = (
+                "properties",
+                Value::Map(map(vec![("addressPrefix", param(r, "cidr"))])),
+            );
+            let body = match azure.dialect {
+                // Bicep nests a child under its parent's symbol.
+                Dialect::Bicep => map(vec![
+                    ("name", cloud_name(r)),
+                    ("parent", Value::String(format!("${{{network}}}"))),
+                    properties,
+                ]),
+                // ARM names a child "<parent>/<child>". Reading the
+                // network's name, rather than writing it out, is what orders
+                // the subnet after its network: ARM infers no order of its own.
+                Dialect::Arm => {
+                    let name = match cloud_name(r) {
+                        Value::String(n) => n,
+                        _ => r.id.clone(),
+                    };
                     map(vec![
-                        ("name", cloud_name(r)),
-                        ("parent", Value::String(format!("${{{network}}}"))),
-                        (
-                            "properties",
-                            Value::Map(map(vec![("addressPrefix", param(r, "cidr"))])),
-                        ),
-                    ]),
-                )],
+                        ("name", Value::String(format!("${{{network}.name}}/{name}"))),
+                        properties,
+                    ])
+                }
+            };
+            Expansion {
+                order: Vec::new(),
+                resources: vec![azure.network(r, None, "virtualNetworks/subnets", body)],
                 outputs: own_id(),
             }
         }
@@ -205,7 +298,7 @@ fn expand(r: &Resource) -> Result<Expansion, CompileError> {
             // A location must be known when the deployment starts, so a
             // network's location cannot be read here; the resource group's
             // is used unless the firewall gives one.
-            let mut body = top(r, map(vec![]));
+            let mut body = azure.top(r, map(vec![]));
             let rules: Vec<Value> = firewall_rules(r)
                 .iter()
                 .enumerate()
@@ -216,15 +309,18 @@ fn expand(r: &Resource) -> Result<Expansion, CompileError> {
                 Value::Map(map(vec![("securityRules", Value::List(rules))])),
             );
             Expansion {
-                resources: vec![primary(r, &network_type("networkSecurityGroups"), body)],
+                order: Vec::new(),
+                resources: vec![azure.network(r, None, "networkSecurityGroups", body)],
                 outputs: own_id(),
             }
         }
         "address" => Expansion {
-            resources: vec![primary(
+            order: Vec::new(),
+            resources: vec![azure.network(
                 r,
-                &network_type("publicIPAddresses"),
-                top(
+                None,
+                "publicIPAddresses",
+                azure.top(
                     r,
                     map(vec![
                         (
@@ -243,10 +339,10 @@ fn expand(r: &Resource) -> Result<Expansion, CompileError> {
             )],
             outputs: outputs(&[
                 ("address", format!("${{{id}.properties.ipAddress}}")),
-                ("id", format!("${{{id}.id}}")),
+                ("id", azure.id(id)),
             ]),
         },
-        _ => vm(r)?,
+        _ => vm(azure, r)?,
     })
 }
 
@@ -291,10 +387,10 @@ fn azure_rule(i: usize, rule: &infra::FirewallRule) -> BTreeMap<String, Value> {
     ])
 }
 
-fn vm(r: &Resource) -> Result<Expansion, CompileError> {
+fn vm(azure: Azure, r: &Resource) -> Result<Expansion, CompileError> {
     let id = r.id.as_str();
     let Some(key) = r.params.get("sshKey").cloned() else {
-        return Err(refuse(
+        return Err(azure.refuse(
             r,
             &rules::MISSING_PARAM,
             "a vm on Azure needs sshKey: an Azure Linux machine is created with password login \
@@ -307,7 +403,7 @@ fn vm(r: &Resource) -> Result<Expansion, CompileError> {
         _ => Vec::new(),
     };
     if firewalls.len() > 1 {
-        return Err(refuse_param(
+        return Err(azure.refuse_param(
             r,
             "firewalls",
             "an Azure network interface takes one network security group; put the rules in one \
@@ -334,7 +430,7 @@ fn vm(r: &Resource) -> Result<Expansion, CompileError> {
             "subnet",
             Value::Map(map(vec![(
                 "id",
-                reference(&ref_param(r, "subnet").unwrap_or_default(), "id"),
+                azure.id_value(&ref_param(r, "subnet").unwrap_or_default()),
             )])),
         ),
     ]);
@@ -342,7 +438,7 @@ fn vm(r: &Resource) -> Result<Expansion, CompileError> {
     if let Some(address) = &address {
         configuration.insert(
             "publicIPAddress".to_owned(),
-            Value::Map(map(vec![("id", reference(address, "id"))])),
+            Value::Map(map(vec![("id", azure.id_value(address))])),
         );
     }
     let mut nic_properties = map(vec![(
@@ -355,26 +451,26 @@ fn vm(r: &Resource) -> Result<Expansion, CompileError> {
     if let Some(firewall) = firewalls.first() {
         nic_properties.insert(
             "networkSecurityGroup".to_owned(),
-            Value::Map(map(vec![("id", reference(firewall, "id"))])),
+            Value::Map(map(vec![("id", azure.id_value(firewall))])),
         );
     }
     let nic_id = format!("{id}_nic");
     let mut nic = map(vec![
         ("name", Value::String(format!("{name_text}-nic"))),
-        ("location", location(r)),
+        ("location", azure.location(r)),
         ("properties", Value::Map(nic_properties)),
     ]);
     if let Some(tags) = r.params.get("tags") {
         nic.insert("tags".to_owned(), tags.clone());
     }
-    let nic = helper(r, "nic", &network_type("networkInterfaces"), nic);
+    let nic = azure.network(r, Some("nic"), "networkInterfaces", nic);
 
     let size = param(r, "size");
     let size = match asked_size(&size) {
         Some((cpus, memory)) => {
             Value::from(closest_size(AZURE_SIZES, cpus, memory).ok_or_else(|| {
                 let (largest, c, m) = AZURE_SIZES.last().expect("not empty");
-                refuse(
+                azure.refuse(
                     r,
                     &rules::INVALID_PARAM,
                     format!(
@@ -447,20 +543,19 @@ fn vm(r: &Resource) -> Result<Expansion, CompileError> {
             "networkProfile",
             Value::Map(map(vec![(
                 "networkInterfaces",
-                Value::List(vec![Value::Map(map(vec![(
-                    "id",
-                    reference(&nic_id, "id"),
-                )]))]),
+                Value::List(vec![Value::Map(map(vec![("id", azure.id_value(&nic_id))]))]),
             )])),
         ),
     ]);
-    let machine = primary(
+    let machine = azure.resource(
         r,
-        &format!("Microsoft.Compute/virtualMachines@{COMPUTE_API}"),
-        top(r, map(vec![("properties", Value::Map(properties))])),
+        None,
+        "Microsoft.Compute/virtualMachines",
+        COMPUTE_API,
+        azure.top(r, map(vec![("properties", Value::Map(properties))])),
     );
     let mut reads = vec![
-        ("id", format!("${{{id}.id}}")),
+        ("id", azure.id(id)),
         (
             "privateAddress",
             format!("${{{nic_id}.properties.ipConfigurations[0].properties.privateIPAddress}}"),
@@ -473,6 +568,7 @@ fn vm(r: &Resource) -> Result<Expansion, CompileError> {
         ));
     }
     Ok(Expansion {
+        order: Vec::new(),
         resources: vec![nic, machine],
         outputs: outputs(&reads),
     })

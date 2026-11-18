@@ -10,7 +10,7 @@ with `aws` through a change set, so what is applied is what was previewed.
 | | |
 |---|---|
 | Category | Infrastructure as code |
-| Resource types | CloudFormation's own: any `Vendor::Service::Type` or `Custom::Name`, plus `stack` for the deployment's settings |
+| Resource types | CloudFormation's own: any `Vendor::Service::Type` or `Custom::Name`, plus `stack` for the deployment's settings. Also the [common infrastructure types](#common-infrastructure-types) |
 | `dependsOn` | Yes, as `DependsOn`, unless a reference already implies the order |
 | `notifies` | No. CloudFormation has no way to react to a change in another resource. Refused |
 | `runtimeWhen` | No. A CloudFormation condition is decided from the template's parameters, not at deploy time. Refused |
@@ -167,6 +167,28 @@ Ids become logical ids: `web_vm` is `WebVm`. Collisions are refused. Reports use
 
 Anything else in `${}` is refused (`invalid-reference`). Values from data never become
 references ([see](../reference/dsl/interpolation.md#a-tools-own-expressions)).
+
+## Common infrastructure types
+
+`network`, `subnet`, `firewall`, `address` and `vm` are Meridian's own types,
+and this target turns each into CloudFormation's own
+([the common infrastructure types](../reference/dsl/common-infrastructure-types.md)
+has every param and mapping). They are created in the stack's region, and
+mapped as the Terraform target maps them on AWS, with the same sizes,
+refusals and outputs.
+
+| Common type | Becomes |
+|---|---|
+| `network` | `AWS::EC2::VPC`, with DNS host names on |
+| `subnet` | `AWS::EC2::Subnet`. With `public: true`, also an `AWS::EC2::InternetGateway` and `AWS::EC2::VPCGatewayAttachment` per network, a route table, a route to the internet that waits for the attachment, and the table's association |
+| `firewall` | `AWS::EC2::SecurityGroup`, the rules inside it |
+| `address` | `AWS::EC2::EIP` |
+| `vm` | `AWS::EC2::Instance`, an `AWS::EC2::KeyPair` for `sshKey`, an `AWS::EC2::EIPAssociation` for `address` |
+
+An image given as `{family, version}` is read when the stack is deployed from
+the vendor's public Systems Manager parameter, as `{{resolve:ssm:...}}`.
+Compare [`examples/common/web-cloudformation.yaml`](../../examples/common/web-cloudformation.yaml)
+with [`web-aws.yaml`](../../examples/common/web-aws.yaml).
 
 ## Ordering
 

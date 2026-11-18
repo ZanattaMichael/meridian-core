@@ -167,10 +167,11 @@ Also:
 - dependencies come first.
 
 **Common infrastructure types.** `infra_conformance.rs` compiles about 40 documents using
-`network`, `subnet`, `firewall`, `address` and `vm` for Terraform and OpenTofu (AWS, Azure)
-and Bicep into the [infra conformance matrix](../reference/infra-conformance-matrix.md). It
-fails if a target declares only some of the five or has no column, and checks a secret ssh key
-is never written.
+`network`, `subnet`, `firewall`, `address` and `vm` for Terraform and OpenTofu (AWS, Azure),
+CloudFormation, Bicep and ARM into the
+[infra conformance matrix](../reference/infra-conformance-matrix.md). It fails if a target
+declares only some of the five or has no column, and checks a secret ssh key is never
+written.
 
 **Every target.** Each `examples/<target>/` example must compile deterministically to
 relative paths, never drop `runtimeWhen`, refuse undeclared notifies, and refuse unknown
