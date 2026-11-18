@@ -37,11 +37,12 @@ on [its own page](../../concepts/secrets-in-memory.md).
 
 > **Where this stands.** A secret can be declared, fetched, read by a `when`,
 > and placed in a resource's `params` for a target that
-> [takes one](#handing-a-secret-to-a-tool): today `ansible`, `terraform` and
-> `opentofu`. For any other target a secret in `params` is checked and
-> `compile` writes its name in its place, but `plan` and `apply` stop at it,
-> because that target has no channel yet that is not the compiled files. A run
-> never writes a secret into a compiled file to get past this.
+> [takes one](#handing-a-secret-to-a-tool): today `ansible`, `puppet`,
+> `openvox`, `salt`, `chef`, `terraform` and `opentofu`. For any other target
+> a secret in `params` is checked and `compile` writes its name in its place,
+> but `plan` and `apply` stop at it, because that target has no channel that
+> is not the compiled files. A run never writes a secret into a compiled file
+> to get past this.
 
 ## Contents
 
@@ -270,7 +271,10 @@ spec:
 |---|---|---|
 | `ansible` | `{{ meridian_secret_db_password }}`, and the task is marked `no_log` so Ansible prints neither its arguments, its diff nor its result | an extra-vars file only the user can read, held in memory where the system allows, passed as `--extra-vars @<path>` and removed when the run ends |
 | `terraform`, `opentofu` | `${var.meridian_secret_db_password}`, with the variable declared `sensitive` | a variables file of the same kind, passed to `plan` as `-var-file=<path>` and removed when the plan is saved. The saved plan holds every variable's value, as every Terraform plan file does, so it is overwritten and removed as soon as it has been applied or shown |
-| any other target | the stage stops, and says which targets take a secret | |
+| `puppet`, `openvox` | `Sensitive(lookup('meridian_secret_db_password'))`: a Hiera lookup, wrapped so that Puppet redacts the value in its report and its diffs. A secret is a whole param; one inside a list or a map is refused, since a lookup is one value | a Hiera data file only the user can read, with a `hiera.yaml` beside it that names that directory, passed as `--hiera_config <path>` to `puppet apply` and `--hiera-config <path>` to `bolt apply`, and removed when the run ends |
+| `salt` | `{{ pillar['meridian_secret_db_password'] \| yaml_encode }}`, rendered by Jinja before Salt reads the file as YAML. A file state given one gets `show_changes: false`, so Salt prints no diff. An `exec` is refused one (`unsupported-secret-place`): Salt prints the command line in its report, and nothing turns that off | a pillar root only the user can read, a pillar file and the top file that applies it, passed as `--pillar-root <dir>` to `salt-call` and named as `pillar_roots` in the `salt-ssh` configuration, and removed when the run ends |
+| `chef` | `node['meridian_secret_db_password']`, with `sensitive true` on the resource, so Chef prints neither its diff nor its content | on this machine: an attributes file only the user can read, passed as `--json-attributes <path>` to `chef-client`, with a `client.rb` beside it that keeps the node object local mode writes back (attributes and all) in the same private directory, and removed when the run ends. Through `chef-run`, which takes attributes on its command line only, the apply stops and says so |
+| any other target (`cloud-init`, `dsc`, the containers and the infrastructure targets) | the stage stops, and says which targets take a secret | |
 
 Only a bare secret is handed over under its own name. A value made from a
 secret and anything else is a secret of its own, since the whole of it is
@@ -300,7 +304,7 @@ secret's name instead, as `password=(secret db_password)`, and `plan` and
 `apply` stop at the stage:
 
 ```
-resource "app_env": params.content holds a secret, and target "chef" does not take one: it has no private channel to hand a secret to its tool, so the value would be written into a file or dropped. A secret can still decide a when for it; targets that do: ansible, opentofu, terraform
+resource "app_env": params.content holds a secret, and target "cloud-init" does not take one: it has no private channel to hand a secret to its tool, so the value would be written into a file or dropped. A secret can still decide a when for it; targets that do: ansible, chef, openvox, opentofu, puppet, salt, terraform
 ```
 
 A rollback hands the tool the document's secrets again, fetched at the
@@ -388,7 +392,7 @@ does not have is `UNAVAILABLE`.
 | `validate` | checked: the name is declared, the expression is one a secret allows where it can be known | checked the same way |
 | `compile` | refused: `(secret db_password) is not fetched here: a secret is fetched by plan and apply, never by validate or compile` | written as its name: `password=(secret db_password)` |
 | `secret check` | not read | not read: only where each declared secret comes from is looked at |
-| `plan`, `apply` | decided. The report shows the condition as the document wrote it, never the value | [handed to the tool](#handing-a-secret-to-a-tool) by a private channel, for a target that takes one; for any other, the stage stops: `resource "conf": params.content holds a secret, and target "chef" does not take one: ...` |
+| `plan`, `apply` | decided. The report shows the condition as the document wrote it, never the value | [handed to the tool](#handing-a-secret-to-a-tool) by a private channel, for a target that takes one; for any other, the stage stops: `resource "conf": params.content holds a secret, and target "cloud-init" does not take one: ...` |
 
 What `compile --out` writes for a secret depends on the target. For one that
 takes secrets it is the reference the tool will resolve, `{{
@@ -425,7 +429,10 @@ a command's arguments.
 | The kernel keyring holds the key and this session may not read it | `plan`, `apply` | `secret "x" (from: keyring): the kernel keyring holds the key ..., and this session may not read it: the key is readable only by a possessor, and this session's keyring does not link the user keyring. Let the owner read it with: keyctl setperm ... 0x3f3f0000, or store it with meridian secret set` |
 | `secret set` on a secret with no writable place | `secret set` | `"deploy_token" names no place meridian can write. It is looked for in the environment variable DEPLOY_TOKEN, then in the file token.txt. meridian writes the kernel keyring (from: keyring) and the Secret Service (from: secret-service); every other place is written with its own tool` |
 | A secret that is not base64 is given to `base64Decode` | `plan`, `apply` | `base64Decode(...): the secret is not base64` |
-| A secret in `params` of a target that takes none | `plan`, `apply` | `resource "conf": params.content holds a secret, and target "chef" does not take one: it has no private channel to hand a secret to its tool, so the value would be written into a file or dropped. A secret can still decide a when for it; targets that do: ansible, opentofu, terraform` |
+| A secret in `params` of a target that takes none | `plan`, `apply` | `resource "conf": params.content holds a secret, and target "cloud-init" does not take one: it has no private channel to hand a secret to its tool, so the value would be written into a file or dropped. A secret can still decide a when for it; targets that do: ansible, chef, openvox, opentofu, puppet, salt, terraform` |
+| A secret in `params` of a `chef` document for another machine | `apply` | `chef-run has no private way to hand a secret to web01: it takes attributes on its command line only, where every user of this machine could read them. Run chef-client on the host, with the local transport, or keep the secret out of this document` |
+| A secret inside a list or a map, on `puppet` or `openvox` | `compile` | `param "groups" holds a secret inside a list or a map; on this target a secret is a whole param, looked up as one Sensitive value [unsupported-secret-place]` |
+| A secret in an `exec`, on `salt` | `compile` | `a secret cannot be used in an exec on this target: Salt prints the command line in its report, and nothing turns that off. Put the secret in a file the command reads, or in a runtimeWhen [unsupported-secret-place]` |
 | A secret that is not text, handed to a tool that reads a variables file | `plan`, `apply` | `writing the extra-vars file: the secret is not text, so it cannot be written as a JSON string` |
 
 ## Examples
@@ -468,8 +475,9 @@ What each machine is given:
 | the default password | kept | kept | removed | removed |
 | a strong password outside production | removed | removed | removed | removed |
 
-The second is compiled, which reads no secret. Its target, `chef`, takes no
-secret yet, so the name is written where the value belongs:
+The second is compiled, which reads no secret. Its target, `cloud-init`,
+takes no secret (its user-data is the compiled file, for a machine that does
+not exist yet), so the name is written where the value belongs:
 
 ```
 meridian compile examples/language/secret-in-a-setting.yaml \

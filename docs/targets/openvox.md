@@ -17,6 +17,7 @@ of Puppet: `puppet apply` on the machine itself, or OpenBolt for another machine
 | Not supported | `action: reload`, `start` or `stop` on a service, and notifying a `package`, `file`, `user` or `group`. A refresh restarts a service and takes no argument, and the other types do nothing on one. The compile refuses these and says why; it does not turn a reload into a restart |
 | `runtimeWhen` | No. A catalog is compiled before it reaches the node, so there is nothing left to evaluate at apply time. Refused |
 | `state: restarted` | No. It is not a state a node can be left in. Notify the service instead |
+| Secrets | Yes: by Hiera, as a `Sensitive` lookup, exactly as the Puppet target does. See [Secrets](#secrets) |
 | References (`${id.param}`) | Yes, settled at compile time to the value the document declares. Anything that cannot be settled is refused. See [References](#references) |
 | Plan | Yes: the tool's own `--noop` run |
 | Apply | Yes |
@@ -477,6 +478,25 @@ MERIDIAN_OPENVOX_ARGS="--environment staging" meridian apply site.yaml      # lo
 
 `MERIDIAN_OPENVOX_TRANSPORT=local` is for running Meridian on the node itself when the
 document names that node by its real host name.
+
+### Secrets
+
+A [secret](../reference/dsl/secrets.md) in a resource's params is compiled to a Hiera
+lookup wrapped in `Sensitive`, so OpenVox redacts the value in its report and in any
+diff:
+
+```puppet
+    content => Sensitive(lookup('meridian_secret_db_password')),
+```
+
+When a stage runs, the value is written under that key into a Hiera data file only the
+user can read, with a `hiera.yaml` beside it, both in a private directory that is
+removed when the run ends; the run is given `--hiera_config <dir>/hiera.yaml` (OpenBolt:
+`--hiera-config`) and nothing more. The command line, the environment and the work
+directory never hold the value. A secret inside a list or a map is refused at compile,
+because a lookup is one value. This is the Puppet target's handover, run through
+OpenVox's `puppet`; [its page](puppet.md#secrets) describes it in full, and the real-tool
+test here (`MERIDIAN_TEST_REAL_OPENVOX=1`) proves it against OpenVox itself.
 
 ### Making sure it is OpenVox
 

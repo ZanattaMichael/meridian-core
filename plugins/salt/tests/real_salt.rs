@@ -19,7 +19,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use meridian_plugin_testkit::{
-    fixture, graph_from_file, graph_from_text, scratch, without_positions, KeptLog,
+    fixture, graph_from_file, graph_from_text, scratch, secret_in_param, secrets,
+    without_positions, KeptLog,
 };
 use meridian_sdk::{Artifact, Data, Emitter, RunContext, Runner};
 use meridian_target_salt::{Salt, SaltRunner, Transport};
@@ -402,4 +403,81 @@ fn another_host_is_configured_over_ssh() {
         "over ssh\n"
     );
     assert!(runner.plan(&ctx, &artifact, &log).unwrap().in_sync());
+}
+
+/// Nothing the plugin wrote to its work directory holds `value`.
+fn nothing_under_work_holds(dir: &Path, value: &str) {
+    fn walk(dir: &Path, value: &str) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, value);
+            } else if path.is_file() {
+                let bytes = fs::read(&path).unwrap();
+                assert!(
+                    !String::from_utf8_lossy(&bytes).contains(value),
+                    "{} holds the secret",
+                    path.display()
+                );
+            }
+        }
+    }
+    walk(&dir.join("work"), value);
+}
+
+const SECRET: &str = "s3cr3t-not-a-real-password-Q9";
+
+#[ignore = "needs a real salt-call or salt-ssh; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_secret_reaches_salt_as_pillar_data_and_is_in_nothing_salt_prints_or_the_plugin_writes() {
+    let dir = scratch(TMP, "real-secret");
+    let Some(runner) = real(&dir) else { return };
+    let base = dir.join("node");
+    let path = base.join("app.env");
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: salt\n  targetHost:\n    from: inline\n    host: localhost\n  resources:\n    - id: app_dir\n      type: file\n      state: directory\n      params:\n        path: {base}\n    - id: env_file\n      type: file\n      params:\n        path: {path}\n        content: placeholder\n        mode: \"0600\"\n      dependsOn:\n        - resource: app_dir\n",
+        base = base.display(),
+        path = path.display()
+    );
+    let mut graph = graph_from_text("site.yaml", &text, "salt");
+    let slot = secret_in_param(&mut graph, "env_file", "content", "db_password");
+    let artifact = Salt
+        .emit(&graph, &Data::new())
+        .unwrap_or_else(|e| panic!("{e}"))
+        .artifact;
+    assert!(!artifact.files["states/web.sls"].contains(SECRET));
+    let mut ctx = context(&dir);
+    ctx.secrets = secrets(&[(slot, "db_password", SECRET)]);
+
+    // A dry run sees the change and, show_changes being off, prints no
+    // diff of it.
+    let log = KeptLog::default();
+    let plan = runner
+        .plan(&ctx, &artifact, &log)
+        .unwrap_or_else(|e| panic!("planning: {e}\n{}", log.text().join("\n")));
+    assert_eq!(
+        ids(&plan.changes),
+        ["app_dir", "env_file"],
+        "{}",
+        log.text().join("\n")
+    );
+    assert!(
+        !log.text().iter().any(|line| line.contains(SECRET)),
+        "{:?}",
+        log.text()
+    );
+    assert!(!path.exists(), "a plan creates nothing");
+
+    let log = KeptLog::default();
+    runner
+        .apply(&ctx, &artifact, &log)
+        .unwrap_or_else(|e| panic!("applying: {e}\n{}", log.text().join("\n")));
+    assert!(
+        !log.text().iter().any(|line| line.contains(SECRET)),
+        "{:?}",
+        log.text()
+    );
+    // Salt ends a managed file with a newline, as it does for any content.
+    assert_eq!(fs::read_to_string(&path).unwrap(), format!("{SECRET}\n"));
+    nothing_under_work_holds(&dir, SECRET);
 }

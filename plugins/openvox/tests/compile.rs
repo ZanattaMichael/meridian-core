@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use meridian_plugin_testkit::{
     assert_golden, assert_golden_refusal, fixture, graph_from_file, graph_from_text,
-    without_positions,
+    secret_in_param, without_positions,
 };
 use meridian_sdk::{Capabilities, Category, CompileError, Data, Emitted, Emitter, ResourceGraph};
 use meridian_target_openvox::{OpenVox, MANIFEST_PATH, NAME, SITE_PATH};
@@ -57,7 +57,7 @@ fn the_plugin_describes_itself_as_openvox() {
             native_notify: true,
             synthetic_notify: false,
             runtime_condition: false,
-            secrets: false,
+            secrets: true,
             credentials: false,
         }
     );
@@ -215,4 +215,20 @@ fn a_reference_is_settled_from_the_document_or_refused_as_openvox() {
     assert_eq!(err.rule, "invalid-reference");
     assert_eq!(err.target, "openvox");
     assert_eq!(err.resource, "page");
+}
+
+#[test]
+fn a_secret_compiles_to_the_same_sensitive_lookup_as_puppet() {
+    let text = "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: openvox\n  targetHost:\n    from: inline\n    host: web01.example.com\n  resources:\n    - id: env_file\n      type: file\n      params: {path: /etc/app/env, content: placeholder, mode: \"0600\"}\n";
+    let mut graph = graph_from_text("site.yaml", text, NAME);
+    secret_in_param(&mut graph, "env_file", "content", "db_password");
+    let ours = emit(&graph).unwrap();
+    let theirs = Puppet.emit(&graph, &Data::new()).unwrap();
+    assert_eq!(ours.artifact.files, theirs.artifact.files);
+    assert!(
+        ours.artifact.files[MANIFEST_PATH]
+            .contains("content => Sensitive(lookup('meridian_secret_db_password')),"),
+        "{}",
+        ours.artifact.files[MANIFEST_PATH]
+    );
 }

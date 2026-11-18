@@ -212,6 +212,10 @@ user in the process list.
   reach a disk. `in_memory()` says whether it is.
 - The file is built from parts, literal text and secrets in order, so a
   secret goes from locked memory to the file without becoming a `String`.
+- `beside(name, text)` writes a second file of the same protection into the
+  same directory, for a tool that reaches the secret file only through
+  another: a `hiera.yaml` naming its data directory, a pillar top file, a
+  `client.rb`. The text holds no secret; the file goes with the directory.
 - Dropping it overwrites the file and removes it and its directory, including
   anything a tool left beside it.
 - A run that was killed cannot clean up. `sweep_stale()` removes the
@@ -260,9 +264,11 @@ crosses one boundary on the way. What crosses, and when:
   `Display`, and they are wiped when the call's context is dropped.
 - **To the tool by a private channel.** `Secrets::json_file` writes every
   value into one `SecretFile` under the names the artifact uses, for a tool
-  that reads variables from a file; `Tool::stdin_secret` pipes one into a
-  tool's standard input. Neither the command line nor the environment is a
-  channel the SDK offers.
+  that reads variables from a file; a plugin whose tool reads another format
+  (Hiera's YAML, a Salt pillar) builds the `SecretFile` from parts the same
+  way; `Tool::stdin_secret` pipes one into a tool's standard input. Neither
+  the command line nor the environment is a channel the SDK offers, and a
+  tool that has only the command line (`chef-run`) is refused the secret.
 - **Rollback fetches again.** The run keeps nothing of a stage's secrets once
   the stage ends; a rollback at the end of a failed run, or `meridian
   rollback` later, fetches the document's secrets at the stage's turn.

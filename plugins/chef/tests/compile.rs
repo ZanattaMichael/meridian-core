@@ -4,7 +4,9 @@
 
 use std::path::{Path, PathBuf};
 
-use meridian_plugin_testkit::{assert_golden, fixture, graph_from_file, graph_from_text};
+use meridian_plugin_testkit::{
+    assert_golden, fixture, graph_from_file, graph_from_text, secret_in_param,
+};
 use meridian_sdk::{CompileError, Data, Emitted, Emitter, ResourceGraph};
 use meridian_target_chef::{recipe_path, Chef};
 
@@ -200,4 +202,48 @@ fn a_reference_is_settled_from_the_document_or_refused() {
     assert_eq!(err.rule, "invalid-reference");
     assert_eq!(err.resource, "page");
     assert!(err.msg.contains("does not declare"), "{}", err.msg);
+}
+
+// ---- secrets ------------------------------------------------------------
+
+fn with_secret(resources: &str, id: &str, param: &str, name: &str) -> ResourceGraph {
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: chef\n  targetHost:\n    from: inline\n    host: web01.example.com\n  resources:\n{resources}"
+    );
+    let mut graph = graph_from_text("site.yaml", &text, "chef");
+    secret_in_param(&mut graph, id, param, name);
+    graph
+}
+
+#[test]
+fn a_secret_in_a_param_is_read_from_the_node_and_the_resource_is_sensitive() {
+    let graph = with_secret(
+        "    - id: env_file\n      type: file\n      params: {path: /etc/app/env, content: placeholder, mode: \"0600\"}\n    - id: conf\n      type: file\n      params: {path: /etc/app/app.conf, content: \"a = 1\\n\"}\n",
+        "env_file",
+        "content",
+        "db_password",
+    );
+    let text = emit(&graph).unwrap().artifact.files[&recipe_path("meridian_web")].clone();
+    assert!(
+        text.contains(
+            "file 'env_file' do\n  content node['meridian_secret_db_password']\n  mode '0600'\n  path '/etc/app/env'\n  sensitive true\n  action :create\nend\n"
+        ),
+        "{text}"
+    );
+    // The resource with no secret is not made sensitive: its diff still
+    // shows.
+    assert!(
+        text.contains("file 'conf' do\n  content \"a = 1\\n\"\n  path '/etc/app/app.conf'\n  action :create\nend\n"),
+        "{text}"
+    );
+    assert!(!text.contains("placeholder"), "{text}");
+    assert_eq!(
+        meridian_target_chef::secret_reference("db_password"),
+        "node['meridian_secret_db_password']"
+    );
+    assert_eq!(
+        meridian_target_chef::secret_key("db_password"),
+        "meridian_secret_db_password"
+    );
+    assert!(Chef.capabilities().secrets);
 }

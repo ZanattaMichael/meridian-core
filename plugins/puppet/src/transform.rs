@@ -206,11 +206,21 @@ fn lookup(pairs: &[(&'static str, &'static str)], key: &str) -> Option<&'static 
 /// metaparameters its notifies edges require. It does no ordering work:
 /// `require` is the sort stage's job, because whether one is needed depends
 /// on what notify already implies.
+/// Whether a value refers to a secret anywhere inside it.
+fn holds_secret(value: &Value) -> bool {
+    match value {
+        Value::Secret(_) => true,
+        Value::List(items) => items.iter().any(holds_secret),
+        Value::Map(map) => map.values().any(holds_secret),
+        _ => false,
+    }
+}
+
 pub(crate) fn transform(graph: &ResourceGraph) -> Result<Manifest, CompileError> {
     let class = class_name(&graph.name)?;
     let mut resources = Vec::with_capacity(graph.resources.len());
     for resource in &graph.resources {
-        resources.push(declaration_for(resource)?);
+        resources.push(declaration_for(resource, &graph.secrets)?);
     }
     let mut notify = notifications(graph, &resources)?;
     for declaration in &mut resources {
@@ -235,7 +245,10 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Manifest, CompileError>
     })
 }
 
-fn declaration_for(r: &Resource) -> Result<Declaration, CompileError> {
+fn declaration_for(
+    r: &Resource,
+    secrets: &[meridian_sdk::SecretName],
+) -> Result<Declaration, CompileError> {
     let Some(m) = mapping(&r.r#type) else {
         return Err(refuse(
             r,
@@ -309,7 +322,35 @@ fn declaration_for(r: &Resource) -> Result<Declaration, CompileError> {
             }
             continue;
         }
-        attrs.insert(native.to_owned(), Attr::Value(value.clone()));
+        // A secret is handed over by the runner, through Hiera: the
+        // manifest looks it up under its name, as a Sensitive value, so
+        // Puppet redacts it from its report. It stands on its own as a
+        // param: inside a list or a hash, Puppet would hold the rest of the
+        // value in the open beside it.
+        let attr = match value {
+            Value::Secret(at) => {
+                let Some(secret) = secrets.iter().find(|s| s.secret == *at) else {
+                    return Err(refuse(
+                        r,
+                        "unnamed-secret",
+                        format!("param {name:?} holds a secret the graph does not name"),
+                    ));
+                };
+                Attr::Source(crate::secret_reference(&secret.name))
+            }
+            value if holds_secret(value) => {
+                return Err(refuse(
+                    r,
+                    "unsupported-secret-place",
+                    format!(
+                        "param {name:?} holds a secret inside a list or a map; on this target \
+                         a secret is a whole param, looked up as one Sensitive value"
+                    ),
+                ));
+            }
+            value => Attr::Value(value.clone()),
+        };
+        attrs.insert(native.to_owned(), attr);
     }
 
     for need in m.required {

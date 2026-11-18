@@ -24,9 +24,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use meridian_plugin_testkit::{graph_from_text, scratch, KeptLog};
+use meridian_plugin_testkit::{graph_from_text, scratch, secret_in_param, secrets, KeptLog};
 use meridian_sdk::{
-    Applied, Artifact, Change, ChangeAction, Data, Emitter, Plan, RunContext, Runner,
+    Applied, Artifact, Change, ChangeAction, Data, Emitter, Plan, RunContext, Runner, SecretRef,
 };
 use meridian_target_chef::{Chef, ChefRunner};
 
@@ -324,4 +324,86 @@ fn packages_accounts_and_a_service_are_managed_as_root() {
     assert!(!exists(&["getent", "passwd", "meridian-deploy"]));
     assert!(!exists(&["getent", "group", "meridian-team"]));
     assert!(!exists(&["dpkg", "-s", "hello"]));
+}
+
+/// Nothing the plugin wrote to its work directory holds `value`.
+fn nothing_under_work_holds(dir: &Path, value: &str) {
+    fn walk(dir: &Path, value: &str) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, value);
+            } else if path.is_file() {
+                let bytes = fs::read(&path).unwrap();
+                assert!(
+                    !String::from_utf8_lossy(&bytes).contains(value),
+                    "{} holds the secret",
+                    path.display()
+                );
+            }
+        }
+    }
+    walk(&dir.join("work"), value);
+}
+
+const SECRET: &str = "s3cr3t-not-a-real-password-Q9";
+
+#[ignore = "needs a real chef-client; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_secret_reaches_chef_as_a_node_attribute_and_is_in_nothing_chef_prints_or_the_plugin_writes() {
+    let Some(runner) = chef() else { return };
+    let dir = scratch(TMP, "real-secret");
+    let root = dir.display();
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: site\nspec:\n  target: chef\n  targetHost:\n    from: inline\n    host: localhost\n  resources:\n    - id: env_file\n      type: file\n      params:\n        path: {root}/app.env\n        content: placeholder\n        mode: \"0600\"\n"
+    );
+    let mut graph = graph_from_text("site.yaml", &text, "chef");
+    let slot: SecretRef = secret_in_param(&mut graph, "env_file", "content", "db_password");
+    let artifact = Chef
+        .emit(&graph, &Data::new())
+        .unwrap_or_else(|e| panic!("{e}"))
+        .artifact;
+    assert!(!artifact.files["cookbooks/meridian_site/recipes/default.rb"].contains(SECRET));
+    let mut context = context(&dir);
+    context.secrets = secrets(&[(slot, "db_password", SECRET)]);
+
+    // A why-run sees the change and, the resource being sensitive, prints
+    // no content.
+    let log = KeptLog::default();
+    let preview = runner
+        .plan(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(
+        changes(&preview.changes),
+        [("env_file", ChangeAction::Update)]
+    );
+    assert!(
+        !log.text().iter().any(|line| line.contains(SECRET)),
+        "{:?}",
+        log.text()
+    );
+    assert!(!dir.join("app.env").exists(), "a plan creates nothing");
+
+    let log = KeptLog::default();
+    runner
+        .apply(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert!(
+        !log.text().iter().any(|line| line.contains(SECRET)),
+        "{:?}",
+        log.text()
+    );
+    assert_eq!(fs::read_to_string(dir.join("app.env")).unwrap(), SECRET);
+    // Local mode writes the node back after a run, attributes and all; that
+    // went to the private directory, not the work directory.
+    nothing_under_work_holds(&dir, SECRET);
+    assert!(
+        !dir.join("work/nodes").exists(),
+        "the node was written to the work directory"
+    );
+
+    let again = runner
+        .plan(&context, &artifact, &KeptLog::default())
+        .unwrap();
+    assert!(again.changes.is_empty(), "{:?}", again.changes);
 }

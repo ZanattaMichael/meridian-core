@@ -334,6 +334,16 @@ fn unsupported_type(r: &Resource) -> CompileError {
 /// edges into requisites. It does no ordering work: the resources arrive in
 /// apply order and leave in the same order, and dependency edges are the sort
 /// stage's.
+/// Whether a value refers to a secret anywhere inside it.
+pub(crate) fn holds_secret(value: &Value) -> bool {
+    match value {
+        Value::Secret(_) => true,
+        Value::List(items) => items.iter().any(holds_secret),
+        Value::Map(map) => map.values().any(holds_secret),
+        _ => false,
+    }
+}
+
 pub(crate) fn transform(graph: &ResourceGraph) -> Result<(Sls, Vec<Warning>), CompileError> {
     let mut warnings = Vec::new();
     let mut states = Vec::with_capacity(graph.resources.len());
@@ -347,6 +357,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<(Sls, Vec<Warning>), Co
             host: graph.host.clone(),
             states,
             reactions,
+            secrets: graph.secrets.clone(),
         },
         warnings,
     ))
@@ -426,6 +437,31 @@ fn state_for(
             args.insert("replace".to_owned(), Value::Bool(false));
         }
         _ => {}
+    }
+
+    // A state handed a secret is not allowed to show it: a managed file
+    // prints no diff. The runner hands the value over through the pillar;
+    // here only its name is written. A command is refused one: Salt writes
+    // the command line into its result's comment, in a dry run ("Command
+    // ... would have been executed") and in a real one, and no setting
+    // keeps it out, so the value would be in the report Meridian reads.
+    if args.values().any(holds_secret) {
+        match m.module {
+            "file" => {
+                args.insert("show_changes".to_owned(), Value::Bool(false));
+            }
+            "cmd" => {
+                return Err(refuse(
+                    r,
+                    "unsupported-secret-place",
+                    "a secret cannot be used in an exec on this target: Salt prints the \
+                     command line in its report, and nothing turns that off. Put the \
+                     secret in a file the command reads, or in a runtimeWhen"
+                        .to_owned(),
+                ));
+            }
+            _ => {}
+        }
     }
 
     // `name` leads, as a person would write it; the rest keep their sorted

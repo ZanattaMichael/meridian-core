@@ -7,9 +7,12 @@
 //! there over SSH or WinRM. The runner picks by the document's host and can
 //! be told.
 
-use meridian_sdk::tool::{write_artifact, Tool};
+use std::path::PathBuf;
+
+use meridian_sdk::tool::{absolute_path, write_artifact, Tool};
 use meridian_sdk::{
     Applied, Artifact, Change, ChangeAction, Log, Operations, Plan, RunContext, RunError, Runner,
+    SecretFile,
 };
 
 /// Names the `chef-client` program, when it is not on `PATH`. Cinc's
@@ -104,6 +107,7 @@ impl ChefRunner {
         why_run: bool,
         log: &dyn Log,
     ) -> Result<Vec<Change>, RunError> {
+        let attributes = secret_attributes(context)?;
         let mut tool = Tool::new(&self.client)
             // Local mode takes the directory it runs in for the repository
             // when it holds a `cookbooks` directory, which the work
@@ -111,10 +115,23 @@ impl ChefRunner {
             .args(["--local-mode", "--no-color", "--force-formatter"])
             .args(["--override-runlist", &format!("recipe[{cookbook}]")])
             .dir(&context.work_dir);
+        if let Some(attributes) = &attributes {
+            // The attributes file is read as the node's JSON attributes, and
+            // the configuration beside it keeps the node object local mode
+            // writes back, which copies every attribute, out of the work
+            // directory and in the private one.
+            tool = tool
+                .args(["--config", &attributes.config.to_string_lossy()])
+                .args([
+                    "--json-attributes",
+                    &attributes.file.path().to_string_lossy(),
+                ]);
+        }
         if why_run {
             tool = tool.arg("--why-run");
         }
         let finished = tool.args(self.extra_args.iter().cloned()).run(log)?;
+        drop(attributes);
         let changes = read_report(&finished.stdout);
         if finished.success() {
             return Ok(changes);
@@ -125,6 +142,48 @@ impl ChefRunner {
         }
         Err(error)
     }
+}
+
+/// The document's secrets as node attributes, in files only the user can
+/// read, and the client configuration that goes with them.
+struct SecretAttributes {
+    /// `attributes.json`: each secret under [`crate::secret_key`].
+    file: SecretFile,
+    /// `client.rb` beside it, which names the repository and keeps the node
+    /// file in the same private directory.
+    config: PathBuf,
+}
+
+/// Writes the secrets for a local run. `None` when the document has none,
+/// so a run without secrets is exactly what it was before.
+fn secret_attributes(context: &RunContext) -> Result<Option<SecretAttributes>, RunError> {
+    if context.secrets.is_empty() {
+        return Ok(None);
+    }
+    let file = context
+        .secrets
+        .json_file("attributes.json", crate::secret_key)
+        .map_err(|e| RunError::new(format!("writing the attributes file: {e}")))?;
+    // Local mode writes the node, attributes and all, to `node_path` after
+    // the run. The default is `nodes` under the repository, which is the
+    // work directory that lives on after the run; this keeps it private and
+    // short-lived.
+    let text = format!(
+        "chef_repo_path '{}'
+node_path '{}'
+",
+        ruby_string(&absolute_path(&context.work_dir).to_string_lossy()),
+        ruby_string(&file.dir().to_string_lossy()),
+    );
+    let config = file
+        .beside("client.rb", &text)
+        .map_err(|e| RunError::new(format!("writing the client configuration: {e}")))?;
+    Ok(Some(SecretAttributes { file, config }))
+}
+
+/// `text` as the body of a single-quoted Ruby string.
+fn ruby_string(text: &str) -> String {
+    text.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
 /// Reads chef-client's report. Each resource is a line such as
@@ -218,6 +277,12 @@ impl Runner for ChefRunner {
         let changes = match self.transport_for(&context.host) {
             Transport::Local => self.converge_here(context, &cookbook, false, log)?,
             Transport::Remote => {
+                if !context.secrets.is_empty() {
+                    return Err(RunError::new(format!(
+                        "chef-run has no private way to hand a secret to {}: it takes attributes on its command line only, where every user of this machine could read them. Run chef-client on the host, with the local transport, or keep the secret out of this document",
+                        context.host
+                    )));
+                }
                 // The core checked the host already; this runner is the
                 // last thing between it and chef-run's command line.
                 meridian_sdk::check_host(&context.host).map_err(|why| {

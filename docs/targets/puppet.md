@@ -16,6 +16,7 @@ person would have written and runs Puppet on it.
 | `dependsOn` | Yes, as `require`. Puppet orders by declared relationships, so the dependency graph survives into the manifest intact |
 | `notifies` | Native: `notify`. A service can be restarted (`restart` or `refresh`); an exec can be `run` |
 | `runtimeWhen` | No. A catalog is compiled before it reaches the node, so there is nothing left to evaluate at apply time. Refused |
+| Secrets | Yes: by Hiera. The manifest looks each up as a `Sensitive` value, and the run is given a data file and a `hiera.yaml` only the user can read. See [Secrets](#secrets) |
 | References | `${id.param}` is settled from the document when it is compiled; anything else in `${...}` is refused, and `$${` is a literal `${` ([rules](../reference/resource-types.md#references)) |
 | Plan | Yes: `--noop`, with `--detailed-exitcodes`. Every resource reports whether it would change |
 | Apply | Yes |
@@ -29,8 +30,9 @@ What it does not do:
   refresh restarts a service and takes no argument. The compile says why; it
   does not turn a reload into a restart. See
   [Ordering and notifications](#ordering-and-notifications).
-- **No Puppet master, no PuppetDB, no Hiera.** Plan and apply are masterless.
-  The compiled class works on a master, but you copy it there yourself.
+- **No Puppet master, no PuppetDB.** Plan and apply are masterless, and Hiera
+  is used for one thing, [handing over the document's secrets](#secrets). The
+  compiled class works on a master, but you copy it there yourself.
 - **No resource types beyond the six.** There is no passthrough to arbitrary
   Puppet types. Anything else is refused at compile time.
 - **`package.version` and `exec.removes` are refused**, though Puppet could
@@ -44,6 +46,7 @@ Contents: [Requirements](#requirements) ·
 [What a compile writes](#what-a-compile-writes) ·
 [Running](#running) ·
 [Settings](#settings) ·
+[Secrets](#secrets) ·
 [What is refused](#what-is-refused) ·
 [Troubleshooting](#troubleshooting) ·
 [How it is tested](#how-it-is-tested)
@@ -242,6 +245,70 @@ empty, so a run never says "nothing to do" on no evidence.
 | `MERIDIAN_BOLT` | the `bolt` program, when it is not on `PATH` |
 | `MERIDIAN_PUPPET_TRANSPORT` | `local` or `bolt`, to override the choice made from the host |
 | `MERIDIAN_PUPPET_ARGS` | arguments added to every run, split on spaces: `--confdir /tmp/p --vardir /tmp/v --codedir /tmp/c` for an isolated run, or Bolt's `--inventoryfile inventory.yaml` |
+
+## Secrets
+
+A [secret](../reference/dsl/secrets.md) in a resource's params reaches Puppet
+through Hiera, and through nothing else.
+
+```yaml
+spec:
+  target: puppet
+  secrets:
+    - name: db_password
+      from: env
+      key: APP_DB_PASSWORD
+  resources:
+    - id: db_conf
+      type: file
+      params:
+        path: /etc/app/db.conf
+        mode: "0600"
+        content: ${{ secret.db_password }}
+```
+
+**What the compile writes.** The param becomes a lookup of the secret's key,
+wrapped in `Sensitive`, so that Puppet redacts the value wherever it would
+print it: in its report, in a `--noop` run's `current_value`/`should be` line,
+and in a file's diff.
+
+```puppet
+  file { 'db_conf':
+    ensure  => file,
+    content => Sensitive(lookup('meridian_secret_db_password')),
+    mode    => '0600',
+    path    => '/etc/app/db.conf',
+  }
+```
+
+The compiled manifest holds the key, never the value, so it can be reviewed
+and kept. `meridian compile` writes exactly this.
+
+**How the value reaches the tool.** When a stage runs, the runner writes a
+Hiera data file, `common.yaml`, with each secret under its key, into a
+directory only the user can enter (mode `0700`, the file `0600`, on a memory
+filesystem where the system has one), and a `hiera.yaml` beside it that names
+that directory as its data directory. The run is given the configuration and
+nothing more: `puppet apply ... --hiera_config <dir>/hiera.yaml` on this
+machine, `bolt apply ... --hiera-config <dir>/hiera.yaml` for another host.
+Over Bolt the catalog is compiled on this machine, so the lookup is answered
+here and the value travels to the node inside the catalog, the way Bolt sends
+every catalog. Both files are overwritten and removed when the run ends.
+Neither the command line nor the tool's environment ever holds the value, and
+nothing in the stage's work directory does.
+
+**What is refused.** A secret is a whole param. One inside a list or a map
+(`groups: [..., "${{ secret.x }}"]`) is refused at compile, rule
+`unsupported-secret-place`, because a lookup is one value and the plugin does
+not build a list around it. A document's own Hiera is not read: the
+configuration the run is given names Meridian's data file alone, so a
+`hiera.yaml` of your own is not consulted during a Meridian run.
+
+The handover is tested against a stand-in `puppet` that keeps a copy of the
+data file, its mode, its arguments and its environment, and against the real
+`puppet` in CI (`MERIDIAN_TEST_REAL_PUPPET=1`), which applies a file whose
+content is a secret and whose value then appears in the file and in nothing
+Puppet printed or the plugin wrote.
 
 ## What is refused
 

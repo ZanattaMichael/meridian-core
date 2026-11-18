@@ -12,6 +12,12 @@ pub enum Yaml {
     Uint(u64),
     Float(f64),
     Str(String),
+    /// Text written as it is, unquoted and unescaped, as a plain scalar on
+    /// one line. For a template expression that a tool renders before it
+    /// reads the file as YAML, such as a Jinja read of a Salt pillar key: the
+    /// expression is what is written, and the tool's rendering of it is what
+    /// the YAML reader sees. The text has no line break.
+    Raw(String),
     Seq(Vec<Yaml>),
     Map(Vec<(String, Yaml)>),
 }
@@ -101,6 +107,7 @@ impl Writer {
                     // At the root there is no enclosing block, so a literal's
                     // lines are indented one step from the margin.
                     Yaml::Str(s) => string(s, indent.max(self.step)),
+                    Yaml::Raw(s) => Text::Plain(s.clone()),
                     Yaml::Map(_) | Yaml::Seq(_) => unreachable!("handled above"),
                 };
                 match text {

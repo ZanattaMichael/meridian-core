@@ -9,7 +9,8 @@
 use std::path::{Path, PathBuf};
 
 use meridian_plugin_testkit::{
-    assert_golden, assert_golden_refusal, fixture, graph_from_text, without_positions,
+    assert_golden, assert_golden_refusal, fixture, graph_from_text, secret_in_param,
+    without_positions,
 };
 use meridian_sdk::{CompileError, Data, Emitted, Emitter, ResourceGraph};
 use meridian_target_puppet::Puppet;
@@ -262,4 +263,62 @@ fn a_host_that_is_not_a_name_is_refused_rather_than_written_into_site_pp() {
         .artifact
         .files[meridian_target_puppet::SITE_PATH];
     assert!(site.contains("node 'web01.example.com' {"), "{site}");
+}
+
+// ---- secrets ------------------------------------------------------------
+
+/// The document a secret is put into: a file whose content the runner hands
+/// over through Hiera.
+fn with_secret(param: &str) -> ResourceGraph {
+    let text = "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: puppet\n  targetHost:\n    from: inline\n    host: web01.example.com\n  resources:\n    - id: env_file\n      type: file\n      params: {path: /etc/app/env, content: placeholder, mode: \"0600\"}\n";
+    let mut graph = graph_from_text("site.yaml", text, "puppet");
+    secret_in_param(&mut graph, "env_file", param, "db_password");
+    graph
+}
+
+#[test]
+fn a_secret_in_a_param_is_a_sensitive_lookup_the_runner_answers_through_hiera() {
+    let emitted = emit(&with_secret("content")).unwrap();
+    let manifest = &emitted.artifact.files["manifests/init.pp"];
+    assert!(
+        manifest.contains("content => Sensitive(lookup('meridian_secret_db_password')),"),
+        "{manifest}"
+    );
+    assert!(!manifest.contains("placeholder"), "{manifest}");
+    assert_eq!(
+        meridian_target_puppet::secret_key("db_password"),
+        "meridian_secret_db_password"
+    );
+    assert_eq!(
+        meridian_target_puppet::secret_reference("db_password"),
+        "Sensitive(lookup('meridian_secret_db_password'))"
+    );
+    assert!(Puppet.capabilities().secrets);
+}
+
+#[test]
+fn a_secret_inside_a_list_or_a_map_is_refused_because_a_lookup_is_a_whole_value() {
+    let mut graph = with_secret("content");
+    let slot = graph.secrets[0].secret;
+    let file = graph
+        .resources
+        .iter_mut()
+        .find(|r| r.id == "env_file")
+        .unwrap();
+    file.params.insert(
+        "content".to_owned(),
+        meridian_sdk::Value::List(vec![meridian_sdk::Value::Secret(slot)]),
+    );
+    let err = emit(&graph).unwrap_err();
+    assert_eq!(err.rule, "unsupported-secret-place");
+    assert_eq!(err.resource, "env_file");
+    assert!(err.msg.contains("inside a list or a map"), "{err}");
+}
+
+#[test]
+fn a_secret_the_graph_does_not_name_is_refused_not_masked() {
+    let mut graph = with_secret("content");
+    graph.secrets.clear();
+    let err = emit(&graph).unwrap_err();
+    assert_eq!(err.rule, "unnamed-secret");
 }

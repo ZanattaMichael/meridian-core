@@ -6,8 +6,8 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{artifact, scratch, stand_in, KeptLog};
-use meridian_sdk::{Artifact, RunContext, Runner};
+use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
+use meridian_sdk::{Artifact, RunContext, Runner, SecretRef};
 use meridian_target_openvox::{find_program, OpenVoxRunner, Transport, Verify};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -405,4 +405,29 @@ fn the_tool_is_looked_for_on_the_path_and_then_where_the_packages_put_it() {
     );
     // Nowhere: the bare name, and running it says it is not installed.
     assert_eq!(find_program("facter", Some(&path), &fallbacks), "facter");
+}
+
+#[test]
+fn a_secret_reaches_openvox_as_hiera_data_the_way_it_reaches_puppet() {
+    let dir = scratch(TMP, "secrets");
+    let keep = format!(
+        "while [ $# -gt 0 ]; do case \"$1\" in --hiera_config) cp \"$(dirname \"$2\")/common.yaml\" \"{dir}/common.yaml\"; echo \"$2\" > \"{dir}/config-path\"; shift;; esac; shift; done\n{NOOP}",
+        dir = dir.display()
+    );
+    let mut context = context(&dir, "localhost");
+    context.secrets = secrets(&[(SecretRef::new(1), "db_password", "hunter2")]);
+    let log = KeptLog::default();
+    runner(&dir, OPENVOX, &keep, "exit 9")
+        .apply(&context, &compiled(), &log)
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.join("common.yaml")).unwrap(),
+        "---\n\"meridian_secret_db_password\": \"hunter2\"\n"
+    );
+    let apply = &invocations(&dir, "puppet")[1];
+    assert!(apply.contains("--hiera_config "), "{apply}");
+    assert!(!apply.contains("hunter2"), "{apply}");
+    assert!(!log.text().iter().any(|l| l.contains("hunter2")));
+    let config_path = fs::read_to_string(dir.join("config-path")).unwrap();
+    assert!(!Path::new(config_path.trim()).exists());
 }

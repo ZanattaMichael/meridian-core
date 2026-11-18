@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 
 use meridian_sdk::tool::{write_artifact, Finished, Tool};
 use meridian_sdk::{
-    decode_value, Applied, Artifact, Change, ChangeAction, Log, Operations, Plan, RunContext,
-    RunError, Runner, Value,
+    decode_value, Applied, Artifact, Change, ChangeAction, Log, Operations, Part, Plan, RunContext,
+    RunError, Runner, SecretFile, Value,
 };
 
 use crate::{STATES_DIR, TOP_PATH};
@@ -123,11 +123,17 @@ impl SaltRunner {
             ))
         })?;
         let work = absolute(&context.work_dir);
+        // The document's secrets go to Salt as pillar data, from a pillar
+        // root only the user can read, removed when the run ends. The states
+        // read each by its key.
+        let pillar = pillar_root(context)?;
+        let pillar_dir = pillar.as_ref().map(|p| p.dir().to_path_buf());
         let mut on_disk = artifact.clone();
         if transport == Transport::Ssh {
-            on_disk
-                .files
-                .insert(SSH_CONFIG_PATH.to_owned(), ssh_config(&work));
+            on_disk.files.insert(
+                SSH_CONFIG_PATH.to_owned(),
+                ssh_config(&work, pillar_dir.as_deref()),
+            );
             on_disk
                 .files
                 .insert(SSH_ROSTER_PATH.to_owned(), ssh_roster(&context.host));
@@ -135,15 +141,17 @@ impl SaltRunner {
         write_artifact(&work, &on_disk)?;
 
         let (program, tool) = match transport {
-            Transport::Local => (
-                "salt-call",
-                Tool::new(&self.salt_call)
+            Transport::Local => ("salt-call", {
+                let mut tool = Tool::new(&self.salt_call)
                     .arg("--local")
                     .arg("--file-root")
-                    .arg(path_text(&work.join(STATES_DIR)))
-                    .args(["--out", "json", "--no-color", "--retcode-passthrough"])
-                    .args(self.extra_args.iter().cloned()),
-            ),
+                    .arg(path_text(&work.join(STATES_DIR)));
+                if let Some(dir) = &pillar_dir {
+                    tool = tool.arg("--pillar-root").arg(path_text(dir));
+                }
+                tool.args(["--out", "json", "--no-color", "--retcode-passthrough"])
+                    .args(self.extra_args.iter().cloned())
+            }),
             Transport::Ssh => (
                 "salt-ssh",
                 Tool::new(&self.salt_ssh)
@@ -164,6 +172,7 @@ impl SaltRunner {
         // and not something to relay. What it says is relayed afterwards, a
         // line per state.
         let finished = tool.dir(&work).capture_stdout().run(log)?;
+        drop(pillar);
         read_result(program, finished, test, log)
     }
 }
@@ -242,14 +251,52 @@ fn yaml_text(text: &str) -> String {
     Value::String(text.to_owned()).canonical()
 }
 
-fn ssh_config(work: &Path) -> String {
-    format!(
+fn ssh_config(work: &Path, pillar_dir: Option<&Path>) -> String {
+    let mut config = format!(
         "# Written by Meridian for salt-ssh. It is rewritten on every run.\n\
          root_dir: {}\n\
          file_roots:\n  base:\n    - {}\n",
         yaml_text(&path_text(&work.join("ssh/root"))),
         yaml_text(&path_text(&work.join(STATES_DIR))),
+    );
+    if let Some(dir) = pillar_dir {
+        config.push_str(&format!(
+            "pillar_roots:\n  base:\n    - {}\n",
+            yaml_text(&path_text(dir))
+        ));
+    }
+    config
+}
+
+/// Writes the document's secrets as a pillar root: a pillar file with each
+/// under its key, and the top file that applies it to every minion, in a
+/// directory only the user can enter. `None` when the document has none.
+/// A value is written as a JSON string, which YAML reads the same, and goes
+/// from protected memory to the file and nowhere else.
+fn pillar_root(context: &RunContext) -> Result<Option<SecretFile>, RunError> {
+    if context.secrets.is_empty() {
+        return Ok(None);
+    }
+    let keys: Vec<String> = context
+        .secrets
+        .iter()
+        .map(|(name, _)| Value::String(crate::secret_key(name)).canonical())
+        .collect();
+    let mut parts = vec![Part::Text("#!yaml\n")];
+    for (key, (_, value)) in keys.iter().zip(context.secrets.iter()) {
+        parts.push(Part::Text(key));
+        parts.push(Part::Text(": \""));
+        parts.push(Part::JsonString(value));
+        parts.push(Part::Text("\"\n"));
+    }
+    let file = SecretFile::create(&format!("{}.sls", crate::PILLAR_NAME), &parts)
+        .map_err(|e| RunError::new(format!("writing the pillar file: {e}")))?;
+    file.beside(
+        "top.sls",
+        &format!("#!yaml\nbase:\n  '*':\n    - {}\n", crate::PILLAR_NAME),
     )
+    .map_err(|e| RunError::new(format!("writing the pillar top file: {e}")))?;
+    Ok(Some(file))
 }
 
 fn ssh_roster(host: &str) -> String {
@@ -524,7 +571,7 @@ mod tests {
         // The paths are spelled the Unix way: salt-ssh, which reads this
         // file, does not run from a Windows machine.
         if cfg!(unix) {
-            let config = ssh_config(Path::new("/work dir"));
+            let config = ssh_config(Path::new("/work dir"), None);
             assert!(
                 config.contains("root_dir: \"/work dir/ssh/root\"\n"),
                 "{config}"

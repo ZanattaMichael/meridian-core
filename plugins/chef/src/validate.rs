@@ -88,6 +88,7 @@ mod tests {
 
     fn cookbook() -> Cookbook {
         Cookbook {
+            secrets: Vec::new(),
             name: "web".to_owned(),
             document: "web".to_owned(),
             blocks: vec![

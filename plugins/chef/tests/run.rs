@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{artifact, scratch, stand_in, KeptLog};
-use meridian_sdk::{Artifact, RunContext, Runner};
+use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
+use meridian_sdk::{Artifact, RunContext, Runner, SecretRef};
 use meridian_target_chef::{ChefRunner, Transport};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -187,4 +187,134 @@ fn a_host_chef_run_would_read_as_an_option_is_refused_before_it_runs() {
         "{err}"
     );
     assert!(!dir.join("chef-run.args").exists());
+}
+
+// ---- secrets ------------------------------------------------------------
+
+/// A stand-in body that keeps what a client given `--json-attributes` and
+/// `--config` could read: both files, the attributes file's mode, and the
+/// environment, then prints `report`.
+fn keeping_attributes(dir: &Path, report: &str) -> String {
+    format!(
+        "env > \"{dir}/env\"
+while [ $# -gt 0 ]; do
+  case \"$1\" in
+    --json-attributes)
+      echo \"$2\" > \"{dir}/attributes-path\"
+      cp \"$2\" \"{dir}/attributes.json\"
+      stat -c %a \"$2\" > \"{dir}/mode\" 2>/dev/null || stat -f %Lp \"$2\" > \"{dir}/mode\"
+      shift;;
+    --config) cp \"$2\" \"{dir}/client.rb\"; shift;;
+  esac
+  shift
+done
+{report}",
+        dir = dir.display()
+    )
+}
+
+fn with_secret(dir: &Path, host: &str) -> RunContext {
+    let mut context = context(dir, host);
+    context.secrets = secrets(&[(SecretRef::new(1), "db_password", "hunter2\"\\")]);
+    context
+}
+
+#[test]
+fn secrets_reach_chef_client_as_node_attributes_in_a_private_file_and_nowhere_else() {
+    let dir = scratch(TMP, "secrets-local");
+    let log = KeptLog::default();
+    runner(&dir, &keeping_attributes(&dir, REPORT), "exit 9")
+        .apply(&with_secret(&dir, "localhost"), &compiled(), &log)
+        .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(dir.join("attributes.json")).unwrap(),
+        "{\"meridian_secret_db_password\":\"hunter2\\\"\\\\\"}\n"
+    );
+    #[cfg(unix)]
+    assert_eq!(fs::read_to_string(dir.join("mode")).unwrap().trim(), "600");
+    // The configuration beside it names the repository, and keeps the node
+    // object the client writes back (attributes and all) in the private
+    // directory rather than the work directory.
+    let config = fs::read_to_string(dir.join("client.rb")).unwrap();
+    let attributes_path = fs::read_to_string(dir.join("attributes-path")).unwrap();
+    let private_dir = Path::new(attributes_path.trim()).parent().unwrap();
+    let work = meridian_sdk::tool::absolute_path(&dir.join("work"));
+    // Both paths are Ruby single-quoted strings, so a backslash in one (a
+    // Windows path) is written doubled.
+    let ruby = |path: &Path| path.to_string_lossy().replace('\\', "\\\\");
+    assert_eq!(
+        config,
+        format!(
+            "chef_repo_path '{}'\nnode_path '{}'\n",
+            ruby(&work),
+            ruby(private_dir)
+        )
+    );
+    let args = args(&dir, "chef-client");
+    assert!(args.contains("--config "), "{args}");
+    assert!(args.contains("--json-attributes "), "{args}");
+    assert!(args.starts_with("--local-mode --no-color --force-formatter --override-runlist recipe[meridian_web] --config "), "{args}");
+    assert!(!args.contains("hunter2"), "{args}");
+    assert!(!fs::read_to_string(dir.join("env"))
+        .unwrap()
+        .contains("hunter2"));
+    assert!(!log.text().iter().any(|l| l.contains("hunter2")));
+    assert!(
+        !private_dir.exists(),
+        "{} was left behind",
+        private_dir.display()
+    );
+}
+
+#[test]
+fn a_why_run_with_secrets_takes_the_same_files_and_a_run_without_takes_none() {
+    let dir = scratch(TMP, "secrets-plan");
+    runner(&dir, &keeping_attributes(&dir, REPORT), "exit 9")
+        .plan(&with_secret(&dir, ""), &compiled(), &KeptLog::default())
+        .unwrap();
+    let with = args(&dir, "chef-client");
+    assert!(
+        with.contains("--json-attributes ") && with.ends_with("--why-run"),
+        "{with}"
+    );
+
+    let dir = scratch(TMP, "no-secrets");
+    runner(&dir, REPORT, "exit 9")
+        .plan(&context(&dir, ""), &compiled(), &KeptLog::default())
+        .unwrap();
+    let plain = args(&dir, "chef-client");
+    assert!(
+        !plain.contains("--json-attributes") && !plain.contains("--config"),
+        "{plain}"
+    );
+}
+
+#[test]
+fn chef_run_is_refused_a_secret_because_it_would_put_it_on_the_command_line() {
+    let dir = scratch(TMP, "secrets-remote");
+    let log = KeptLog::default();
+    let err = runner(&dir, "exit 9", "echo converged")
+        .apply(&with_secret(&dir, "web01.example.com"), &compiled(), &log)
+        .unwrap_err();
+    assert!(
+        err.msg.starts_with("chef-run has no private way to hand a secret to web01.example.com: it takes attributes on its command line only"),
+        "unexpected error prefix for rejected secret with chef-run"
+    );
+    assert!(
+        err.msg.contains("local transport"),
+        "expected guidance to use local transport"
+    );
+    assert!(!err.msg.contains("hunter2"));
+    assert!(!dir.join("chef-run.args").exists(), "chef-run was started");
+    // A plan for that host says it is unknown, as it does without secrets,
+    // and runs nothing either.
+    let plan = runner(&dir, "exit 9", "echo converged")
+        .plan(
+            &with_secret(&dir, "web01.example.com"),
+            &compiled(),
+            &KeptLog::default(),
+        )
+        .unwrap();
+    assert!(plan.unknown);
 }

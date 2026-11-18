@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use meridian_sdk::Value;
+use meridian_sdk::{SecretName, Value};
 
 use crate::{Block, Cookbook};
 
@@ -32,7 +32,7 @@ pub(crate) fn serialise(cookbook: &Cookbook) -> BTreeMap<String, String> {
     let mut recipe = HEADER.to_owned();
     for block in &cookbook.blocks {
         recipe.push('\n');
-        write_block(&mut recipe, block);
+        write_block(&mut recipe, block, &cookbook.secrets);
     }
 
     let metadata = format!(
@@ -49,10 +49,15 @@ pub(crate) fn serialise(cookbook: &Cookbook) -> BTreeMap<String, String> {
     ])
 }
 
-fn write_block(out: &mut String, block: &Block) {
+fn write_block(out: &mut String, block: &Block, secrets: &[SecretName]) {
     let _ = writeln!(out, "{} {} do", block.resource, quote(&block.name));
     for (name, value) in &block.properties {
-        let _ = writeln!(out, "  {name} {}", literal(value));
+        let _ = writeln!(out, "  {name} {}", literal(value, secrets));
+    }
+    // A resource handed a secret is not allowed to show it: `sensitive`
+    // keeps its diff and its properties out of what chef-client prints.
+    if block.properties.values().any(holds_secret) {
+        out.push_str("  sensitive true\n");
     }
     if !block.only_if.is_empty() {
         let _ = writeln!(out, "  only_if {{ {} }}", block.only_if.trim());
@@ -77,8 +82,18 @@ fn write_block(out: &mut String, block: &Block) {
     out.push_str("end\n");
 }
 
+/// Whether a value refers to a secret anywhere inside it.
+fn holds_secret(value: &Value) -> bool {
+    match value {
+        Value::Secret(_) => true,
+        Value::List(items) => items.iter().any(holds_secret),
+        Value::Map(map) => map.values().any(holds_secret),
+        _ => false,
+    }
+}
+
 /// A value as a Ruby literal.
-fn literal(value: &Value) -> String {
+fn literal(value: &Value, secrets: &[SecretName]) -> String {
     match value {
         Value::Null => "nil".to_owned(),
         Value::Bool(b) => b.to_string(),
@@ -93,10 +108,15 @@ fn literal(value: &Value) -> String {
             }
         }
         Value::String(s) => quote(s),
-        // A plugin is never sent a secret as a value; one would be written as its mask.
-        Value::Secret(_) => quote(meridian_sdk::SENSITIVE),
+        // A secret is read from the node's attributes when the recipe runs;
+        // one the graph does not name is written as its mask.
+        Value::Secret(at) => secrets
+            .iter()
+            .find(|s| s.secret == *at)
+            .map(|s| crate::secret_reference(&s.name))
+            .unwrap_or_else(|| quote(meridian_sdk::SENSITIVE)),
         Value::List(items) => {
-            let items: Vec<String> = items.iter().map(literal).collect();
+            let items: Vec<String> = items.iter().map(|v| literal(v, secrets)).collect();
             format!("[{}]", items.join(", "))
         }
         Value::Map(map) => {
@@ -105,7 +125,7 @@ fn literal(value: &Value) -> String {
             }
             let pairs: Vec<String> = map
                 .iter()
-                .map(|(k, v)| format!("{} => {}", quote(k), literal(v)))
+                .map(|(k, v)| format!("{} => {}", quote(k), literal(v, secrets)))
                 .collect();
             format!("{{ {} }}", pairs.join(", "))
         }
@@ -156,13 +176,16 @@ mod tests {
 
     #[test]
     fn values_are_ruby_literals() {
-        assert_eq!(literal(&Value::Int(1200)), "1200");
-        assert_eq!(literal(&Value::Bool(true)), "true");
+        assert_eq!(literal(&Value::Int(1200), &[]), "1200");
+        assert_eq!(literal(&Value::Bool(true), &[]), "true");
         assert_eq!(
-            literal(&Value::List(vec![
-                Value::String("deploy".into()),
-                Value::String("sudo".into())
-            ])),
+            literal(
+                &Value::List(vec![
+                    Value::String("deploy".into()),
+                    Value::String("sudo".into())
+                ]),
+                &[]
+            ),
             "['deploy', 'sudo']"
         );
     }

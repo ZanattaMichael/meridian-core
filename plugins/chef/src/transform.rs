@@ -168,6 +168,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Cookbook, CompileError>
         name: cookbook_name(&graph.name)?,
         document: graph.name.clone(),
         blocks,
+        secrets: graph.secrets.clone(),
     })
 }
 
