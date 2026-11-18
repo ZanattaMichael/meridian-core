@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use crate::signature::SIGNATURE_FILE;
-use crate::Error;
+use crate::{Error, Kind};
 
 /// Directories that are never part of a module: git's own, and Meridian's
 /// state directory.
@@ -37,15 +37,17 @@ pub(crate) fn files(root: &Path) -> Result<Vec<(String, PathBuf)>, Error> {
     let mut pending = vec![(String::new(), root.to_path_buf())];
     while let Some((prefix, dir)) = pending.pop() {
         let entries = fs::read_dir(&dir)
-            .map_err(|e| Error::new(format!("reading {}: {e}", dir.display())))?;
+            .map_err(|e| Error::new(Kind::Integrity, format!("reading {}: {e}", dir.display())))?;
         for entry in entries {
-            let entry = entry.map_err(|e| Error::new(format!("reading {}: {e}", dir.display())))?;
+            let entry = entry.map_err(|e| {
+                Error::new(Kind::Integrity, format!("reading {}: {e}", dir.display()))
+            })?;
             let name = entry.file_name();
             let Some(name) = name.to_str() else {
-                return Err(Error::new(format!(
-                    "{} holds a file whose name is not UTF-8",
-                    dir.display()
-                )));
+                return Err(Error::new(
+                    Kind::Integrity,
+                    format!("{} holds a file whose name is not UTF-8", dir.display()),
+                ));
             };
             if prefix.is_empty() && EXCLUDED.contains(&name) {
                 continue;
@@ -55,32 +57,40 @@ pub(crate) fn files(root: &Path) -> Result<Vec<(String, PathBuf)>, Error> {
             // every control character here keeps hashing, packing, copying
             // and unpacking in agreement.
             if name.contains(char::is_control) {
-                return Err(Error::new(format!(
-                    "{} holds a file whose name has a control character in it, and a module \
+                return Err(Error::new(
+                    Kind::Integrity,
+                    format!(
+                        "{} holds a file whose name has a control character in it, and a module \
                      cannot hold one: {name:?}",
-                    dir.display()
-                )));
+                        dir.display()
+                    ),
+                ));
             }
             let relative = if prefix.is_empty() {
                 name.to_owned()
             } else {
                 format!("{prefix}/{name}")
             };
-            let kind = entry
-                .file_type()
-                .map_err(|e| Error::new(format!("reading {}: {e}", entry.path().display())))?;
+            let kind = entry.file_type().map_err(|e| {
+                Error::new(
+                    Kind::Integrity,
+                    format!("reading {}: {e}", entry.path().display()),
+                )
+            })?;
             if kind.is_symlink() {
-                return Err(Error::new(format!(
-                    "{relative} is a symbolic link, and a module cannot hold one"
-                )));
+                return Err(Error::new(
+                    Kind::Integrity,
+                    format!("{relative} is a symbolic link, and a module cannot hold one"),
+                ));
             } else if kind.is_dir() {
                 pending.push((relative, entry.path()));
             } else if kind.is_file() {
                 out.push((relative, entry.path()));
             } else {
-                return Err(Error::new(format!(
-                    "{relative} is not a regular file, and a module cannot hold it"
-                )));
+                return Err(Error::new(
+                    Kind::Integrity,
+                    format!("{relative} is not a regular file, and a module cannot hold it"),
+                ));
             }
         }
     }
@@ -98,8 +108,8 @@ pub fn hash_dir(root: &Path) -> Result<String, Error> {
         if relative == SIGNATURE_FILE {
             continue;
         }
-        let content =
-            fs::read(&path).map_err(|e| Error::new(format!("reading {}: {e}", path.display())))?;
+        let content = fs::read(&path)
+            .map_err(|e| Error::new(Kind::Integrity, format!("reading {}: {e}", path.display())))?;
         listing.push_str(&sha256_hex(&content));
         listing.push_str("  ");
         listing.push_str(&relative);
@@ -111,8 +121,9 @@ pub fn hash_dir(root: &Path) -> Result<String, Error> {
 /// Copies the module at `from` into the new directory `to`, leaving out what
 /// is never part of a module.
 pub(crate) fn copy_tree(from: &Path, to: &Path) -> Result<(), Error> {
-    let io =
-        |what: &Path, e: std::io::Error| Error::new(format!("writing {}: {e}", what.display()));
+    let io = |what: &Path, e: std::io::Error| {
+        Error::new(Kind::Integrity, format!("writing {}: {e}", what.display()))
+    };
     fs::create_dir_all(to).map_err(|e| io(to, e))?;
     for (relative, path) in files(from)? {
         let dest = to.join(&relative);

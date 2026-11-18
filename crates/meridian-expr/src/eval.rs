@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use meridian_secret::{Piece, SecretTable, Transform};
 use meridian_value::{SecretRef, Value};
 
+use crate::error::{Error, Kind, Span};
 use crate::funcs;
 use crate::parse::{Binary, Node, Unary};
 use crate::{Names, Scope};
@@ -14,26 +15,36 @@ use crate::{Names, Scope};
 /// answer; anything else is a mistake and always surfaces.
 pub(crate) enum Failure {
     NotSet { path: String, hint: String },
-    Other(String),
+    Other(Error),
 }
 
 impl Failure {
-    pub(crate) fn message(self) -> String {
+    pub(crate) fn into_error(self) -> Error {
         match self {
-            Failure::NotSet { path, hint } if hint.is_empty() => {
-                format!("{path} is not set (test for it with defined({path}))")
-            }
-            Failure::NotSet { path, hint } => {
-                format!("{path} is not set ({})", hint.replace("{path}", &path))
-            }
-            Failure::Other(message) => message,
+            Failure::NotSet { path, hint } if hint.is_empty() => Error::new(
+                Kind::NotSet,
+                format!("{path} is not set (test for it with defined({path}))"),
+            ),
+            Failure::NotSet { path, hint } => Error::new(
+                Kind::NotSet,
+                format!("{path} is not set ({})", hint.replace("{path}", &path)),
+            ),
+            Failure::Other(error) => error,
         }
     }
 }
 
+/// A failure with only words: an operator applied to the wrong kinds of
+/// value, which is what most of the evaluator has to say.
 impl From<String> for Failure {
     fn from(message: String) -> Self {
-        Failure::Other(message)
+        Failure::Other(Error::new(Kind::Type, message))
+    }
+}
+
+impl From<Error> for Failure {
+    fn from(error: Error) -> Self {
+        Failure::Other(error)
     }
 }
 
@@ -42,87 +53,122 @@ type Outcome<T> = Result<T, Failure>;
 /// The functions that decide for themselves which arguments to evaluate.
 const LAZY: [&str; 5] = ["defined", "coalesce", "default", "map", "filter"];
 
-pub(crate) fn check(node: &Node, names: &Names, bound: &mut Vec<String>) -> Result<(), String> {
-    match node {
-        Node::Literal(_) => Ok(()),
-        Node::Name(name) => {
-            if bound.contains(name) || names.roots.contains(name) {
-                // A root on its own is its whole mapping. `data` alone is
-                // almost always a path that was never finished, so it keeps
-                // the message it has always had.
-                if name == "data" && !bound.contains(name) {
-                    return Err("data must be followed by a key, as in data.environment".to_owned());
+pub(crate) fn check(node: &Node, names: &Names, bound: &mut Vec<String>) -> Result<(), Error> {
+    // A chain of a thousand operators is a thousand nodes deep, so the walk
+    // keeps its own list of what is left instead of recursing, except into
+    // the body of `map` and `filter`, which binds a name: calls nest no
+    // deeper than the parser's depth limit. Children are pushed last first,
+    // so the first mistake found is the leftmost, as a reader expects.
+    let mut todo: Vec<&Node> = vec![node];
+    while let Some(node) = todo.pop() {
+        match node {
+            Node::Literal(_) => {}
+            Node::Name(name, at) => check_name(name, *at, names, bound)?,
+            Node::Field(base, _) => {
+                if !is_root(base, names, bound) {
+                    todo.push(base);
                 }
-                return Ok(());
             }
-            if let Some(why) = names.refused.get(name) {
-                return Err(why.clone());
-            }
-            let hint = if names.hint.is_empty() {
-                "text is quoted".to_owned()
-            } else {
-                names.hint.clone()
-            };
-            Err(format!("unknown name {name:?} ({hint})"))
-        }
-        Node::Field(base, _) => match base.as_ref() {
-            // `data.key`: the root itself needs no further check.
-            Node::Name(name) if names.roots.contains(name) && !bound.contains(name) => Ok(()),
-            other => check(other, names, bound),
-        },
-        Node::Index(base, index) => {
-            match base.as_ref() {
-                Node::Name(name) if names.roots.contains(name) && !bound.contains(name) => {}
-                other => check(other, names, bound)?,
-            }
-            check(index, names, bound)
-        }
-        Node::Unary(_, inner) => check(inner, names, bound),
-        Node::Binary(_, left, right) => {
-            check(left, names, bound)?;
-            check(right, names, bound)
-        }
-        Node::Choice(condition, yes, no) => {
-            check(condition, names, bound)?;
-            check(yes, names, bound)?;
-            check(no, names, bound)
-        }
-        Node::List(items) => items.iter().try_for_each(|item| check(item, names, bound)),
-        Node::Map(entries) => entries
-            .iter()
-            .try_for_each(|(_, value)| check(value, names, bound)),
-        Node::Call(name, args) => {
-            funcs::check_arity(name, args.len())?;
-            match name.as_str() {
-                "defined" => {
-                    if !args[0].is_path() {
-                        return Err("defined(...) takes a data.<key> path".to_owned());
-                    }
-                    check(&args[0], names, bound)
+            Node::Index(base, index) => {
+                todo.push(index);
+                if !is_root(base, names, bound) {
+                    todo.push(base);
                 }
-                "map" | "filter" => {
+            }
+            Node::Unary(_, inner) => todo.push(inner),
+            Node::Binary(_, left, right) => {
+                todo.push(right);
+                todo.push(left);
+            }
+            Node::Choice(condition, yes, no) => {
+                todo.push(no);
+                todo.push(yes);
+                todo.push(condition);
+            }
+            Node::List(items) => todo.extend(items.iter().rev()),
+            Node::Map(entries) => todo.extend(entries.iter().rev().map(|(_, value)| value)),
+            Node::Call(name, args, at) => match check_call_shape(name, args, *at)? {
+                Some(item) => {
                     check(&args[0], names, bound)?;
-                    let Node::Literal(Value::String(item)) = &args[1] else {
-                        return Err(format!(
-                            "the second argument of {name}(...) is the name each item is \
-                             given, as quoted text: {name}(list, 'item', expression)"
-                        ));
-                    };
-                    bound.push(item.clone());
+                    bound.push(item);
                     let outcome = check(&args[2], names, bound);
                     bound.pop();
-                    outcome
+                    outcome?;
                 }
-                _ => args.iter().try_for_each(|arg| check(arg, names, bound)),
-            }
+                None => todo.extend(args.iter().rev()),
+            },
         }
+    }
+    Ok(())
+}
+
+/// `data.key`: the root itself needs no further check.
+fn is_root(base: &Node, names: &Names, bound: &[String]) -> bool {
+    matches!(base, Node::Name(name, _) if names.roots.contains(name) && !bound.iter().any(|b| b == name))
+}
+
+/// A name on its own: a root, a bound item name, or a mistake.
+fn check_name(name: &str, at: Span, names: &Names, bound: &[String]) -> Result<(), Error> {
+    let is_bound = bound.iter().any(|b| b == name);
+    if is_bound || names.roots.contains(name) {
+        // A root on its own is its whole mapping. `data` alone is almost
+        // always a path that was never finished, so it keeps the message it
+        // has always had.
+        if name == "data" && !is_bound {
+            return Err(Error::new(
+                Kind::Syntax,
+                "data must be followed by a key, as in data.environment",
+            )
+            .at(at));
+        }
+        return Ok(());
+    }
+    if let Some(why) = names.refused.get(name) {
+        return Err(Error::new(Kind::RefusedName, why.clone()).at(at));
+    }
+    let hint = if names.hint.is_empty() {
+        "text is quoted".to_owned()
+    } else {
+        names.hint.clone()
+    };
+    Err(Error::new(Kind::UnknownName, format!("unknown name {name:?} ({hint})")).at(at))
+}
+
+/// What a call must look like before its arguments are walked: the right
+/// number of them, a path for `defined`, and for `map` and `filter` the
+/// quoted item name, which is returned so the walk can bind it.
+fn check_call_shape(name: &str, args: &[Node], at: Span) -> Result<Option<String>, Error> {
+    funcs::check_arity(name, args.len()).map_err(|e| e.at(at))?;
+    match name {
+        "defined" => {
+            if !args[0].is_path() {
+                return Err(
+                    Error::new(Kind::Argument, "defined(...) takes a data.<key> path").at(at),
+                );
+            }
+            Ok(None)
+        }
+        "map" | "filter" => {
+            let Node::Literal(Value::String(item)) = &args[1] else {
+                return Err(Error::new(
+                    Kind::Argument,
+                    format!(
+                        "the second argument of {name}(...) is the name each item is given, as \
+                         quoted text: {name}(list, 'item', expression)"
+                    ),
+                )
+                .at(at));
+            };
+            Ok(Some(item.clone()))
+        }
+        _ => Ok(None),
     }
 }
 
 pub(crate) fn roots(node: &Node, bound: &mut Vec<String>, out: &mut BTreeSet<String>) {
     match node {
         Node::Literal(_) => {}
-        Node::Name(name) => {
+        Node::Name(name, _) => {
             if !bound.contains(name) {
                 out.insert(name.clone());
             }
@@ -144,7 +190,7 @@ pub(crate) fn roots(node: &Node, bound: &mut Vec<String>, out: &mut BTreeSet<Str
         }
         Node::List(items) => items.iter().for_each(|item| roots(item, bound, out)),
         Node::Map(entries) => entries.iter().for_each(|(_, v)| roots(v, bound, out)),
-        Node::Call(name, args) => {
+        Node::Call(name, args, _) => {
             if matches!(name.as_str(), "map" | "filter") && args.len() == 3 {
                 roots(&args[0], bound, out);
                 if let Node::Literal(Value::String(item)) = &args[1] {
@@ -170,13 +216,13 @@ pub(crate) fn reads(
     let free = |name: &String, bound: &Vec<String>| !bound.contains(name);
     match node {
         Node::Literal(_) => {}
-        Node::Name(name) => {
+        Node::Name(name, _) => {
             if free(name, bound) {
                 out.insert((name.clone(), None));
             }
         }
         Node::Field(base, key) => match base.as_ref() {
-            Node::Name(name) => {
+            Node::Name(name, _) => {
                 if free(name, bound) {
                     out.insert((name.clone(), Some(key.clone())));
                 }
@@ -185,7 +231,7 @@ pub(crate) fn reads(
         },
         Node::Index(base, index) => {
             match (base.as_ref(), index.as_ref()) {
-                (Node::Name(name), Node::Literal(Value::String(key))) => {
+                (Node::Name(name, _), Node::Literal(Value::String(key))) => {
                     if free(name, bound) {
                         out.insert((name.clone(), Some(key.clone())));
                     }
@@ -206,7 +252,7 @@ pub(crate) fn reads(
         }
         Node::List(items) => items.iter().for_each(|item| reads(item, bound, out)),
         Node::Map(entries) => entries.iter().for_each(|(_, v)| reads(v, bound, out)),
-        Node::Call(name, args) => {
+        Node::Call(name, args, _) => {
             if matches!(name.as_str(), "map" | "filter") && args.len() == 3 {
                 reads(&args[0], bound, out);
                 if let Node::Literal(Value::String(item)) = &args[1] {
@@ -318,8 +364,9 @@ fn present_of(value: Outcome<Value>) -> Outcome<Option<Value>> {
 }
 
 fn overflow(op: &str) -> Failure {
-    Failure::Other(format!(
-        "the result of {op} is too large for a whole number"
+    Failure::Other(Error::new(
+        Kind::Type,
+        format!("the result of {op} is too large for a whole number"),
     ))
 }
 
@@ -340,10 +387,13 @@ impl<'a> Evaluator<'a> {
     fn truth_of(&self, value: Outcome<Value>, node: &Node) -> Outcome<bool> {
         match value? {
             Value::Bool(b) => Ok(b),
-            other => Err(Failure::Other(format!(
-                "{} is {}, not true or false; compare it with == or !=",
-                node.describe(),
-                other.describe()
+            other => Err(Failure::Other(Error::new(
+                Kind::Type,
+                format!(
+                    "{} is {}, not true or false; compare it with == or !=",
+                    node.describe(),
+                    other.describe()
+                ),
             ))),
         }
     }
@@ -363,7 +413,7 @@ impl<'a> Evaluator<'a> {
     pub(crate) fn value(&mut self, node: &Node) -> Outcome<Value> {
         Ok(match node {
             Node::Literal(value) => value.clone(),
-            Node::Name(name) => {
+            Node::Name(name, _) => {
                 if let Some((_, value)) = self.bound.iter().rev().find(|(n, _)| n == name) {
                     return Ok(value.clone());
                 }
@@ -378,9 +428,12 @@ impl<'a> Evaluator<'a> {
                 Some(Number::Int(n)) => Value::Int(n.checked_neg().ok_or_else(|| overflow("-"))?),
                 Some(Number::Float(n)) => Value::Float(-n),
                 None => {
-                    return Err(Failure::Other(format!(
-                        "{} is not a number, so it has no negative",
-                        inner.describe()
+                    return Err(Failure::Other(Error::new(
+                        Kind::Type,
+                        format!(
+                            "{} is not a number, so it has no negative",
+                            inner.describe()
+                        ),
                     )))
                 }
             },
@@ -405,7 +458,7 @@ impl<'a> Evaluator<'a> {
                 Value::Map(map)
             }
             Node::Binary(..) => self.chain(node)?,
-            Node::Call(name, args) => self.call(name, args)?,
+            Node::Call(name, args, _) => self.call(name, args)?,
         })
     }
 
@@ -444,10 +497,13 @@ impl<'a> Evaluator<'a> {
                 _ => return Err(self.not_set(node)),
             },
             other => {
-                return Err(Failure::Other(format!(
-                    "{} is {}, so it has no key {key:?}",
-                    base.describe(),
-                    other.describe()
+                return Err(Failure::Other(Error::new(
+                    Kind::Type,
+                    format!(
+                        "{} is {}, so it has no key {key:?}",
+                        base.describe(),
+                        other.describe()
+                    ),
                 )))
             }
         })
@@ -463,9 +519,12 @@ impl<'a> Evaluator<'a> {
             },
             (Value::List(mut items), index) if Number::of(index).is_some() => {
                 let Some(Number::Int(n)) = Number::of(index) else {
-                    return Err(Failure::Other(format!(
-                        "an index into a list is a whole number, not {}",
-                        index.canonical()
+                    return Err(Failure::Other(Error::new(
+                        Kind::Type,
+                        format!(
+                            "an index into a list is a whole number, not {}",
+                            index.canonical()
+                        ),
                     )));
                 };
                 // A negative index counts from the end.
@@ -477,24 +536,33 @@ impl<'a> Evaluator<'a> {
                 items.swap_remove(at as usize)
             }
             (Value::Map(_), other) => {
-                return Err(Failure::Other(format!(
-                    "{} is a mapping, so it is indexed with text, not {}",
-                    base.describe(),
-                    other.describe()
+                return Err(Failure::Other(Error::new(
+                    Kind::Type,
+                    format!(
+                        "{} is a mapping, so it is indexed with text, not {}",
+                        base.describe(),
+                        other.describe()
+                    ),
                 )))
             }
             (Value::List(_), other) => {
-                return Err(Failure::Other(format!(
-                    "{} is a list, so it is indexed with a number, not {}",
-                    base.describe(),
-                    other.describe()
+                return Err(Failure::Other(Error::new(
+                    Kind::Type,
+                    format!(
+                        "{} is a list, so it is indexed with a number, not {}",
+                        base.describe(),
+                        other.describe()
+                    ),
                 )))
             }
             (other, _) => {
-                return Err(Failure::Other(format!(
-                    "{} is {}, so it cannot be indexed",
-                    base.describe(),
-                    other.describe()
+                return Err(Failure::Other(Error::new(
+                    Kind::Type,
+                    format!(
+                        "{} is {}, so it cannot be indexed",
+                        base.describe(),
+                        other.describe()
+                    ),
                 )))
             }
         })
@@ -555,11 +623,14 @@ impl<'a> Evaluator<'a> {
         right: &Node,
     ) -> Outcome<Value> {
         let mismatch = |verb: &str| {
-            Failure::Other(format!(
-                "cannot {verb} {} and {} with {}; convert one first, with toString or toNumber",
-                a.describe(),
-                b.describe(),
-                op.symbol()
+            Failure::Other(Error::new(
+                Kind::Type,
+                format!(
+                    "cannot {verb} {} and {} with {}; convert one first, with toString or toNumber",
+                    a.describe(),
+                    b.describe(),
+                    op.symbol()
+                ),
             ))
         };
         if matches!(a, Value::Secret(_)) || matches!(b, Value::Secret(_)) {
@@ -575,9 +646,10 @@ impl<'a> Evaluator<'a> {
                     _ => return Err(mismatch("compare")),
                 };
                 let Some(ordering) = ordering else {
-                    return Err(Failure::Other(
-                        "a value that is not a number cannot be ordered".to_owned(),
-                    ));
+                    return Err(Failure::Other(Error::new(
+                        Kind::Type,
+                        "a value that is not a number cannot be ordered",
+                    )));
                 };
                 Value::Bool(match op {
                     Binary::Less => ordering.is_lt(),
@@ -588,7 +660,7 @@ impl<'a> Evaluator<'a> {
             }
             Binary::In | Binary::NotIn => {
                 let found = funcs::holds(&b, &a).map_err(|()| {
-                    Failure::Other(if matches!(b, Value::String(_)) {
+                    let msg = if matches!(b, Value::String(_)) {
                         format!(
                             "{} looks for text inside text; {} is {}",
                             op.symbol(),
@@ -603,17 +675,21 @@ impl<'a> Evaluator<'a> {
                             right.describe(),
                             b.describe()
                         )
-                    })
+                    };
+                    Failure::Other(Error::new(Kind::Type, msg))
                 })?;
                 Value::Bool(found == (op == Binary::In))
             }
             Binary::Matches | Binary::NotMatches => {
                 let (Value::String(text), Value::String(pattern)) = (&a, &b) else {
-                    return Err(Failure::Other(format!(
-                        "{} matches text against a pattern; it was given {} and {}",
-                        op.symbol(),
-                        a.describe(),
-                        b.describe()
+                    return Err(Failure::Other(Error::new(
+                        Kind::Type,
+                        format!(
+                            "{} matches text against a pattern; it was given {} and {}",
+                            op.symbol(),
+                            a.describe(),
+                            b.describe()
+                        ),
                     )));
                 };
                 let found = funcs::pattern(pattern)?.is_match(text);
@@ -651,9 +727,9 @@ impl<'a> Evaluator<'a> {
                     return Err(mismatch("calculate"));
                 };
                 if y.float() == 0.0 {
-                    return Err(Failure::Other(format!(
-                        "{} is divided by zero",
-                        left.describe()
+                    return Err(Failure::Other(Error::new(
+                        Kind::Type,
+                        format!("{} is divided by zero", left.describe()),
                     )));
                 }
                 match (x, y, op) {
@@ -677,7 +753,10 @@ impl<'a> Evaluator<'a> {
 
     fn secrets(&self) -> Outcome<&SecretTable> {
         self.scope.secrets.as_deref().ok_or_else(|| {
-            Failure::Other("a secret cannot be read here: this place holds no secrets".to_owned())
+            Failure::Other(Error::new(
+                Kind::Type,
+                "a secret cannot be read here: this place holds no secrets".to_owned(),
+            ))
         })
     }
 
@@ -686,7 +765,9 @@ impl<'a> Evaluator<'a> {
     /// which gives a secret. Nothing else is done to one.
     fn binary_with_secret(&self, op: Binary, a: &Value, b: &Value) -> Outcome<Value> {
         let table = self.secrets()?;
-        let failed = |e: meridian_secret::TableError| Failure::Other(e.to_string());
+        let failed = |e: meridian_secret::TableError| {
+            Failure::Other(Error::new(Kind::Secret, e.to_string()))
+        };
         match op {
             Binary::Equal | Binary::NotEqual => {
                 let equal = match (a, b) {
@@ -719,21 +800,27 @@ impl<'a> Evaluator<'a> {
                     _ => None,
                 };
                 let (Some(x), Some(y)) = (piece(a), piece(b)) else {
-                    return Err(Failure::Other(format!(
+                    return Err(Failure::Other(Error::new(
+                        Kind::Type,
+                        format!(
                         "cannot add {} and {} with +; a secret is joined to text or to another \
                          secret",
                         a.describe(),
                         b.describe()
+                    ),
                     )));
                 };
                 let joined = table.join(&[x.piece(), y.piece()]).map_err(failed)?;
                 Ok(Value::Secret(joined))
             }
-            _ => Err(Failure::Other(format!(
+            _ => Err(Failure::Other(Error::new(
+                Kind::Type,
+                format!(
                 "{} cannot be used on a secret; a secret can be compared with == or !=, joined \
                  to text with +, and given to {}",
                 op.symbol(),
                 Transform::FUNCTIONS.join(", ")
+            ),
             ))),
         }
     }
@@ -746,13 +833,16 @@ impl<'a> Evaluator<'a> {
             (Some(transform), [Value::Secret(secret)]) => table
                 .transform(*secret, transform)
                 .map(Value::Secret)
-                .map_err(|e| Failure::Other(e.to_string())),
+                .map_err(|e| Failure::Other(Error::new(Kind::Secret, e.to_string()))),
             // The value is handed back as it is, or the run stops.
             _ if name == "required" => Ok(funcs::call(name, values, self.scope)?),
-            _ => Err(Failure::Other(format!(
-                "{name}(...) cannot be given a secret; the functions that can are {}, and a \
+            _ => Err(Failure::Other(Error::new(
+                Kind::Type,
+                format!(
+                    "{name}(...) cannot be given a secret; the functions that can are {}, and a \
                  secret can be joined to text with + or placed inside text",
-                Transform::FUNCTIONS.join(", ")
+                    Transform::FUNCTIONS.join(", ")
+                ),
             ))),
         }
     }
@@ -790,15 +880,21 @@ impl<'a> Evaluator<'a> {
             // map and filter
             _ => {
                 let Value::List(items) = self.value(&args[0])? else {
-                    return Err(Failure::Other(format!(
-                        "{name}(...) takes a list as its first argument; {} is not one",
-                        args[0].describe()
+                    return Err(Failure::Other(Error::new(
+                        Kind::Type,
+                        format!(
+                            "{name}(...) takes a list as its first argument; {} is not one",
+                            args[0].describe()
+                        ),
                     )));
                 };
                 let Node::Literal(Value::String(item_name)) = &args[1] else {
-                    return Err(Failure::Other(format!(
-                        "the second argument of {name}(...) is the name each item is given, \
+                    return Err(Failure::Other(Error::new(
+                        Kind::Type,
+                        format!(
+                            "the second argument of {name}(...) is the name each item is given, \
                          as quoted text"
+                        ),
                     )));
                 };
                 let mut out = Vec::with_capacity(items.len());

@@ -38,7 +38,7 @@ fn json(text: &str) -> Value {
 }
 
 fn eval(text: &str) -> Result<Value, String> {
-    Expr::parse(text)?.eval(&scope())
+    Ok(Expr::parse(text)?.eval(&scope())?)
 }
 
 /// Each case is an expression and the JSON its value must equal.
@@ -477,7 +477,7 @@ fn what_is_not_in_the_language_is_refused_when_it_is_read() {
             "unexpected",
         ),
     ] {
-        let err = Expr::parse(expression).expect_err(expression);
+        let err = Expr::parse(expression).expect_err(expression).to_string();
         assert!(err.contains(want), "{expression:?}: {err}");
     }
 }
@@ -485,7 +485,7 @@ fn what_is_not_in_the_language_is_refused_when_it_is_read() {
 #[test]
 fn an_expression_nested_too_deep_is_refused_and_does_not_overflow() {
     let deep = format!("{}1{}", "(".repeat(5000), ")".repeat(5000));
-    let err = Expr::parse(&deep).expect_err("deep nesting");
+    let err = Expr::parse(&deep).expect_err("deep nesting").to_string();
     assert!(err.contains("nested more than"), "{err}");
     let deep = format!("{}true", "!".repeat(5000));
     assert!(Expr::parse(&deep).is_err());
@@ -504,7 +504,7 @@ fn a_long_chain_of_operators_is_refused_and_does_not_overflow() {
         format!("x{}", "[0]".repeat(10_000)),
         format!("{}1", "true ? 1 : ".repeat(10_000)),
     ] {
-        let err = Expr::parse(&chain).expect_err("a long chain");
+        let err = Expr::parse(&chain).expect_err("a long chain").to_string();
         assert!(
             err.contains("more than 1000 operators") || err.contains("nested more than"),
             "{err}"
@@ -528,11 +528,11 @@ fn a_long_chain_of_operators_is_refused_and_does_not_overflow() {
             assert_eq!(expr.eval(&scope).unwrap(), Value::String("last".to_owned()));
             let path = format!("data{}", ".a".repeat(1000));
             let expr = Expr::parse(&path).unwrap();
-            let err = expr.eval(&scope).unwrap_err();
+            let err = expr.eval(&scope).unwrap_err().to_string();
             assert!(err.contains("data"), "{err}");
             let path = format!("data{}", "[0]".repeat(1000));
             let expr = Expr::parse(&path).unwrap();
-            let err = expr.eval(&scope).unwrap_err();
+            let err = expr.eval(&scope).unwrap_err().to_string();
             assert!(err.contains("data"), "{err}");
             let chain = format!("{}3", "1 + 2 * ".repeat(500));
             let expr = Expr::parse(&chain).unwrap();
@@ -626,7 +626,8 @@ fn names_are_checked_without_any_data() {
     ] {
         let err = Expr::parse(expression)
             .and_then(|e| e.check(&names))
-            .expect_err(expression);
+            .expect_err(expression)
+            .to_string();
         assert!(err.contains(want), "{expression}: {err}");
     }
 }
@@ -667,11 +668,11 @@ fn a_condition_must_be_a_yes_or_a_no() {
             "the expression is a string, not true or false",
         ),
     ] {
-        let err = truth(condition).expect_err(condition);
+        let err = truth(condition).expect_err(condition).to_string();
         assert!(err.contains(want), "{condition}: {err}");
     }
     // A condition's own diagnostics call it a condition.
-    let err = Expr::parse_condition("").unwrap_err();
+    let err = Expr::parse_condition("").unwrap_err().to_string();
     assert_eq!(err, "the condition ends where a value was expected");
 }
 

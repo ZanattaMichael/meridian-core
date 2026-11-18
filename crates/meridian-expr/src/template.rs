@@ -11,6 +11,7 @@ use std::collections::BTreeSet;
 use meridian_secret::Piece;
 use meridian_value::{PlacedEscape, SecretRef, Value};
 
+use crate::error::{Error, Kind};
 use crate::{Expr, Names, Scope};
 
 /// What opens an interpolation.
@@ -21,7 +22,23 @@ pub const CLOSE: &str = "}}";
 #[derive(Clone, Debug, PartialEq)]
 enum Part {
     Text(String),
-    Expr { source: String, expr: Expr },
+    Expr {
+        source: String,
+        expr: Expr,
+        /// The byte offset of `source` in the text, so an error inside the
+        /// expression can be placed in the whole value.
+        offset: usize,
+    },
+}
+
+/// The words in front of an error inside an interpolation.
+fn inside(source: &str) -> String {
+    format!("in {OPEN} {source} {CLOSE}: ")
+}
+
+/// A failure of the interpolation itself, not of an expression in it.
+fn interpolation(msg: String) -> Error {
+    Error::new(Kind::Interpolation, msg)
 }
 
 /// A value's text, split into what is literal and what is decided.
@@ -76,7 +93,7 @@ fn closing(body: &str) -> Option<usize> {
 
 impl Template {
     /// Splits `text` and reads every expression in it. Nothing is decided.
-    pub fn parse(text: &str) -> Result<Template, String> {
+    pub fn parse(text: &str) -> Result<Template, Error> {
         let mut parts = Vec::new();
         let mut literal = String::new();
         let mut rest = text;
@@ -90,25 +107,39 @@ impl Template {
             }
             literal.push_str(&rest[..at]);
             let body = &rest[at + OPEN.len()..];
+            // Where `rest` is in the text, so that an error inside the
+            // expression can be placed in the whole value.
+            let consumed = text.len() - rest.len();
             // When the brackets inside do not balance, the first closing
             // braces end it, and the expression itself says what is wrong.
             let Some(end) = closing(body).or_else(|| body.find(CLOSE)) else {
-                return Err(format!(
+                return Err(interpolation(format!(
                     "{text:?} opens an interpolation that is never closed with {CLOSE}"
-                ));
+                ))
+                .at(crate::Span::new(consumed + at, text.len())));
             };
-            let source = body[..end].trim();
+            let raw = &body[..end];
+            let source = raw.trim();
+            let offset = consumed + at + OPEN.len() + (raw.len() - raw.trim_start().len());
             if source.is_empty() {
-                return Err(format!("{text:?} holds an empty interpolation"));
+                return Err(
+                    interpolation(format!("{text:?} holds an empty interpolation")).at(
+                        crate::Span::new(
+                            consumed + at,
+                            consumed + at + OPEN.len() + end + CLOSE.len(),
+                        ),
+                    ),
+                );
             }
             let expr =
-                Expr::parse(source).map_err(|why| format!("in {OPEN} {source} {CLOSE}: {why}"))?;
+                Expr::parse(source).map_err(|e| e.prefixed(&inside(source)).shifted(offset))?;
             if !literal.is_empty() {
                 parts.push(Part::Text(std::mem::take(&mut literal)));
             }
             parts.push(Part::Expr {
                 source: source.to_owned(),
                 expr,
+                offset,
             });
             rest = &body[end + CLOSE.len()..];
         }
@@ -126,19 +157,28 @@ impl Template {
 
     /// The single expression the text consists of, when it is nothing else.
     /// Its value keeps its type.
-    fn only(&self) -> Option<(&str, &Expr)> {
+    fn only(&self) -> Option<(&str, &Expr, usize)> {
         match self.parts.as_slice() {
-            [Part::Expr { source, expr }] => Some((source, expr)),
+            [Part::Expr {
+                source,
+                expr,
+                offset,
+            }] => Some((source.as_str(), expr, *offset)),
             _ => None,
         }
     }
 
     /// Checks every expression's names and functions; see [`Expr::check`].
-    pub fn check(&self, names: &Names) -> Result<(), String> {
+    pub fn check(&self, names: &Names) -> Result<(), Error> {
         for part in &self.parts {
-            if let Part::Expr { source, expr } = part {
+            if let Part::Expr {
+                source,
+                expr,
+                offset,
+            } = part
+            {
                 expr.check(names)
-                    .map_err(|why| format!("in {OPEN} {source} {CLOSE}: {why}"))?;
+                    .map_err(|e| e.prefixed(&inside(source)).shifted(*offset))?;
             }
         }
         Ok(())
@@ -159,14 +199,14 @@ impl Template {
     /// interpolation. A condition may be written this way, and means the
     /// same as the expression written bare.
     pub fn sole_source(&self) -> Option<&str> {
-        self.only().map(|(source, _)| source)
+        self.only().map(|(source, _, _)| source)
     }
 
     /// [`Template::eval`], for a value a plugin will read afterwards: every
     /// value an interpolation places is made literal, so text that came from
     /// data can never turn into a reference the tool resolves. What the
     /// author wrote around the interpolation is left as written.
-    pub fn eval_literal(&self, scope: &Scope) -> Result<Value, String> {
+    pub fn eval_literal(&self, scope: &Scope) -> Result<Value, Error> {
         self.decide(scope, Some(&[]))
     }
 
@@ -180,7 +220,7 @@ impl Template {
         &self,
         scope: &Scope,
         escapes: &[PlacedEscape],
-    ) -> Result<Value, String> {
+    ) -> Result<Value, Error> {
         self.decide(scope, Some(escapes))
     }
 
@@ -190,21 +230,21 @@ impl Template {
     /// expression's value with its type: a number stays a number and a list
     /// stays a list. An interpolation inside longer text must be text, a
     /// number or a boolean, and is placed as text.
-    pub fn eval(&self, scope: &Scope) -> Result<Value, String> {
+    pub fn eval(&self, scope: &Scope) -> Result<Value, Error> {
         self.decide(scope, None)
     }
 
     /// With `escapes`, every placed value is made literal: for Meridian's
     /// own `${` always, and for each opening the target declared.
-    fn decide(&self, scope: &Scope, escapes: Option<&[PlacedEscape]>) -> Result<Value, String> {
+    fn decide(&self, scope: &Scope, escapes: Option<&[PlacedEscape]>) -> Result<Value, Error> {
         let literal = escapes.is_some();
         let rules = escapes.unwrap_or(&[]);
         let placed = |value: Value| if literal { escape(value, rules) } else { value };
-        if let Some((source, expr)) = self.only() {
+        if let Some((source, expr, offset)) = self.only() {
             return expr
                 .eval(scope)
                 .map(placed)
-                .map_err(|why| format!("in {OPEN} {source} {CLOSE}: {why}"));
+                .map_err(|e| e.prefixed(&inside(source)).shifted(offset));
         }
         // Text gathers in `out`. When a secret is placed, what has gathered
         // so far and the secret become pieces, and the whole is a secret.
@@ -214,7 +254,7 @@ impl Template {
         // brace (or the other way round), would join into a reference that
         // neither side wrote, so the join is made literal as well.
         let mut last_placed = false;
-        let mut add = |out: &mut String, text: &str, is_placed: bool| -> Result<(), String> {
+        let mut add = |out: &mut String, text: &str, is_placed: bool| -> Result<(), Error> {
             if text.is_empty() {
                 return Ok(());
             }
@@ -232,11 +272,11 @@ impl Template {
                 && text.starts_with(REFERENCE)
             {
                 let reference = text.split_inclusive('}').next().unwrap_or(text);
-                return Err(format!(
+                return Err(interpolation(format!(
                     "the value placed before {reference} ends in \"$\", and a \"$\" directly \
                      before a reference makes it literal text, so the reference would be \
                      lost; put a space or other text between the two"
-                ));
+                )));
             }
             if literal && (is_placed || last_placed) && out.ends_with('$') && text.starts_with('{')
             {
@@ -260,8 +300,13 @@ impl Template {
         for part in &self.parts {
             match part {
                 Part::Text(text) => add(&mut out, text, false)?,
-                Part::Expr { source, expr } => {
-                    let fail = |why: String| format!("in {OPEN} {source} {CLOSE}: {why}");
+                Part::Expr {
+                    source,
+                    expr,
+                    offset,
+                } => {
+                    let fail = |e: Error| e.prefixed(&inside(source)).shifted(*offset);
+                    let placed_here = |msg: String| fail(interpolation(msg));
                     match expr.eval(scope).map_err(fail)? {
                         Value::String(s) => {
                             let s = if literal {
@@ -280,14 +325,14 @@ impl Template {
                         | Value::Float(_)) => add(&mut out, &value.canonical(), true)?,
                         Value::Secret(secret) => pieces.push((std::mem::take(&mut out), secret)),
                         Value::Null => {
-                            return Err(fail(
+                            return Err(placed_here(
                                 "the value is null, which has no text form; give a default \
                                  with ??"
                                     .to_owned(),
                             ))
                         }
                         other => {
-                            return Err(fail(format!(
+                            return Err(placed_here(format!(
                                 "{} cannot be placed inside text; use join(...) or \
                                  toJson(...), or make the interpolation the whole value",
                                 other.describe()
@@ -310,11 +355,14 @@ impl Template {
             .secrets
             .as_deref()
             .ok_or_else(|| {
-                "a secret cannot be placed here: this place holds no secrets".to_owned()
+                Error::new(
+                    Kind::Secret,
+                    "a secret cannot be placed here: this place holds no secrets",
+                )
             })?
             .join(&joined)
             .map(Value::Secret)
-            .map_err(|e| e.to_string())
+            .map_err(|e| Error::new(Kind::Secret, e.to_string()))
     }
 }
 

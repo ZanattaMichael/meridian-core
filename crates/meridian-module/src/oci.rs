@@ -21,7 +21,7 @@ use ureq::{Agent, Body};
 
 use crate::integrity::sha256_hex;
 use crate::pack::{unpack, MAX_UNPACKED_BYTES};
-use crate::Error;
+use crate::{Error, Kind};
 
 /// The artifact type of a module's manifest.
 pub const ARTIFACT_TYPE: &str = "application/vnd.meridian.module.v1";
@@ -179,10 +179,13 @@ impl<'a> Repository<'a> {
         declared: Option<&'a Credential>,
     ) -> Result<Repository<'a>, Error> {
         let bad = || {
-            Error::new(format!(
-                "{repository:?} is not a registry repository such as \
+            Error::new(
+                Kind::Registry,
+                format!(
+                    "{repository:?} is not a registry repository such as \
                  registry.example.com/team/module"
-            ))
+                ),
+            )
         };
         let (host, path) = repository.split_once('/').ok_or_else(bad)?;
         let ok_host = !host.is_empty()
@@ -217,19 +220,25 @@ impl<'a> Repository<'a> {
             None => Login::Docker(docker_credentials(host)),
             Some(credential) => {
                 if !matches!(credential.kind.as_str(), "registry" | "usernamePassword") {
-                    return Err(Error::new(format!(
-                        "the credential {} is a {} credential; a registry is logged in to \
+                    return Err(Error::new(
+                        Kind::Registry,
+                        format!(
+                            "the credential {} is a {} credential; a registry is logged in to \
                          with a registry or a usernamePassword credential",
-                        credential.name, credential.kind
-                    )));
+                            credential.name, credential.kind
+                        ),
+                    ));
                 }
                 // A login declared for one registry is never sent to another.
                 if let Some(server) = credential.text("server").filter(|s| *s != host) {
-                    return Err(Error::new(format!(
-                        "the credential {} is for the registry {server}, and {repository} is \
+                    return Err(Error::new(
+                        Kind::Registry,
+                        format!(
+                            "the credential {} is for the registry {server}, and {repository} is \
                          on {host}; it was not sent",
-                        credential.name
-                    )));
+                            credential.name
+                        ),
+                    ));
                 }
                 Login::Declared(credential)
             }
@@ -282,7 +291,12 @@ impl<'a> Repository<'a> {
                 request.send(*body)
             }
         };
-        result.map_err(|e| Error::new(format!("reaching the registry {}: {e}", self.host)))
+        result.map_err(|e| {
+            Error::new(
+                Kind::Registry,
+                format!("reaching the registry {}: {e}", self.host),
+            )
+        })
     }
 
     /// The `Authorization` header that says who we are, when we have a login.
@@ -305,23 +319,32 @@ impl<'a> Repository<'a> {
             return self.basic_login().ok_or_else(|| self.no_access());
         }
         if !scheme.eq_ignore_ascii_case("bearer") {
-            return Err(Error::new(format!(
-                "the registry {} asks for {scheme:?} authentication, which is not supported",
-                self.host
-            )));
+            return Err(Error::new(
+                Kind::Registry,
+                format!(
+                    "the registry {} asks for {scheme:?} authentication, which is not supported",
+                    self.host
+                ),
+            ));
         }
         let params = challenge_params(params);
         let Some(realm) = params.get("realm") else {
-            return Err(Error::new(format!(
-                "the registry {} asked for a token without saying where to get one",
-                self.host
-            )));
+            return Err(Error::new(
+                Kind::Registry,
+                format!(
+                    "the registry {} asked for a token without saying where to get one",
+                    self.host
+                ),
+            ));
         };
         if !(realm.starts_with("https://") || self.insecure && realm.starts_with("http://")) {
-            return Err(Error::new(format!(
-                "the registry {} sends logins to {realm:?}, which is not an https address",
-                self.host
-            )));
+            return Err(Error::new(
+                Kind::Registry,
+                format!(
+                    "the registry {} sends logins to {realm:?}, which is not an https address",
+                    self.host
+                ),
+            ));
         }
         let mut url = realm.clone();
         let mut separator = if realm.contains('?') { '&' } else { '?' };
@@ -345,7 +368,9 @@ impl<'a> Repository<'a> {
             .with_config()
             .limit(MAX_MANIFEST_BYTES)
             .read_to_vec()
-            .map_err(|e| Error::new(format!("reading a token from {realm}: {e}")))?;
+            .map_err(|e| {
+                Error::new(Kind::Registry, format!("reading a token from {realm}: {e}"))
+            })?;
         let token = serde_json::from_slice::<serde_json::Value>(&body)
             .ok()
             .and_then(|v| {
@@ -353,7 +378,12 @@ impl<'a> Repository<'a> {
                     .or_else(|| v.get("access_token"))
                     .and_then(|t| t.as_str().map(str::to_owned))
             })
-            .ok_or_else(|| Error::new(format!("{realm} did not answer with a token")))?;
+            .ok_or_else(|| {
+                Error::new(
+                    Kind::Registry,
+                    format!("{realm} did not answer with a token"),
+                )
+            })?;
         Ok(format!("Bearer {token}"))
     }
 
@@ -375,10 +405,13 @@ impl<'a> Repository<'a> {
         } else {
             "reading"
         };
-        Error::new(format!(
-            "the registry {} did not allow {doing} {}: {hint}",
-            self.host, self.name
-        ))
+        Error::new(
+            Kind::Registry,
+            format!(
+                "the registry {} did not allow {doing} {}: {hint}",
+                self.host, self.name
+            ),
+        )
     }
 
     /// A request that logs in once if the registry asks.
@@ -407,12 +440,18 @@ impl<'a> Repository<'a> {
     fn check(&self, response: &Response<Body>, what: &str) -> Result<(), Error> {
         match response.status().as_u16() {
             200..=299 => Ok(()),
-            404 => Err(Error::new(format!("{what} was not found in {}", self.name))),
+            404 => Err(Error::new(
+                Kind::Registry,
+                format!("{what} was not found in {}", self.name),
+            )),
             403 => Err(self.no_access()),
-            status => Err(Error::new(format!(
-                "the registry {} answered {status} for {what} of {}",
-                self.host, self.name
-            ))),
+            status => Err(Error::new(
+                Kind::Registry,
+                format!(
+                    "the registry {} answered {status} for {what} of {}",
+                    self.host, self.name
+                ),
+            )),
         }
     }
 
@@ -422,7 +461,12 @@ impl<'a> Repository<'a> {
             .with_config()
             .limit(limit)
             .read_to_vec()
-            .map_err(|e| Error::new(format!("reading {what} of {}: {e}", self.name)))
+            .map_err(|e| {
+                Error::new(
+                    Kind::Registry,
+                    format!("reading {what} of {}: {e}", self.name),
+                )
+            })
     }
 
     /// Every tag of the repository.
@@ -447,10 +491,10 @@ impl<'a> Repository<'a> {
             });
             let body = self.body(response, MAX_MANIFEST_BYTES, "the list of versions")?;
             let listing: serde_json::Value = serde_json::from_slice(&body).map_err(|e| {
-                Error::new(format!(
-                    "the list of versions of {} is not JSON: {e}",
-                    self.name
-                ))
+                Error::new(
+                    Kind::Registry,
+                    format!("the list of versions of {} is not JSON: {e}", self.name),
+                )
             })?;
             if let Some(tags) = listing.get("tags").and_then(|t| t.as_array()) {
                 out.extend(tags.iter().filter_map(|t| t.as_str().map(str::to_owned)));
@@ -469,14 +513,21 @@ impl<'a> Repository<'a> {
         let body = self.body(response, MAX_MANIFEST_BYTES, &what)?;
         let digest = format!("sha256:{}", sha256_hex(&body));
         if reference.starts_with("sha256:") && reference != digest {
-            return Err(Error::new(format!(
-                "the registry {} answered a request for {reference} of {} with different \
+            return Err(Error::new(
+                Kind::Registry,
+                format!(
+                    "the registry {} answered a request for {reference} of {} with different \
                  content ({digest})",
-                self.host, self.name
-            )));
+                    self.host, self.name
+                ),
+            ));
         }
-        let manifest: serde_json::Value = serde_json::from_slice(&body)
-            .map_err(|e| Error::new(format!("{what} of {} is not JSON: {e}", self.name)))?;
+        let manifest: serde_json::Value = serde_json::from_slice(&body).map_err(|e| {
+            Error::new(
+                Kind::Registry,
+                format!("{what} of {} is not JSON: {e}", self.name),
+            )
+        })?;
         let layers = manifest
             .get("layers")
             .and_then(|l| l.as_array())
@@ -491,16 +542,19 @@ impl<'a> Repository<'a> {
         };
         let Some(layer) = layers.iter().find(|l| media(l) == LAYER_MEDIA_TYPE) else {
             let found: Vec<String> = layers.iter().map(media).collect();
-            return Err(Error::new(format!(
-                "{reference} of {} is not a Meridian module: it has no layer of type \
+            return Err(Error::new(
+                Kind::Registry,
+                format!(
+                    "{reference} of {} is not a Meridian module: it has no layer of type \
                  {LAYER_MEDIA_TYPE} (found: {})",
-                self.name,
-                if found.is_empty() {
-                    "no layers".to_owned()
-                } else {
-                    found.join(", ")
-                }
-            )));
+                    self.name,
+                    if found.is_empty() {
+                        "no layers".to_owned()
+                    } else {
+                        found.join(", ")
+                    }
+                ),
+            ));
         };
         let layer_digest = layer
             .get("digest")
@@ -510,10 +564,13 @@ impl<'a> Repository<'a> {
                     .is_some_and(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()))
             })
             .ok_or_else(|| {
-                Error::new(format!(
-                    "{reference} of {} names its layer by something other than a sha256 digest",
-                    self.name
-                ))
+                Error::new(
+                    Kind::Registry,
+                    format!(
+                        "{reference} of {} names its layer by something other than a sha256 digest",
+                        self.name
+                    ),
+                )
             })?;
         Ok((digest, layer_digest.to_owned()))
     }
@@ -526,11 +583,14 @@ impl<'a> Repository<'a> {
         let body = self.body(response, MAX_UNPACKED_BYTES, &what)?;
         let found = format!("sha256:{}", sha256_hex(&body));
         if found != digest {
-            return Err(Error::new(format!(
-                "the registry {} answered a request for {digest} of {} with different content \
+            return Err(Error::new(
+                Kind::Registry,
+                format!(
+                    "the registry {} answered a request for {digest} of {} with different content \
                  ({found})",
-                self.host, self.name
-            )));
+                    self.host, self.name
+                ),
+            ));
         }
         Ok(body)
     }
@@ -576,11 +636,14 @@ impl Repository<'_> {
         } else if location.starts_with(&format!("{}/", self.base)) {
             location.to_owned()
         } else {
-            return Err(Error::new(format!(
-                "the registry {} sent the upload of {} to {location:?}, which is not on that \
+            return Err(Error::new(
+                Kind::Registry,
+                format!(
+                    "the registry {} sent the upload of {} to {location:?}, which is not on that \
                  registry",
-                self.host, self.name
-            )));
+                    self.host, self.name
+                ),
+            ));
         };
         let separator = if target.contains('?') { '&' } else { '?' };
         let put = Call::Put {
@@ -666,10 +729,13 @@ pub fn push(
             })
         }
         Some(found) => {
-            return Err(Error::new(format!(
-                "{name} {version} is already published in {repository} with different content \
+            return Err(Error::new(
+                Kind::Registry,
+                format!(
+                    "{name} {version} is already published in {repository} with different content \
                  ({found}); a version is published once. Release a new version instead"
-            )))
+                ),
+            ))
         }
         None => {}
     }

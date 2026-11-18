@@ -31,7 +31,7 @@ fn scope() -> Scope {
 
 fn eval(text: &str) -> Result<Value, String> {
     let expr = Expr::parse(text)?;
-    expr.eval(&scope())
+    Ok(expr.eval(&scope())?)
 }
 
 fn all_equal(cases: &[(&str, &str)]) {

@@ -40,8 +40,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use meridian_ir::Bundle;
 use meridian_orchestrator::{
     lock, record, run_selected, selected, Backend, Drift, Event, ExecBackend, LocalBackend, Mode,
-    Observer, OnFailure, Options, Outcome, Policy, Resume, RollbackOutcome, RollbackReport,
-    RunRecord, Selector, StageId, StageReport, MASK, REASON_POLICY_DENIED,
+    Observer, OnFailure, Options, Outcome, Policy, Reason, Resume, RollbackOutcome, RollbackReport,
+    RunRecord, Selector, StageId, StageReport, MASK,
 };
 use meridian_plugin_host::{
     signature::signature_path, Policy as SignaturePolicy, PublicKey, Registry, SecretKey,
@@ -479,10 +479,10 @@ impl TrustedKeys {
                     .collect();
                 files.sort();
                 for file in files {
-                    keys.push(PublicKey::read(&file).map_err(Failure::Message)?);
+                    keys.push(PublicKey::read(&file).map_err(|e| Failure::Message(e.into()))?);
                 }
             } else {
-                keys.push(PublicKey::read(path).map_err(Failure::Message)?);
+                keys.push(PublicKey::read(path).map_err(|e| Failure::Message(e.into()))?);
             }
         }
         Ok(keys)
@@ -1152,7 +1152,7 @@ fn module(command: ModuleCommand, state_dir: &Path) -> Result<(), Failure> {
             return Ok(());
         }
         ModuleCommand::Sign { key } => {
-            let key = SecretKey::read(&key).map_err(Failure::Message)?;
+            let key = SecretKey::read(&key).map_err(|e| Failure::Message(e.into()))?;
             let signed = meridian_module::sign(project.dir, &key).map_err(module_failure)?;
             outln!(
                 "signed {}{} with key {}",
@@ -1511,7 +1511,7 @@ fn signing(command: SigningCommand) -> Result<(), Failure> {
                     )));
                 }
             }
-            let key = SecretKey::generate().map_err(Failure::Message)?;
+            let key = SecretKey::generate().map_err(|e| Failure::Message(e.into()))?;
             write_secret(&secret, &format!("{}\n", key.to_text()))
                 .and_then(|()| std::fs::write(&public, format!("{}\n", key.public().to_text())))
                 .map_err(|e| Failure::Message(format!("writing the key pair: {e}")))?;
@@ -1521,9 +1521,11 @@ fn signing(command: SigningCommand) -> Result<(), Failure> {
             Ok(())
         }
         SigningCommand::Sign { key, binaries } => {
-            let key = SecretKey::read(&key).map_err(Failure::Message)?;
+            let key = SecretKey::read(&key).map_err(|e| Failure::Message(e.into()))?;
             for binary in binaries {
-                let text = key.sign_file(&binary).map_err(Failure::Message)?;
+                let text = key
+                    .sign_file(&binary)
+                    .map_err(|e| Failure::Message(e.into()))?;
                 let path = signature_path(&binary);
                 std::fs::write(&path, text)
                     .map_err(|e| Failure::Message(format!("writing {}: {e}", path.display())))?;
@@ -1908,7 +1910,10 @@ fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Result<(), Fai
             .iter()
             .filter(|s| matches!(s.outcome, Outcome::Failed(_)))
             .collect();
-        let denied = !failed.is_empty() && failed.iter().all(|s| s.reason == REASON_POLICY_DENIED);
+        let denied = !failed.is_empty()
+            && failed
+                .iter()
+                .all(|s| s.reason == Some(Reason::PolicyDenied));
         let applied = report
             .stages
             .iter()

@@ -40,6 +40,7 @@ pub mod event;
 pub mod history;
 pub mod lock;
 pub mod policy;
+mod reason;
 pub mod record;
 mod rollback;
 mod secrets;
@@ -68,6 +69,7 @@ pub use backend::{Backend, ExecBackend, LocalBackend, MemoryBackend};
 pub use event::Event;
 pub use lock::{LockError, LockInfo};
 pub use policy::{Decisions, Policy};
+pub use reason::{Reason, UnknownReason};
 pub use record::{RunRecord, RunStatus, StepRecord, StepStatus};
 pub use rollback::{RollbackOutcome, RollbackReport};
 pub use secrets::{check_declared, names_declared, places_declared, Declared};
@@ -214,10 +216,10 @@ pub struct StageReport {
     /// What the document's conditions removed before it was compiled.
     pub removed: Vec<Removed>,
     pub outcome: Outcome,
-    /// For a failed stage, the fixed word that says what kind of failure it
-    /// was, one of the `REASON_` constants. It is what the run's record
-    /// keeps; the text in [`Outcome::Failed`] is for the terminal only.
-    pub reason: String,
+    /// For a failed stage, what kind of failure it was. Its word is what
+    /// the run's record keeps; the text in [`Outcome::Failed`] is for the
+    /// terminal only.
+    pub reason: Option<Reason>,
     /// What a failed apply had already done before it failed, as far as the
     /// tool reported it.
     pub done_before_failing: Vec<Change>,
@@ -229,21 +231,6 @@ pub struct StageReport {
     /// was asked about it.
     pub policy: Option<Decisions>,
 }
-
-/// No plugin provides the document's target.
-pub const REASON_NO_PLUGIN: &str = "no-plugin";
-/// The document was refused before or while it was compiled.
-pub const REASON_COMPILE_REFUSED: &str = "compile-refused";
-/// The target cannot do what was asked of it.
-pub const REASON_NOT_SUPPORTED: &str = "not-supported";
-/// The plugin mechanism failed: the process died, or the call did.
-pub const REASON_PLUGIN_FAILED: &str = "plugin-failed";
-/// The tool said no.
-pub const REASON_TOOL_FAILED: &str = "tool-failed";
-/// The stage's working directory could not be prepared.
-pub const REASON_STATE_FAILED: &str = "state-failed";
-/// The run's policy does not allow the change, or could not be asked.
-pub const REASON_POLICY_DENIED: &str = "policy-denied";
 
 /// Why a run did not start.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -649,7 +636,7 @@ pub fn run_selected(
                 outcome: Outcome::NotRun {
                     because_of: because_of.clone(),
                 },
-                reason: String::new(),
+                reason: None,
                 done_before_failing: Vec::new(),
                 previous_good: String::new(),
                 policy: None,
@@ -664,7 +651,7 @@ pub fn run_selected(
         let stage_report = run.stage(stage, observer);
         // A plan goes on past a stage its policy denied, so that one plan
         // shows every denial there is.
-        let denied_plan = mode == Mode::Plan && stage_report.reason == REASON_POLICY_DENIED;
+        let denied_plan = mode == Mode::Plan && stage_report.reason == Some(Reason::PolicyDenied);
         if matches!(stage_report.outcome, Outcome::Failed(_)) && !denied_plan {
             failed = Some(stage_report.id.clone());
         }
@@ -1058,7 +1045,7 @@ impl Journal {
                     self.emit(observer, event::RESOURCE_CHANGED, at, resource(change));
                 }
                 step.status = StepStatus::Failed;
-                step.reason = report.reason.clone();
+                step.reason = report.reason.map_or_else(String::new, |r| r.to_string());
                 step.changes = report.done_before_failing.len() as u64;
                 // The reason is a fixed word. What the tool said stays on
                 // the terminal, because a tool can quote a value.
@@ -1067,7 +1054,10 @@ impl Journal {
                     event::STEP_FAILED,
                     at,
                     vec![
-                        ("reason", Value::from(report.reason.as_str())),
+                        (
+                            "reason",
+                            Value::from(report.reason.map_or("", Reason::as_str)),
+                        ),
                         hash,
                         ("changes", Value::Int(step.changes as i64)),
                     ],
@@ -1342,8 +1332,7 @@ struct Compiled {
 /// Why a stage did not compile, or cannot yet.
 enum Stop {
     Failed {
-        /// One of the `REASON_` constants.
-        reason: &'static str,
+        reason: Reason,
         why: String,
         /// The stage's host, when it was worked out before the failure.
         host: String,
@@ -1412,14 +1401,14 @@ impl Run<'_> {
             warnings: Vec::new(),
             removed: Vec::new(),
             outcome: Outcome::Compiled,
-            reason: String::new(),
+            reason: None,
             done_before_failing: Vec::new(),
             previous_good: String::new(),
             policy: None,
         };
-        let fail = |mut report: StageReport, reason: &str, why: String| {
+        let fail = |mut report: StageReport, reason: Reason, why: String| {
             report.outcome = Outcome::Failed(why);
-            report.reason = reason.to_owned();
+            report.reason = Some(reason);
             report
         };
 
@@ -1449,7 +1438,7 @@ impl Run<'_> {
                 report.outcome = Outcome::LeftOut { condition };
                 return report;
             }
-            Read::Failed(why) => return fail(report, REASON_COMPILE_REFUSED, why),
+            Read::Failed(why) => return fail(report, Reason::CompileRefused, why),
         };
         let stage = Stage::of(&document);
 
@@ -1511,7 +1500,7 @@ impl Run<'_> {
                 let decisions = self.decide(policy, &stage, &report, info.category, &graph, None);
                 report.policy = Some(decisions.clone());
                 if !decisions.allowed() {
-                    return fail(report, REASON_POLICY_DENIED, denial(&decisions));
+                    return fail(report, Reason::PolicyDenied, denial(&decisions));
                 }
             }
             return report;
@@ -1532,7 +1521,7 @@ impl Run<'_> {
         if self.mode == Mode::Apply && !operations.apply {
             return fail(
                 report,
-                REASON_NOT_SUPPORTED,
+                Reason::NotSupported,
                 format!(
                     "target {:?} only compiles, so Meridian cannot apply this document; \
                      use `meridian compile` and apply the result with the tool itself",
@@ -1545,15 +1534,15 @@ impl Run<'_> {
         // declared it takes them, or the read would have stopped.
         let handed = match secrets::handed(&graph, secrets.table()) {
             Ok(handed) => handed,
-            Err(why) => return fail(report, REASON_COMPILE_REFUSED, why),
+            Err(why) => return fail(report, Reason::CompileRefused, why),
         };
         let held = match secrets::handed_credential(credential.as_ref(), secrets.table()) {
             Ok(held) => held,
-            Err(why) => return fail(report, REASON_COMPILE_REFUSED, why),
+            Err(why) => return fail(report, Reason::CompileRefused, why),
         };
         let context = match self.context(&id, stage.target(), &report.host, inputs, handed, held) {
             Ok(context) => context,
-            Err(why) => return fail(report, REASON_STATE_FAILED, why),
+            Err(why) => return fail(report, Reason::StateFailed, why),
         };
 
         // A resumed run leaves alone what the run it continues already
@@ -1607,7 +1596,7 @@ impl Run<'_> {
             };
             report.policy = Some(decisions.clone());
             if !decisions.allowed() {
-                return fail(report, REASON_POLICY_DENIED, denial(&decisions));
+                return fail(report, Reason::PolicyDenied, denial(&decisions));
             }
             if self.preflight {
                 self.checked.insert(id.clone(), (hash.clone(), decisions));
@@ -1853,7 +1842,7 @@ impl Run<'_> {
         declared_secrets: &[(String, SecretRef)],
     ) -> Result<Compiled, Stop> {
         let id = stage.id();
-        let refuse = |reason: &'static str, why: String| Stop::Failed {
+        let refuse = |reason: Reason, why: String| Stop::Failed {
             reason,
             why,
             host: String::new(),
@@ -1868,20 +1857,20 @@ impl Run<'_> {
                 format!("loaded targets: {known}")
             };
             return Err(refuse(
-                REASON_NO_PLUGIN,
+                Reason::NoPlugin,
                 format!("no plugin provides target {:?} ({known})", stage.target()),
             ));
         };
 
         let info = target.info();
         if let Err(why) = kind_fits(id.kind, info.category) {
-            return Err(refuse(REASON_COMPILE_REFUSED, why));
+            return Err(refuse(Reason::CompileRefused, why));
         }
         let asked = stage.target_version();
         if !asked.is_empty() {
             if info.target_versions.is_empty() {
                 return Err(refuse(
-                    REASON_COMPILE_REFUSED,
+                    Reason::CompileRefused,
                     format!(
                         "the document asks for targetVersion {asked:?}, but target {:?} does \
                          not say which versions of its tool it compiles for, so the request \
@@ -1892,7 +1881,7 @@ impl Run<'_> {
             }
             if !version_fits(asked, &info.target_versions) {
                 return Err(refuse(
-                    REASON_COMPILE_REFUSED,
+                    Reason::CompileRefused,
                     format!(
                         "the document asks for targetVersion {asked:?}, and target {:?} \
                          compiles for: {}",
@@ -1907,7 +1896,7 @@ impl Run<'_> {
                 // Dropping the value without a word would compile into
                 // something that means less than the document says.
                 return Err(refuse(
-                    REASON_COMPILE_REFUSED,
+                    Reason::CompileRefused,
                     format!(
                         "the document imports {:?}, and target {:?} has no way to hand a value \
                          from another document to its tool; remove spec.imports, or use a \
@@ -1923,12 +1912,12 @@ impl Run<'_> {
         let (graph, host, inputs) = match stage {
             Stage::Infrastructure(doc) => match ResourceGraph::build_infrastructure(doc) {
                 Ok(graph) => (graph, String::new(), Data::new()),
-                Err(e) => return Err(refuse(REASON_COMPILE_REFUSED, e.to_string())),
+                Err(e) => return Err(refuse(Reason::CompileRefused, e.to_string())),
             },
             Stage::ResourceSet(doc) => {
                 let (host, inputs) = match self.host_of(doc) {
                     Ok(found) => found,
-                    Err(Halt::Failed(why)) => return Err(refuse(REASON_COMPILE_REFUSED, why)),
+                    Err(Halt::Failed(why)) => return Err(refuse(Reason::CompileRefused, why)),
                     Err(Halt::Deferred { waiting_on, output }) => {
                         return Err(Stop::Deferred { waiting_on, output })
                     }
@@ -1937,7 +1926,7 @@ impl Run<'_> {
                     Ok(graph) => (graph, host, inputs),
                     Err(e) => {
                         return Err(Stop::Failed {
-                            reason: REASON_COMPILE_REFUSED,
+                            reason: Reason::CompileRefused,
                             why: e.to_string(),
                             host,
                         })
@@ -1952,8 +1941,7 @@ impl Run<'_> {
         // write a reference the operator recognises. Only a target that
         // takes secrets is read with any (see `read`).
         name_secrets(&mut graph, declared_secrets);
-        let failed =
-            |reason: &'static str, why: String, host: String| Stop::Failed { reason, why, host };
+        let failed = |reason: Reason, why: String, host: String| Stop::Failed { reason, why, host };
         match target.emit(&graph, &options.data) {
             Ok(emitted) => Ok(Compiled {
                 graph,
@@ -1962,8 +1950,8 @@ impl Run<'_> {
                 inputs,
                 credential,
             }),
-            Err(EmitError::Refused(e)) => Err(failed(REASON_COMPILE_REFUSED, e.to_string(), host)),
-            Err(EmitError::Plugin(e)) => Err(failed(REASON_PLUGIN_FAILED, e.to_string(), host)),
+            Err(EmitError::Refused(e)) => Err(failed(Reason::CompileRefused, e.to_string(), host)),
+            Err(EmitError::Plugin(e)) => Err(failed(Reason::PluginFailed, e.to_string(), host)),
         }
     }
 
@@ -1986,14 +1974,14 @@ impl Run<'_> {
             } => (document, secrets),
             Read::LeftOut { condition } => {
                 return Err(Stop::Failed {
-                    reason: REASON_COMPILE_REFUSED,
+                    reason: Reason::CompileRefused,
                     why: format!("its when ({condition}) is false, so it compiles to nothing"),
                     host: String::new(),
                 })
             }
             Read::Failed(why) => {
                 return Err(Stop::Failed {
-                    reason: REASON_COMPILE_REFUSED,
+                    reason: Reason::CompileRefused,
                     why,
                     host: String::new(),
                 })
@@ -2014,7 +2002,7 @@ impl Run<'_> {
     fn imports_of(&mut self, document: &Document) -> Result<Data, Stop> {
         let bundle = self.bundle;
         let refuse = |why: String| Stop::Failed {
-            reason: REASON_COMPILE_REFUSED,
+            reason: Reason::CompileRefused,
             why,
             host: String::new(),
         };
@@ -2374,11 +2362,11 @@ fn denial(decisions: &Decisions) -> String {
     )
 }
 
-/// The fixed word for why a run of a tool produced no result.
-fn reason_of(failure: &RunFailure) -> &'static str {
+/// Why a run of a tool produced no result.
+fn reason_of(failure: &RunFailure) -> Reason {
     match failure {
-        RunFailure::Tool(_) => REASON_TOOL_FAILED,
-        RunFailure::Plugin(_) => REASON_PLUGIN_FAILED,
+        RunFailure::Tool(_) => Reason::ToolFailed,
+        RunFailure::Plugin(_) => Reason::PluginFailed,
     }
 }
 

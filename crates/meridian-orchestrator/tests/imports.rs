@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 use meridian_ir::Bundle;
 use meridian_orchestrator::record;
 use meridian_orchestrator::{
-    run, run_selected, Mode, Observer, OnFailure, Options, Outcome, Quiet, RunReport, Selector,
-    StageId, StageKind, MASK, REASON_COMPILE_REFUSED,
+    run, run_selected, Mode, Observer, OnFailure, Options, Outcome, Quiet, Reason, RunReport,
+    Selector, StageId, StageKind, MASK,
 };
 use meridian_plugin_host::{Registry, StartOptions};
 use meridian_sdk::{
@@ -392,7 +392,7 @@ fn a_file_the_document_does_not_compile_to_is_a_failure_that_lists_what_it_does(
     let report = run(&workflow, &registry, Mode::Apply, &options, &mut Quiet);
     assert!(!report.succeeded());
     let machine = stage(&report, "machine");
-    assert_eq!(machine.reason, REASON_COMPILE_REFUSED);
+    assert_eq!(machine.reason, Some(Reason::CompileRefused));
     match &machine.outcome {
         Outcome::Failed(why) => assert_eq!(
             why,
@@ -449,7 +449,7 @@ fn a_target_that_takes_no_inputs_refuses_a_document_that_imports() {
     );
     assert!(!report.succeeded());
     let machine = stage(&report, "machine");
-    assert_eq!(machine.reason, REASON_COMPILE_REFUSED);
+    assert_eq!(machine.reason, Some(Reason::CompileRefused));
     match &machine.outcome {
         Outcome::Failed(why) => assert_eq!(
             why,

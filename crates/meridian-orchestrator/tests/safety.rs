@@ -14,8 +14,8 @@ use meridian_ir::Bundle;
 use meridian_orchestrator::backend::{Backend, ExecBackend, LocalBackend, MemoryBackend};
 use meridian_orchestrator::record::{self, RunStatus, StepStatus};
 use meridian_orchestrator::{
-    event, lock, run, work_dir, Event, LockInfo, Mode, Observer, Options, Outcome, Quiet, Refusal,
-    Resume, RunState, StageId, StageKind, StageReport,
+    event, lock, run, work_dir, Event, LockInfo, Mode, Observer, Options, Outcome, Quiet, Reason,
+    Refusal, Resume, RunState, StageId, StageKind, StageReport,
 };
 use meridian_plugin_host::{Registry, StartOptions};
 use meridian_sdk::LogLine;
@@ -380,7 +380,7 @@ fn a_failed_run_records_the_failure_as_a_fixed_word_and_releases_the_lock() {
     );
     let failed = record.step(&web()).unwrap();
     assert_eq!(failed.status, StepStatus::Failed);
-    assert_eq!(failed.reason, "tool-failed");
+    assert_eq!(failed.reason, Reason::ToolFailed.as_str());
 
     // The terminal is told what the tool said. The record is not: a tool
     // can quote a value in its error.

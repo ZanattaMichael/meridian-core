@@ -169,6 +169,10 @@ A step's `reason`, when it failed:
 | `state-failed` | the step's working directory could not be prepared |
 | `policy-denied` | the run's [policy](policy.md) does not allow the change, or could not be asked |
 
+These words are fixed: a new kind of failure gets a new word, and a word is
+never reused. They are also listed with every other error code in
+[error kinds and codes](errors.md#stages-of-a-run-meridian-orchestrator).
+
 ## Events
 
 `runs/<id>/events.jsonl` has one JSON object per line.

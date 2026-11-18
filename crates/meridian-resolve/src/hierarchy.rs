@@ -3,7 +3,7 @@ use std::fmt;
 
 use meridian_ir::Value;
 
-use crate::resolve::Error;
+use crate::resolve::{Error, Kind};
 
 /// A per-key merge behaviour.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -121,8 +121,10 @@ impl Hierarchy {
     /// unrecognised field are all errors here, so a `Hierarchy` that exists is
     /// one whose rules mean something.
     pub fn parse(name: &str, data: &[u8]) -> Result<Self, Error> {
-        let value = meridian_ir::parse_value(name, data).map_err(|e| Error::new(e.to_string()))?;
-        let h = Self::from_value(&value).map_err(|e| Error::new(format!("{name}: {e}")))?;
+        let value = meridian_ir::parse_value(name, data)
+            .map_err(|e| Error::new(Kind::Hierarchy, e.to_string()))?;
+        let h = Self::from_value(&value)
+            .map_err(|e| Error::new(Kind::Hierarchy, format!("{name}: {e}")))?;
         h.validate()?;
         Ok(h)
     }
@@ -184,7 +186,7 @@ impl Hierarchy {
     /// any node being resolved.
     pub fn validate(&self) -> Result<(), Error> {
         if self.paths.is_empty() {
-            return Err(Error::new("hierarchy: no layers declared"));
+            return Err(Error::new(Kind::Hierarchy, "hierarchy: no layers declared"));
         }
         Ok(())
     }
@@ -195,16 +197,19 @@ impl Hierarchy {
         let mut out: Vec<String> = Vec::with_capacity(self.paths.len());
         for (i, raw) in self.paths.iter().enumerate() {
             let expanded = interpolate(raw, scope, &mut Vec::new())
-                .map_err(|e| Error::new(format!("hierarchy[{i}] {raw:?}: {e}")))?;
+                .map_err(|e| Error::new(Kind::Hierarchy, format!("hierarchy[{i}] {raw:?}: {e}")))?;
             // Clean the path so two spellings of the same layer (for example
             // "role/x.yaml" and "node/../role/x.yaml") compare equal and a
             // layer cannot be loaded twice under different names.
             let expanded = clean(&expanded);
             if let Some(prev) = out.iter().position(|p| *p == expanded) {
-                return Err(Error::new(format!(
+                return Err(Error::new(
+                    Kind::Hierarchy,
+                    format!(
                     "hierarchy[{i}] {raw:?} resolves to {expanded:?}, which hierarchy[{prev}] already resolves to: \
                      a layer cannot appear twice in one hierarchy"
-                )));
+                ),
+                ));
             }
             out.push(expanded);
         }

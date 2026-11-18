@@ -63,23 +63,77 @@ pub use parse::RULES_VERSION;
 pub use pattern::{KeyPattern, PathGlob};
 
 /// The rules could not be read or evaluated. Not a violation: a mistake in
-/// the rules file or the hierarchy itself.
+/// the rules file, the hierarchy or one of its layers, and `kind` says which.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Error(String);
+pub struct Error {
+    kind: Kind,
+    msg: String,
+}
+
+/// Which file the mistake is in, each with a fixed code listed in
+/// `docs/reference/errors.md`. A code is never reused for another meaning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Kind {
+    /// The hierarchy file cannot be read, parsed or expanded.
+    Hierarchy,
+    /// A layer the hierarchy names cannot be read, or its values merged.
+    Layer,
+    /// The rules file is missing where it is required, cannot be read, or
+    /// says something the rules language does not: an unknown rule, field,
+    /// group or merge strategy.
+    File,
+}
+
+impl Kind {
+    /// Every kind, in the order the reference lists them.
+    pub const ALL: [Kind; 3] = [Kind::Hierarchy, Kind::Layer, Kind::File];
+
+    /// The fixed code.
+    pub fn code(self) -> &'static str {
+        match self {
+            Kind::Hierarchy => "rules-hierarchy",
+            Kind::Layer => "rules-layer",
+            Kind::File => "rules-file",
+        }
+    }
+}
 
 impl Error {
-    pub(crate) fn new(msg: impl Into<String>) -> Self {
-        Error(msg.into())
+    pub(crate) fn new(kind: Kind, msg: impl Into<String>) -> Self {
+        Error {
+            kind,
+            msg: msg.into(),
+        }
+    }
+
+    pub fn kind(&self) -> Kind {
+        self.kind
+    }
+}
+
+impl From<meridian_resolve::Error> for Error {
+    fn from(e: meridian_resolve::Error) -> Self {
+        let kind = match e.kind() {
+            meridian_resolve::Kind::Hierarchy => Kind::Hierarchy,
+            meridian_resolve::Kind::Layer | meridian_resolve::Kind::Merge => Kind::Layer,
+        };
+        Error::new(kind, e.to_string())
     }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.msg)
     }
 }
 
 impl std::error::Error for Error {}
+
+impl From<Error> for String {
+    fn from(error: Error) -> String {
+        error.msg
+    }
+}
 
 /// Why layered data was not handed over.
 #[derive(Clone, Debug, PartialEq)]
@@ -138,19 +192,21 @@ pub fn load(
     loader: &dyn Loader,
     command_line: &[Layer],
 ) -> Result<Loaded, Error> {
-    let mut resolved = meridian_resolve::resolve(hierarchy, scope, loader)
-        .map_err(|e| Error::new(e.to_string()))?;
+    let mut resolved = meridian_resolve::resolve(hierarchy, scope, loader).map_err(Error::from)?;
     let mut layers = Vec::new();
     for layer in resolved.layers.iter().filter(|l| l.found) {
         // The same loader that just produced the layer for the merge.
         let data = loader.load(&layer.path).map_err(|e| {
-            Error::new(match e {
-                LoadError::NotFound => format!(
-                    "{:?}: the layer disappeared while it was being read",
-                    layer.path
-                ),
-                LoadError::Failed(why) => format!("{:?}: {why}", layer.path),
-            })
+            Error::new(
+                Kind::Layer,
+                match e {
+                    LoadError::NotFound => format!(
+                        "{:?}: the layer disappeared while it was being read",
+                        layer.path
+                    ),
+                    LoadError::Failed(why) => format!("{:?}: {why}", layer.path),
+                },
+            )
         })?;
         layers.push(Layer::new(layer.path.clone(), data));
     }

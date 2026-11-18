@@ -124,8 +124,10 @@ fn reached_a_tool(step: &StepRecord) -> bool {
         // reason that says the tool or its plugin failed.
         StepStatus::Failed => {
             !step.artifact.is_empty()
-                && (step.reason == crate::REASON_TOOL_FAILED
-                    || step.reason == crate::REASON_PLUGIN_FAILED)
+                && step
+                    .reason
+                    .parse::<crate::Reason>()
+                    .is_ok_and(crate::Reason::reached_the_tool)
         }
         // Already put back, never applied, or left alone by a resume.
         _ => false,
@@ -505,12 +507,12 @@ fn one(
                 at,
                 vec![
                     ("to", Value::from(previous.as_str())),
-                    ("reason", Value::from(reason)),
+                    ("reason", Value::from(reason.as_str())),
                 ],
             );
             (
                 report(RollbackOutcome::Failed(run.describe(failure))),
-                reason,
+                reason.as_str(),
             )
         }
     }

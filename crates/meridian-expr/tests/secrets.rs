@@ -47,11 +47,17 @@ fn fixture() -> Fixture {
 
 impl Fixture {
     fn eval(&self, text: &str) -> Result<Value, String> {
-        Expr::parse(text).unwrap().eval(&self.scope)
+        Expr::parse(text)
+            .unwrap()
+            .eval(&self.scope)
+            .map_err(String::from)
     }
 
     fn place(&self, text: &str) -> Result<Value, String> {
-        Template::parse(text).unwrap().eval_literal(&self.scope)
+        Template::parse(text)
+            .unwrap()
+            .eval_literal(&self.scope)
+            .map_err(String::from)
     }
 
     fn secret(&self, value: Value) -> SecretRef {
@@ -165,7 +171,7 @@ fn every_other_function_refuses_a_secret_and_says_which_take_one() {
         "first([secret.db_password])",
         "quote(secret.db_password)",
     ] {
-        let err = f.eval(call).unwrap_err();
+        let err = f.eval(call).unwrap_err().to_string();
         let name = call.split('(').next().unwrap();
         assert!(
             err.contains(&format!("{name}(...) cannot be given a secret"))
@@ -191,18 +197,19 @@ fn operators_other_than_comparison_and_joining_refuse_a_secret() {
             // Not every operator here is one the language has.
             continue;
         };
-        let err = parsed.eval(&f.scope).unwrap_err();
+        let err = parsed.eval(&f.scope).unwrap_err().to_string();
         assert!(err.contains("secret"), "{expr}: {err}");
         clean(&err);
     }
-    let err = f.eval("secret.db_password + 1").unwrap_err();
+    let err = f.eval("secret.db_password + 1").unwrap_err().to_string();
     assert!(err.contains("cannot add a secret and a number"), "{err}");
-    let err = f.eval("!secret.db_password").unwrap_err();
+    let err = f.eval("!secret.db_password").unwrap_err().to_string();
     clean(&err);
     let err = Expr::parse_condition("secret.db_password")
         .unwrap()
         .truth(&f.scope)
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("is a secret, not true or false"), "{err}");
 }
 
@@ -278,7 +285,7 @@ fn a_secret_that_is_not_fetched_is_described_and_cannot_be_compared() {
         .unwrap();
     let at = f.secret(placed);
     assert_eq!(f.table.describe(at), "token=urlEncode((secret pending))\n");
-    let err = f.eval("secret.pending == \"x\"").unwrap_err();
+    let err = f.eval("secret.pending == \"x\"").unwrap_err().to_string();
     assert_eq!(
         err,
         "(secret pending) is not fetched here: a secret is fetched by plan and apply, never by \
@@ -323,7 +330,8 @@ fn a_secret_cannot_be_read_where_no_secrets_are_held() {
     let err = Expr::parse("secret.x + \"a\"")
         .unwrap()
         .eval(&scope)
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
     assert_eq!(
         err,
         "a secret cannot be read here: this place holds no secrets"
@@ -331,7 +339,8 @@ fn a_secret_cannot_be_read_where_no_secrets_are_held() {
     let err = Template::parse(concat!("a $", "{{ secret.x }}"))
         .unwrap()
         .eval(&scope)
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("this place holds no secrets"), "{err}");
 }
 
@@ -347,7 +356,7 @@ fn no_error_about_a_secret_holds_it() {
         "semverCompare(secret.db_password, \"1.0.0\")",
         "fromJson(secret.db_password)",
     ] {
-        let err = f.eval(expr).unwrap_err();
+        let err = f.eval(expr).unwrap_err().to_string();
         clean(&err);
     }
 }
