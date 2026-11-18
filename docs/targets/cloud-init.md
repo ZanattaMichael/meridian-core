@@ -732,7 +732,12 @@ The plugin reads its settings from the environment of the `meridian` command.
 | `MERIDIAN_CLOUD_INIT_VALIDATE` | `on` | `off` skips the check, for a machine with no cloud-init, such as a Mac. |
 | `MERIDIAN_CLOUD_INIT_WAIT` | `off` | `ssh` makes `apply` wait for the first boot. |
 | `MERIDIAN_CLOUD_INIT_SSH` | `ssh` | The SSH program used to wait. |
-| `MERIDIAN_CLOUD_INIT_SSH_ARGS` | none | Extra SSH arguments, split on spaces, such as `-l ubuntu -i ~/.ssh/deploy`. |
+| `MERIDIAN_CLOUD_INIT_SSH_ARGS` | none | Extra SSH arguments, split like a shell command line (quotes hold a word together), such as `-l ubuntu -i ~/.ssh/deploy`. |
+
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.cloud-init`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#cloud-init).
 
 SSH is always run with `-o BatchMode=yes`, so a wait fails instead of stopping to ask
 for a password.

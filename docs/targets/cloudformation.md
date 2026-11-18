@@ -315,7 +315,12 @@ description.
 | Variable | Meaning |
 |---|---|
 | `MERIDIAN_AWS` | the program to run, when it is not `aws` on `PATH` |
-| `MERIDIAN_AWS_ARGS` | arguments added to every call, split on spaces: `--profile prod`, or `--endpoint-url http://localhost:4566` for an emulator |
+| `MERIDIAN_AWS_ARGS` | arguments added to every call, split like a shell command line (quotes hold a word together): `--profile prod`, or `--endpoint-url http://localhost:4566` for an emulator |
+
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.cloudformation`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#cloudformation).
 
 Credentials, and the default region when the `stack` resource names none,
 are the `aws` command's own.

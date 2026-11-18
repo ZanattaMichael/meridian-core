@@ -273,6 +273,26 @@ versions decide which `targetVersion` a document may ask it for. A plugin that
 can read its tool's existing configuration lists `import` under `can`, and the
 file names each of its formats claims under `imports`.
 
+`meridian plugins --settings` adds, under each plugin, every setting its
+runner declares: the short name to use under `spec.settings` in
+`meridian.yaml`, the environment variable, the default and what it does.
+
+```
+ansible
+  ...
+  settings:
+    program (MERIDIAN_ANSIBLE_PLAYBOOK, default "ansible-playbook")
+      The `ansible-playbook` program to run, when it is not on `PATH`.
+    args (MERIDIAN_ANSIBLE_ARGS, default none)
+      Extra arguments for every run, split like a shell command line: ...
+```
+
+The same list for every shipped plugin is the
+[plugin settings reference](plugin-settings.md). When the current directory
+holds a `meridian.yaml`, every command that starts plugins reads its
+`spec.settings` and hands each target its own; a setting a plugin does not
+declare refuses to start it, naming the ones it does.
+
 ### `import`
 
 Turns a tool's existing configuration into Meridian documents. It only reads:

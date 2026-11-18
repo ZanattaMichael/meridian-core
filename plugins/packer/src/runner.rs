@@ -9,12 +9,35 @@ use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, Operations, Output, Plan,
     RunContext, RunError, Runner, SecretFile, Value,
 };
+use meridian_sdk::{settings, Setting};
 
 use crate::outputs::{self, Built};
 use crate::{BUILD_PATH, CONFIG_PATH, MANIFEST_PATH};
 
 /// Names the program to run, when it is not `packer` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_PACKER";
+/// Extra arguments for `packer validate` and `packer build`, split like a
+/// shell command line: `-only=amazon-ebs.web`, `-parallel-builds=1`.
+pub const ARGS_VARIABLE: &str = "MERIDIAN_PACKER_ARGS";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "program",
+            PROGRAM_VARIABLE,
+            "packer",
+            "The `packer` program to run, when it is not on `PATH`.",
+        ),
+        Setting::new(
+            "args",
+            ARGS_VARIABLE,
+            "",
+            "Extra arguments for `packer validate` and `packer build`, split like a shell command line: `-only=amazon-ebs.web`, `-parallel-builds=1`.",
+        ),
+    ]
+}
 
 /// Runs a compiled template.
 ///
@@ -23,6 +46,8 @@ pub const PROGRAM_VARIABLE: &str = "MERIDIAN_PACKER";
 pub struct PackerRunner {
     /// The program to run.
     pub program: String,
+    /// Arguments added to `validate` and `build`, after Packer's own.
+    pub extra_args: Vec<String>,
 }
 
 /// What the compile recorded about the build, read back from the artifact or
@@ -38,11 +63,11 @@ struct Described {
 impl PackerRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         PackerRunner {
-            program: std::env::var(PROGRAM_VARIABLE)
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or_else(|| "packer".to_owned()),
+            program: settings::text(setting("program")),
+            extra_args: settings::args(setting("args")),
         }
     }
 
@@ -88,7 +113,10 @@ impl PackerRunner {
         command: &[&str],
         secrets: Option<&SecretFile>,
     ) -> Tool {
-        let tool = self.tool(context).args(command.iter().copied());
+        let tool = self
+            .tool(context)
+            .args(command.iter().copied())
+            .args(self.extra_args.iter().cloned());
         match secrets {
             Some(file) => tool.arg(format!("-var-file={}", file.path().display())),
             None => tool,
@@ -127,6 +155,10 @@ impl PackerRunner {
 }
 
 impl Runner for PackerRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations::ALL
     }

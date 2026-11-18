@@ -13,13 +13,34 @@ use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
     RunContext, RunError, Runner, SecretFile, Value,
 };
+use meridian_sdk::{settings, Setting};
 
 use crate::{STACK_PATH, TEMPLATE_PATH};
 
 /// Names the program to run, when it is not `aws` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_AWS";
-/// Extra arguments for every call, split on whitespace: `--profile prod`.
+/// Extra arguments for every call, split like a shell command line:
+/// `--profile prod`.
 pub const ARGS_VARIABLE: &str = "MERIDIAN_AWS_ARGS";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "program",
+            PROGRAM_VARIABLE,
+            "aws",
+            "The AWS CLI program to run, when it is not `aws` on `PATH`.",
+        ),
+        Setting::new(
+            "args",
+            ARGS_VARIABLE,
+            "",
+            "Extra arguments for every `aws` call, split like a shell command line: `--profile prod --region eu-west-1`.",
+        ),
+    ]
+}
 
 /// Deploys a compiled template as a stack.
 pub struct CloudFormationRunner {
@@ -90,14 +111,11 @@ struct Preview {
 impl CloudFormationRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         CloudFormationRunner {
-            program: std::env::var(PROGRAM_VARIABLE)
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or_else(|| "aws".to_owned()),
-            extra_args: std::env::var(ARGS_VARIABLE)
-                .map(|v| v.split_whitespace().map(str::to_owned).collect())
-                .unwrap_or_default(),
+            program: settings::text(setting("program")),
+            extra_args: settings::args(setting("args")),
         }
     }
 
@@ -364,6 +382,10 @@ fn read_changes(description: &Value, resources: &BTreeMap<String, String>) -> Ve
 }
 
 impl Runner for CloudFormationRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations::ALL
     }

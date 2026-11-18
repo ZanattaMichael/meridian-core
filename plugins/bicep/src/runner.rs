@@ -8,13 +8,33 @@ use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
     RunContext, RunError, Runner, SecretFile, Value,
 };
+use meridian_sdk::{settings, Setting};
 
 use crate::{DEPLOYMENT_PATH, TEMPLATE_PATH};
 
 /// Names the program to run, when it is not `az` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_AZ";
-/// Extra arguments for every call, split on whitespace.
+/// Extra arguments for every call, split like a shell command line.
 pub const ARGS_VARIABLE: &str = "MERIDIAN_AZ_ARGS";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "program",
+            PROGRAM_VARIABLE,
+            "az",
+            "The Azure CLI program to run, when it is not `az` on `PATH`. Shared with the arm target.",
+        ),
+        Setting::new(
+            "args",
+            ARGS_VARIABLE,
+            "",
+            "Extra arguments for every `az` call, split like a shell command line: `--only-show-errors`. Shared with the arm target.",
+        ),
+    ]
+}
 
 /// Deploys a compiled Bicep file to a resource group.
 ///
@@ -83,14 +103,11 @@ impl Deployment {
 impl BicepRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         BicepRunner {
-            program: std::env::var(PROGRAM_VARIABLE)
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or_else(|| "az".to_owned()),
-            extra_args: std::env::var(ARGS_VARIABLE)
-                .map(|v| v.split_whitespace().map(str::to_owned).collect())
-                .unwrap_or_default(),
+            program: settings::text(setting("program")),
+            extra_args: settings::args(setting("args")),
         }
     }
 
@@ -254,6 +271,10 @@ fn read_outputs(json: &str) -> Result<Vec<Output>, RunError> {
 }
 
 impl Runner for BicepRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations::ALL
     }

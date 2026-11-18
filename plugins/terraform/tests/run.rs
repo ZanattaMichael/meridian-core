@@ -35,6 +35,7 @@ fn runner(dir: &Path, cases: &str) -> TerraformRunner {
     );
     TerraformRunner {
         program: program.to_str().unwrap().to_owned(),
+        extra_args: Vec::new(),
     }
 }
 

@@ -257,8 +257,13 @@ installed, is reported in a note.
 | Plan | `kubectl apply --dry-run=server --filename manifests.yaml`; with a [secret](#secrets) in the document, `--filename -` with the filled manifests on standard input |
 | Apply | `kubectl apply --filename manifests.yaml`, or `--filename -` the same way, then each output with `kubectl get ... --output jsonpath=...` |
 | `MERIDIAN_KUBECTL` | the program to run, when it is not `kubectl` on `PATH` |
-| `MERIDIAN_KUBECTL_ARGS` | arguments added to every call |
+| `MERIDIAN_KUBECTL_ARGS` | arguments added to every call, split like a shell command line (quotes hold a word together): `--context prod` |
 | `MERIDIAN_KUBECTL_OUTPUT_WAIT` | seconds an apply waits for an output that has no value yet |
+
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.kubernetes`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#kubernetes).
 
 One limit of the plan: nothing is stored in a dry run, so objects that go in a
 namespace the same document creates cannot be previewed until the namespace

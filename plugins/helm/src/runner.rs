@@ -15,6 +15,7 @@ use meridian_sdk::{
     decode_value, Applied, Artifact, Change, Log, NoLog, Operations, Output, Plan, RunContext,
     RunError, Runner, Value, Written,
 };
+use meridian_sdk::{settings, Setting};
 use meridian_yaml::Yaml;
 
 use crate::emit::RENDERED_FILE;
@@ -55,7 +56,7 @@ use crate::{template, CHART_DIR, KUSTOMIZE_DIR, RELEASE_PATH};
 
 /// Names the program to run, when it is not `helm` on `PATH`.
 pub const HELM_VARIABLE: &str = "MERIDIAN_HELM";
-/// Extra arguments for every `helm` call, split on whitespace:
+/// Extra arguments for every `helm` call, split like a shell command line:
 /// `--kube-context prod`.
 pub const HELM_ARGS_VARIABLE: &str = "MERIDIAN_HELM_ARGS";
 /// The command that builds an overlay, when it is not `kustomize build`:
@@ -63,9 +64,46 @@ pub const HELM_ARGS_VARIABLE: &str = "MERIDIAN_HELM_ARGS";
 pub const KUSTOMIZE_VARIABLE: &str = "MERIDIAN_KUSTOMIZE";
 /// Names the program that reads outputs, when it is not `kubectl` on `PATH`.
 pub const KUBECTL_VARIABLE: &str = "MERIDIAN_KUBECTL";
-/// Extra arguments for every `kubectl` call, split on whitespace:
+/// Extra arguments for every `kubectl` call, split like a shell command line:
 /// `--context prod`.
 pub const KUBECTL_ARGS_VARIABLE: &str = "MERIDIAN_KUBECTL_ARGS";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "helm",
+            HELM_VARIABLE,
+            "helm",
+            "The `helm` program to run, when it is not on `PATH`.",
+        ),
+        Setting::new(
+            "helm-args",
+            HELM_ARGS_VARIABLE,
+            "",
+            "Extra arguments for every `helm` call, split like a shell command line: `--kube-context prod`.",
+        ),
+        Setting::new(
+            "kustomize",
+            KUSTOMIZE_VARIABLE,
+            "kustomize build",
+            "The command that builds an overlay, when it is not `kustomize build`: `kubectl kustomize` uses the copy built into kubectl.",
+        ),
+        Setting::new(
+            "kubectl",
+            KUBECTL_VARIABLE,
+            "kubectl",
+            "The `kubectl` program that reads outputs, when it is not on `PATH`. Shared with the kubernetes target.",
+        ),
+        Setting::new(
+            "kubectl-args",
+            KUBECTL_ARGS_VARIABLE,
+            "",
+            "Extra arguments for every `kubectl` call, split like a shell command line: `--context prod`. Shared with the kubernetes target.",
+        ),
+    ]
+}
 
 /// The directory of the work directory that holds the patched objects as a
 /// chart of their own, when the document has an overlay.
@@ -234,31 +272,17 @@ impl Preview {
     }
 }
 
-fn split(variable: &str) -> Vec<String> {
-    std::env::var(variable)
-        .map(|v| v.split_whitespace().map(str::to_owned).collect())
-        .unwrap_or_default()
-}
-
 impl HelmRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
-        let program = |variable: &str, default: &str| {
-            std::env::var(variable)
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or_else(|| default.to_owned())
-        };
-        let mut kustomize = split(KUSTOMIZE_VARIABLE);
-        if kustomize.is_empty() {
-            kustomize = vec!["kustomize".to_owned(), "build".to_owned()];
-        }
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         HelmRunner {
-            helm: program(HELM_VARIABLE, "helm"),
-            helm_args: split(HELM_ARGS_VARIABLE),
-            kustomize,
-            kubectl: program(KUBECTL_VARIABLE, "kubectl"),
-            kubectl_args: split(KUBECTL_ARGS_VARIABLE),
+            helm: settings::text(setting("helm")),
+            helm_args: settings::args(setting("helm-args")),
+            kustomize: settings::args(setting("kustomize")),
+            kubectl: settings::text(setting("kubectl")),
+            kubectl_args: settings::args(setting("kubectl-args")),
         }
     }
 
@@ -533,6 +557,10 @@ impl HelmRunner {
 }
 
 impl Runner for HelmRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations::ALL
     }
