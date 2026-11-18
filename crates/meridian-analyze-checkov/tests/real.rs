@@ -77,5 +77,5 @@ fn a_real_checkov_reports_the_bucket_against_the_resource() {
     assert_eq!(logging["resource"], Value::from("logs"));
     assert_eq!(logging["file"], Value::from("main.tf.json"));
     assert_eq!(logging["severity"], Value::from("high"));
-    assert!(matches!(logging["line"], Value::Uint(n) if n > 0));
+    assert!(matches!(logging["line"], Value::Int(n) if n > 0));
 }

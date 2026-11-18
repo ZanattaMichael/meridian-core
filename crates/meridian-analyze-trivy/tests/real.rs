@@ -75,6 +75,6 @@ fn a_real_trivy_reports_the_bucket_against_the_resource() {
         .find(|f| f["resource"] == Value::from("logs"))
         .expect("a finding names the bucket by the document's id");
     assert_eq!(bucket["file"], Value::from("main.tf.json"));
-    assert!(matches!(bucket["line"], Value::Uint(n) if n > 0));
+    assert!(matches!(bucket["line"], Value::Int(n) if n > 0));
     assert!(bucket["rule"].as_str().unwrap().starts_with("AVD-AWS-"));
 }
