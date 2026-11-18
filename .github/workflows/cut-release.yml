@@ -1,0 +1,152 @@
+name: cut release
+
+# The button that cuts a release. Run it from the Actions tab (Run workflow):
+# it checks that the version in Cargo.toml is the one being released, that
+# the commit's own CI is green and that the tag does not exist yet, then
+# makes the annotated tag `v<version>` and starts the `release` workflow on
+# it. Everything after that (building, testing, signing, the draft release)
+# is the release workflow's, and the `publish` job there still sits behind
+# the `release` environment, so an approval can be required before anything
+# leaves GitHub.
+#
+# A tag pushed by a workflow's own token does not start the workflows that
+# listen for tags (GitHub stops runs from setting off runs without end), so
+# this workflow starts `release` itself, by dispatching it at the tag. The
+# release workflow treats a dispatch at a `v*` tag as a release.
+#
+# docs/contributing/releasing.md is the maintainer's guide.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          The version to release, such as 0.1.0 or 0.2.0-rc.1. It must be
+          the version in Cargo.toml at the ref. Leave empty to release
+          whatever Cargo.toml says.
+        required: false
+        type: string
+      ref:
+        description: The branch or commit to release. Leave empty for main.
+        required: false
+        type: string
+      require_green_ci:
+        description: >-
+          Require the ref's `rust` workflow run to have passed. Switch off
+          only when you know why.
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cut-release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  cut:
+    name: tag v${{ inputs.version || 'Cargo.toml' }} and start the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # push the tag
+      actions: write # start the release workflow
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || 'main' }}
+          fetch-depth: 0
+
+      - name: Decide the version
+        id: version
+        env:
+          ASKED: ${{ inputs.version }}
+        run: |
+          in_cargo="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          version="${ASKED:-$in_cargo}"
+          version="${version#v}"
+          # SemVer 2.0.0, with the optional pre-release and build parts.
+          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          if ! [[ "$version" =~ $semver ]]; then
+            echo "::error::'$version' is not a SemVer version (like 0.1.0 or 0.2.0-rc.1)"
+            exit 1
+          fi
+          if [ "$version" != "$in_cargo" ]; then
+            echo "::error::you asked for $version but Cargo.toml at this ref says $in_cargo; bump the version on main first (docs/contributing/releasing.md, Cutting a release)"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
+            echo "::error::tag v$version exists already; a published release is never moved, so pick the next version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # A release is cut from a commit whose own tests passed. The `rust`
+      # workflow runs on every push to main, so a fresh merge may still be
+      # running: wait for it, or rerun this once it is green.
+      - name: Check the commit's CI
+        if: inputs.require_green_ci
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ steps.version.outputs.sha }}
+        run: |
+          conclusion="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow rust.yml --commit "$SHA" \
+            --limit 1 --json status,conclusion --jq 'if length == 0 then "none" elif .[0].status != "completed" then .[0].status else .[0].conclusion end')"
+          case "$conclusion" in
+            success) echo "rust is green on $SHA" ;;
+            none) echo "::error::no rust run found for $SHA; push the commit to main and let CI run, or switch require_green_ci off"; exit 1 ;;
+            *) echo "::error::the rust run on $SHA is '$conclusion', not success; wait for it or fix it first"; exit 1 ;;
+          esac
+
+      - name: Make and push the tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "Meridian $VERSION" -m "Cut by $ACTOR from the Actions tab (run $GITHUB_RUN_ID)."
+          git push origin "refs/tags/v$VERSION"
+
+      - name: Start the release workflow on the tag
+        id: start
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "v$VERSION"
+          # The run takes a few seconds to appear; find it so the summary can link it.
+          url=""
+          for _ in $(seq 1 12); do
+            sleep 5
+            url="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release.yml --branch "v$VERSION" \
+              --event workflow_dispatch --limit 1 --json url --jq '.[0].url // empty')"
+            [ -n "$url" ] && break
+          done
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA: ${{ steps.version.outputs.sha }}
+          URL: ${{ steps.start.outputs.url }}
+        run: |
+          {
+            echo "## Meridian $VERSION is being released"
+            echo
+            echo "- Tag \`v$VERSION\` at \`$SHA\`"
+            if [ -n "$URL" ]; then
+              echo "- Release run: $URL"
+            else
+              echo "- Release run: started; find it under the \`release\` workflow, branch \`v$VERSION\`"
+            fi
+            echo
+            echo "When it is green, approve the \`publish\` job if the \`release\` environment asks, then read the draft under Releases and press Publish."
+          } >> "$GITHUB_STEP_SUMMARY"

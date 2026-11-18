@@ -18,14 +18,20 @@ or the root `Cargo.toml`, and on demand from the Actions tab (Run workflow).
 What it makes stays in the run as workflow artifacts, kept for seven days.
 
 **A release** is the same build and the same tests, followed by the `publish`
-job. It happens only when both of these are true:
+job. It happens in either of two ways:
 
-- a tag `v<version>` was pushed, where `<version>` is the workspace version in
-  `Cargo.toml`, and
-- the repository variable `MERIDIAN_RELEASE_PUBLISH` is `true`.
+- the **`cut release`** workflow was run from the Actions tab. It makes the
+  tag `v<version>` itself and starts `release` on it. This is the usual way,
+  described under [Cutting a release](#cutting-a-release); or
+- a tag `v<version>` was pushed by hand, where `<version>` is the workspace
+  version in `Cargo.toml`, **and** the repository variable
+  `MERIDIAN_RELEASE_PUBLISH` is `true`.
 
-A tag pushed without the variable is a rehearsal, and says so in the run. A
-tag that does not match `Cargo.toml` fails at once.
+A tag pushed by hand without the variable is a rehearsal, and says so in the
+run. A tag that does not match `Cargo.toml` fails at once, whichever way it
+arrived. Choosing a `v*` tag under Run workflow on the `release` workflow
+itself is also a release: a dispatch at a tag is read as the decision to
+release.
 
 Even a release publishes nothing final: it opens a **draft** GitHub release.
 Nobody is notified and `releases/latest` does not move until you publish the
@@ -89,7 +95,7 @@ Nothing has to be set for rehearsals. For a release:
 
 | What | Where | Value |
 |---|---|---|
-| The switch | Settings, Secrets and variables, Actions, Variables | `MERIDIAN_RELEASE_PUBLISH` = `true` |
+| The switch for tags pushed by hand | Settings, Secrets and variables, Actions, Variables | `MERIDIAN_RELEASE_PUBLISH` = `true`. Not needed when `cut release` makes the tag |
 | An approval before publishing (recommended) | Settings, Environments, `release` | add yourself under Required reviewers. The `publish` job then waits for your approval in the run. The environment is created the first time the job runs if you have not made it |
 | Restrict the environment to tags (recommended) | the same page, Deployment branches and tags | allow the tag pattern `v*` only |
 | Make the image public | after the first release: your profile, Packages, `meridian`, Package settings | change visibility to Public, and connect the package to this repository. A package pushed by a workflow starts private |
@@ -106,15 +112,28 @@ they need a GitHub Enterprise Cloud plan.
 ## Cutting a release
 
 1. Set the version: `version` under `[workspace.package]` in the root
-   `Cargo.toml`. Run `cargo build` so `Cargo.lock` follows. Merge that.
-2. Wait for CI on `main` to be green, including the `release` rehearsal.
-3. Tag the merged commit and push the tag:
-   ```
-   git tag v0.1.0
-   git push origin v0.1.0
-   ```
+   `Cargo.toml`, and `version` in `editors/vscode/package.json` to match. Run
+   `cargo build` so `Cargo.lock` follows. Merge that.
+2. Wait for CI on `main` to be green. The `release` rehearsal runs on that
+   pull request because it touches `Cargo.toml`, so it has been tried too.
+3. Open the Actions tab, choose **cut release**, press **Run workflow** and
+   fill in:
+   - **version**: the version being released, such as `0.1.0`. It must be
+     what `Cargo.toml` says; left empty, that is what is used.
+   - **ref**: the commit or branch to release. Left empty, `main`.
+   - **require_green_ci**: on, unless you have a reason. The workflow refuses
+     a commit whose `rust` run is not `success`, including one still running.
+
+   The workflow checks the version is SemVer and matches `Cargo.toml`, that
+   the tag does not exist, and that CI passed; then it makes the annotated
+   tag `v<version>` and starts `release` on it. Its summary links the run.
+   Only people with write access to the repository can press the button.
+
+   By hand, the same thing is `git tag -a v0.1.0 -m "Meridian 0.1.0"` and
+   `git push origin v0.1.0`, which needs the variable above to be `true`.
 4. Watch the `release` run. If you set a required reviewer, approve the
-   `publish` job when the rest is green.
+   `publish` job when the rest is green. Everything before that job is
+   a rehearsal; the approval is the last moment to stop.
 5. Open the draft under Releases. Read the notes, check the files are all
    there (six archives, checksums and its `.sigstore.json`, `VERSION`,
    `install.sh`, `install.ps1`, two SBOMs, the package manifests), and press
@@ -123,9 +142,18 @@ they need a GitHub Enterprise Cloud plan.
    commands under [Check what you downloaded](../quickstart/install.md#check-what-you-downloaded).
 7. Update the package managers, below.
 
-If a run fails after the tag was pushed, fix the cause on `main`, delete the
-tag and the draft, and tag again. Do not move a tag once its release has been
+If a run fails after the tag was made, fix the cause on `main`, delete the
+tag and the draft, and cut again. Do not move a tag once its release has been
 published: the signatures and attestations name the commit.
+
+### Why a tag made by the workflow needs the dispatch
+
+GitHub does not start workflows for a push made with a run's own token, so a
+tag made by `cut release` would never set off `release` on its own. `cut
+release` therefore dispatches `release` at the tag, and `release` reads a
+dispatch at a `v*` tag as a release. The `MERIDIAN_RELEASE_PUBLISH` variable
+only governs tags pushed by hand, where the push itself is the trigger and
+the variable is the confirmation. See [decision 21](../decisions/0021-a-dispatch-at-a-tag-is-a-release.md).
 
 ## Package managers
 
