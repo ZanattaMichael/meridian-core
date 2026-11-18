@@ -245,6 +245,7 @@ fn main() -> ExitCode {
         Command::Lint(args) => tools::lint(&args),
         Command::Schema(args) => tools::schema(&args),
         Command::Lsp(args) => tools::lsp(&args),
+        Command::Mcp(args) => tools::mcp(&args),
         Command::Signing { command } => signing(command),
     });
     // What stdout holds is the command's result, so a result that could not

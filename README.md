@@ -120,6 +120,7 @@ meridian lint --strict .                    # every error in a project, plus pro
 meridian schema -o meridian.schema.json     # a JSON Schema, for editors that only know YAML
 meridian schema sync .                      # cache each tool's own types, for completion and checking
 meridian lsp                                # the language server, started by your editor
+meridian mcp                                # the MCP server, started by an AI client
 ```
 
 ![Writing a resource with completion](docs/tooling/images/writing-a-resource.gif)
@@ -156,6 +157,7 @@ The core is a Cargo workspace under `crates/`:
   and navigation, and the JSON Schema export, all read from the parser's own field tables and
   from what the plugins declare
 - `meridian-lsp` — the language server
+- `meridian-mcp` — the MCP server: the compiler and the catalogue as tools for an AI model
 - `meridian-cli` — the `meridian` command
 - `meridian-policy-opa` — the policy engine for Open Policy Agent, which `--policy` asks whether
   a change may be made

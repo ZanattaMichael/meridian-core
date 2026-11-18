@@ -12,6 +12,7 @@ Meridian comes with the tools an author needs while writing, all in the one
 | [Linter](linter.md) | `meridian lint` | the compiler's errors for a whole project, plus things that compile and are probably mistakes |
 | [JSON Schema](json-schema.md) | `meridian schema` | validation in editors that only know YAML |
 | [Tool schemas](schema-sync.md) | `meridian schema sync` | completion and checking of a tool's own types (`aws_instance`, `apps/v1/Deployment`), read once from the tool and cached |
+| [MCP server](mcp-server.md) | `meridian mcp` | the same compiler and catalogue as tools for an AI model, so a small model can write a document that compiles |
 
 ![Writing a resource with completion: the type, its params, and an error for a param the target does not take](images/writing-a-resource.gif)
 
@@ -28,19 +29,23 @@ flowchart LR
     cache["What each tool says about its own types<br/>(.meridian/schemas, from meridian schema sync)"]
     compiler["meridian compile"]
     lsp["meridian lsp"]
+    mcp["meridian mcp"]
     fmt["meridian fmt"]
     lint["meridian lint"]
     schema["meridian schema"]
     tables --> compiler
     tables --> lsp
+    tables --> mcp
     tables --> fmt
     tables --> lint
     tables --> schema
     plugins --> compiler
     plugins --> lsp
+    plugins --> mcp
     plugins --> lint
     plugins --> schema
     cache --> lsp
+    cache --> mcp
     cache --> lint
     cache --> schema
 ```

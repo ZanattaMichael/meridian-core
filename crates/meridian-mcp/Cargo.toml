@@ -1,0 +1,26 @@
+[package]
+name = "meridian-mcp"
+description = "The Meridian MCP server: the compiler, the target catalogue and the examples as tools an AI model calls, over the Model Context Protocol on standard input and output"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+build = "build.rs"
+
+[dependencies]
+meridian-ast = { path = "../meridian-ast" }
+meridian-expr = { path = "../meridian-expr" }
+meridian-import = { path = "../meridian-import" }
+meridian-ir = { path = "../meridian-ir" }
+meridian-plugin-host = { path = "../meridian-plugin-host" }
+meridian-sdk = { path = "../meridian-sdk" }
+meridian-tooling = { path = "../meridian-tooling" }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+meridian-target-ansible = { path = "../../plugins/ansible" }
+meridian-target-fake = { path = "../meridian-target-fake" }
+meridian-target-terraform = { path = "../../plugins/terraform" }
+
+[lints]
+workspace = true
