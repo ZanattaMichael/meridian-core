@@ -153,7 +153,15 @@ fn the_plugin_says_what_it_is() {
     );
     assert_eq!(
         Salt.supported_resource_types(),
-        ["exec", "file", "group", "package", "service", "user"]
+        [
+            "<module>.<function>",
+            "exec",
+            "file",
+            "group",
+            "package",
+            "service",
+            "user"
+        ]
     );
 }
 
@@ -373,8 +381,9 @@ fn an_unknown_type_names_the_types_that_work_and_the_line() {
     assert_eq!(err.target, "salt");
     assert_eq!(
         err.msg,
-        "unsupported resource type \"firewall_rule\" on this target \
-         (supported: exec, file, group, package, service, user)"
+        "unsupported resource type \"firewall_rule\" on this target: it is not one of the \
+         shared types (exec, file, group, package, service, user), and a Salt state is \
+         written by its dotted name, such as pkgrepo.managed"
     );
     assert_eq!((err.pos.file.as_str(), err.pos.line), ("site.yaml", 11));
 }
@@ -897,4 +906,134 @@ fn what_salt_ssh_cannot_take_of_a_credential_is_refused_with_the_reason() {
         assert!(err.msg.contains(reason), "{entry}: {err}");
         assert!(err.msg.starts_with("the credential \"deploy\""), "{err}");
     }
+}
+
+// ---- Salt's own state functions beside the six ----------------------------
+
+/// The document behind the `native_states` golden files: Salt's own state
+/// functions beside the shared ones, with a condition, notified and
+/// notifying, and one with no name of its own.
+const NATIVE_STATES: &str = "    - id: nginx_repo\n      type: pkgrepo.managed\n      params:\n        name: deb http://nginx.org/packages/debian bookworm nginx\n        file: /etc/apt/sources.list.d/nginx.list\n        key_url: https://nginx.org/keys/nginx_signing.key\n      runtimeWhen: grains['os_family'] == 'Debian'\n    - id: nginx_pkg\n      type: package\n      params:\n        name: nginx\n      dependsOn:\n        - resource: nginx_repo\n    - id: nginx_conf\n      type: file.symlink\n      params:\n        name: /etc/nginx/sites-enabled/web\n        target: /etc/nginx/sites-available/web\n      dependsOn:\n        - resource: nginx_pkg\n      notifies:\n        - resource: nginx_svc\n          action: restart\n        - resource: app\n          action: watch\n    - id: nginx_svc\n      type: service\n      params:\n        name: nginx\n    - id: app\n      type: docker_container.running\n      params:\n        image: app:1.2\n        port_bindings: ['8080:80']\n";
+
+#[test]
+fn a_state_function_is_written_with_its_arguments_as_written() {
+    let emitted = compile(NATIVE_STATES).unwrap_or_else(|e| panic!("{e}"));
+    assert_golden(
+        &repo_root().join("plugins/salt/testdata"),
+        "native_states",
+        &emitted,
+    );
+    let text = &emitted.artifact.files[SLS];
+    // The arguments are the function's own, as written, name first.
+    assert!(
+        text.contains("nginx_repo:\n  pkgrepo.managed:\n    - name: deb http://nginx.org/packages/debian bookworm nginx\n    - file: /etc/apt/sources.list.d/nginx.list\n    - key_url: https://nginx.org/keys/nginx_signing.key\n"),
+        "{text}"
+    );
+    // A state with no name of its own is named by its ID, as Salt reads it.
+    assert!(
+        text.contains(
+            "app:\n  docker_container.running:\n    - image: app:1.2\n    - port_bindings:\n"
+        ),
+        "{text}"
+    );
+    // A notified state watches the notifier.
+    assert!(
+        text.contains("    - watch:\n        - file: nginx_conf\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("    - require:\n        - pkg: nginx_pkg\n"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_state_function_takes_no_state_and_can_only_watch_when_notified() {
+    let err = refusal(
+        "    - id: a\n      type: file.symlink\n      state: present\n      params:\n        name: /x\n        target: /y\n",
+    );
+    assert_eq!(err.rule, "unsupported-state");
+
+    let err = refusal("    - id: a\n      type: file.symlink\n      params:\n        target: ~\n");
+    assert_eq!(err.rule, "empty-param");
+
+    let err = refusal(
+        "    - id: conf\n      type: file\n      params: {path: /a, content: a}\n      notifies:\n        - resource: a\n          action: restart\n    - id: a\n      type: docker_container.running\n      params: {image: app}\n",
+    );
+    assert_eq!(err.rule, "unsupported-action");
+    assert_eq!(err.resource, "a");
+    assert_eq!(
+        err.msg,
+        "resource type \"docker_container.running\" is a Salt state, which can only watch \
+         the notifier when notified (action \"watch\"), got action \"restart\""
+    );
+}
+
+#[test]
+fn a_watch_from_a_state_applied_later_gets_a_state_after_both() {
+    let text = sls(
+        "    - id: app\n      type: docker_container.running\n      params: {image: app}\n    - id: conf\n      type: file\n      params: {path: /a, content: a}\n      dependsOn:\n        - resource: app\n      notifies:\n        - resource: app\n          action: watch\n",
+    );
+    assert!(
+        text.ends_with(
+            "watch app:\n  docker_container.running:\n    - image: app\n    - require:\n        - docker_container: app\n    - watch:\n        - file: conf\n"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_name_that_is_not_a_state_function_is_refused_with_the_dotted_name_to_write() {
+    for r#type in [
+        "File.Managed",
+        "pkgrepo",
+        "a.b.c",
+        "mysql::db",
+        "native/cron",
+    ] {
+        let err = refusal(&format!(
+            "    - id: a\n      type: '{type}'\n      params:\n        name: /x\n"
+        ));
+        assert_eq!(err.rule, "unsupported-resource-type", "{type}");
+    }
+    let err = refusal("    - id: a\n      type: native/file\n      params:\n        name: /x\n");
+    assert_eq!(err.rule, "unsupported-resource-type");
+    assert_eq!(
+        err.msg,
+        "resource type \"native/file\" is not how a state is reached on this target: a Salt \
+         state is written by its dotted name, file.managed or another function of its module"
+    );
+}
+
+#[test]
+fn a_secret_handed_to_a_state_function_is_read_from_the_pillar_and_a_command_is_refused_one() {
+    let graph = with_secrets(
+        "    - id: key\n      type: file.managed\n      params: {name: /etc/app/key, contents: placeholder, mode: '0600'}\n",
+        &[("key", "contents", "api_key")],
+    );
+    let text = emit(&graph).unwrap().artifact.files[SLS].clone();
+    assert!(
+        text.contains("    - contents: {{ pillar['meridian_secret_api_key'] | yaml_encode }}\n"),
+        "{text}"
+    );
+    assert!(text.contains("    - show_changes: false\n"), "{text}");
+    assert!(!text.contains("placeholder"), "{text}");
+
+    let graph = with_secrets(
+        "    - id: login\n      type: cmd.run\n      params: {name: 'docker login -p placeholder'}\n",
+        &[("login", "name", "api_key")],
+    );
+    let err = emit(&graph).unwrap_err();
+    assert_eq!(err.rule, "unsupported-secret-place");
+}
+
+#[test]
+fn the_schemas_offer_any_state_function_as_an_open_pattern() {
+    let schemas = Salt.resource_schemas();
+    let pattern = schemas
+        .iter()
+        .find(|s| s.r#type == meridian_target_salt::NATIVE_PATTERN)
+        .expect("the function pattern is declared");
+    assert!(pattern.open && pattern.is_pattern() && pattern.params.is_empty());
+    assert_eq!(pattern.actions, ["watch"]);
 }

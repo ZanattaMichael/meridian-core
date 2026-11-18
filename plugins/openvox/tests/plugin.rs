@@ -94,7 +94,16 @@ fn the_binary_is_discovered_by_name_and_says_what_it_is() {
     );
     assert_eq!(
         info.resource_types,
-        ["exec", "file", "group", "package", "service", "user"]
+        [
+            "<module>::<type>",
+            "<type>",
+            "exec",
+            "file",
+            "group",
+            "package",
+            "service",
+            "user"
+        ]
     );
     assert_eq!(info.protocol_version, meridian_sdk::PROTOCOL_VERSION);
     assert_eq!(registry.names(), ["openvox"]);

@@ -16,11 +16,11 @@ packages, files and services. This page is how the
 | Target | Types | Page |
 |---|---|---|
 | `ansible` | the six shared types, and any module by its full name (`ansible.builtin.lineinfile`) | [ansible](../../targets/ansible.md) |
-| `puppet` | the six shared types | [puppet](../../targets/puppet.md) |
-| `chef` | the six shared types | [chef](../../targets/chef.md) |
-| `salt` | the six shared types | [salt](../../targets/salt.md) |
-| `openvox` | the six shared types, compiled the way `puppet` compiles them | [openvox](../../targets/openvox.md) |
-| `cloud-init` | the six shared types, limited to what a first boot can do | [cloud-init](../../targets/cloud-init.md) |
+| `puppet` | the six shared types, and any Puppet type (`cron`, `mysql::db`, `native/file`) | [puppet](../../targets/puppet.md) |
+| `chef` | the six shared types, and any Chef resource (`template`, `native/package`) | [chef](../../targets/chef.md) |
+| `salt` | the six shared types, and any state function (`pkgrepo.managed`) | [salt](../../targets/salt.md) |
+| `openvox` | the six shared types and any Puppet type, compiled the way `puppet` compiles them | [openvox](../../targets/openvox.md) |
+| `cloud-init` | the six shared types, limited to what a first boot can do, and any cloud-config module (`ntp`) | [cloud-init](../../targets/cloud-init.md) |
 | `dsc` | DSC's own resources | [dsc](../../targets/dsc.md) |
 
 There are two dialects in this segment, and the table shows which target speaks
@@ -129,10 +129,10 @@ lint` report it in place.
 | Target | The native `type` is | Example | `state` | When notified |
 |---|---|---|---|---|
 | `ansible` | the module's fully qualified collection name | `ansible.builtin.lineinfile`, `community.general.ufw` | the module's `state` argument | runs the task again (`run`) |
-| `puppet`, `openvox` | not yet: refused as `unsupported-resource-type` | | | |
-| `chef` | not yet | | | |
-| `salt` | not yet | | | |
-| `cloud-init` | not yet | | | |
+| `puppet`, `openvox` | the type as a declaration names it, `native/<name>` for the six | `cron`, `mysql::db`, `native/file` | the type's `ensure` | refreshed (`refresh`) |
+| `chef` | the resource as a recipe names it, `native/<name>` for five (`execute` has no prefix) | `template`, `apt_update`, `native/package` | the resource's `action` | takes the action word as written |
+| `salt` | the state function, dotted; `native/<name>` refused with the dotted name | `pkgrepo.managed`, `file.symlink` | refused: the function is the state | watches the notifier (`watch`) |
+| `cloud-init` | the cloud-config key; `native/<name>` refused, as are the five keys the six write | `ntp`, `timezone`, `bootcmd` | refused: the module's keys say what it does | refused: applied once |
 
 Three rules hold the two apart:
 
@@ -145,6 +145,10 @@ Three rules hold the two apart:
   the six names, and only where the tool has a bare type of that name; a
   target whose types are always written in full refuses it and says what to
   write instead (`ansible.builtin.file` on Ansible).
+- **A native type is placed as the tool places it.** `dependsOn`, `notifies` and
+  `runtimeWhen` on one are read as on any resource where the tool can honour
+  them; where it cannot (nothing can be ordered around a cloud-config module,
+  Puppet has no apply-time condition), the target page says what is refused.
 - **A native type makes the document single-target.** The `native-type`
   lint rule ([reference](../lint.md#native-type)) marks each such resource,
   so a document that was meant to move between tools shows where it stopped.
@@ -188,7 +192,7 @@ are too many, with too many properties each, to hide behind six words.
 | `type` | the DSC resource, `Module/Resource`: `PSDscResources/Service`, `Microsoft.Windows/Registry` |
 | `params` | the resource's properties, exactly as the resource documents them |
 | `state` | not used, and refused. A DSC resource carries its desired state in its own properties (`Ensure`, `_exist`) |
-| Settings | [`spec.settings`](index.md#settings): the engine (DSC v2 or v3), how the host is reached, and the name of a credential the runner resolves. A resource of type `runner`, the old way to say the same, still compiles with a warning |
+| Settings resource | one optional resource of type `runner`: the engine (DSC v2 or v3), and how the host is reached |
 | References | `${id.Property}` reads a property another resource reported; the reader is ordered after it |
 
 See [the `dsc` target](../../targets/dsc.md) and
@@ -222,11 +226,11 @@ the compile warns.
 | Target | Actions accepted |
 |---|---|
 | `ansible` | `restart`, `reload`, `start`, `stop` on a service; `run` on an exec or on a module named in full |
-| `chef` | `restart`, `reload`, `start`, `stop` on a service; `run` on an exec |
-| `salt` | `restart`, `reload`, `start`, `stop` on a service; `run` on an exec |
-| `puppet`, `openvox` | `restart` (or `refresh`) on a service; `run` on an exec. `reload`, `start` and `stop` are refused: Puppet's refresh restarts a service and takes no argument |
+| `chef` | `restart`, `reload`, `start`, `stop` on a service; `run` on an exec; any action word on a Chef resource of its own |
+| `salt` | `restart`, `reload`, `start`, `stop` on a service; `run` on an exec; `watch` on a state function of Salt's own |
+| `puppet`, `openvox` | `restart` (or `refresh`) on a service; `run` on an exec; `refresh` on a Puppet type of its own. `reload`, `start` and `stop` are refused: Puppet's refresh restarts a service and takes no argument |
 | `dsc` | `refresh`: the notified resource's `Set` runs even when its `Test` says there is nothing to do |
-| `cloud-init` | `start`, `stop`, `restart`, `reload` on a service; `run` on an exec |
+| `cloud-init` | `start`, `stop`, `restart`, `reload` on a service; `run` on an exec. A cloud-config module cannot be notified |
 
 A notified `exec` runs in its place in the order, and once more when it is
 notified.

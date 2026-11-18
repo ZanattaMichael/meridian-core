@@ -376,3 +376,139 @@ fn what_bolt_cannot_take_of_a_credential_is_refused_with_the_reason() {
         assert!(err.msg.starts_with("the credential \"deploy\""), "{err}");
     }
 }
+
+// ---- Puppet's own types beside the six -------------------------------------
+
+/// The document behind the `native_types` golden files: Puppet's own types
+/// beside the shared ones, a core type, a defined type, the native `file`
+/// reached through `native/`, with a state, notified and notifying.
+const NATIVE_TYPES: &str = "    - id: nginx_pkg\n      type: package\n      params:\n        name: nginx\n    - id: html\n      type: native/file\n      state: directory\n      params:\n        path: /var/www/html\n        source: puppet:///modules/web/html\n        recurse: true\n      dependsOn:\n        - resource: nginx_pkg\n    - id: logrotate\n      type: cron\n      state: present\n      params:\n        command: /usr/sbin/logrotate /etc/logrotate.conf\n        user: root\n        hour: 2\n        minute: 0\n      notifies:\n        - resource: nginx_svc\n          action: restart\n        - resource: app_db\n          action: refresh\n    - id: nginx_svc\n      type: service\n      params:\n        name: nginx\n    - id: app_db\n      type: mysql::db\n      params:\n        user: app\n        password: placeholder\n        host: localhost\n        grant: [SELECT, INSERT]\n    - id: tag\n      type: mysql::server::tag\n";
+
+#[test]
+fn a_puppet_type_is_declared_with_its_attributes_as_written() {
+    let emitted = compile(NATIVE_TYPES).unwrap_or_else(|e| panic!("{e}"));
+    assert_golden(&golden(), "native_types", &emitted);
+    let manifest = &emitted.artifact.files["manifests/init.pp"];
+    // The attributes are the type's own, as written, and the state is its
+    // ensure, bare when it is a word.
+    assert!(manifest.contains("  cron { 'logrotate':\n    ensure  => present,\n    command => '/usr/sbin/logrotate /etc/logrotate.conf',\n    hour    => 2,"), "{manifest}");
+    // native/file is Puppet's file, with the attributes the shared type does
+    // not take.
+    assert!(manifest.contains("  file { 'html':\n    ensure  => directory,\n    path    => '/var/www/html',\n    recurse => true,\n    source  => 'puppet:///modules/web/html',\n    require => Package['nginx_pkg'],"), "{manifest}");
+    // A reference to a defined type capitalises each segment.
+    assert!(
+        manifest.contains("notify  => [Mysql::Db['app_db'], Service['nginx_svc']],"),
+        "{manifest}"
+    );
+    // A type with nothing to say is still a declaration.
+    assert!(
+        manifest.contains("  mysql::server::tag { 'tag':\n  }\n"),
+        "{manifest}"
+    );
+}
+
+#[test]
+fn a_puppet_type_takes_its_ensure_once_and_a_value_that_is_not_a_word_is_quoted() {
+    let err = refusal(
+        "    - id: a\n      type: cron\n      state: absent\n      params:\n        command: /bin/true\n        ensure: present\n",
+    );
+    assert_eq!(err.rule, "param-conflicts-with-state");
+
+    let err = refusal("    - id: a\n      type: cron\n      params:\n        command: ~\n");
+    assert_eq!(err.rule, "empty-param");
+
+    let manifest = manifest(
+        "    - id: a\n      type: native/package\n      state: 1.2.3-1\n      params:\n        name: nginx\n        install_options: ['--no-install-recommends']\n",
+    );
+    assert!(
+        manifest.contains("ensure          => '1.2.3-1',"),
+        "{manifest}"
+    );
+    assert!(
+        manifest.contains("install_options => ['--no-install-recommends'],"),
+        "{manifest}"
+    );
+}
+
+#[test]
+fn a_name_that_is_not_a_puppet_type_is_refused() {
+    for r#type in [
+        "Cron",
+        "mysql::",
+        "ansible.builtin.cron",
+        "native/cron",
+        "native/File",
+    ] {
+        let err = refusal(&format!(
+            "    - id: a\n      type: '{type}'\n      params:\n        command: /bin/true\n"
+        ));
+        assert_eq!(err.rule, "unsupported-resource-type", "{type}");
+        assert!(
+            err.msg.contains("mysql::db") || err.msg.contains("reaches only a Puppet type"),
+            "{type}: {}",
+            err.msg
+        );
+    }
+}
+
+#[test]
+fn a_puppet_type_can_only_be_refreshed_when_notified() {
+    let err = refusal(
+        "    - id: conf\n      type: file\n      params: {path: /a, content: a}\n      notifies:\n        - resource: job\n          action: restart\n    - id: job\n      type: cron\n      params: {command: /bin/true}\n",
+    );
+    assert_eq!(err.rule, "unsupported-action");
+    assert_eq!(err.resource, "conf");
+    assert_eq!(
+        err.msg,
+        "notifies resource \"job\" with action \"restart\", but cron is a Puppet type, which \
+         can only be refreshed when notified (action \"refresh\")"
+    );
+}
+
+#[test]
+fn a_native_file_and_the_shared_file_managing_one_path_are_refused_together() {
+    let err = refusal(
+        "    - id: a\n      type: file\n      params: {path: /etc/motd, content: hi}\n    - id: b\n      type: native/file\n      params: {path: /etc/motd, source: puppet:///modules/web/motd}\n",
+    );
+    assert_eq!(err.rule, "duplicate-namevar");
+    assert_eq!(err.resource, "b");
+}
+
+#[test]
+fn a_secret_handed_to_a_puppet_type_is_a_sensitive_lookup() {
+    let text = "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: puppet\n  targetHost:\n    from: inline\n    host: web01.example.com\n  resources:\n    - id: db\n      type: mysql::db\n      params:\n        user: app\n        password: placeholder\n";
+    let mut graph = graph_from_text("site.yaml", text, "puppet");
+    secret_in_param(&mut graph, "db", "password", "db_password");
+    let manifest = emit(&graph).unwrap().artifact.files["manifests/init.pp"].clone();
+    assert!(
+        manifest.contains("password => Sensitive(lookup('meridian_secret_db_password')),"),
+        "{manifest}"
+    );
+    assert!(!manifest.contains("placeholder"), "{manifest}");
+}
+
+#[test]
+fn the_schemas_offer_any_puppet_type_as_an_open_pattern() {
+    let schemas = Puppet.resource_schemas();
+    for pattern in meridian_target_puppet::NATIVE_PATTERNS {
+        let schema = schemas
+            .iter()
+            .find(|s| s.r#type == *pattern)
+            .expect("the pattern is declared");
+        assert!(schema.open && schema.is_pattern() && schema.params.is_empty());
+        assert_eq!(schema.actions, ["refresh"]);
+    }
+    assert_eq!(
+        Puppet.supported_resource_types(),
+        [
+            "<module>::<type>",
+            "<type>",
+            "exec",
+            "file",
+            "group",
+            "package",
+            "service",
+            "user"
+        ]
+    );
+}

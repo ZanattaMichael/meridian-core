@@ -1,0 +1,21 @@
+#cloud-config
+# Compiled by Meridian from the document "web". Change the document, not this file.
+packages:
+  - nginx
+runcmd:
+  - set -e
+  - systemctl start nginx
+  - systemctl restart nginx
+ntp:
+  enabled: true
+  servers:
+    - 0.pool.ntp.org
+    - 1.pool.ntp.org
+timezone: Europe/Amsterdam
+bootcmd:
+  - echo booting > /dev/kmsg
+apt:
+  primary:
+    - arches:
+        - default
+      uri: http://deb.example.com/debian

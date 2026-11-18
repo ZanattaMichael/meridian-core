@@ -6,10 +6,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use meridian_sdk::{CompileError, EdgeKind, Resource, ResourceGraph, Value, Warning};
+use meridian_sdk::{
+    CompileError, EdgeKind, Resource, ResourceGraph, ResourceSchema, TypeName, Value, Warning,
+};
 
 use crate::shell::{quote, split};
-use crate::{refuse, warning, Command, Group, Item, Package, Placed, User, WriteFile};
+use crate::{refuse, warning, Command, Group, Item, Module, Package, Placed, User, WriteFile};
 
 /// What the transform stage hands on.
 pub(crate) struct Transformed {
@@ -20,19 +22,45 @@ pub(crate) struct Transformed {
     pub warnings: Vec<Warning>,
 }
 
-/// Every IR resource type this target maps, sorted.
+/// The six shared types, sorted.
+const SHARED: &[&str] = &["exec", "file", "group", "package", "service", "user"];
+
+/// How an editor is told that any cloud-config module is a type: the key
+/// the module is written under.
+pub const NATIVE_PATTERN: &str = "<module>";
+
+/// The cloud-config keys the shared types write. A module of one of these
+/// names is reached through the shared type, so the two never write one key.
+const SHARED_KEYS: &[(&str, &str)] = &[
+    ("groups", "group"),
+    ("packages", "package"),
+    ("runcmd", "exec"),
+    ("users", "user"),
+    ("write_files", "file"),
+];
+
+/// Every IR resource type this target maps: the pattern every module fits,
+/// then the shared six, sorted.
 pub fn supported_resource_types() -> Vec<String> {
-    ["exec", "file", "group", "package", "service", "user"]
-        .map(str::to_owned)
-        .to_vec()
+    let mut types = vec![NATIVE_PATTERN.to_owned()];
+    types.extend(SHARED.iter().map(|t| (*t).to_owned()));
+    types
 }
 
 /// What each resource type takes, for editors. The lists repeat what each
 /// type's function accepts below; the tooling crate's schema conformance
 /// test fails if the two ever disagree.
-pub fn resource_schemas() -> Vec<meridian_sdk::ResourceSchema> {
+pub fn resource_schemas() -> Vec<ResourceSchema> {
     use meridian_sdk::schema::shared;
     vec![
+        ResourceSchema::open(
+            NATIVE_PATTERN,
+            "Any cloud-config module, by the key it is written under: ntp, apt, timezone, \
+             bootcmd. The params are the module's own keys, passed through as written; a \
+             module whose value is not a mapping takes the one param value. It runs at the \
+             point of the first boot cloud-init gives it, so nothing can depend on it or be \
+             ordered before it. The document then compiles for cloud-init only.",
+        ),
         shared(
             "exec",
             &["chdir", "command", "creates", "removes", "shell"],
@@ -166,7 +194,127 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Transformed, CompileErr
     })
 }
 
+/// The cloud-config module a native type names, when the type is one: a
+/// key as cloud-init writes it, lower-case, with underscores or hyphens.
+/// None of the six has a module of its own name, so `native/<name>` reaches
+/// nothing here.
+pub(crate) fn native_module(r: &Resource) -> Result<Option<&str>, CompileError> {
+    match TypeName::read(&r.r#type) {
+        TypeName::Shared(_) => Ok(None),
+        TypeName::NativeNamedLikeShared(bare) => {
+            let key = SHARED_KEYS
+                .iter()
+                .find(|(_, shared)| *shared == bare)
+                .map_or("", |(key, _)| *key);
+            let hint = if key.is_empty() {
+                "a module is written by its key".to_owned()
+            } else {
+                format!("the shared type {bare} is what writes {key}, and a module is written by its key")
+            };
+            Err(refuse(
+                r,
+                "unsupported-resource-type",
+                format!(
+                    "resource type {:?} names no cloud-config module: {hint}, such as ntp",
+                    r.r#type
+                ),
+            ))
+        }
+        TypeName::Native(name) if is_key(name) => {
+            if let Some((key, shared)) = SHARED_KEYS.iter().find(|(key, _)| *key == name) {
+                return Err(refuse(
+                    r,
+                    "unsupported-resource-type",
+                    format!(
+                        "resource type {key:?} is the key the shared type {shared} writes; \
+                         write a {shared} resource, so that the two never write one key"
+                    ),
+                ));
+            }
+            Ok(Some(name))
+        }
+        TypeName::Native(_) => Err(unsupported_type(r)),
+    }
+}
+
+/// Whether `name` is shaped like a cloud-config key.
+fn is_key(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_ascii_lowercase())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
+fn unsupported_type(r: &Resource) -> CompileError {
+    refuse(
+        r,
+        "unsupported-resource-type",
+        format!(
+            "unsupported resource type {:?} on this target: it is not one of the shared types \
+             ({}), and a cloud-config module is written by its key, such as ntp or apt",
+            r.r#type,
+            SHARED.join(", ")
+        ),
+    )
+}
+
+/// A resource whose type is a cloud-config module: its params are the
+/// module's own keys as written, or, for a module whose value is not a
+/// mapping, the one param `value`. Nothing is checked against what the
+/// module takes; a key it does not have is cloud-init's to refuse when it
+/// validates the user-data, until the schema is synced and the editor
+/// reports it in place.
+fn module(r: &Resource, key: &str) -> Result<Item, CompileError> {
+    if !r.state.is_empty() {
+        return Err(refuse(
+            r,
+            "unsupported-state",
+            format!(
+                "resource type {key:?} accepts no state on this target: a module's own keys \
+                 say what it does, got {:?}",
+                r.state
+            ),
+        ));
+    }
+    for (name, value) in &r.params {
+        if *value == Value::Null {
+            return Err(refuse(r, "empty-param", empty(name, r)));
+        }
+    }
+    let value = match r.params.get("value") {
+        Some(_) if r.params.len() > 1 => {
+            return Err(refuse(
+                r,
+                "invalid-param",
+                format!(
+                    "param \"value\" is the whole value of module {key}, and stands alone; \
+                     write the module's keys as params instead, or only value"
+                ),
+            ));
+        }
+        Some(value) => value.clone(),
+        None if r.params.is_empty() => {
+            return Err(refuse(
+                r,
+                "missing-param",
+                format!(
+                    "module {key} was given nothing to write: its keys as params, or the one \
+                     param value"
+                ),
+            ));
+        }
+        None => Value::Map(r.params.clone()),
+    };
+    Ok(Item::Module(Module {
+        key: key.to_owned(),
+        value,
+    }))
+}
+
 fn item_for(r: &Resource) -> Result<Item, CompileError> {
+    if let Some(key) = native_module(r)? {
+        return module(r, key);
+    }
     match r.r#type.as_str() {
         "package" => package(r),
         "file" => file(r),
@@ -178,15 +326,7 @@ fn item_for(r: &Resource) -> Result<Item, CompileError> {
             no_state(r)?;
             Ok(Item::Commands(vec![exec_command(r)?]))
         }
-        _ => Err(refuse(
-            r,
-            "unsupported-resource-type",
-            format!(
-                "unsupported resource type {:?} on this target (supported: {})",
-                r.r#type,
-                supported_resource_types().join(", ")
-            ),
-        )),
+        _ => Err(unsupported_type(r)),
     }
 }
 
@@ -533,6 +673,18 @@ fn handler_for(r: &Resource, action: &str) -> Result<Command, CompileError> {
             ),
         )
     };
+    // A module is applied once, at its own point of the first boot, and
+    // there is no command that runs it again.
+    if let Some(key) = native_module(r)? {
+        return Err(refuse(
+            r,
+            "unsupported-action",
+            format!(
+                "resource type {key:?} is a cloud-config module, which cloud-init applies \
+                 once and cannot be asked to run again, got action {action:?}"
+            ),
+        ));
+    }
     match r.r#type.as_str() {
         "service" => {
             if !SERVICE_ACTIONS.contains(&action) {

@@ -32,10 +32,15 @@ written, nothing is checked against a hand-written list, and an argument the
 tool does not take is the tool's to refuse when it runs, until the tool's
 schema is synced and the editor reports it in place. `state` and `notifies`
 map where the tool has the notion (Ansible's `state` argument, Puppet's
-`ensure`, Chef's `action`) and are refused otherwise. A notified native
+`ensure`, Chef's `action`) and are refused otherwise (Salt's function is its
+state; a cloud-config module's keys say what it does). A notified native
 resource does the one thing the tool can be asked for without knowing the
 type: Ansible runs the task again (`run`), Puppet refreshes it (`refresh`),
-Chef takes the action word as written.
+Chef takes the action word as written, Salt makes the state watch the
+notifier (`watch`), and cloud-init, which applies a module once, refuses.
+Where the tool itself has no place for a native type, the target refuses
+rather than guesses: nothing can be ordered around a cloud-config module,
+because where cloud-init applies it is cloud-init's to know.
 
 **The bare word is always the shared type.** `file` is the shared `file` on
 every one of the six targets, whatever the tool calls its own. A native name
@@ -52,7 +57,10 @@ type names, so it collides with nothing. It is read on every target and
 refused where the tool has no bare type of that name: Ansible, whose modules
 are always written in full, refuses `native/file` with
 `ansible.builtin.file` as what to write; Salt, whose state functions are
-always dotted, refuses it with `file.managed`. The prefix is accepted only
+always dotted, refuses it with `file.managed`; cloud-init, whose modules are
+`packages` and `write_files` and not `package` and `file`, refuses it too,
+and refuses those five keys as types, so that the shared type and a module
+never write one key. The prefix is accepted only
 for the six names a shared type has taken: `native/cron` on Puppet is refused
 with `cron` as what to write, so there is one way to write each type.
 
