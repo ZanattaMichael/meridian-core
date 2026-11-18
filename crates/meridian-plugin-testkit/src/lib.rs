@@ -633,8 +633,10 @@ pub fn credential(kind: &str, user: &str, fields: &[(&str, &str)]) -> HeldCreden
 }
 
 /// Stand-ins for `ssh-agent` and `ssh-add` that record what they are given.
-/// The agent creates a plain file where its socket is asked for and waits to
-/// be stopped; `ssh-add` keeps the key it reads on standard input in
+/// The agent creates a plain file where its socket is asked for and waits
+/// until it is stopped or that file is gone (on Windows a stopped stand-in
+/// is its launcher only, and the shell under it would otherwise live on,
+/// holding the test run's output open); `ssh-add` keeps the key it reads on standard input in
 /// `added-key`, its arguments in `ssh-add.args`, its environment in
 /// `ssh-add.env`, and what its askpass program answers in `added-passphrase`.
 pub fn agent_stand_ins(dir: &Path) -> AgentPrograms {
@@ -652,7 +654,7 @@ for a in "$@"; do
 done
 : > "$sock"
 trap 'exit 0' TERM INT
-while :; do sleep 1; done"#
+while [ -e "$sock" ]; do sleep 1; done"#
         ),
     );
     let ssh_add = stand_in(
