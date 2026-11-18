@@ -240,12 +240,15 @@ fn secrets_reach_chef_client_as_node_attributes_in_a_private_file_and_nowhere_el
     let attributes_path = fs::read_to_string(dir.join("attributes-path")).unwrap();
     let private_dir = Path::new(attributes_path.trim()).parent().unwrap();
     let work = meridian_sdk::tool::absolute_path(&dir.join("work"));
+    // Both paths are Ruby single-quoted strings, so a backslash in one (a
+    // Windows path) is written doubled.
+    let ruby = |path: &Path| path.to_string_lossy().replace('\\', "\\\\");
     assert_eq!(
         config,
         format!(
             "chef_repo_path '{}'\nnode_path '{}'\n",
-            work.display(),
-            private_dir.display()
+            ruby(&work),
+            ruby(private_dir)
         )
     );
     let args = args(&dir, "chef-client");
