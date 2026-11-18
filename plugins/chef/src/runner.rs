@@ -60,7 +60,7 @@ pub fn settings() -> Vec<Setting> {
             "inspector",
             INSPECTOR_VARIABLE,
             "chef-resource-inspector",
-            "The resource inspector `meridian schema sync` runs to read what each resource takes, when it is not `chef-resource-inspector` on `PATH`; `cinc-resource-inspector` is tried when that does not run.",
+            "The resource inspector `meridian schema sync` runs to read what each resource takes, when it is not `chef-resource-inspector` on `PATH`; `cinc-resource-inspector`, then the copies the Cinc and Chef packages keep under `/opt/cinc` and `/opt/chef`, are tried when that does not run.",
         ),
     ];
     declared.extend(meridian_sdk::agent::settings());

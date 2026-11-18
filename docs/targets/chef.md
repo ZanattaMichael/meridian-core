@@ -332,7 +332,7 @@ changes made before it.
 | `MERIDIAN_CHEF_RUN` | the program to run for another machine, when it is not `chef-run` on `PATH` |
 | `MERIDIAN_CHEF_TRANSPORT` | `local` or `remote`, to override the choice made from the host |
 | `MERIDIAN_CHEF_ARGS` | arguments added to every run, split like a shell command line (quotes hold a word together): `--chef-license accept`, or `chef-run`'s `--user deploy --identity-file ~/.ssh/deploy` |
-| `MERIDIAN_CHEF_INSPECTOR` | the resource inspector `meridian schema sync` runs, when it is not `chef-resource-inspector` on `PATH`; `cinc-resource-inspector` is tried when that does not run. See [Editor schemas](#editor-schemas) |
+| `MERIDIAN_CHEF_INSPECTOR` | the resource inspector `meridian schema sync` runs, when it is not `chef-resource-inspector` on `PATH`; `cinc-resource-inspector`, then the copies the Cinc and Chef packages keep under `/opt/cinc` and `/opt/chef`, are tried when that does not run. See [Editor schemas](#editor-schemas) |
 | `MERIDIAN_SSH_AGENT` | the `ssh-agent` program, when it is not on `PATH`; started for a credential's key, see [Credentials](#credentials) |
 | `MERIDIAN_SSH_ADD` | the `ssh-add` program, when it is not on `PATH` |
 
@@ -469,7 +469,7 @@ says.
 
 | | |
 |---|---|
-| Described in full | each Chef resource the documents use, under the name the document writes (`template`, or `native/package` for one of the six names): every property with its kind from the Ruby types the inspector lists (`String` as text, `Integer`, `true`/`false` as a flag, `Array`, `Hash`; anything else as any value), whether it is required, its `equal_to` values, the resource's description, and its actions beside `nothing`, which is what `notifies` can name. Read from the inspector's one JSON document, which comes with the Chef or Cinc client (`cinc-resource-inspector` is tried when `chef-resource-inspector` does not run). A custom resource from a cookbook is not in it, so it is a note and not the end of the sync |
+| Described in full | each Chef resource the documents use, under the name the document writes (`template`, or `native/package` for one of the six names): every property with its kind from the Ruby types the inspector lists (`String` as text, `Integer`, `true`/`false` as a flag, `Array`, `Hash`; anything else as any value), whether it is required, its `equal_to` values, the resource's description, and its actions beside `nothing`, which is what `notifies` can name. Read from the inspector's one JSON document, which comes with the Chef or Cinc client (`cinc-resource-inspector`, then the copies the Cinc and Chef packages keep under `/opt/cinc` and `/opt/chef`, are tried when `chef-resource-inspector` does not run). A custom resource from a cookbook is not in it, so it is a note and not the end of the sync |
 | Listed by name | every other resource the inspector knows, with its description; the six shared names under `native/` |
 | Pinned | the client's version, from `chef-client --version` |
 

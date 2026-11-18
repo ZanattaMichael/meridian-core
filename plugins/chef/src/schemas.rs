@@ -24,9 +24,18 @@ use meridian_sdk::{
 
 use crate::runner::settings as runner_settings;
 
-/// The inspector tried when the configured one is Chef's and does not run:
-/// Cinc installs the same program under its own name.
-const CINC_INSPECTOR: &str = "cinc-resource-inspector";
+/// The inspectors tried, in order, when the configured one does not run:
+/// Cinc installs the same program under its own name, and both omnibus
+/// packages keep the Ruby gem's own binstub in their embedded `bin`,
+/// which is not on `PATH`.
+const FALLBACK_INSPECTORS: &[&str] = &[
+    "cinc-resource-inspector",
+    "/opt/cinc/bin/cinc-resource-inspector",
+    "/opt/cinc/bin/chef-resource-inspector",
+    "/opt/cinc/embedded/bin/chef-resource-inspector",
+    "/opt/chef/bin/chef-resource-inspector",
+    "/opt/chef/embedded/bin/chef-resource-inspector",
+];
 
 /// Asks the resource inspector for the resources the documents use.
 pub struct ChefSchemas {
@@ -61,13 +70,18 @@ impl SchemaSource for ChefSchemas {
         let source = format!("chef {version}");
 
         let mut shown = Tool::new(&self.inspector).capture_stdout().run(log);
-        let failed = shown.as_ref().map_or(true, |f| !f.success());
-        if failed && self.inspector != CINC_INSPECTOR {
-            log.err(&format!(
-                "{} does not run; trying {CINC_INSPECTOR}",
-                self.inspector
-            ));
-            shown = Tool::new(CINC_INSPECTOR).capture_stdout().run(log);
+        for fallback in FALLBACK_INSPECTORS {
+            let runs = shown.as_ref().is_ok_and(|f| f.success());
+            if runs || *fallback == self.inspector {
+                continue;
+            }
+            if !fallback.starts_with('/') || std::path::Path::new(fallback).is_file() {
+                log.err(&format!(
+                    "{} does not run; trying {fallback}",
+                    self.inspector
+                ));
+                shown = Tool::new(*fallback).capture_stdout().run(log);
+            }
         }
         let shown = match shown {
             Ok(finished) if finished.success() => finished,
