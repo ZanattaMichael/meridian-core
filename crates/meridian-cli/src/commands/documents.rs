@@ -22,6 +22,8 @@ pub(crate) fn load(files: &[PathBuf], state_dir: &Path) -> Result<Bundle, Failur
                 ]),
             );
         }
+        // And the pipeline engine, where there is one: each at its line.
+        report_problems(&document_problems(&errors));
         Failure::Reported
     };
     let files = in_modules(files, state_dir)?;

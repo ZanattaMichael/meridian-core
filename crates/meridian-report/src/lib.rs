@@ -14,9 +14,12 @@
 //!   JSON, JUnit XML, Markdown or one self-contained HTML page.
 //! - [`sink`] sends the events themselves, as they happen, to a program that
 //!   forwards them somewhere else: a webhook, a chat channel, a collector.
+//! - [`engine`] turns a report, or a document's diagnostics, into what a
+//!   pipeline engine shows beside a job: annotations and a summary.
 //!
 //! The design is `docs/plans/reporting.md`.
 
+pub mod engine;
 mod model;
 pub mod render;
 pub mod sink;

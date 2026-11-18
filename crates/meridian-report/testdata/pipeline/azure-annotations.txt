@@ -1,0 +1,1 @@
+##vso[task.logissue type=error;sourcepath=site.yaml;linenumber=24]ResourceSet web failed: target fake on 10.0.0.5: tool-failed (the tool reported a failure)%3B `meridian apply --resume` continues from here once the cause is fixed

@@ -1,0 +1,173 @@
+name: pipeline shell
+
+# The GitHub Actions snippet of docs/operations/running-in-a-pipeline.md, run
+# for real: the real meridian binary, inside a real job, against the fake
+# target, with two jobs sharing one record through an artifact. The plan job
+# plans; the apply job applies a document that asks the fake tool to fail,
+# then fixes it and continues with `apply --resume`. Each job checks that what
+# the page promises appeared: the step summary, and an annotation at the
+# document that failed. A test in crates/meridian-cli/tests/pipeline.rs holds
+# the page's snippet to the commands run here.
+#
+# No release has been published yet, so the binaries are built here instead
+# of installed by the page's install script; the rest of the snippet is run
+# as written.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'crates/**'
+      - 'fixtures/pipeline/**'
+      - 'docs/operations/running-in-a-pipeline.md'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/pipeline-shell.yml'
+
+permissions:
+  contents: read
+
+# One run at a time per ref: the record is carried between the jobs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  MERIDIAN_PLUGIN_SIGNATURES: 'off'   # a build from source is unsigned; a release would be `require`
+  SITE_DB_PASSWORD: zzq-not-a-real-password-for-the-smoke-test
+
+jobs:
+  plan:
+    name: plan, in a job
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: fixtures/pipeline
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-rust
+
+      - name: Build the command and the fake target
+        run: cargo build --locked -p meridian-cli -p meridian-target-fake
+        working-directory: .
+
+      - name: Put them on the PATH, as the install script would
+        run: echo "$GITHUB_WORKSPACE/target/debug" >> "$GITHUB_PATH"
+
+      - name: Pin the modules
+        run: meridian module install --locked
+
+      - name: Check the documents, the secrets and the job's identity
+        run: |
+          meridian validate site.yaml
+          meridian secret check site.yaml
+
+      - name: Plan
+        run: |
+          mkdir -p events
+          meridian plan site.yaml --events json > events/plan.jsonl
+
+      - name: The job page shows the plan
+        run: |
+          grep -q '"type":"run.succeeded"' events/plan.jsonl
+          grep -q '## ✓ Meridian plan succeeded' "$GITHUB_STEP_SUMMARY"
+          ! grep -r "$SITE_DB_PASSWORD" events "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the events and the record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meridian-plan
+          path: |
+            fixtures/pipeline/events/
+            fixtures/pipeline/.meridian/
+          include-hidden-files: true
+
+      - name: Keep the binaries for the apply job
+        uses: actions/upload-artifact@v4
+        with:
+          name: meridian-binaries
+          path: |
+            target/debug/meridian
+            target/debug/meridian-target-fake
+
+  apply:
+    name: apply, fail, and apply --resume, in a second job
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: fixtures/pipeline
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Take the binaries from the plan job
+        uses: actions/download-artifact@v4
+        with:
+          name: meridian-binaries
+          path: bin
+
+      - name: Put them on the PATH, as the install script would
+        run: |
+          chmod +x "$GITHUB_WORKSPACE"/bin/meridian*
+          echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+
+      - name: Take the record from the plan job
+        uses: actions/download-artifact@v4
+        with:
+          name: meridian-plan
+          path: fixtures/pipeline
+
+      - name: The record came across
+        run: |
+          test -d .meridian
+          test -f events/plan.jsonl
+          meridian runs
+
+      # The fake tool fails on this word in a file's content, as a real tool
+      # fails on a bad value. The failure is expected; the step after it
+      # checks what the job page was shown.
+      - name: Ask the tool to fail
+        run: sed -i 's/welcome/welcome FAIL/' site.yaml
+
+      - name: Apply
+        id: apply
+        continue-on-error: true
+        run: meridian apply site.yaml --events json > events/apply.jsonl 2> >(tee apply.log >&2)
+
+      - name: The failure was annotated at its document, and summarised
+        run: |
+          test "${{ steps.apply.outcome }}" = failure
+          grep -q '"type":"step.failed"' events/apply.jsonl
+          grep -q '^::error file=site.yaml,line=' apply.log
+          grep -q 'title=Meridian%3A ResourceSet web failed' apply.log
+          grep -q '## ✗ Meridian apply failed' "$GITHUB_STEP_SUMMARY"
+          ! grep -r "$SITE_DB_PASSWORD" events apply.log "$GITHUB_STEP_SUMMARY"
+
+      - name: Fix the cause
+        run: sed -i 's/welcome FAIL/welcome/' site.yaml
+
+      - name: Continue the apply that failed
+        run: meridian apply site.yaml --resume --events json > events/resume.jsonl
+
+      - name: The resume picked up where the apply failed
+        run: |
+          grep -q '"type":"run.succeeded"' events/resume.jsonl
+          grep -q '"reason":"already-applied"' events/resume.jsonl
+          grep -q '## ✓ Meridian apply succeeded' "$GITHUB_STEP_SUMMARY"
+          ! grep -r "$SITE_DB_PASSWORD" events "$GITHUB_STEP_SUMMARY"
+          meridian status
+
+      - name: Keep the events and the record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meridian-apply
+          path: |
+            fixtures/pipeline/events/
+            fixtures/pipeline/.meridian/
+          include-hidden-files: true

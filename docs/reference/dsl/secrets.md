@@ -411,6 +411,16 @@ A secret with several places is reported by the first place that would
 answer, or, when none would, with every place's reason. A store this machine
 does not have is `UNAVAILABLE`.
 
+**In a pipeline.** The engine's secret store puts a value in the job's
+environment, and the document reads it with `from: env`; the engine's
+identity (an OIDC token exchanged by the engine's own action or service
+connection) is a credential declared
+[`from: ambient`](credentials.md#from-ambient), which `secret check` also
+looks for before the run. No value is in any file the engine keeps, and
+none is ever printed, so there is nothing for the engine to mask.
+[Running Meridian in a pipeline](../../operations/running-in-a-pipeline.md)
+has a snippet per engine.
+
 ## What each command does
 
 | Command | A `when` that reads a secret | A secret in `params` |

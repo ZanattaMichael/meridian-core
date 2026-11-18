@@ -36,7 +36,7 @@ FONT = "'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif"
 MONO = "ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace"
 
 # The palette from docs/branding/README.md.
-IAC, CM, CON, ORC = "#6F9BFF", "#FF8A4C", "#35D0C2", "#B48CFF"
+IAC, CM, CON, ORC, PIPE = "#6F9BFF", "#FF8A4C", "#35D0C2", "#B48CFF", "#FFC857"
 WHITE, TEXT_SOFT, LINE = "#FFFFFF", "#C9D4FF", "#8FA3E8"
 TILE, TILE_EDGE, WELL = "#16224F", "#2B3A78", "#101A3F"
 RED, GREEN = "#FF7A90", "#7EE2A8"
@@ -165,6 +165,8 @@ CATEGORIES = [
      ["ansible-playbook", "puppet apply", "chef-client", "salt-call", "Invoke-DscRunner"]),
     ("Containers", CON, ["docker", "podman"], ["docker compose", "podman", "systemctl"]),
     ("Orchestration", ORC, ["kubernetes", "helm"], ["kubectl apply", "helm upgrade --install"]),
+    ("Pipelines", PIPE, ["github-actions", "azure-pipelines", "gitlab-ci", "buildkite", "argo-workflows", "octopus"],
+     ["a workflow file", "the engine runs meridian"]),
 ]
 
 
@@ -196,14 +198,14 @@ def chip_row(x: float, y: float, labels: list[str], colour: str = LINE, size: fl
 
 
 def architecture() -> str:
-    W, H = 1200, 760
+    W, H = 1200, 780
     L, R = 90, 1160  # the drawing, right of the gutter
     p: list[str] = []
     # What you write.
     top, card_h = 48, 92
     p.append(gutter(top, card_h, "You write", WHITE))
     cards = [
-        ("Documents", ["kind: Infrastructure or ResourceSet", "YAML or JSON, one tool each"], 268),
+        ("Documents", ["kind: Infrastructure, ResourceSet or Workflow", "YAML or JSON, one tool each"], 268),
         ("Data and rules", ["--data layers decide every when", "compile rules say what a layer may set"], 268),
         ("Modules", ["meridian.yaml names what you need", "meridian.lock pins what was fetched"], 268),
         ("Editor tools", ["lsp, fmt, lint, schema:", "the same compiler"], 206),
@@ -248,19 +250,19 @@ def architecture() -> str:
     cat_y, cat_h = 500, 112
     p.append(gutter(cat_y, cat_h, "Plugins"))
     gap = 20
-    col_w = (R - L - 3 * gap) / 4
-    tool_y, tool_h = 650, 66
+    col_w = (R - L - (len(CATEGORIES) - 1) * gap) / len(CATEGORIES)
+    tool_y, tool_h = 650, 84
     p.append(gutter(tool_y, tool_h, "Tools"))
     for i, (label, colour, targets, tools) in enumerate(CATEGORIES):
         x = L + i * (col_w + gap)
         cx = x + col_w / 2
         p.append(rect(x, cat_y, col_w, cat_h, TILE, colour))
         p.append(f'<rect x="{x:g}" y="{cat_y}" width="{col_w:g}" height="5" rx="2.5" fill="{colour}"/>')
-        p.append(text(cx, cat_y + 30, label, 15.5, 700, colour))
-        p.append(lines(cx, cat_y + 54, wrap(targets, 30), 12.5, WHITE, mono=True, gap=1.3))
+        p.append(text(cx, cat_y + 30, label, 14, 700, colour))
+        p.append(lines(cx, cat_y + 54, wrap(targets, 24), 12, WHITE, mono=True, gap=1.3))
         p.append(flow(f"M{cx:g} {proto_y + proto_h}L{cx:g} {cat_y}", colour, delay=i * 0.7))
         p.append(rect(x, tool_y, col_w, tool_h, WELL, TILE_EDGE, 12, 1.2, "4 4"))
-        p.append(lines(cx, tool_y + 24, wrap(tools, 33), 12, TEXT_SOFT, mono=True))
+        p.append(lines(cx, tool_y + 24, wrap(tools, 26), 11.5, TEXT_SOFT, mono=True))
         p.append(flow(f"M{cx:g} {cat_y + cat_h}L{cx:g} {tool_y}", colour, delay=i * 0.7 + 1.5))
     p.append(caption(W, H, "A plugin compiles the document into its tool's own files, then drives that tool, as you would by hand. Nothing in the core knows how."))
     return doc(W, H, "Meridian architecture: documents into the core, the core to a plugin, the plugin to its tool", "".join(p))
@@ -494,31 +496,94 @@ def run_safety() -> str:
 
 
 def plugin_categories() -> str:
-    W, H = 1200, 420
+    W, H = 1200, 470
     p: list[str] = []
-    p.append(heading(40, 40, "Two kinds of document"))
-    p.append(card(40, 52, 320, 120, "kind: Infrastructure", ["what should exist?", "creates things through an API,", "keeps track of them, promises outputs"], IAC, 18, 13.5))
-    p.append(card(40, 212, 320, 120, "kind: ResourceSet", ["how should this machine be set up?", "logs in to a machine that exists,", "converges packages, files, services"], CM, 18, 13.5))
-    p.append(heading(560, 40, "Four categories a plugin can declare"))
+    p.append(heading(40, 40, "Three kinds of document"))
+    p.append(card(40, 52, 320, 100, "kind: Infrastructure", ["what should exist?", "creates things through an API,", "keeps track of them, promises outputs"], IAC, 18, 13.5))
+    p.append(card(40, 182, 320, 100, "kind: ResourceSet", ["how should this machine be set up?", "logs in to a machine that exists,", "converges packages, files, services"], CM, 18, 13.5))
+    p.append(card(40, 312, 320, 100, "kind: Workflow", ["in what order, on what, with what gates?", "steps over the other documents;", "an engine's job runs each step"], PIPE, 18, 13.5))
+    p.append(heading(560, 40, "Five categories a plugin can declare"))
     cats = [
         ("Infrastructure as code", IAC, "terraform, opentofu, cloudformation, bicep, arm, pulumi, packer", 52),
-        ("Containers", CON, "docker takes either kind; podman", 132),
-        ("Orchestration", ORC, "kubernetes, helm", 212),
-        ("Configuration management", CM, "ansible, puppet, openvox, chef, salt, dsc, cloud-init", 292),
+        ("Containers", CON, "docker takes either kind; podman", 122),
+        ("Orchestration", ORC, "kubernetes, helm", 192),
+        ("Configuration management", CM, "ansible, puppet, openvox, chef, salt, dsc, cloud-init", 262),
+        ("Pipelines", PIPE, "github-actions, azure-pipelines, gitlab-ci, buildkite, argo, octopus", 332),
     ]
     for label, colour, members, y in cats:
-        p.append(rect(560, y, 600, 60, TILE, colour))
-        p.append(f'<rect x="560" y="{y}" width="5" height="60" rx="2.5" fill="{colour}"/>')
-        p.append(text(590, y + 26, label, 16, 700, colour, "start"))
-        p.append(text(590, y + 47, members, 13, 400, TEXT_SOFT, "start", mono=True))
-    # Infrastructure reaches three categories; ResourceSet one, plus docker.
-    p.append(flow("M360 112C460 112 460 82 560 82", IAC, delay=0, seconds=2.4))
-    p.append(flow("M360 112C460 112 460 162 560 162", IAC, delay=0.6, seconds=2.4))
-    p.append(flow("M360 112C460 112 460 242 560 242", IAC, delay=1.2, seconds=2.4))
-    p.append(flow("M360 272C460 272 460 322 560 322", CM, delay=0.3, seconds=2.4))
-    p.append(flow("M360 272C460 272 460 162 560 162", CM, delay=1.5, seconds=2.4))
+        p.append(rect(560, y, 600, 56, TILE, colour))
+        p.append(f'<rect x="560" y="{y}" width="5" height="56" rx="2.5" fill="{colour}"/>')
+        p.append(text(590, y + 24, label, 16, 700, colour, "start"))
+        p.append(text(590, y + 45, members, 13, 400, TEXT_SOFT, "start", mono=True))
+    # Infrastructure reaches three categories; ResourceSet one, plus docker; Workflow the pipelines.
+    p.append(flow("M360 102C460 102 460 80 560 80", IAC, delay=0, seconds=2.4))
+    p.append(flow("M360 102C460 102 460 150 560 150", IAC, delay=0.6, seconds=2.4))
+    p.append(flow("M360 102C460 102 460 220 560 220", IAC, delay=1.2, seconds=2.4))
+    p.append(flow("M360 232C460 232 460 290 560 290", CM, delay=0.3, seconds=2.4))
+    p.append(flow("M360 232C460 232 460 150 560 150", CM, delay=1.5, seconds=2.4))
+    p.append(flow("M360 362C460 362 460 360 560 360", PIPE, delay=0.9, seconds=2.4))
     p.append(caption(W, H, "A document aimed at a category that does not take its kind is refused at compile, with the reason. Each plugin declares which it is."))
-    return doc(W, H, "Which kind of document each plugin category takes: Infrastructure for infrastructure as code, containers and orchestration; ResourceSet for configuration management; docker takes both", "".join(p))
+    return doc(W, H, "Which kind of document each plugin category takes: Infrastructure for infrastructure as code, containers and orchestration; ResourceSet for configuration management; Workflow for pipelines; docker takes both of the first two", "".join(p))
+
+
+def in_a_pipeline() -> str:
+    """What a pipeline engine keeps, what Meridian owns, and the three things that join them."""
+    W, H = 1200, 640
+    p: list[str] = []
+    # The engine's band.
+    ey, eh = 48, 118
+    p.append(gutter(ey, eh, "The engine keeps", PIPE))
+    p.append(rect(90, ey - 12, 1070, eh + 24, WELL, PIPE, 18, 1.2, "6 6"))
+    engine = [
+        ("trigger", ["push, tag, schedule,", "pull request"]),
+        ("runner + identity", ["a machine, and the OIDC", "token only it can mint"]),
+        ("secret release", ["the store, released to", "a job after its rules pass"]),
+        ("approval", ["reviewers, wait timers,", "the audit trail"]),
+        ("logs + artifacts", ["every job's output,", "kept and linked"]),
+    ]
+    ex, ew, egap = 110, 198, 15
+    ecx = []
+    for i, (title, body) in enumerate(engine):
+        x = ex + i * (ew + egap)
+        p.append(card(x, ey, ew, eh - 10, title, body, PIPE, 16, 12.5))
+        ecx.append(x + ew / 2)
+        if i:
+            p.append(flow(f"M{x - egap:g} {ey + 54}L{x:g} {ey + 54}", PIPE, delay=i * 0.4, seconds=1.4, width=1.5))
+    # Meridian's band.
+    my, mh = 330, 150
+    p.append(gutter(my, mh, "Meridian owns", WHITE))
+    p.append(rect(90, my - 12, 1070, mh + 24, TILE, LINE, 18))
+    p.append(card(110, my, 220, mh - 10, "Workflow", ["steps, order from needs,", "fan-out, gates, retry,", "finally, with: values"], WHITE, 17, 12.5))
+    p.append(card(350, my, 290, mh - 10, "orchestrator", ["lock, run record, events,", "--resume, rollback, drift,", "policy, a shared backend", "across every job"], WHITE, 17, 12.5))
+    p.append(card(660, my, 300, mh - 10, "target plugins", ["terraform, ansible, kubernetes, ...", "each compiles its tool's own files", "and drives the tool"], LINE, 17, 12.5))
+    p.append(card(980, my, 180, mh - 10, "secret delivery", ["each tool's own", "channel; a value", "is never printed"], ORC, 17, 12.5))
+    p.append(flow(f"M330 {my + 70}L350 {my + 70}", WHITE, delay=0.2, seconds=1.2, width=1.5))
+    p.append(flow(f"M640 {my + 70}L660 {my + 70}", WHITE, delay=0.6, seconds=1.2, width=1.5))
+    p.append(flow(f"M960 {my + 70}L980 {my + 70}", WHITE, delay=1.0, seconds=1.2, width=1.5))
+    # The joins run in lanes between the bands, so each can be read on its own.
+    top, bottom = ey + eh - 10, my
+    runner, secret, approval, logs, trigger = ecx[1], ecx[2], ecx[3], ecx[4], ecx[0]
+    p.append(flow(f"M{runner:g} {top}L{runner:g} {bottom}", WHITE, delay=0.3))
+    p.append(text(runner - 12, 236, "runs meridian apply", 13, 600, WHITE, "end", mono=True))
+    p.append(text(runner - 12, 254, "one job, or one job per step", 12, 400, TEXT_SOFT, "end"))
+    p.append(flow(f"M{secret:g} {top}L{secret:g} 222L1120 222L1120 {bottom}", ORC, delay=0.9, seconds=3.4))
+    p.append(text(1108, 214, "env and OIDC: a secret provider", 12.5, 400, TEXT_SOFT, "end"))
+    p.append(flow(f"M{approval:g} {top}L{approval:g} 262L560 262L560 {bottom}", PIPE, delay=1.4, seconds=3.4))
+    p.append(text(574, 254, "gate satisfied by the engine's approval", 12.5, 400, TEXT_SOFT, "start"))
+    p.append(flow(f"M600 {bottom}L600 298L{logs:g} 298L{logs:g} {top}", CON, delay=0.6, seconds=3.4))
+    p.append(text(614, 316, "--events json: annotations, summaries, the record", 12.5, 400, TEXT_SOFT, "start"))
+    p.append(f'<path d="M{trigger + 6:g} {bottom}L{trigger + 6:g} {top}" fill="none" stroke="{PIPE}" stroke-width="1.5" stroke-dasharray="5 6" marker-end="url(#g-arrow)" opacity=".8"/>')
+    p.append(text(trigger + 18, 290, "an emitter plugin writes the job", 12, 400, TEXT_SOFT, "start"))
+    p.append(text(trigger + 18, 306, "skeleton from the Workflow;", 12, 400, TEXT_SOFT, "start"))
+    p.append(text(trigger + 18, 322, "every job still runs meridian", 12, 400, TEXT_SOFT, "start"))
+    # Below: what this is not.
+    p.append(rect(90, 510, 1070, 74, TILE, LINE, 14, 1.2, "5 5"))
+    p.append(text(120, 536, "What stays where it is", 15, 700, WHITE, "start"))
+    p.append(lines(120, 558, [
+        "Meridian never becomes the engine: no triggers, runners, reviewer lists or log hosting. The engine never does the work itself: no terraform apply in a job, only meridian.",
+    ], 12.5, TEXT_SOFT, "start"))
+    p.append(caption(W, H, "The engine is a thin shell: it starts the job, holds the secrets and the approval, and keeps the logs. Everything the job does is Meridian's."))
+    return doc(W, H, "Meridian inside a pipeline engine: the engine keeps the trigger, the runner and its identity, the secret release, the approval and the logs; Meridian owns the workflow, the orchestrator, the target plugins and secret delivery", "".join(p))
 
 
 def modules_flow() -> str:
@@ -554,6 +619,7 @@ GRAPHIC_FILES = {
     "meridian-secrets-flow.svg": secrets_flow,
     "meridian-run-safety.svg": run_safety,
     "meridian-plugin-categories.svg": plugin_categories,
+    "meridian-in-a-pipeline.svg": in_a_pipeline,
     "meridian-modules-flow.svg": modules_flow,
 }
 
@@ -578,14 +644,14 @@ def with_light(still: str, label: str, point_colour: str, light: str, width: flo
 
     Each coloured meridian gets two overlays with `pathLength="100"`: a soft
     one in its own colour and a sharp one in the light's colour, offset so the
-    four lights leave the point one after another.
+    five lights leave the point one after another.
     """
     found = MERIDIAN_PATH.findall(still)
-    if len(found) != 4:
-        raise SystemExit(f"{label}: expected the four meridians, found {len(found)}")
+    if len(found) != 5:
+        raise SystemExit(f"{label}: expected the five meridians, found {len(found)}")
     overlays = []
     for i, (d, colour, _) in enumerate(found):
-        delay = f"animation-delay:{-i * 0.65:g}s"
+        delay = f"animation-delay:{-i * 0.52:g}s"
         overlays.append(
             f'<path d="{d}" stroke="{colour}" stroke-width="{width * 2:g}" pathLength="100" class="m-glow" style="{delay}"/>'
             f'<path d="{d}" stroke="{light}" stroke-width="{width:g}" pathLength="100" class="m-light" style="{delay}"/>'

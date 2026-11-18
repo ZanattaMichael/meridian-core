@@ -810,5 +810,8 @@ fn secret_check_of_documents_without_secrets_says_so() {
     fs::write(dir.join("site.yaml"), document).unwrap();
     let check = meridian(&dir, &["secret", "check", "site.yaml"]);
     assert!(check.status.success(), "{}", stderr(&check));
-    assert_eq!(stdout(&check), "no secret is declared\n");
+    assert_eq!(
+        stdout(&check),
+        "no secret or ambient credential is declared\n"
+    );
 }
