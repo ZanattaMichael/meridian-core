@@ -102,6 +102,11 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Transformed, CompileErr
     let mut units = Vec::with_capacity(graph.resources.len());
     let mut services = Vec::new();
     for resource in &graph.resources {
+        // The shared types are checked the same way on every configuration
+        // management target, so a document moves between tools without the
+        // type rules changing under it.
+        meridian_sdk::schema::check_shared(resource)
+            .map_err(|e| refuse(resource, &e.rule, e.msg))?;
         // cloud-init reads the whole document once and evaluates nothing per
         // entry. Compiling the condition away would apply the resource on
         // every machine the condition was meant to exclude.

@@ -37,8 +37,8 @@ where the tools themselves differ; the cells say how, and the
 | no `name` | yes | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` |
 | no `params` at all | yes | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` |
 | a param outside the dialect (`provider`) | yes | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` |
-| `name` is a number | no | ok | ok | `invalid-param` | ok | ok | ok |
-| `name` is a list | no | ok | ok | `invalid-param` | ok | ok | ok |
+| `name` is a number | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+| `name` is a list | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
 
 ## `service`
 
@@ -52,7 +52,7 @@ where the tools themselves differ; the cells say how, and the
 | state `reloaded` | no | ok | `unsupported-state` | ok, warns | `unsupported-state` | `unsupported-state` | `unsupported-state` |
 | a state no tool has (`paused`) | yes | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` |
 | no `name` | yes | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` |
-| `enabled` is text, not true or false | no | ok | `invalid-param` | `invalid-param` | ok | ok | ok |
+| `enabled` is text, not true or false | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
 | a param outside the dialect (`pattern`) | yes | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` |
 
 ## `file`
@@ -70,7 +70,7 @@ where the tools themselves differ; the cells say how, and the
 | content with quotes, a backslash and every tool's own interpolation | yes | ok | ok | ok | ok | ok | ok |
 | content that is not ASCII | yes | ok | ok | ok | ok | ok | ok |
 | content of several lines | yes | ok | ok | ok | ok | ok | ok |
-| `mode` unquoted, so read as a number | no | ok | ok | `invalid-param` | ok | ok | ok |
+| `mode` unquoted, so read as a number | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
 | no `path` | yes | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` |
 | a state no tool has (`touched`) | yes | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` |
 | a param outside the dialect (`source`) | yes | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` |
@@ -83,7 +83,7 @@ where the tools themselves differ; the cells say how, and the
 | uid, home, shell, system and groups | yes | ok | ok | ok | ok | ok | ok |
 | state `absent` | no | ok | ok | `unsupported-state` | ok | ok | ok |
 | no `name` | yes | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` |
-| `groups` is text, not a list | no | ok | `invalid-param` | ok | ok | ok | ok |
+| `groups` is text, not a list | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
 | a param outside the dialect (`password`) | yes | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` |
 
 ## `group`
