@@ -37,9 +37,9 @@ page it affects. The pull request template asks for it.
 | [Group and layer paths are case-sensitive](0010-group-paths-are-case-sensitive.md) | Compile rules | proposed |
 | [There is no central module index](0011-no-central-module-index.md) | Modules | accepted 2026-11-18 |
 | [One version of each module per project](0012-one-version-of-a-module-per-project.md) | Modules | accepted 2026-11-18 |
-| [Registry logins are read only from Docker's `auths`](0013-registry-logins-from-docker-auths-only.md) | Modules | proposed |
+| [Registry logins are read only from Docker's `auths`](0013-registry-logins-from-docker-auths-only.md) | Modules | accepted 2026-11-18 |
 | [The lock file does not record who signed a module](0014-lock-file-does-not-record-the-signer.md) | Modules | proposed |
-| [Plugin signatures default to `require` in a release and `off` from source](0015-plugin-signatures-require-in-a-release.md) | Releases | proposed |
+| [Plugin signatures default to `require` in a release and `off` from source](0015-plugin-signatures-require-in-a-release.md) | Releases | accepted 2026-11-18 |
 | [The Windows named pipe can be opened for reading by any local account](0016-windows-pipe-readable-by-local-accounts.md) | Releases | proposed |
 | [A dispatch of the release workflow at a `v*` tag is a release](0021-a-dispatch-at-a-tag-is-a-release.md) | Releases | proposed |
 | [cloud-init's `apply` does not touch a machine](0017-cloud-init-apply-touches-no-machine.md) | Targets | proposed |

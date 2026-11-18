@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Area | Modules |
-| Status | **proposed**: made during the work and merged, not yet accepted or changed by the owner |
+| Status | **accepted** 2026-11-18 |
 | Made in | PR 83 and PR 131 |
 | Where it shows | [Modules: registries](../reference/modules.md) |
 
