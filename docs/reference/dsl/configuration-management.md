@@ -1,8 +1,7 @@
 # The configuration management flavour
 
-Configuration management tools log in to a machine, or run on it, and converge
-packages, files and services. This page is how the
-[Meridian language](index.md) is written for them.
+How the [Meridian language](index.md) is written for tools that configure an existing
+machine.
 
 | | |
 |---|---|
@@ -23,16 +22,12 @@ packages, files and services. This page is how the
 | `cloud-init` | the six shared types, limited to what a first boot can do, and any cloud-config module (`ntp`) | [cloud-init](../../targets/cloud-init.md) |
 | `dsc` | DSC's own resources | [dsc](../../targets/dsc.md) |
 
-There are two dialects in this segment, and the table shows which target speaks
-which. A target of the shared dialect may also take its tool's own types
-beside the six; see [native types beside the six](#native-types-beside-the-six).
+Two dialects. Shared-dialect targets also take [native types](#native-types-beside-the-six).
 
 ## The shared dialect: six types
 
-`ansible`, `puppet`, `openvox`, `chef`, `salt` and `cloud-init` take the same six
-resource types. A resource using them compiles for any of these targets, so
-changing `spec.target` moves a document between tools, within each tool's
-limits. This is where the language is truly "write once".
+`ansible`, `puppet`, `openvox`, `chef`, `salt` and `cloud-init` take the same six types.
+Changing `spec.target` moves a document between them, within each tool's limits.
 
 | `type` | Manages | `state` | Required params |
 |---|---|---|---|
@@ -43,8 +38,7 @@ limits. This is where the language is truly "write once".
 | `group` | a group | `present` (default), `absent` | `name` |
 | `exec` | a command to run | none | `command` |
 
-Every param, every state and which actions each type can be notified with are
-in [the resource types reference](../resource-types.md).
+Params, states and actions: [resource types](../resource-types.md).
 
 ```yaml
 apiVersion: meridian/v1
@@ -86,40 +80,32 @@ spec:
 
 This document is
 [`examples/flavours/configuration-management.yaml`](../../../examples/flavours/configuration-management.yaml),
-and it compiles for all three tools. A longer one for each tool is under
+and compiles for all three tools. Longer ones are under
 [`examples/ansible/`](../../../examples/ansible),
 [`examples/puppet/`](../../../examples/puppet) and
 [`examples/chef/`](../../../examples/chef).
 
-Anything outside the six types and their params is refused at compile time: an
-unknown type, an unsupported param, an inexpressible state. Nothing is dropped.
-The only way beyond the six is the tool's own types, below.
+An unknown type, unsupported param or inexpressible state is refused at compile.
 
-In this dialect a reference is settled when the document is compiled:
-`${id.param}` becomes the value the document gives that param on the resource
-`id`. Anything else in `${...}` is refused, and `$${` is a literal `${`. See
-[references](references.md#configuration-management-the-shared-types).
+`${id.param}` becomes that param's value at compile time. Anything else in `${...}` is
+refused; `$${` is a literal `${`
+([references](references.md#configuration-management-the-shared-types)).
 
 ### cloud-init: the same types, once, at first boot
 
-`cloud-init` takes the six types but does not target a running machine. It
-compiles a ResourceSet into user-data that a new machine applies on first boot.
-So it accepts only what a first boot can do: nothing can be removed or tracked
-later (`absent` and `latest` are refused), order follows cloud-init's fixed boot
-stages (a dependency pointing backwards through them is refused), and it adds a
-few params, such as a user's `ssh_authorized_keys`. Use it for what must be true
-before any other tool can reach the machine. [Its page](../../targets/cloud-init.md) has the detail, and
-[the resource types reference](../resource-types.md) marks every difference.
+`cloud-init` compiles a ResourceSet into user-data applied on first boot:
+
+- `absent` and `latest` are refused.
+- Order follows cloud-init's boot stages; a dependency pointing backwards is refused.
+- It adds params such as a user's `ssh_authorized_keys`.
+
+See [its page](../../targets/cloud-init.md) and [resource types](../resource-types.md).
 
 ## Native types beside the six
 
-A tool does more than the six types cover, and a document may use it. On these
-targets, a `type` that is not one of the six is the tool's own type, spelled as
-the tool spells it, with `params` passed through unchanged, as on the
-[infrastructure as code targets](infrastructure-as-code.md). Meridian checks
-nothing against a list: the tool refuses unknown arguments when it runs, unless
-the tool's schema is synced ([tool schemas](../../tooling/schema-sync.md)), in
-which case the editor and `meridian lint` flag them in place.
+A `type` that is not one of the six is the tool's own type, with `params` passed through
+unchanged. The tool refuses unknown arguments when it runs; with a
+[synced schema](../../tooling/schema-sync.md) the editor and `meridian lint` flag them.
 
 | Target | The native `type` is | Example | `state` | When notified |
 |---|---|---|---|---|
@@ -129,24 +115,19 @@ which case the editor and `meridian lint` flag them in place.
 | `salt` | the state function, dotted; `native/<name>` refused with the dotted name | `pkgrepo.managed`, `file.symlink` | refused: the function is the state | watches the notifier (`watch`) |
 | `cloud-init` | the cloud-config key; `native/<name>` refused, as are the five keys the six write | `ntp`, `timezone`, `bootcmd` | refused: the module's keys say what it does | refused: applied once |
 
-Three rules hold the two apart:
+Rules:
 
-- **The bare word is always the shared type.** `file` is the shared `file`
-  on every target, whatever the tool calls its own. A dotted or namespaced
-  name can never be a shared type, so it is the tool's.
+- **A bare word is the shared type.** A dotted or namespaced name is the tool's.
 - **A native type whose bare name a shared type has taken is written
   `native/<name>`**: `native/file` is the tool's own `file`, with every
   attribute the shared type does not take. The prefix is accepted only for the
   six names, and only where the tool has a bare type of that name; a target
   whose types are always fully qualified refuses it and says what to write
   (`ansible.builtin.file` on Ansible).
-- **A native type is placed as the tool places it.** `dependsOn`, `notifies`
-  and `runtimeWhen` work as on any resource where the tool can honour them;
-  where it cannot (nothing orders around a cloud-config module; Puppet has no
-  apply-time condition), the target page says what is refused.
-- **A native type makes the document single-target.** The `native-type` lint
-  rule ([reference](../lint.md#native-type)) marks each one, so a document
-  meant to be portable shows where it stopped being so.
+- **`dependsOn`, `notifies` and `runtimeWhen` work where the tool can honour them.** The
+  target page says what is refused.
+- **A native type makes the document single-target.** The
+  [`native-type`](../lint.md#native-type) lint rule marks each one.
 
 ```yaml
 resources:
@@ -171,16 +152,12 @@ resources:
       name: nginx
 ```
 
-A native resource takes `dependsOn`, `notifies`, `runtimeWhen`, secrets and
-references like any other; what differs is only how `type`, `params` and
-`state` are read. How each target writes a native resource, and what it
-refuses, is on the target's page. The choice is
+See each target's page and
 [decision 0032](../../decisions/0032-native-types-beside-the-six-and-a-prefix-for-colliding-names.md).
 
 ## The native dialect: DSC
 
-`dsc` does not take the six types. DSC's vocabulary is its resources, and there
-are too many, with too many properties each, to hide behind six words.
+`dsc` takes DSC's own resources, not the six types.
 
 | | |
 |---|---|
@@ -197,8 +174,7 @@ A document written in one dialect does not compile for a target of the other.
 
 ## Order
 
-`dependsOn` works on every target in the segment. What it turns into depends on
-how the tool thinks about order:
+`dependsOn` works on every target:
 
 | Target | `dependsOn` becomes |
 |---|---|
@@ -210,13 +186,10 @@ how the tool thinks about order:
 
 ## `notifies`
 
-Every tool in the segment that runs against a live machine has its own
-mechanism for reacting to a change, so a notify is **native** there: an Ansible
-handler, Puppet's and OpenVox's `notify`, Chef's `notifies`, Salt's `watch` and
-`onchanges`, the DSC runner's `notify`.
-`cloud-init` has none and runs once, so its notify is **synthetic**: the action
-becomes a command that runs once, unconditionally, after every other command,
-with a compile warning.
+**Native** everywhere except `cloud-init`: an Ansible handler, Puppet and OpenVox
+`notify`, Chef `notifies`, Salt `watch` and `onchanges`, the DSC runner's `notify`. On
+`cloud-init` it is **synthetic**: a command run once, unconditionally, after every other,
+with a warning.
 
 | Target | Actions accepted |
 |---|---|
@@ -232,10 +205,8 @@ notified.
 
 ## `runtimeWhen`
 
-A condition the tool checks on the machine at the moment it applies the
-resource. Meridian does not read it. It is written in the tool's own language,
-so it is the one part of a shared-dialect document that does not move between
-tools.
+Checked by the tool on the machine at apply time, in the tool's own language. Meridian
+does not read it, and it does not move between tools.
 
 | Target | `runtimeWhen` is | Example |
 |---|---|---|
@@ -248,17 +219,13 @@ tools.
 
 ## Plan and apply
 
-`meridian plan` uses each tool's own dry run (`--check --diff`, `--noop`,
-`--why-run`, the DSC runner's `Test` mode). Where a tool has none for the way
-the host is reached, the plan is reported as unknown and not as empty. Each
-target's page lists the exact commands under "Running".
+`meridian plan` uses the tool's dry run (`--check --diff`, `--noop`, `--why-run`, the DSC
+runner's `Test` mode). Without one, the plan is unknown. Each target page lists the
+commands.
 
 ## What this flavour does not have
 
-- Outputs. Nothing a ResourceSet does is handed to a later stage.
-- A way to create the machine. That is an Infrastructure document, joined to
-  this one through `targetHost` with `from: infrastructure`
+- Outputs.
+- Creating the machine; use an Infrastructure document and `targetHost`
   ([two-stage workflow](../../quickstart/first-two-stage.md)).
-- A `when` that depends on the node. [`when`](index.md#when-and-runtimewhen) is
-  decided from the `--data` files before compiling, on every target; facts
-  about the node are not gathered yet.
+- A [`when`](index.md#when-and-runtimewhen) on node facts.
