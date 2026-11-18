@@ -438,6 +438,39 @@ binary checked (`binary`, `verified`, `signature`). Schemas:
 `schemas/output/signing-sign.schema.json`,
 `schemas/output/signing-verify.schema.json`.
 
+### `test`
+
+One object per test document under `files` (`file`, `name`, `ok` and its
+`cases`), each case with `name`, `run` (`compile` or `plan`), `status`
+(`passed`, `failed`, or `error` when the case could not run), `failures`
+(one line each, empty when it passed), `documents` (each `name`, `target` and
+`outcome`: `compiled`, `refused`, `left-out`, `planned`, `deferred`, `failed`
+or `not-run`) and `millis`; then a `summary` of `files`, `cases`, `passed`,
+`failed` and `errors`. `ok` is true only when every case passed. The report
+for people moves to standard error. Schema: `schemas/output/test.schema.json`.
+
+```json
+{
+  "command": "test",
+  "ok": false,
+  "files": [
+    {
+      "file": "tests/site.test.yaml",
+      "name": "site",
+      "ok": false,
+      "cases": [
+        { "name": "dev compiles nginx", "run": "compile", "status": "passed", "failures": [],
+          "documents": [{ "name": "web", "target": "ansible", "outcome": "compiled" }], "millis": 12 },
+        { "name": "production says so", "run": "compile", "status": "failed",
+          "failures": ["assert contains(stages.web.files['playbook.yml'], 'welcome to prod'): false"],
+          "documents": [{ "name": "web", "target": "ansible", "outcome": "compiled" }], "millis": 9 }
+      ]
+    }
+  ],
+  "summary": { "files": 1, "cases": 2, "passed": 1, "failed": 1, "errors": 0 }
+}
+```
+
 ## In a pipeline
 
 A pull request job that plans, comments the changes, and fails only on an

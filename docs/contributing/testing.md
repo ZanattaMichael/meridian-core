@@ -327,6 +327,14 @@ refusal that names the target and the rule. Never a panic.
 The first run found one: a resource id used twice made the Ansible, Puppet and
 OpenVox sort stages panic. They now refuse it as `duplicate-resource`.
 
+## Tests people write for their own documents
+
+The suites above test Meridian. A person who writes documents or publishes a
+module tests those with [`meridian test`](../reference/testing.md): a `Test`
+document of cases that compile or plan their documents with given data and
+check what came out. The example under `examples/tests/` is run by the
+examples test below with the real plugins, so the page's example cannot rot.
+
 ## Examples
 
 Every `.yaml` file under `examples/` is validated and compiled by the real

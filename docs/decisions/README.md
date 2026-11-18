@@ -58,6 +58,7 @@ page it affects. The pull request template asks for it.
 | [A command's JSON result is one object, and a plan with changes exits 2 only when asked](0030-json-output-is-one-object-and-plan-exits-2-only-when-asked.md) | Core | proposed |
 | [A refusal's rule is one of a registry, and the same mistake has the same name on every target](0034-a-refusal-rule-is-one-of-a-registry.md) | Core | proposed |
 | [An apply from a saved plan applies that plan or nothing, and the file never holds a value](0038-an-apply-from-a-saved-plan-applies-that-or-nothing.md) | Orchestrator | proposed |
+| [A test is a document of cases over compile and plan, and never a script](0037-a-test-is-a-document-of-cases-over-compile-and-plan.md) | Testing | proposed |
 | [A key reaches a host through an agent Meridian starts](0028-a-key-reaches-a-host-through-an-agent-meridian-starts.md) | Targets | proposed |
 | [A configuration management target takes its tool's own types beside the six, and a colliding name is written `native/<name>`](0032-native-types-beside-the-six-and-a-prefix-for-colliding-names.md) | Targets | proposed |
 | [A tool's published schema file is fetched over HTTPS, pinned by its hash, and the last copy stands in offline](0036-a-published-schema-file-is-fetched-over-https-pinned-by-hash-and-reused-offline.md) | Tooling | proposed |
