@@ -365,6 +365,7 @@ fn refusal(refusal: &Refusal) -> Json {
         Refusal::State(_) => "state",
         Refusal::Resume(_) => "resume",
         Refusal::Rollback(_) => "rollback",
+        Refusal::Plan(_) => "plan",
     };
     json!({
         "kind": kind,
@@ -376,9 +377,24 @@ fn refusal(refusal: &Refusal) -> Json {
     })
 }
 
+/// The saved plan a run wrote or carried out, for the run's output.
+pub(crate) struct PlanAbout {
+    /// The plan file.
+    pub(crate) file: PathBuf,
+    /// The id of the run that took the plan; empty when this run did.
+    pub(crate) run: String,
+    /// Whether the plan leaves an apply something to do.
+    pub(crate) has_changes: bool,
+}
+
 /// The whole run: what `compile`, `plan`, `apply`, `drift` and `rollback`
 /// print.
-pub(crate) fn run(report: &RunReport, mode: Mode, out: Option<&Path>) -> Map<String, Json> {
+pub(crate) fn run(
+    report: &RunReport,
+    mode: Mode,
+    out: Option<&Path>,
+    plan: Option<&PlanAbout>,
+) -> Map<String, Json> {
     let failed = report
         .stages
         .iter()
@@ -419,6 +435,17 @@ pub(crate) fn run(report: &RunReport, mode: Mode, out: Option<&Path>) -> Map<Str
             Json::Array(report.rollbacks.iter().map(rollback).collect()),
         ),
         ("warnings", json!(report.warnings)),
+        (
+            "plan",
+            match plan {
+                None => Json::Null,
+                Some(about) => json!({
+                    "file": about.file.display().to_string(),
+                    "run": text_or_null(&about.run),
+                    "hasChanges": about.has_changes,
+                }),
+            },
+        ),
         (
             "summary",
             json!({

@@ -8,6 +8,8 @@ The plugin's runner (plugins/dsc/src/runner.rs) is a plan and an apply:
 
   plan   Invoke-DscRunner -Mode Test; a resource reported as FAIL is a change
   apply  the same Test, then Invoke-DscRunner -Mode Set; a FAIL then is a failure
+         (with a DscPipelineRunner whose Set results carry Drifted, the plugin runs the
+         Set alone; this script keeps the Test so it checks the drift either way)
 
 This script makes the same calls, with the same arguments, over a project that was compiled
 elsewhere, and asserts:

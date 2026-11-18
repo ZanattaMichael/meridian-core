@@ -27,6 +27,10 @@ compiled, with the reason. Each target's own page says how it does what it can.
 - **runtimeWhen** is a condition the tool checks on the node at the moment it
   applies a resource.
 - **plan** asks the tool what an apply would change, without changing it.
+- **saved plan** says the tool saves its plan when `meridian plan --out` is
+  run, and applies exactly that plan on `meridian apply --plan`. Every target
+  is checked by its artifact hash; this column says which also hand the tool
+  its own plan back. See [a saved plan](../operations/pull-requests.md).
 - **outputs** are values a later stage of a workflow can read.
 - **inputs** says the target hands its tool the values a document's
   `spec.imports` brings from other documents, as the tool's own variables or
@@ -79,8 +83,9 @@ fn row(
         None => "no".to_owned(),
     };
     format!(
-        "| [{name}](../targets/{name}.md) | {category} | {types} | {notifies} | {runtime} | {plan} | {apply} | {outputs} | {inputs} | {secrets} | {credentials} | {import} | {schemas} |\n",
+        "| [{name}](../targets/{name}.md) | {category} | {types} | {notifies} | {runtime} | {plan} | {saved} | {apply} | {outputs} | {inputs} | {secrets} | {credentials} | {import} | {schemas} |\n",
         schemas = yes(schemas.is_some()),
+        saved = yes(runner.saves_plans()),
         credentials = yes(capabilities.credentials),
         name = emitter.name(),
         category = emitter.category(),
@@ -110,7 +115,7 @@ fn matrix() -> String {
         .collect();
     rows.sort();
     format!(
-        "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | apply | outputs | inputs | secrets | credentials | import | schemas |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n{}",
+        "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | saved plan | apply | outputs | inputs | secrets | credentials | import | schemas |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n{}",
         rows.concat()
     )
 }

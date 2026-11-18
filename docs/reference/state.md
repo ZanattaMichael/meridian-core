@@ -172,6 +172,7 @@ A step's `reason`, when it failed:
 | `timed-out` | the step's tool ran past `--stage-timeout` and was stopped |
 | `analysis-failed` | an [analyzer](analyzers.md) found something at or above the severity the run fails on (`--fail-on`) |
 | `analyzer-failed` | an analyzer could not be run, or did not answer, so the step was not analyzed |
+| `plan-differs` | an `apply --plan` compiled the stage to an artifact other than the one the saved plan recorded, or the plan previewed a stage the document now leaves out; the stages after it are not run |
 
 These words are fixed: a new kind of failure gets a new word, and a word is
 never reused. They are also listed with every other error code in
@@ -205,7 +206,7 @@ not change when workflows, fan-out and retries arrive.
 | Type | When | `detail` |
 |---|---|---|
 | `lock.acquired` | the run holds the lock | `id` |
-| `run.started` | the run begins | `mode`, `command`, `resumes`, `rollsBack` (the run a `rollback` puts back) |
+| `run.started` | the run begins | `mode`, `command`, `resumes`, `rollsBack` (the run a `rollback` puts back), `plan` (the run that took the saved plan an `apply --plan` carries out) |
 | `step.started` | a step begins | `kind` |
 | `resource.planned` | one line of a plan, or of a drift check | `kind`, `resource`, `action` |
 | `resource.changed` | one thing an apply or a rollback changed, including what a failed apply had done before it failed | `kind`, `resource`, `action` |

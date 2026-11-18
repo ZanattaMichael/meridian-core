@@ -12,6 +12,7 @@ meridian-ir = { path = "../meridian-ir" }
 meridian-plugin-host = { path = "../meridian-plugin-host" }
 meridian-sdk = { path = "../meridian-sdk" }
 meridian-secret = { path = "../meridian-secret" }
+base64 = { workspace = true }
 sha2 = { workspace = true }
 
 [dev-dependencies]

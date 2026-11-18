@@ -69,6 +69,13 @@ pub struct Options {
     /// recorded as [`Reason::Interrupted`] or [`Reason::TimedOut`], the
     /// stages after it as not run, and the lock is released as usual.
     pub stop: Stop,
+    /// Ask each target to hand back its tool's own saved plan, for a plan
+    /// that will be written with [`PlanFile`](crate::PlanFile).
+    pub save_plan: bool,
+    /// Apply exactly this saved plan: refuse when any stage no longer
+    /// compiles to what was planned, or was applied since, and hand each
+    /// tool the plan it saved. Only an apply takes one.
+    pub from_plan: Option<Arc<crate::PlanFile>>,
 }
 
 /// What an apply does when a stage fails.
@@ -105,6 +112,8 @@ impl Options {
             baseline: Baseline::default(),
             strict_secrets: false,
             stop: Stop::default(),
+            save_plan: false,
+            from_plan: None,
         }
     }
 

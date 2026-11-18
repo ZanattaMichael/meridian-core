@@ -127,6 +127,7 @@ impl Runner for TemplateRunner {
             // TODO(plugin): set this when the tool cannot say what would
             // change, so an empty list is never read as "in sync".
             unknown: false,
+            saved: None,
         })
     }
 

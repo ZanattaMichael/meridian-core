@@ -38,11 +38,15 @@ pub enum Reason {
     /// An analyzer could not be run, or did not answer, so the stage was
     /// not analyzed.
     AnalyzerFailed,
+    /// An apply from a saved plan found that the document no longer compiles
+    /// to what was planned, or that its condition no longer keeps it, so the
+    /// plan does not say what would happen.
+    PlanDiffers,
 }
 
 impl Reason {
     /// Every reason, in the order the reference lists them.
-    pub const ALL: [Reason; 11] = [
+    pub const ALL: [Reason; 12] = [
         Reason::NoPlugin,
         Reason::CompileRefused,
         Reason::NotSupported,
@@ -54,6 +58,7 @@ impl Reason {
         Reason::TimedOut,
         Reason::AnalysisFailed,
         Reason::AnalyzerFailed,
+        Reason::PlanDiffers,
     ];
 
     /// The word the record keeps.
@@ -70,6 +75,7 @@ impl Reason {
             Reason::TimedOut => "timed-out",
             Reason::AnalysisFailed => "analysis-failed",
             Reason::AnalyzerFailed => "analyzer-failed",
+            Reason::PlanDiffers => "plan-differs",
         }
     }
 

@@ -477,3 +477,38 @@ fn a_secret_reaches_openvox_through_hiera_and_is_in_nothing_it_prints_or_the_plu
         .unwrap();
     assert!(plan.in_sync(), "{:?}", plan.changes);
 }
+
+#[ignore = "needs a real OpenVox; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn the_types_schemas_are_exported_for_an_editor() {
+    use meridian_sdk::{SchemaRequest, SchemaSource};
+
+    let Some(puppet) = openvox() else { return };
+    let dir = scratch(TMP, "real-schemas");
+    let text = "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: site\nspec:\n  target: openvox\n  targetHost:\n    from: inline\n    host: localhost\n  resources:\n    - id: motd\n      type: file\n      params:\n        path: /etc/motd\n        content: hi\n    - id: run\n      type: native/exec\n      params:\n        command: /bin/true\n";
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_text("site.yaml", text, "openvox")],
+    );
+    let log = KeptLog::default();
+    let export = runner(&puppet, &dir)
+        .schemas()
+        .export(&request, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(export.tool, "openvox");
+    assert_eq!(export.pins.get("openvox"), Some(&export.tool_version));
+    let exec = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "native/exec")
+        .unwrap_or_else(|| panic!("exec is described: {:?}", export.notes));
+    assert!(
+        !exec.open && exec.find_param("command").is_some(),
+        "{exec:?}"
+    );
+    assert!(exec.source.starts_with("openvox "), "{}", exec.source);
+    assert!(export
+        .schemas
+        .iter()
+        .any(|s| s.r#type == "notify" && s.open));
+}

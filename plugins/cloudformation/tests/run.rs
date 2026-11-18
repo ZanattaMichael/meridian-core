@@ -309,3 +309,48 @@ fn a_run_without_secrets_names_no_parameters_file() {
     );
     assert!(!dir.join("secrets.json").exists());
 }
+
+#[test]
+fn a_plan_asked_to_save_keeps_its_change_set_and_an_apply_handed_it_executes_that() {
+    let dir = scratch(TMP, "saved-plan");
+    let runner = runner(&dir, &format!("{EXISTING}\n{CHANGES}"));
+    let mut context = context(&dir);
+    context.save_plan = true;
+    let log = KeptLog::default();
+    let plan = runner.plan(&context, &compiled(), &log).unwrap();
+    let saved = plan
+        .saved
+        .clone()
+        .expect("the change set's name is handed back");
+    // The change set is neither deleted nor executed by the plan.
+    assert_eq!(
+        calls(&dir)[1..],
+        [
+            "create-change-set --change-set-name meridian-N --change-set-type UPDATE --template-body file://template.yaml --capabilities CAPABILITY_IAM",
+            "wait change-set-create-complete --change-set-name meridian-N",
+            "describe-change-set --change-set-name meridian-N --output json",
+        ]
+    );
+    let text = String::from_utf8(saved.data.clone()).unwrap();
+    assert!(text.starts_with("{\"changeSet\":\"meridian-"), "{text}");
+    assert!(text.ends_with("\"newStack\":false}"), "{text}");
+
+    let _ = fs::remove_file(dir.join("calls"));
+    let mut context = context.clone();
+    context.save_plan = false;
+    context.saved_plan = Some(meridian_sdk::SavedPlan {
+        data: saved.data,
+        changes: plan.changes.clone(),
+    });
+    let applied = runner.apply(&context, &compiled(), &log).unwrap();
+    assert_eq!(
+        calls(&dir),
+        [
+            "execute-change-set --change-set-name meridian-N",
+            "wait stack-update-complete",
+            "describe-stacks --output json",
+        ]
+    );
+    assert_eq!(applied.changes, plan.changes);
+    assert_eq!(applied.outputs[0].name, "web_vm_ip");
+}

@@ -586,6 +586,53 @@ def in_a_pipeline() -> str:
     return doc(W, H, "Meridian inside a pipeline engine: the engine keeps the trigger, the runner and its identity, the secret release, the approval and the logs; Meridian owns the workflow, the orchestrator, the target plugins and secret delivery", "".join(p))
 
 
+def saved_plan() -> str:
+    """A saved plan: what plan --out writes, what the reviewer sees, what apply --plan checks and hands on."""
+    W, H = 1200, 560
+    p: list[str] = []
+    # The plan, on the left.
+    p.append(heading(40, 40, "meridian plan --out plan.mplan", WHITE))
+    p.append(card(40, 56, 300, 150, "plan", ["compiles every document,", "asks each tool what would change,", "asks the policy, and writes the file"], LINE, 17, 12.5))
+    p.append(flow("M340 131L400 131", WHITE, delay=0.2, seconds=1.6))
+    # The file, in the middle.
+    p.append(rect(400, 56, 380, 290, WELL, PIPE, 18, 1.4))
+    p.append(f'<rect x="400" y="56" width="380" height="5" rx="2.5" fill="{PIPE}"/>')
+    p.append(text(590, 88, "plan.mplan", 18, 700, WHITE, mono=True))
+    p.append(lines(422, 118, [
+        "files, data, set, selector, run",
+        "stages:",
+        "  network  (terraform)",
+        "    artifactHash: sha256:9f2c…",
+        "    changes: create web_vm, …",
+        "    appliedBefore: sha256:40b1…",
+        "    saved: <the tool's own plan>",
+        "    policy: allowed",
+        "  web  (ansible)   status: deferred",
+    ], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(chip(422, 300, 336, "names, hashes and summaries: never a value", GREEN, 28, 12))
+    # The reviewer, above right.
+    p.append(card(840, 56, 320, 110, "the pull request", ["one comment, updated in place:", "the report of the plan", "and the policy's decision"], PIPE, 17, 12.5))
+    p.append(flow("M780 111L840 111", PIPE, delay=0.8, seconds=1.6))
+    # The apply, below right.
+    p.append(heading(840, 212, "meridian apply --plan plan.mplan", WHITE))
+    p.append(card(840, 228, 320, 118, "apply", ["the same stages, none applied since;", "each document compiles to the", "planned hash, or plan-differs;", "each tool is handed its saved plan"], LINE, 17, 12.5))
+    p.append(flow("M780 287L840 287", WHITE, delay=1.4, seconds=1.6))
+    # The checks, as a row along the bottom.
+    cy = 410
+    p.append(heading(40, cy - 12, "What is refused, and when"))
+    checks = [
+        ("before anything runs", ["a stage the plan does not have,", "or one the run does not;", "a stage applied since the plan"], RED),
+        ("at each stage's turn", ["the document no longer compiles", "to the planned artifact:", "plan-differs, and the run stops"], RED),
+        ("by the tool itself", ["Terraform and OpenTofu refuse a", "stale plan file; Pulumi a changed", "plan; CloudFormation an obsolete", "change set"], IAC),
+        ("never checked", ["a stage the plan deferred, which", "waited on an output: applied as", "any apply would, with a warning"], TEXT_SOFT),
+    ]
+    for i, (title, body, colour) in enumerate(checks):
+        x = 40 + i * 285
+        p.append(card(x, cy, 265, 118, title, body, colour, 15, 12.5))
+    p.append(caption(W, H, "What a reviewer approved is what is applied: a plan file ties the two, and anything that moved in between is a refusal, not a surprise."))
+    return doc(W, H, "A saved plan: meridian plan --out writes a file of artifact hashes, changes and each tool's own saved plan; the pull request shows it as one comment; meridian apply --plan refuses a stale plan and hands each tool the plan it saved", "".join(p))
+
+
 def modules_flow() -> str:
     W, H = 1200, 440
     p: list[str] = []
@@ -681,6 +728,7 @@ GRAPHIC_FILES = {
     "meridian-plugin-categories.svg": plugin_categories,
     "meridian-in-a-pipeline.svg": in_a_pipeline,
     "meridian-modules-flow.svg": modules_flow,
+    "meridian-saved-plan.svg": saved_plan,
     "meridian-test-flow.svg": test_flow,
     "meridian-analyzers-flow.svg": analyzers_flow,
 }

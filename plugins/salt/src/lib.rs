@@ -15,6 +15,7 @@
 
 mod emit;
 mod runner;
+mod schemas;
 mod sort;
 mod transform;
 mod validate;
@@ -29,6 +30,7 @@ pub use emit::{sls_path, STATES_DIR, TOP_PATH};
 pub use runner::{
     SaltRunner, Transport, ARGS_VARIABLE, SALT_CALL_VARIABLE, SALT_SSH_VARIABLE, TRANSPORT_VARIABLE,
 };
+pub use schemas::SaltSchemas;
 pub use transform::{supported_resource_types, NATIVE_PATTERN};
 
 /// The target name a document selects with `spec.target`.

@@ -300,6 +300,7 @@ impl Runner for CloudInitRunner {
                 .into_iter()
                 .collect(),
             unknown: false,
+            saved: None,
         })
     }
 

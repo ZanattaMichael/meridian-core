@@ -23,6 +23,7 @@
 
 mod emit;
 mod runner;
+mod schemas;
 mod sort;
 mod transform;
 mod validate;
@@ -63,6 +64,7 @@ fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
 
 pub use emit::{metadata_path, recipe_path};
 pub use runner::{ChefRunner, Transport};
+pub use schemas::ChefSchemas;
 pub use transform::{supported_resource_types, NATIVE_PATTERN};
 
 /// The target name a document selects with `spec.target`.

@@ -64,6 +64,7 @@ and in the `failure` element of a [JUnit report](reporting.md).
 | `timed-out` | the step's tool ran past `--stage-timeout` and was stopped |
 | `analysis-failed` | an [analyzer](analyzers.md) found something at or above the severity the run fails on (`--fail-on`) |
 | `analyzer-failed` | an analyzer could not be run, or did not answer, so the step was not analyzed |
+| `plan-differs` | an `apply --plan` compiled the stage to an artifact other than the one the saved plan recorded, or the plan previewed a stage the document now leaves out; the stages after it are not run |
 
 A step's record can also hold words that are not a stage failure: a step that
 was skipped because an earlier one failed says `earlier-step-failed`, and a
