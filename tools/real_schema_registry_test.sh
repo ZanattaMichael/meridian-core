@@ -99,7 +99,7 @@ grep -q 'application/vnd.meridian.schema-index.v1' "$work/index-manifest.json" \
 # The title annotation is on the manifest, not the layer, so `oras pull`
 # skips the layer; fetch it as a blob by its digest instead.
 layer=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["layers"][0]["digest"])' "$work/index-manifest.json")
-oras blob fetch --plain-http "$open@$layer" --output "$work/index.json"
+oras blob fetch --plain-http "$open/index@$layer" --output "$work/index.json"
 grep -q "\"digest\": \"$digest\"" "$work/index.json" || { cat "$work/index.json"; fail "the index does not list the bundle"; }
 
 say "a project takes its schemas from the registry, signatures required"
