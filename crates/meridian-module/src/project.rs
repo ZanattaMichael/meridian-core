@@ -16,7 +16,7 @@ use crate::manifest::{safe_relative, Manifest, Source, MANIFEST_FILE};
 use meridian_secret::Credential;
 use meridian_signing::{Signature, Verification};
 
-use crate::{git, oci, signature, Error};
+use crate::{git, oci, signature, Error, Kind};
 
 /// What opens a reference to a file in a module: `@acme/nginx:documents/web.yaml`.
 pub const MODULE_REFERENCE_PREFIX: char = '@';
@@ -256,11 +256,14 @@ impl Resolver<'_> {
                             format!("path+{}", normalize(&Path::new(base).join(path)))
                         }
                         None => {
-                            return Err(Error::new(format!(
-                                "{by} requires {} by `path`, which only works between modules \
+                            return Err(Error::new(
+                                Kind::Resolution,
+                                format!(
+                                    "{by} requires {} by `path`, which only works between modules \
                                  on disk; a fetched module must name a `git` or `oci` source",
-                                requirement.name
-                            )))
+                                    requirement.name
+                                ),
+                            ))
                         }
                     },
                     other => other.locator(),
@@ -368,6 +371,7 @@ impl Resolver<'_> {
             });
         }
         Err(Error::new(
+            Kind::Resolution,
             "the module requirements did not settle; this is a bug in meridian",
         ))
     }
@@ -401,13 +405,13 @@ impl Resolver<'_> {
                 }
             ));
         }
-        Error::new(msg)
+        Error::new(Kind::Resolution, msg)
     }
 
     fn choose(&mut self, name: &str, demands: &[Demand]) -> Result<Node, Error> {
         let first = &demands[0];
         if let Some(other) = demands.iter().find(|d| d.locator != first.locator) {
-            return Err(Error::new(format!(
+            return Err(Error::new(Kind::Resolution, format!(
                 "{name} is required from two different sources\n    {}   required by {}\n    {}   required by {}",
                 first.locator, first.by, other.locator, other.by
             )));
@@ -441,15 +445,18 @@ impl Resolver<'_> {
                         .version
                         .as_ref()
                         .map_or("no version".to_owned(), |v| format!("version {v}"));
-                    return Err(Error::new(format!(
-                        "{name} at {} has {has}, and {} requires {}",
-                        dir.display(),
-                        d.by,
-                        d.version
-                            .as_ref()
-                            .map(ToString::to_string)
-                            .unwrap_or_default()
-                    )));
+                    return Err(Error::new(
+                        Kind::Resolution,
+                        format!(
+                            "{name} at {} has {has}, and {} requires {}",
+                            dir.display(),
+                            d.by,
+                            d.version
+                                .as_ref()
+                                .map(ToString::to_string)
+                                .unwrap_or_default()
+                        ),
+                    ));
                 }
             }
             self.accept(name, &manifest, &locked)?;
@@ -475,7 +482,9 @@ impl Resolver<'_> {
             if !(dir.is_dir() && hash_dir(&dir).is_ok_and(|h| h == pin.integrity)) {
                 let found = self.fetch(&first.source, &pin.resolved, &pin)?;
                 if found.integrity != pin.integrity {
-                    return Err(Error::new(format!(
+                    return Err(Error::new(
+                        Kind::Resolution,
+                        format!(
                         "{}: what {} now serves does not match {LOCK_FILE}\n    pinned:  {}\n    \
                          fetched: {}\nThe source changed after it was pinned. If that is \
                          expected, run `meridian module update {name}`.",
@@ -483,7 +492,8 @@ impl Resolver<'_> {
                         pin.source,
                         pin.integrity,
                         found.integrity
-                    )));
+                    ),
+                    ));
                 }
             }
             let manifest = Manifest::load(&dir)?;
@@ -554,10 +564,13 @@ impl Resolver<'_> {
     /// it works with this core.
     fn accept(&self, name: &str, manifest: &Manifest, locked: &Locked) -> Result<(), Error> {
         if manifest.name != name {
-            return Err(Error::new(format!(
-                "{} holds the module {}, and it was required as {name}",
-                locked.source, manifest.name
-            )));
+            return Err(Error::new(
+                Kind::Resolution,
+                format!(
+                    "{} holds the module {}, and it was required as {name}",
+                    locked.source, manifest.name
+                ),
+            ));
         }
         let declared = manifest
             .version
@@ -568,16 +581,19 @@ impl Resolver<'_> {
             && !locked.version.is_empty()
             && declared != locked.version
         {
-            return Err(Error::new(format!(
-                "{name}: the version {} of {} holds a manifest that says {}",
-                locked.version,
-                locked.source,
-                if declared.is_empty() {
-                    "no version"
-                } else {
-                    &declared
-                }
-            )));
+            return Err(Error::new(
+                Kind::Resolution,
+                format!(
+                    "{name}: the version {} of {} holds a manifest that says {}",
+                    locked.version,
+                    locked.source,
+                    if declared.is_empty() {
+                        "no version"
+                    } else {
+                        &declared
+                    }
+                ),
+            ));
         }
         check_core(&label(locked), manifest, self.project.core_version)
     }
@@ -598,8 +614,12 @@ impl Resolver<'_> {
         let _ = fs::remove_dir_all(&scratch);
         let out = scratch.join("module");
         let result = (|| {
-            fs::create_dir_all(&scratch)
-                .map_err(|e| Error::new(format!("creating {}: {e}", scratch.display())))?;
+            fs::create_dir_all(&scratch).map_err(|e| {
+                Error::new(
+                    Kind::Install,
+                    format!("creating {}: {e}", scratch.display()),
+                )
+            })?;
             let resolved = match source {
                 Source::Git { url, subdir, .. } => {
                     git::fetch(url, reference, subdir.as_deref(), &scratch, &out)?
@@ -619,7 +639,9 @@ impl Resolver<'_> {
                 ..wanted.clone()
             };
             let dir = store_dir(self.project.state_dir, &locked);
-            let moving = |e: std::io::Error| Error::new(format!("writing {}: {e}", dir.display()));
+            let moving = |e: std::io::Error| {
+                Error::new(Kind::Install, format!("writing {}: {e}", dir.display()))
+            };
             let _ = fs::remove_dir_all(&dir);
             if let Some(parent) = dir.parent() {
                 fs::create_dir_all(parent).map_err(moving)?;
@@ -628,7 +650,7 @@ impl Resolver<'_> {
             Ok(locked)
         })();
         let _ = fs::remove_dir_all(&scratch);
-        result.map_err(|e: Error| Error::new(format!("{}: {e}", label(wanted))))
+        result.map_err(|e: Error| Error::new(Kind::Install, format!("{}: {e}", label(wanted))))
     }
 }
 
@@ -639,13 +661,15 @@ fn check_core(who: &str, manifest: &Manifest, core_version: &str) -> Result<(), 
     if req.matches(&core) {
         return Ok(());
     }
-    Err(Error::new(format!(
-        "{who} needs meridian {req}, and this is meridian {core}"
-    )))
+    Err(Error::new(
+        Kind::Resolution,
+        format!("{who} needs meridian {req}, and this is meridian {core}"),
+    ))
 }
 
 fn write_atomically(path: &Path, content: &str) -> Result<(), Error> {
-    let failed = |e: std::io::Error| Error::new(format!("writing {}: {e}", path.display()));
+    let failed =
+        |e: std::io::Error| Error::new(Kind::Install, format!("writing {}: {e}", path.display()));
     let mut staged = path.as_os_str().to_owned();
     staged.push(".tmp");
     let staged = PathBuf::from(staged);
@@ -662,7 +686,7 @@ fn write_atomically(path: &Path, content: &str) -> Result<(), Error> {
 /// push.
 pub fn resolve_login(manifest: &Manifest, name: &str) -> Result<Credential, Error> {
     meridian_secret::resolve_credential(&manifest.credentials, name)
-        .map_err(|e| Error::new(format!("the credential {name}: {e}")))
+        .map_err(|e| Error::new(Kind::Credential, format!("the credential {name}: {e}")))
 }
 
 /// Resolves what the project's manifest requires, fetches what is missing,
@@ -672,9 +696,12 @@ pub fn install(project: &Project<'_>, mode: Mode) -> Result<Report, Error> {
     check_core("the project", &root, project.core_version)?;
     let previous = Lock::load(project.dir)?;
     if mode == Mode::Locked && previous.is_none() && !root.modules.is_empty() {
-        return Err(Error::new(format!(
-            "there is no {LOCK_FILE} to hold to; run `meridian module install` and commit it"
-        )));
+        return Err(Error::new(
+            Kind::Install,
+            format!(
+                "there is no {LOCK_FILE} to hold to; run `meridian module install` and commit it"
+            ),
+        ));
     }
     let previous = previous.unwrap_or_default();
     let refresh = match &mode {
@@ -682,9 +709,12 @@ pub fn install(project: &Project<'_>, mode: Mode) -> Result<Report, Error> {
         Mode::Update(names) if names.is_empty() => None,
         Mode::Update(names) => {
             if let Some(unknown) = names.iter().find(|n| previous.get(n).is_none()) {
-                return Err(Error::new(format!(
-                    "{unknown} is not a module in {LOCK_FILE}, so there is nothing to update"
-                )));
+                return Err(Error::new(
+                    Kind::Install,
+                    format!(
+                        "{unknown} is not a module in {LOCK_FILE}, so there is nothing to update"
+                    ),
+                ));
             }
             Some(names.iter().cloned().collect())
         }
@@ -733,7 +763,7 @@ pub fn install(project: &Project<'_>, mode: Mode) -> Result<Report, Error> {
         .filter(|m| !m.source.starts_with("path+"))
     {
         let dir = store_dir(project.state_dir, module);
-        let found = signed(project, module, &dir).map_err(Error::new)?;
+        let found = signed(project, module, &dir)?;
         if found != Signature::NotChecked {
             signatures.insert(module.name.clone(), found);
         }
@@ -753,15 +783,18 @@ pub fn install(project: &Project<'_>, mode: Mode) -> Result<Report, Error> {
             .filter(|(_, c)| *c != Change::Unchanged)
             .map(|(m, _)| m.name.clone())
             .collect();
-        return Err(Error::new(format!(
-            "{LOCK_FILE} is out of date with {MANIFEST_FILE}{}; run `meridian module install` \
+        return Err(Error::new(
+            Kind::Install,
+            format!(
+                "{LOCK_FILE} is out of date with {MANIFEST_FILE}{}; run `meridian module install` \
              and commit the result",
-            if moved.is_empty() {
-                String::new()
-            } else {
-                format!(" ({} would change)", moved.join(", "))
-            }
-        )));
+                if moved.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({} would change)", moved.join(", "))
+                }
+            ),
+        ));
     }
     if differs {
         write_atomically(&lock_path, &rendered)?;
@@ -776,55 +809,62 @@ pub fn install(project: &Project<'_>, mode: Mode) -> Result<Report, Error> {
 
 /// The directory a pinned module's files are in, and what is wrong with it
 /// if anything is.
-fn locate(project: &Project<'_>, module: &Locked) -> Result<(PathBuf, Signature), String> {
+fn locate(project: &Project<'_>, module: &Locked) -> Result<(PathBuf, Signature), Error> {
+    let install = |msg: String| Error::new(Kind::Install, msg);
     if let Some(path) = module.source.strip_prefix("path+") {
         // `Lock::parse` holds the path to what `normalize` writes; a `Locked`
         // built by hand is held to the same.
         if path.is_empty() || path != normalize(Path::new(path)) {
-            return Err(format!(
+            return Err(install(format!(
                 "{} is required from {:?}, which is not a path as `meridian module install` \
                  writes it",
                 module.name, module.source
-            ));
+            )));
         }
         let dir = project.dir.join(path);
         return if dir.join(MANIFEST_FILE).is_file() {
             Ok((dir, Signature::NotChecked))
         } else {
-            Err(format!(
+            Err(install(format!(
                 "{} is required from {}, which has no {MANIFEST_FILE}",
                 module.name,
                 dir.display()
-            ))
+            )))
         };
     }
     let dir = store_dir(project.state_dir, module);
     if !dir.is_dir() {
-        return Err(format!(
+        return Err(install(format!(
             "{} is not installed; run `meridian module install`",
             label(module)
-        ));
+        )));
     }
     match hash_dir(&dir) {
         Ok(found) if found == module.integrity => {
             let signature = signed(project, module, &dir)?;
             Ok((dir, signature))
         }
-        Ok(found) => Err(format!(
-            "{} in {} does not match {LOCK_FILE}\n    pinned: {}\n    found:  {found}\nA file \
-             in it was changed after it was fetched. Delete that directory and run `meridian \
-             module install`.",
-            label(module),
-            dir.display(),
-            module.integrity
+        Ok(found) => Err(Error::new(
+            Kind::Integrity,
+            format!(
+                "{} in {} does not match {LOCK_FILE}\n    pinned: {}\n    found:  {found}\nA \
+                 file in it was changed after it was fetched. Delete that directory and run \
+                 `meridian module install`.",
+                label(module),
+                dir.display(),
+                module.integrity
+            ),
         )),
-        Err(e) => Err(format!("{} in {}: {e}", label(module), dir.display())),
+        Err(e) => Err(Error::new(
+            Kind::Integrity,
+            format!("{} in {}: {e}", label(module), dir.display()),
+        )),
     }
 }
 
 /// Applies the project's signature policy to a fetched module whose content
 /// already matched its pin.
-fn signed(project: &Project<'_>, module: &Locked, dir: &Path) -> Result<Signature, String> {
+fn signed(project: &Project<'_>, module: &Locked, dir: &Path) -> Result<Signature, Error> {
     signature::check(
         project.signatures,
         dir,
@@ -849,7 +889,7 @@ pub fn verify(project: &Project<'_>) -> Result<Vec<Check>, Error> {
             },
             Err(problem) => Check {
                 module,
-                problem: Some(problem),
+                problem: Some(problem.into()),
                 signature: Signature::NotChecked,
             },
         })
@@ -873,10 +913,13 @@ impl Modules {
         check_core("the project", &root, project.core_version)?;
         let lock = Lock::load(project.dir)?;
         let stale = |why: String| {
-            Error::new(format!(
-                "{LOCK_FILE} is out of date with {MANIFEST_FILE}: {why}; run `meridian module \
+            Error::new(
+                Kind::Install,
+                format!(
+                    "{LOCK_FILE} is out of date with {MANIFEST_FILE}: {why}; run `meridian module \
                  install`"
-            ))
+                ),
+            )
         };
         let Some(lock) = lock else {
             if root.modules.is_empty() {
@@ -885,10 +928,13 @@ impl Modules {
                     warnings: Vec::new(),
                 });
             }
-            return Err(Error::new(format!(
-                "the project requires modules and has no {LOCK_FILE}; run `meridian module \
+            return Err(Error::new(
+                Kind::Install,
+                format!(
+                    "the project requires modules and has no {LOCK_FILE}; run `meridian module \
                  install`"
-            )));
+                ),
+            ));
         };
         for requirement in &root.modules {
             let Some(pin) = lock.get(&requirement.name) else {
@@ -920,7 +966,7 @@ impl Modules {
         let mut roots = BTreeMap::new();
         let mut signatures = BTreeMap::new();
         for module in &lock.modules {
-            let (dir, signature) = locate(project, module).map_err(Error::new)?;
+            let (dir, signature) = locate(project, module)?;
             roots.insert(module.name.clone(), dir);
             signatures.insert(module.name.clone(), signature);
         }
@@ -959,7 +1005,7 @@ impl Modules {
 
     /// Resolves `@<module>:<path>` to the file it names.
     pub fn resolve(&self, reference: &str) -> Result<PathBuf, Error> {
-        let bad = |why: String| Error::new(format!("{reference}: {why}"));
+        let bad = |why: String| Error::new(Kind::Install, format!("{reference}: {why}"));
         let Some((name, path)) = reference
             .strip_prefix(MODULE_REFERENCE_PREFIX)
             .and_then(|rest| rest.split_once(':'))

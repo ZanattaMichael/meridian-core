@@ -12,7 +12,7 @@ use flate2::{Compression, GzBuilder};
 
 use crate::integrity::files;
 use crate::manifest::safe_relative;
-use crate::Error;
+use crate::{Error, Kind};
 
 /// The most a module may unpack to. A module is configuration; one this big
 /// is a mistake or an attack.
@@ -20,14 +20,15 @@ pub const MAX_UNPACKED_BYTES: u64 = 256 << 20;
 
 /// Packs the module at `root`.
 pub fn pack(root: &Path) -> Result<Vec<u8>, Error> {
-    let bad = |e: std::io::Error| Error::new(format!("packing {}: {e}", root.display()));
+    let bad =
+        |e: std::io::Error| Error::new(Kind::Pack, format!("packing {}: {e}", root.display()));
     let gz = GzBuilder::new()
         .mtime(0)
         .write(Vec::new(), Compression::default());
     let mut tar = tar::Builder::new(gz);
     for (relative, path) in files(root)? {
-        let content =
-            fs::read(&path).map_err(|e| Error::new(format!("reading {}: {e}", path.display())))?;
+        let content = fs::read(&path)
+            .map_err(|e| Error::new(Kind::Pack, format!("reading {}: {e}", path.display())))?;
         // No owner, no time, one mode: nothing about the machine that packed
         // it reaches the archive.
         let mut header = tar::Header::new_gnu();
@@ -51,9 +52,15 @@ pub fn pack(root: &Path) -> Result<Vec<u8>, Error> {
 /// file at a path inside the module is refused, and nothing is linked,
 /// created outside `dest`, or given the archive's permissions.
 pub fn unpack(archive: &[u8], dest: &Path) -> Result<(), Error> {
-    let bad = |what: String| Error::new(format!("the module archive {what}"));
-    let io = |e: std::io::Error| Error::new(format!("the module archive cannot be read: {e}"));
-    fs::create_dir_all(dest).map_err(|e| Error::new(format!("writing {}: {e}", dest.display())))?;
+    let bad = |what: String| Error::new(Kind::Pack, format!("the module archive {what}"));
+    let io = |e: std::io::Error| {
+        Error::new(
+            Kind::Pack,
+            format!("the module archive cannot be read: {e}"),
+        )
+    };
+    fs::create_dir_all(dest)
+        .map_err(|e| Error::new(Kind::Pack, format!("writing {}: {e}", dest.display())))?;
     let mut tar = tar::Archive::new(GzDecoder::new(archive));
     let mut total: u64 = 0;
     for entry in tar.entries().map_err(io)? {
@@ -96,7 +103,9 @@ pub fn unpack(archive: &[u8], dest: &Path) -> Result<(), Error> {
             .read_to_end(&mut content)
             .map_err(io)?;
         let target = dest.join(&relative);
-        let write = |e: std::io::Error| Error::new(format!("writing {}: {e}", target.display()));
+        let write = |e: std::io::Error| {
+            Error::new(Kind::Pack, format!("writing {}: {e}", target.display()))
+        };
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(write)?;
         }

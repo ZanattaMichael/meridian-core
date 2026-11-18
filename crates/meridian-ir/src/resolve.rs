@@ -196,7 +196,7 @@ fn scope_with(data: &Data, secrets: &Secrets) -> Scope {
 /// `data.motd == '${{'`, where it is three characters like any others.
 pub(crate) fn condition(text: &str) -> Result<Expr, String> {
     let wrapped = |text: &str| match Template::parse(text.trim())?.sole_source() {
-        Some(source) => Expr::parse_condition(source),
+        Some(source) => Ok(Expr::parse_condition(source)?),
         None => Err(
             "a condition is one expression, written bare; an interpolation cannot be mixed \
              with other text here"
@@ -209,6 +209,7 @@ pub(crate) fn condition(text: &str) -> Result<Expr, String> {
     // One that does not read as an expression and holds an interpolation
     // was most likely meant as one: say that, not what the parser tripped on.
     Expr::parse_condition(text).or_else(|bare| {
+        let bare = String::from(bare);
         if has_interpolation(text) {
             wrapped(text).and(Err(bare))
         } else {
@@ -795,12 +796,13 @@ fn place(
 ) -> Result<Value, (String, String)> {
     Ok(match value {
         Value::String(text) if has_interpolation(text) => {
-            let template = Template::parse(text).map_err(|why| (path.to_owned(), why))?;
+            let template =
+                Template::parse(text).map_err(|why| (path.to_owned(), why.to_string()))?;
             let decided = match literal {
                 Some(escapes) => template.eval_literal_with(scope, escapes),
                 None => template.eval(scope),
             };
-            decided.map_err(|why| (path.to_owned(), why))?
+            decided.map_err(|why| (path.to_owned(), why.to_string()))?
         }
         Value::List(items) => Value::List(
             items
@@ -914,7 +916,7 @@ fn declarations(
             let path = format!("spec.conditions.{}", decl.name);
             let text = &doc.conditions()[&decl.name];
             let decided = condition(text)
-                .and_then(|expr| expr.truth(&scope))
+                .and_then(|expr| Ok(expr.truth(&scope)?))
                 .map_err(|why| Error::new(pos.clone(), path, why))?;
             conds.insert(decl.name, Value::Bool(decided));
         }
@@ -924,7 +926,7 @@ fn declarations(
 
 /// Decides a condition in `scope`.
 fn decide(text: &str, scope: &Scope) -> Result<bool, String> {
-    condition(text)?.truth(scope)
+    Ok(condition(text)?.truth(scope)?)
 }
 
 /// Resolves a document against `data`: decides every condition and places

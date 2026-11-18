@@ -8,7 +8,7 @@ use meridian_resolve::Data;
 
 use crate::model::{Check, DefaultAccess, Rule, Rules, COMMAND_LINE, UNCLAIMED};
 use crate::pattern::{display_path, glob, KeyPattern};
-use crate::Error;
+use crate::{Error, Kind};
 
 /// How two layers' values for one key combine, reduced to what matters to a
 /// rule: what a more specific layer's value does to a less specific one's.
@@ -586,11 +586,14 @@ impl Evaluation<'_> {
     ) -> Result<(), Error> {
         let known = self.stack.plan.strategies();
         if let Some(unknown) = allow.iter().find(|a| !known.contains(a)) {
-            return Err(Error::new(format!(
-                "rule {:?}: allow: unknown merge strategy {unknown:?} (expected one of: {})",
-                rule.id,
-                known.join(", ")
-            )));
+            return Err(Error::new(
+                Kind::File,
+                format!(
+                    "rule {:?}: allow: unknown merge strategy {unknown:?} (expected one of: {})",
+                    rule.id,
+                    known.join(", ")
+                ),
+            ));
         }
         for key in &rule.keys {
             let path: Vec<String> = key

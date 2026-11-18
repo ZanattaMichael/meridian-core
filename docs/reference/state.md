@@ -171,6 +171,10 @@ A step's `reason`, when it failed:
 | `interrupted` | the operator stopped the run with Ctrl-C (or a `SIGTERM`) while the step was going, or before its tool was started |
 | `timed-out` | the step's tool ran past `--stage-timeout` and was stopped |
 
+These words are fixed: a new kind of failure gets a new word, and a word is
+never reused. They are also listed with every other error code in
+[error kinds and codes](errors.md#stages-of-a-run-meridian-orchestrator).
+
 ## Events
 
 `runs/<id>/events.jsonl` has one JSON object per line.

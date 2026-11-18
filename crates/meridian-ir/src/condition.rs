@@ -40,7 +40,7 @@ impl Condition {
     /// Decides the condition against `data`. Anything that is not plainly
     /// true or false is an error, never a guess.
     pub fn evaluate(&self, data: &Data) -> Result<bool, String> {
-        self.0.truth(&resolve::scope(data))
+        Ok(self.0.truth(&resolve::scope(data))?)
     }
 }
 
@@ -70,7 +70,7 @@ pub(crate) fn prune_in(
             continue;
         }
         let keep = resolve::condition(&r.when)
-            .and_then(|condition| condition.truth(scope))
+            .and_then(|condition| Ok(condition.truth(scope)?))
             .map_err(|why| {
                 Error::new(
                     r.pos.clone(),
@@ -113,7 +113,7 @@ pub(crate) fn prune_in(
         let mut dropped_notifies: HashSet<usize> = HashSet::new();
         let edge = |field: &str, verb: &str, j: usize, when: &str, to: &str, pos: &Position| {
             resolve::condition(when)
-                .and_then(|condition| condition.truth(scope))
+                .and_then(|condition| Ok(condition.truth(scope)?))
                 .map_err(|why| {
                     Error::new(
                         pos.clone(),

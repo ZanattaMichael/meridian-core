@@ -11,6 +11,7 @@ use base64::Engine as _;
 use meridian_value::Value;
 use sha2::{Digest, Sha256};
 
+use crate::error::{Error, Kind};
 use crate::eval::{same, Number};
 use crate::Scope;
 
@@ -260,7 +261,7 @@ pub fn function(name: &str) -> Option<FunctionInfo> {
     functions().into_iter().find(|f| f.name == name)
 }
 
-pub(crate) fn check_arity(name: &str, given: usize) -> Result<(), String> {
+pub(crate) fn check_arity(name: &str, given: usize) -> Result<(), Error> {
     let Some((_, min, max)) = FUNCTIONS.iter().find(|(n, _, _)| *n == name) else {
         // The nearest name, for a slip of the hand or of the case.
         let lower = name.to_lowercase();
@@ -268,10 +269,13 @@ pub(crate) fn check_arity(name: &str, given: usize) -> Result<(), String> {
             .iter()
             .map(|(n, _, _)| *n)
             .find(|n| n.to_lowercase() == lower);
-        return Err(match near {
-            Some(near) => format!("unknown function {name:?} (did you mean {near}?)"),
-            None => format!("unknown function {name:?}"),
-        });
+        return Err(Error::new(
+            Kind::UnknownFunction,
+            match near {
+                Some(near) => format!("unknown function {name:?} (did you mean {near}?)"),
+                None => format!("unknown function {name:?}"),
+            },
+        ));
     };
     let plural = |n: usize| if n == 1 { "argument" } else { "arguments" };
     if given < *min || given > *max {
@@ -282,7 +286,10 @@ pub(crate) fn check_arity(name: &str, given: usize) -> Result<(), String> {
         } else {
             format!("{min} to {max} arguments")
         };
-        return Err(format!("{name}(...) takes {takes}, and was given {given}"));
+        return Err(Error::new(
+            Kind::Arity,
+            format!("{name}(...) takes {takes}, and was given {given}"),
+        ));
     }
     Ok(())
 }
@@ -627,7 +634,13 @@ fn field<'a>(item: &'a Value, key: &str, name: &str) -> Result<Option<&'a Value>
     }
 }
 
-pub(crate) fn call(name: &str, values: &[Value], scope: &Scope) -> Result<Value, String> {
+/// Calls a function by name. A failure is about an argument: the arity and
+/// the name were checked when the expression was read.
+pub(crate) fn call(name: &str, values: &[Value], scope: &Scope) -> Result<Value, Error> {
+    dispatch(name, values, scope).map_err(|msg| Error::new(Kind::Argument, msg))
+}
+
+fn dispatch(name: &str, values: &[Value], scope: &Scope) -> Result<Value, String> {
     let args = Args { name, values };
     Ok(match name {
         "required" => match &values[0] {

@@ -110,6 +110,7 @@ and checked against the file in every build, so none can fall behind the script 
 | [Conformance matrix](reference/conformance-matrix.md) | the same document on every configuration management target, cell by cell; generated from the plugins |
 | [Compatibility](reference/compatibility.md) | which language versions a build reads, and which plugins it loads; generated from the code |
 | [Compile rules](reference/compile-rules.md) | the rules file, every rule and every refusal, and `meridian rules check` |
+| [Error kinds and codes](reference/errors.md) | every kind of error the crates produce, with its fixed code: expressions, stages of a run, modules, compile rules, layered data, keys and signatures |
 
 | Targets | |
 |---|---|

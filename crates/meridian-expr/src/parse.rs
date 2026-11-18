@@ -18,6 +18,18 @@ use std::fmt;
 
 use meridian_value::Value;
 
+use crate::error::{Error, Kind, Span};
+
+/// Text that does not read as an expression.
+fn syntax(msg: String) -> Error {
+    Error::new(Kind::Syntax, msg)
+}
+
+/// An expression too deep or too long to read safely.
+fn limit(msg: String) -> Error {
+    Error::new(Kind::Limit, msg)
+}
+
 /// How deep an expression may nest. Far more than anything written by hand,
 /// and small enough that reading one can never exhaust the stack.
 const MAX_DEPTH: usize = 64;
@@ -85,11 +97,13 @@ impl Binary {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Node {
     Literal(Value),
-    /// A bare name: a root such as `data`, or a name bound by `map`/`filter`.
-    Name(String),
+    /// A bare name: a root such as `data`, or a name bound by `map`/`filter`,
+    /// and where in the text it was written.
+    Name(String, Span),
     Field(Box<Node>, String),
     Index(Box<Node>, Box<Node>),
-    Call(String, Vec<Node>),
+    /// A call, and where in the text the function's name was written.
+    Call(String, Vec<Node>, Span),
     Unary(Unary, Box<Node>),
     Binary(Binary, Box<Node>, Box<Node>),
     Choice(Box<Node>, Box<Node>, Box<Node>),
@@ -101,7 +115,7 @@ impl Node {
     /// Whether this is a path: a name followed only by fields and indexes.
     pub(crate) fn is_path(&self) -> bool {
         match self {
-            Node::Name(_) => true,
+            Node::Name(..) => true,
             Node::Field(base, _) | Node::Index(base, _) => base.is_path(),
             _ => false,
         }
@@ -110,7 +124,7 @@ impl Node {
     /// The first name of a path.
     pub(crate) fn root(&self) -> Option<&str> {
         match self {
-            Node::Name(name) => Some(name),
+            Node::Name(name, _) => Some(name),
             Node::Field(base, _) | Node::Index(base, _) => base.root(),
             _ => None,
         }
@@ -120,7 +134,7 @@ impl Node {
     /// a literal as itself, anything else as "the expression".
     pub(crate) fn describe(&self) -> String {
         match self {
-            Node::Name(name) => name.clone(),
+            Node::Name(name, _) => name.clone(),
             Node::Field(base, key) if base.is_path() => format!("{}.{key}", base.describe()),
             Node::Index(base, index) if base.is_path() => match index.as_ref() {
                 Node::Literal(Value::String(key)) => format!("{}['{key}']", base.describe()),
@@ -175,17 +189,32 @@ impl fmt::Display for Token {
 
 const TWO_CHAR: [&str; 9] = ["==", "!=", "<=", ">=", "&&", "||", "??", "=~", "!~"];
 
-fn tokens(text: &str, what: &str) -> Result<Vec<Token>, String> {
+fn tokens(text: &str, what: &str) -> Result<(Vec<Token>, Vec<Span>), Error> {
     let chars: Vec<char> = text.chars().collect();
+    // The byte offset of each char, and of the end, so a span can be given
+    // in bytes as editors count.
+    let bytes: Vec<usize> = text
+        .char_indices()
+        .map(|(at, _)| at)
+        .chain(std::iter::once(text.len()))
+        .collect();
     let mut out: Vec<Token> = Vec::new();
+    let mut spans: Vec<Span> = Vec::new();
     let mut i = 0;
+    let mut start = 0;
     while i < chars.len() {
+        // The token read last ends where this one starts, before any space.
+        if out.len() > spans.len() {
+            spans.push(Span::new(bytes[start], bytes[i]));
+        }
         let c = chars[i];
         let after_dot = out.last() == Some(&Token::Dot);
         if c.is_whitespace() {
             i += 1;
             continue;
         }
+        start = i;
+        let here = Span::new(bytes[i], bytes[(i + 1).min(chars.len())]);
         if let Some(next) = chars.get(i + 1) {
             let pair: String = [c, *next].iter().collect();
             if let Some(op) = TWO_CHAR.iter().find(|op| **op == pair) {
@@ -226,11 +255,15 @@ fn tokens(text: &str, what: &str) -> Result<Vec<Token>, String> {
                 let mut j = i + 1;
                 loop {
                     match chars.get(j) {
-                        None => return Err("a quoted text is never closed".to_owned()),
+                        None => {
+                            return Err(syntax("a quoted text is never closed".to_owned()).at(here))
+                        }
                         Some(&q) if q == c => break,
                         Some('\\') => {
                             let Some(&escaped) = chars.get(j + 1) else {
-                                return Err("a quoted text is never closed".to_owned());
+                                return Err(
+                                    syntax("a quoted text is never closed".to_owned()).at(here)
+                                );
                             };
                             value.push(match escaped {
                                 'n' => '\n',
@@ -268,7 +301,7 @@ fn tokens(text: &str, what: &str) -> Result<Vec<Token>, String> {
                 } else if let Ok(n) = literal.parse::<f64>() {
                     Value::Float(n)
                 } else {
-                    return Err(format!("{literal:?} is not a number"));
+                    return Err(syntax(format!("{literal:?} is not a number")).at(here));
                 };
                 out.push(Token::Number(value));
             }
@@ -290,25 +323,32 @@ fn tokens(text: &str, what: &str) -> Result<Vec<Token>, String> {
                 out.push(Token::Name(chars[start..i].iter().collect()));
             }
             '=' => {
-                return Err(format!(
+                return Err(syntax(format!(
                     "unexpected \"=\" (to compare two values in a {what}, write ==)"
                 ))
+                .at(here))
             }
             other => {
-                return Err(format!(
+                return Err(syntax(format!(
                     "unexpected {:?} (a {what} is built from names such as data.<key>, true, \
                      false, null, numbers, quoted text, lists, mappings, function calls, and \
                      the operators ! - + * / % == != < <= > >= in =~ !~ && || ?? and ? :)",
                     other.to_string()
                 ))
+                .at(here))
             }
         }
     }
-    Ok(out)
+    if out.len() > spans.len() {
+        spans.push(Span::new(bytes[start], text.len()));
+    }
+    Ok((out, spans))
 }
 
 struct Parser<'a> {
     tokens: Vec<Token>,
+    /// Where each token is in the text, one per token.
+    spans: Vec<Span>,
     at: usize,
     depth: usize,
     /// Operators and postfixes read so far, against `MAX_LINKS`.
@@ -319,6 +359,23 @@ struct Parser<'a> {
 impl Parser<'_> {
     fn peek(&self) -> Option<&Token> {
         self.tokens.get(self.at)
+    }
+
+    /// Where the parser is: the token it is looking at, or, past the end,
+    /// the end of the last token.
+    fn here(&self) -> Option<Span> {
+        self.spans
+            .get(self.at)
+            .copied()
+            .or_else(|| self.spans.last().map(|last| Span::new(last.end, last.end)))
+    }
+
+    /// Where the token just taken was written.
+    fn taken(&self) -> Span {
+        self.spans
+            .get(self.at.wrapping_sub(1))
+            .copied()
+            .unwrap_or(Span::new(0, 0))
     }
 
     fn take(&mut self, token: &Token) -> bool {
@@ -349,23 +406,23 @@ impl Parser<'_> {
         }
     }
 
-    fn expect(&mut self, token: Token) -> Result<(), String> {
+    fn expect(&mut self, token: Token) -> Result<(), Error> {
         if self.take(&token) {
             return Ok(());
         }
-        Err(match self.peek() {
+        Err(syntax(match self.peek() {
             Some(found) => format!("expected {token}, found {found}"),
             None => format!("expected {token}, but the {} ends", self.what),
-        })
+        }))
     }
 
-    fn nested<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T, String>) -> Result<T, String> {
+    fn nested<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T, Error>) -> Result<T, Error> {
         self.depth += 1;
         if self.depth > MAX_DEPTH {
-            return Err(format!(
+            return Err(limit(format!(
                 "the {} is nested more than {MAX_DEPTH} levels deep",
                 self.what
-            ));
+            )));
         }
         let out = f(self);
         self.depth -= 1;
@@ -373,18 +430,18 @@ impl Parser<'_> {
     }
 
     /// Counts one more operator, field read or index.
-    fn link(&mut self) -> Result<(), String> {
+    fn link(&mut self) -> Result<(), Error> {
         self.links += 1;
         if self.links > MAX_LINKS {
-            return Err(format!(
+            return Err(limit(format!(
                 "the {} has more than {MAX_LINKS} operators",
                 self.what
-            ));
+            )));
         }
         Ok(())
     }
 
-    fn expr(&mut self) -> Result<Node, String> {
+    fn expr(&mut self) -> Result<Node, Error> {
         self.nested(|p| {
             let condition = p.coalesce()?;
             if !p.take(&Token::Question) {
@@ -404,8 +461,8 @@ impl Parser<'_> {
     fn chain(
         &mut self,
         ops: &[(&'static str, Binary)],
-        next: fn(&mut Self) -> Result<Node, String>,
-    ) -> Result<Node, String> {
+        next: fn(&mut Self) -> Result<Node, Error>,
+    ) -> Result<Node, Error> {
         let symbols: Vec<&'static str> = ops.iter().map(|(symbol, _)| *symbol).collect();
         let mut left = next(self)?;
         while let Some(symbol) = self.take_op(&symbols) {
@@ -417,19 +474,19 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    fn coalesce(&mut self) -> Result<Node, String> {
+    fn coalesce(&mut self) -> Result<Node, Error> {
         self.chain(&[("??", Binary::Coalesce)], Self::or)
     }
 
-    fn or(&mut self) -> Result<Node, String> {
+    fn or(&mut self) -> Result<Node, Error> {
         self.chain(&[("||", Binary::Or)], Self::and)
     }
 
-    fn and(&mut self) -> Result<Node, String> {
+    fn and(&mut self) -> Result<Node, Error> {
         self.chain(&[("&&", Binary::And)], Self::equal)
     }
 
-    fn equal(&mut self) -> Result<Node, String> {
+    fn equal(&mut self) -> Result<Node, Error> {
         let left = self.compare()?;
         let op = match self.take_op(&["==", "!="]) {
             Some("==") => Binary::Equal,
@@ -439,7 +496,7 @@ impl Parser<'_> {
         Ok(Node::Binary(op, Box::new(left), Box::new(self.compare()?)))
     }
 
-    fn compare(&mut self) -> Result<Node, String> {
+    fn compare(&mut self) -> Result<Node, Error> {
         let left = self.sum()?;
         let op = if let Some(symbol) = self.take_op(&["<=", ">=", "<", ">", "=~", "!~"]) {
             match symbol {
@@ -463,14 +520,14 @@ impl Parser<'_> {
         Ok(Node::Binary(op, Box::new(left), Box::new(self.sum()?)))
     }
 
-    fn sum(&mut self) -> Result<Node, String> {
+    fn sum(&mut self) -> Result<Node, Error> {
         self.chain(
             &[("+", Binary::Add), ("-", Binary::Subtract)],
             Self::product,
         )
     }
 
-    fn product(&mut self) -> Result<Node, String> {
+    fn product(&mut self) -> Result<Node, Error> {
         self.chain(
             &[
                 ("*", Binary::Multiply),
@@ -481,7 +538,7 @@ impl Parser<'_> {
         )
     }
 
-    fn unary(&mut self) -> Result<Node, String> {
+    fn unary(&mut self) -> Result<Node, Error> {
         self.nested(|p| {
             if p.take_op(&["!"]).is_some() {
                 return Ok(Node::Unary(Unary::Not, Box::new(p.unary()?)));
@@ -498,7 +555,7 @@ impl Parser<'_> {
         })
     }
 
-    fn postfix(&mut self) -> Result<Node, String> {
+    fn postfix(&mut self) -> Result<Node, Error> {
         let mut node = self.primary()?;
         loop {
             if self.take(&Token::Dot) {
@@ -513,7 +570,7 @@ impl Parser<'_> {
                         self.at += 1;
                         node = Node::Field(Box::new(node), n.to_string());
                     }
-                    _ => return Err("a \".\" must be followed by a key".to_owned()),
+                    _ => return Err(syntax("a \".\" must be followed by a key".to_owned())),
                 }
             } else if self.take(&Token::OpenList) {
                 self.link()?;
@@ -526,11 +583,15 @@ impl Parser<'_> {
         }
     }
 
-    fn primary(&mut self) -> Result<Node, String> {
+    fn primary(&mut self) -> Result<Node, Error> {
         let Some(token) = self.peek().cloned() else {
-            return Err(format!("the {} ends where a value was expected", self.what));
+            return Err(syntax(format!(
+                "the {} ends where a value was expected",
+                self.what
+            )));
         };
         self.at += 1;
+        let at = self.taken();
         match token {
             Token::Open => {
                 let inner = self.expr()?;
@@ -561,20 +622,22 @@ impl Parser<'_> {
                         let key = match self.peek().cloned() {
                             Some(Token::Name(key)) | Some(Token::Text(key)) => key,
                             Some(other) => {
-                                return Err(format!(
+                                return Err(syntax(format!(
                                     "a key of a mapping is a name or quoted text, found {other}"
-                                ))
+                                )))
                             }
                             None => {
-                                return Err(format!(
+                                return Err(syntax(format!(
                                     "expected a key or \"}}\", but the {} ends",
                                     self.what
-                                ))
+                                )))
                             }
                         };
                         self.at += 1;
                         if entries.iter().any(|(existing, _)| *existing == key) {
-                            return Err(format!("the key {key:?} is set twice in one mapping"));
+                            return Err(syntax(format!(
+                                "the key {key:?} is set twice in one mapping"
+                            )));
                         }
                         self.expect(Token::Colon)?;
                         entries.push((key, self.expr()?));
@@ -606,28 +669,35 @@ impl Parser<'_> {
                             self.expect(Token::Comma)?;
                         }
                     }
-                    Ok(Node::Call(name, args))
+                    Ok(Node::Call(name, args, at))
                 }
-                _ => Ok(Node::Name(name)),
+                _ => Ok(Node::Name(name, at)),
             },
-            other => Err(format!("unexpected {other} where a value was expected")),
+            other => Err(syntax(format!(
+                "unexpected {other} where a value was expected"
+            ))),
         }
     }
 }
 
 /// Reads `text` as one expression. `what` is the word diagnostics use for it:
 /// "condition" for a `when`, "expression" elsewhere.
-pub(crate) fn parse(text: &str, what: &str) -> Result<Node, String> {
+pub(crate) fn parse(text: &str, what: &str) -> Result<Node, Error> {
+    let (tokens, spans) = tokens(text, what)?;
     let mut parser = Parser {
-        tokens: tokens(text, what)?,
+        tokens,
+        spans,
         at: 0,
         depth: 0,
         links: 0,
         what,
     };
-    let node = parser.expr()?;
+    // A syntax error is where the parser stopped, unless it said more exactly.
+    let node = parser.expr().map_err(|e| e.or_at(parser.here()))?;
     if let Some(extra) = parser.peek() {
-        return Err(format!("unexpected {extra} after the end of the {what}"));
+        return Err(
+            syntax(format!("unexpected {extra} after the end of the {what}")).or_at(parser.here()),
+        );
     }
     Ok(node)
 }

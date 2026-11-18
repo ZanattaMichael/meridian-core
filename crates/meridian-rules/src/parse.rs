@@ -9,7 +9,7 @@ use crate::model::{
     UNCLAIMED,
 };
 use crate::pattern::{KeyPattern, PathGlob};
-use crate::Error;
+use crate::{Error, Kind};
 use meridian_ir::Value;
 
 /// The only version of the file format there is.
@@ -18,8 +18,9 @@ pub const RULES_VERSION: i64 = 1;
 impl Rules {
     /// Parses a rules file (YAML or JSON). `name` is used only in messages.
     pub fn parse(name: &str, data: &[u8]) -> Result<Self, Error> {
-        let value = meridian_ir::parse_value(name, data).map_err(|e| Error::new(e.to_string()))?;
-        from_value(&value).map_err(|e| Error::new(format!("{name}: {e}")))
+        let value = meridian_ir::parse_value(name, data)
+            .map_err(|e| Error::new(Kind::File, e.to_string()))?;
+        from_value(&value).map_err(|e| Error::new(Kind::File, format!("{name}: {e}")))
     }
 }
 

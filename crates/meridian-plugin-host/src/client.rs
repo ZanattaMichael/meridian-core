@@ -131,7 +131,7 @@ impl Client {
             .map_err(|cause| Error {
                 path: path.to_owned(),
                 msg: "the plugin was not started".to_owned(),
-                cause,
+                cause: cause.into(),
                 ..Error::default()
             })?;
         let process = Process::spawn(path, options)?;

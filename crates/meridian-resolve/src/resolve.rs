@@ -11,23 +11,67 @@ use crate::merge::{deep_merge, unique_array_merge};
 pub type Data = BTreeMap<String, Value>;
 
 /// A resolution failure. The message names the hierarchy entry, layer or key
-/// at fault.
+/// at fault; `kind` says which of the three it is.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Error(String);
+pub struct Error {
+    kind: Kind,
+    msg: String,
+}
+
+/// What a resolution failure is about, each with a fixed code listed in
+/// `docs/reference/errors.md`. A code is never reused for another meaning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Kind {
+    /// The hierarchy file itself: it does not parse, declares no layers,
+    /// names a strategy that does not exist, or two of its entries resolve
+    /// to the same layer.
+    Hierarchy,
+    /// A layer the hierarchy names could not be loaded.
+    Layer,
+    /// Two layers' values for one key could not be merged under its rule.
+    Merge,
+}
+
+impl Kind {
+    /// Every kind, in the order the reference lists them.
+    pub const ALL: [Kind; 3] = [Kind::Hierarchy, Kind::Layer, Kind::Merge];
+
+    /// The fixed code.
+    pub fn code(self) -> &'static str {
+        match self {
+            Kind::Hierarchy => "resolve-hierarchy",
+            Kind::Layer => "resolve-layer",
+            Kind::Merge => "resolve-merge",
+        }
+    }
+}
 
 impl Error {
-    pub(crate) fn new(msg: impl Into<String>) -> Self {
-        Error(msg.into())
+    pub(crate) fn new(kind: Kind, msg: impl Into<String>) -> Self {
+        Error {
+            kind,
+            msg: msg.into(),
+        }
+    }
+
+    pub fn kind(&self) -> Kind {
+        self.kind
     }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.msg)
     }
 }
 
 impl std::error::Error for Error {}
+
+impl From<Error> for String {
+    fn from(error: Error) -> String {
+        error.msg
+    }
+}
 
 /// Why a [`Loader`] could not produce a layer.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -146,12 +190,13 @@ pub fn resolve(h: &Hierarchy, scope: &Scope, loader: &dyn Loader) -> Result<Reso
                 });
             }
             Err(LoadError::NotFound) => {
-                return Err(Error::new(format!(
-                    "resolve: {path:?}: hierarchy layer not found"
-                )));
+                return Err(Error::new(
+                    Kind::Layer,
+                    format!("resolve: {path:?}: hierarchy layer not found"),
+                ));
             }
             Err(LoadError::Failed(why)) => {
-                return Err(Error::new(format!("resolve: {path:?}: {why}")))
+                return Err(Error::new(Kind::Layer, format!("resolve: {path:?}: {why}")))
             }
         }
     }
@@ -175,7 +220,7 @@ pub fn resolve(h: &Hierarchy, scope: &Scope, loader: &dyn Loader) -> Result<Reso
             Strategy::DeepMerge => values.into_iter().reduce(deep_merge),
             Strategy::UniqueArrayMerge => Some(Value::List(
                 unique_array_merge(values, dedup_key)
-                    .map_err(|e| Error::new(format!("resolve: key {key:?}: {e}")))?,
+                    .map_err(|e| Error::new(Kind::Merge, format!("resolve: key {key:?}: {e}")))?,
             )),
         };
         if let Some(value) = merged {
