@@ -1,11 +1,8 @@
 # How a secret is held in memory
 
-A password Meridian fetches for a tool sits in Meridian's memory for a while.
-This page covers how it is protected, what is not promised, and where the code
-is. The design, including what is not built yet, is in [the language plan](../plans/language-expansion.md#115-holding-a-secret-in-memory).
-
-Everything here lives in one crate, `meridian-secret`. No other crate holds
-the bytes of a secret.
+How Meridian protects a secret it holds for a tool. All of it is in the crate
+`meridian-secret`; no other crate holds a secret's bytes. The design is in
+[the language plan](../plans/language-expansion.md#115-holding-a-secret-in-memory).
 
 <p align="center"><img src="../graphics/meridian-secrets-flow.svg" alt="How a secret moves: from a provider into locked memory, as a reference everywhere else, and to the tool by a private file at run time" width="100%"></p>
 
@@ -19,20 +16,17 @@ the bytes of a secret.
 
 ## The promise, and its limit
 
-Meridian keeps a secret out of everything it writes (logs, plan output, events,
-the run record, panic messages, error messages), out of swap and core dumps,
-out of the environment and arguments of the programs it starts, and out of its
-own memory once the secret is no longer needed.
+A secret is kept out of logs, plan output, events, the run record, panic and error
+messages, swap, core dumps, and the environment and arguments of programs Meridian starts.
+It is wiped when no longer needed.
 
-It does not protect a secret from `root`, a debugger attached by `root`, a
-compromised kernel, or the tool it is handed to. A tool given a password has
-the password.
+It is not protected from `root`, a debugger run by `root`, a compromised kernel, or the
+tool it is handed to.
 
 ## One home for each secret
 
-A secret is a `SecretValue`. Its bytes sit in a memory block mapped for that
-secret alone, at its final size, so they are never moved or left in freed
-memory.
+A secret is a `SecretValue`, in a memory block mapped for it alone at its final size, so
+it is never moved or left in freed memory.
 
 | Property | Linux | macOS and other Unix | Windows |
 |---|---|---|---|
@@ -42,18 +36,13 @@ memory.
 | Left out of core dumps (`MADV_DONTDUMP`) | yes | no | no |
 | Zeroes in a forked child (`MADV_WIPEONFORK`) | yes | no | no |
 
-`SecretValue::protection()` reports which of these were achieved, so a run can
-report it instead of assuming. Locking can fail when `RLIMIT_MEMLOCK` is small;
-the value is still created, with `protection().locked` false. A run holding
-such a secret
-[warns once](../reference/cli.md#secrets), naming it, and with
-`--strict-secrets` stops the stage instead.
+`SecretValue::protection()` reports which of these held. If locking fails (a small
+`RLIMIT_MEMLOCK`), the run [warns once](../reference/cli.md#secrets), or stops the stage
+with `--strict-secrets`.
 
 A `SecretValue` cannot be printed, copied or compared by accident:
 
-- `Debug` and `Display` both give `(sensitive)`, so `{:?}` on a containing
-  structure, `unwrap` on a containing error, and panic messages print only
-  that.
+- `Debug` and `Display` give `(sensitive)`.
 - It does not implement `Clone`, `PartialEq`, `Hash`, `Serialize` or `Deref`.
   Copy with `duplicate()`, which makes a second locked block. Compare with
   `same()`, which runs in constant time.
@@ -63,26 +52,17 @@ A `SecretValue` cannot be printed, copied or compared by accident:
 
 ## Few places expose a secret
 
-Every `expose` call is a place a secret can leave protection. The test
-`crates/meridian-secret/tests/expose_is_rare.rs` scans the workspace and fails
-if a call appears in a file not on its list. A new call site means adding the
-file to that list, with a reason, in review.
-
-The same test keeps `unsafe` code in one module, `sys.rs`. The rest of the
-workspace forbids it.
+`crates/meridian-secret/tests/expose_is_rare.rs` fails if `expose` is called in a file not
+on its list, or `unsafe` appears outside `sys.rs`.
 
 ## The process
 
-`harden_process()` runs before any secret is read. It sets the core dump limit
-to zero (`setrlimit(RLIMIT_CORE, 0)`) and, on Linux, makes the process
-undumpable (`prctl(PR_SET_DUMPABLE, 0)`), which also stops other processes of
-the same user attaching a debugger or reading `/proc/<pid>/mem`. It returns
-what it achieved; `hardening()` reads the same facts back from the system.
+`harden_process()` runs before any secret is read. It sets `setrlimit(RLIMIT_CORE, 0)` and,
+on Linux, `prctl(PR_SET_DUMPABLE, 0)`, which also stops the same user attaching a debugger
+or reading `/proc/<pid>/mem`. `hardening()` reports what held.
 
-Side effect: an undumpable process's `/proc/<pid>` files belong to `root`, so
-the same user can no longer read them. Inspecting a running `meridian`
-(`/proc/<pid>/environ`, `/proc/<pid>/fd`, `strace`, `gdb`) needs `root`.
-Programs Meridian starts are unaffected; the setting resets on exec.
+As a result, inspecting a running `meridian` (`/proc/<pid>/environ`, `strace`, `gdb`)
+needs `root`. Programs it starts are unaffected.
 
 ## Everywhere else: a reference, not the value
 
@@ -90,10 +70,8 @@ The rest of Meridian never holds a secret's bytes. A `Value::Secret` holds only
 a number identifying the run's secret. The bytes are in the run's
 `SecretTable`, in this crate.
 
-- The reference prints, compares and encodes as `(sensitive)`. Plans, logs,
-  errors, debug dumps and run state are built from values, so none can show a
-  secret: the bytes were never there. This is stronger than masking output
-  afterwards, which fails the first time someone forgets.
+- The reference prints, compares and encodes as `(sensitive)`, so plans, logs, errors and
+  run state never contain the bytes.
 - An expression that joins a secret to text or encodes it asks the table to do
   it, on protected memory; the result is another reference.
 - An unfetched secret (`validate` and `compile` never fetch) is in the table as
@@ -136,9 +114,8 @@ is what `meridian secret check` prints.
 
 ## A credential outside a run
 
-Some work needs an identity outside a run, such as fetching a module from a
-private registry. `resolve_credential(declared, name)` handles this with the
-same model.
+`resolve_credential(declared, name)` resolves a credential outside a run, such as for a
+private module registry.
 
 - A `CredentialDeclaration` is a name, a type and fields. A plain field holds
   text. A secret field holds a `Source`, never a value: a literal secret is
@@ -152,16 +129,14 @@ same model.
   `SecretValue`s, and wipes them when dropped.
 - An error names the field and provider, and nothing a provider read.
 
-The first user is the module system: a project declares credentials under
-`spec.credentials` in `meridian.yaml` and names one per registry. See
-[registry logins](../reference/modules.md#registry-logins).
+The module system uses it: see [registry logins](../reference/modules.md#registry-logins).
 
 ## A credential in a run
 
 A document declares credentials under `spec.credentials`, with every type the
 language has, and names one for its host with `targetHost.credential`
-([Credentials](../reference/dsl/credentials.md)). In a run, a credential's
-secret fields are simply secrets of the document:
+([Credentials](../reference/dsl/credentials.md)). Its secret fields are secrets of the
+document:
 
 - A secret field must be exactly `${{ secret.<name> }}`, so once resolved it
   *is* a `Value::Secret` slot in the run's table, like any secret. A plain
@@ -195,16 +170,13 @@ An SSH private key for a host is delivered through an agent (the plan's rank 1,
 - The tool (`ssh`, `salt-ssh`, `bolt`, `chef-run`) gets the socket in
   `SSH_AUTH_SOCK` and nothing else of the credential in its environment or
   command line.
-- Dropping the agent kills it and removes the directory, so the key lives in
-  the agent for one stage. The agent's memory is as protected as `ssh-agent`
-  makes it, the same as the user's own agent.
+- Dropping the agent kills it and removes the directory, so the key lives for one
+  stage.
 
 ## Handing a secret to a tool
 
-In order of preference: the tool's stdin or a file descriptor; a file only the
-user can read; and, only where a tool accepts nothing else, that tool's
-environment. Never an argument: every user can see arguments in the process
-list.
+In order of preference: stdin or a file descriptor; a file only the user can read; the
+tool's environment, only where nothing else works. Never an argument.
 
 `SecretFile::create(name, parts)` is the file:
 
@@ -226,9 +198,8 @@ list.
 
 ## Masking what a tool prints
 
-A tool may print the secret it was given. `Masker` holds each secret of a run
-and replaces it with `(sensitive)` in tool output before Meridian shows or
-records a line. It finds:
+`Masker` replaces each secret with `(sensitive)` in tool output before it is shown or
+recorded. It finds:
 
 - the secret itself;
 - its base64 forms (standard and URL-safe, with and without padding), its
@@ -236,17 +207,12 @@ records a line. It finds:
 - each line of a multi-line secret, since a tool echoing a key prints it line
   by line.
 
-Secrets or lines shorter than four bytes are not searched for: masking every
-`a` would wreck the output and reveal the secret's length. `add()` returns
-`false` for these, so a run can report them as unmasked.
-
-Masking is the second line of defence. The first is the delivery channels
-above, which give the tool nothing to print.
+Secrets or lines shorter than four bytes are not masked; `add()` returns `false` for
+them.
 
 ## Across the plugin boundary
 
-A target plugin is a separate process, so a secret for its tool crosses one
-boundary. What crosses, and when:
+A plugin is a separate process. What crosses, and when:
 
 - **At compile, a name.** Params reach the plugin with `Value::Secret` where a
   secret stands, and the graph names each (`ResourceGraph::secrets`). The plugin
@@ -270,9 +236,9 @@ boundary. What crosses, and when:
 - **Rollback fetches again.** Nothing of a stage's secrets is kept after it
   ends; a rollback, immediate or later, fetches them again at the stage's turn.
 
-Not claimed: a plugin given a secret can do anything with it. The defences are
-those for any code you run (a signed plugin from a named publisher), and a
-plugin gets only the secrets of the resources it compiles.
+A plugin given a secret can do anything with it. It gets only the secrets of the resources
+it compiles; trust it as any code you run (see [plugin
+signatures](../reference/plugin-signatures.md)).
 
 ## What is tested
 
