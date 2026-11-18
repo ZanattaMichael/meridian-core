@@ -12,17 +12,14 @@ spec:
   targetHost:
     from: inline
     host: web01.example.com
+  # How the configuration is run: which engine evaluates the resources, and
+  # how the runner reaches the host. The credential is a name the runner
+  # resolves itself; the secret never appears here.
+  settings:
+    engine: DscV2
+    target: WinRM
+    credential: svcDeploy
   resources:
-    # Not a DSC resource: which engine evaluates the resources, and how the
-    # runner reaches the host. The credential is a name the runner resolves
-    # itself; the secret never appears here.
-    - id: settings
-      type: runner
-      params:
-        engine: DscV2
-        target: WinRM
-        credential: svcDeploy
-
     - id: iis
       type: PSDscResources/WindowsFeature
       params:

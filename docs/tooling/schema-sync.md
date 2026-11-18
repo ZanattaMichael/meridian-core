@@ -222,8 +222,8 @@ runners; see [Real-tool tests](../contributing/real-tool-tests.md).
   colleague with another provider version gets a cache that differs from
   the lock, and is told so.
 - Meridian's own types on a target (`module`, `variable`, `provider`,
-  `cluster`, `stack`, `runner`) are the plugin's to describe, and are not in
-  the cache.
+  `cluster`, `stack`) and its `spec.settings` keys are the plugin's to
+  describe, and are not in the cache.
 - Composite resources, user-defined functions and file templates are not in
   the language yet; when they are, their completion will come from the
   workspace and the installed modules, not from this cache.

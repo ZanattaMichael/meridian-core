@@ -161,6 +161,9 @@ pub struct ImportedDocument {
     pub target_version: String,
     /// The node a ResourceSet configures; empty when the source names none.
     pub host: String,
+    /// `spec.settings`: the tool's own settings the source expressed, by the
+    /// keys the target takes. Empty when the source said nothing of the kind.
+    pub settings: BTreeMap<String, Value>,
     pub resources: Vec<ImportedResource>,
     pub outputs: Vec<ImportedOutput>,
 }

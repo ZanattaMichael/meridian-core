@@ -81,10 +81,11 @@ pub(crate) fn import_configuration(
 pub(crate) fn list_plugins(plugins: &PluginDirs, with_settings: bool) -> Result<(), Failure> {
     let registry = registry(plugins)?;
     let names = registry.names();
-    if names.is_empty() {
+    if names.is_empty() && !json_output() {
         outln!("no plugins found");
         return Ok(());
     }
+    let mut listed = Vec::new();
     for name in names {
         let info = registry
             .target(name)
@@ -109,12 +110,19 @@ pub(crate) fn list_plugins(plugins: &PluginDirs, with_settings: bool) -> Result<
         if info.exports_schemas {
             can.push("schemas");
         }
+        if json_output() {
+            listed.push(output::plugin(name, info, &can));
+            continue;
+        }
         outln!("{name}");
         outln!("  category:  {}", info.category);
         outln!("  can:       {}", can.join(", "));
         outln!("  resources: {}", info.resource_types.join(", "));
         if !info.target_versions.is_empty() {
             outln!("  versions:  {}", info.target_versions.join(", "));
+        }
+        if !info.settings_keys.is_empty() {
+            outln!("  settings:  {}", info.settings_keys.join(", "));
         }
         for format in &info.import_formats {
             outln!(
@@ -150,6 +158,9 @@ pub(crate) fn list_plugins(plugins: &PluginDirs, with_settings: bool) -> Result<
                 }
             }
         }
+    }
+    if json_output() {
+        emit(true, body([("plugins", listed.into())]));
     }
     registry
         .close()

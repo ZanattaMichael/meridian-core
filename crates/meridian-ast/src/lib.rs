@@ -127,6 +127,9 @@ pub struct ResourceGraph {
     /// The credential the host is reached with, when the document names one
     /// in `targetHost.credential`. Resolved: its secret fields are slots.
     pub credential: Option<meridian_ir::Credential>,
+    /// `spec.settings`: the tool's own settings for the whole document, which
+    /// the target checks as it checks params. Empty when none are set.
+    pub settings: BTreeMap<String, Value>,
 
     resources: Vec<Resource>,
     by_id: HashMap<String, usize>,
@@ -154,6 +157,7 @@ impl ResourceGraph {
             &rs.spec.resources,
         )?;
         graph.target_version = rs.spec.target_version.clone();
+        graph.settings = rs.spec.settings.clone();
         graph.credential = rs
             .spec
             .target_host
@@ -176,6 +180,7 @@ impl ResourceGraph {
         )?;
         graph.outputs = doc.spec.outputs.clone();
         graph.target_version = doc.spec.target_version.clone();
+        graph.settings = doc.spec.settings.clone();
         Ok(graph)
     }
 
@@ -269,6 +274,7 @@ impl ResourceGraph {
             target_version: String::new(),
             outputs: Vec::new(),
             credential: None,
+            settings: BTreeMap::new(),
             resources: kept,
             by_id,
             edges,

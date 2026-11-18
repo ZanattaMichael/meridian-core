@@ -88,6 +88,7 @@ fn graph(resources: Vec<Resource>) -> ResourceGraph {
         outputs: Vec::new(),
         secrets: Vec::new(),
         credential: None,
+        settings: BTreeMap::new(),
     }
 }
 

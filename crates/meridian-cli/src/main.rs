@@ -28,6 +28,7 @@ mod args;
 mod commands;
 mod import;
 mod interrupt;
+mod output;
 mod print;
 mod tools;
 
@@ -43,9 +44,10 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use meridian_ir::Bundle;
 use meridian_orchestrator::{
-    describe_duration, lock, record, run_selected, selected, Backend, Drift, Event, ExecBackend,
-    LocalBackend, Mode, Observer, OnFailure, Options, Outcome, Policy, Reason, Resume,
-    RollbackOutcome, RollbackReport, RunRecord, Selector, StageId, StageReport, Stop, MASK,
+    describe_duration, lock, record, run_selected, selected, Backend, Decisions, Drift, Event,
+    ExecBackend, LocalBackend, LockInfo, Mode, Observer, OnFailure, Options, Outcome, Policy,
+    Reason, Refusal, Resume, RollbackOutcome, RollbackReport, RunRecord, RunReport, Selector,
+    StageId, StageReport, Stop, MASK,
 };
 use meridian_plugin_host::{
     signature::signature_path, Policy as SignaturePolicy, PublicKey, Registry, SecretKey,
@@ -57,6 +59,7 @@ use meridian_sdk::{ChangeAction, Data, LogLine, LogStream, Output};
 
 use args::*;
 use commands::*;
+use output::*;
 use print::*;
 pub(crate) use print::{count, Stdout};
 
@@ -71,6 +74,17 @@ struct Cli {
     command: Command,
     #[command(flatten)]
     trust: Trust,
+    /// How the result is printed: text for a person, or json, one JSON
+    /// object per command, for a pipeline or a wrapping tool. The report
+    /// for people then moves to standard error
+    #[arg(
+        long,
+        global = true,
+        value_name = "FORMAT",
+        env = "MERIDIAN_OUTPUT",
+        default_value = "text"
+    )]
+    output: OutputFormat,
 }
 
 fn main() -> ExitCode {
@@ -79,9 +93,20 @@ fn main() -> ExitCode {
     // cannot leave that way.
     let _ = meridian_secret::harden_process();
     let cli = Cli::parse();
+    settle_output(cli.output, &cli.command.name());
     let outcome = settle(cli.trust).and_then(|()| match cli.command {
         Command::Validate { files, state_dir } => load(&files, &state_dir).map(|bundle| {
-            outln!("{} valid", count(bundle.documents.len(), "document"));
+            if json_output() {
+                emit(
+                    true,
+                    body([
+                        ("documents", bundle.documents.len().into()),
+                        ("diagnostics", serde_json::json!([])),
+                    ]),
+                );
+            } else {
+                outln!("{} valid", count(bundle.documents.len(), "document"));
+            }
         }),
         Command::Module { command, state_dir } => module(command, &state_dir),
         Command::Secret {
@@ -103,7 +128,17 @@ fn main() -> ExitCode {
                 ..How::default()
             },
         ),
-        Command::Plan { workflow } => orchestrate(&workflow, Mode::Plan, &How::default()),
+        Command::Plan {
+            workflow,
+            detailed_exitcode,
+        } => orchestrate(
+            &workflow,
+            Mode::Plan,
+            &How {
+                detailed_exitcode,
+                ..How::default()
+            },
+        ),
         Command::Apply {
             workflow,
             resume,
@@ -187,7 +222,7 @@ fn main() -> ExitCode {
         ),
         Command::Migrate { files, to, check } => migrate(&files, to.as_deref(), check),
         Command::Version => {
-            out!("{}", versions());
+            version();
             Ok(())
         }
         Command::Fmt(args) => tools::format(&args),
@@ -198,18 +233,27 @@ fn main() -> ExitCode {
     });
     // What stdout holds is the command's result, so a result that could not
     // be written (other than to a reader that went away) is a failure.
-    let _ = Stdout.flush();
-    match outcome {
-        Ok(()) if Stdout::failed() => ExitCode::FAILURE,
-        Ok(()) => ExitCode::SUCCESS,
-        Err(Failure::Reported) => ExitCode::FAILURE,
-        Err(Failure::Drifted) => ExitCode::from(2),
+    let code: u8 = match outcome {
+        Ok(()) => 0,
+        Err(Failure::Reported) => 1,
+        Err(Failure::Drifted) | Err(Failure::Changes) => 2,
         // The status a shell gives a command ended by Ctrl-C.
-        Err(Failure::Interrupted) => ExitCode::from(130),
+        Err(Failure::Interrupted) => 130,
         Err(Failure::Message(msg)) => {
             eprintln!("error: {msg}");
-            ExitCode::FAILURE
+            // The machine reading stdout is told as well: an empty stdout
+            // and a status would make it read stderr after all.
+            if json_output() {
+                emit_error(&msg);
+            }
+            1
         }
+    };
+    let _ = Stdout.flush();
+    if code == 0 && Stdout::failed() {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::from(code)
     }
 }
 
@@ -222,4 +266,7 @@ pub(crate) enum Failure {
     Drifted,
     /// The operator stopped the run. Already printed.
     Interrupted,
+    /// `plan --detailed-exitcode` found something an apply would do. Already
+    /// printed.
+    Changes,
 }

@@ -803,6 +803,10 @@
             "$ref": "#/definitions/Credential"
           }
         },
+        "settings": {
+          "description": "The tool's own settings for the whole document, such as which engine runs it or how its host is reached. Each target says which keys it takes, on its page; a key the target does not take is refused.",
+          "type": "object"
+        },
         "imports": {
           "description": "Values handed to the document's tool from other documents of the workflow.",
           "type": "array",
@@ -1436,6 +1440,10 @@
               "$ref": "#/definitions/TargetHost"
             }
           ]
+        },
+        "settings": {
+          "description": "The tool's own settings for the whole document, such as which engine runs it or how its host is reached. Each target says which keys it takes, on its page; a key the target does not take is refused.",
+          "type": "object"
         },
         "imports": {
           "description": "Values handed to the document's tool from other documents of the workflow.",

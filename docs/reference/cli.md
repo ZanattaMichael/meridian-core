@@ -3,7 +3,7 @@
 ```
 meridian validate <files>...
 meridian compile  <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--out DIR]
-meridian plan     <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets]
+meridian plan     <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets] [--detailed-exitcode]
 meridian apply    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets] [--resume | --resume=RUN] [--on-failure stop|rollback] [--stage-timeout DURATION]
 meridian drift    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE]
 meridian rollback <files>... [--run RUN]
@@ -27,6 +27,10 @@ meridian schema   status [--state-dir DIR] [--json]
 meridian schema   clean [TARGET]... [--state-dir DIR]
 meridian lsp
 ```
+
+Every command also takes `--output text|json`: with `json` it prints one JSON
+object instead of text, for a pipeline or a wrapping tool.
+[Machine-readable output](cli-json.md) describes every object.
 
 The files given to one command are one workflow. A file may hold several
 documents separated by `---`. Infrastructure documents run before ResourceSets
@@ -102,6 +106,14 @@ instead of empty.
 
 A plan runs each tool, so it takes the [state lock](../concepts/run-safety.md#one-run-at-a-time)
 and is recorded like an apply.
+
+A plan exits `0` whether or not an apply would change anything. With
+`--detailed-exitcode` it exits `2` when an apply would do something (a stage
+with changes, a tool that cannot preview, or a stage deferred until an
+infrastructure output exists), `0` when every stage is in sync, and `1` on an
+error, as `drift` does; a pipeline can then ask "is there anything to apply?"
+without reading the plan. With `--output json` the plan is one object a tool
+can read ([the run object](cli-json.md#compile-plan-apply-drift-rollback)).
 
 With `--policy`, every stage is put to the [policy](policy.md), and its
 warnings and its decision are shown above the plan. A stage the policy denies
@@ -256,7 +268,8 @@ second one collide with it.
 
 Lists every plugin Meridian can find: its category, what it can do, the resource
 types it takes, the versions of its tool it compiles for (when it declares any),
-where its binary is, and what checking its signature found.
+the keys of a document's `spec.settings` it reads (when it takes any), where its
+binary is, and what checking its signature found.
 
 ```
 dsc
@@ -264,6 +277,7 @@ dsc
   can:       compile, plan, apply, import
   resources: <Module>/<Resource>, runner
   versions:  2, 3
+  settings:  credential, engine, target
   imports:   PowerShell DSC configurations (*.ps1)
   imports:   DSC v3 configuration documents and DscPipelineRunner projects (*.dsc.yaml, *.dsc.yml, *.dsc.json, *.dsc.config.yaml, *.dsc.config.yml, *.dsc.config.json, Datum.yml, *.yaml, *.yml, *.json)
   sdk:       0.1.0 (protocol 2)
@@ -275,8 +289,10 @@ dsc
 document's [`spec.imports`](dsl/outputs-and-hand-offs.md#imports) brings from
 other documents.
 
-The category decides which kind of document the plugin is handed, and the
-versions decide which `targetVersion` a document may ask it for. A plugin that
+The category decides which kind of document the plugin is handed, the
+versions decide which `targetVersion` a document may ask it for, and the
+settings keys decide what a document may write under
+[`spec.settings`](dsl/index.md#settings); a plugin that lists none takes none. A plugin that
 can read its tool's existing configuration lists `import` under `can`, and the
 file names each of its formats claims under `imports`.
 
@@ -564,6 +580,8 @@ meridian signing verify --trusted-key acme.pub meridian-target-acme
 
 | Option | Environment | Default | Meaning |
 |---|---|---|---|
+| `--output FORMAT` | `MERIDIAN_OUTPUT` | `text` | `text` for a person, or `json`: one JSON object per command on standard output, the report for people on standard error. [Machine-readable output](cli-json.md) has every object; may be given to any command |
+| `--detailed-exitcode` | | | `plan` only: exit `2` when an apply would do something, `0` when nothing would change, `1` on an error |
 | `--plugin-dir DIR` | `MERIDIAN_PLUGIN_DIR` (separated by `:`, or `;` on Windows) | the directory `meridian` is really in, following a link to it | where to look for plugins; may be repeated |
 | `--plugin-signatures POLICY` | `MERIDIAN_PLUGIN_SIGNATURES` | `require` in a released `meridian`, `off` in one built from source | what to do about [plugin signatures](plugin-signatures.md): `off` does not look, `warn` starts an unsigned or wrongly signed plugin and says so, `require` starts only plugins signed by a trusted key |
 | `--trusted-key FILE` | `MERIDIAN_TRUSTED_KEYS` (separated by `:`, or `;` on Windows) | the key a released `meridian` was built with | a public key whose signatures on plugins and on [modules](modules.md#signatures) are trusted, or a directory of `*.pub` files; may be repeated, and given to any command |
@@ -685,21 +703,17 @@ No version is deprecated today.
 
 ## Exit status
 
-`0` when everything asked for succeeded. `1` when a document was invalid, did
-not compile, a tool failed, a policy denied a change or could not be asked, a
-stage could not be rolled back, or the run was
-refused because the state is locked or there was nothing to resume or roll
-back, or a [sink](reporting.md#sinks) marked `required` failed; when
-`fmt --check` found a file that is not formatted; and when `lint` found an
-error, or a warning with `--strict`. `2` for a mistake in the command line
-itself, and from `drift` when a stage has drifted. `130` when the run was
-[stopped with Ctrl-C](../concepts/run-safety.md#stopping-a-run), as a shell
-reports a command ended that way; a run stopped by `--stage-timeout` is a
-failure and exits `1`.
+| Status | When |
+|---|---|
+| `0` | everything asked for succeeded. For `plan` without `--detailed-exitcode`, whether or not an apply would change anything; for `drift`, nothing drifted; for `import`, the documents were written, whatever was reported about them |
+| `1` | an error: a document was invalid or did not compile; a tool failed; a policy denied a change or could not be asked; a stage could not be rolled back; the run was refused because the state is locked or there was nothing to resume or roll back; a [sink](reporting.md#sinks) marked `required` failed; a run was stopped by `--stage-timeout`; `fmt --check` found a file that is not formatted; `lint` found an error, or a warning with `--strict`; `migrate --check` found a file that would change; `import` could not read the source, no plugin imports it, or, with `--strict`, something was changed or not translated; `module verify`, `signing verify`, `secret check` or `rules check` found something wrong |
+| `2` | `drift`: a stage has drifted. `plan --detailed-exitcode`: an apply would do something. Any command: a mistake in the command line itself |
+| `130` | the run was [stopped with Ctrl-C](../concepts/run-safety.md#stopping-a-run), as a shell reports a command ended that way |
 
-`import` exits `0` when it wrote its documents, whatever it reported about
-them; `1` when the source could not be read or no plugin imports it, and, with
-`--strict`, when anything was changed or not translated.
+With `--output json` the object on standard output says the same: `ok` is
+false for `1` and `130`, and the `summary` of a run carries `drifted` and
+`hasChanges` for the two meanings of `2`
+([machine-readable output](cli-json.md#what-every-object-has)).
 
 A reader that stops early, as in `meridian plugins | head`, ends the printing
 and nothing else: the command still runs to its end and exits with the status

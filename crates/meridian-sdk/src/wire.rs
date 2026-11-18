@@ -5,6 +5,8 @@
 //! generated type.
 
 use meridian_secret::SecretValue;
+use std::collections::BTreeMap;
+
 use meridian_value::{
     canonical_map, decode_map, decode_value, PlacedEscape, SecretRef, Value, SENSITIVE,
 };
@@ -53,6 +55,11 @@ pub fn graph_to_wire(g: &ResourceGraph) -> pb::ResourceGraph {
         host: g.host.clone(),
         target: g.target.clone(),
         target_version: g.target_version.clone(),
+        settings_json: if g.settings.is_empty() {
+            Vec::new()
+        } else {
+            canonical_map(&g.settings).into_bytes()
+        },
         resources: g
             .resources
             .iter()
@@ -133,6 +140,9 @@ pub fn graph_from_wire(g: pb::ResourceGraph) -> Result<ResourceGraph, String> {
         })
         .collect();
     out.credential = g.credential.map(credential_from_wire);
+    if !g.settings_json.is_empty() {
+        out.settings = decode_map(&g.settings_json).map_err(|e| format!("settings: {e}"))?;
+    }
     for r in g.resources {
         let mut params =
             decode_map(&r.params_json).map_err(|e| format!("resource {:?}: {e}", r.id))?;
@@ -969,6 +979,11 @@ pub fn import_response(outcome: Result<Imported, ImportError>) -> pb::ImportResp
                 target: d.target,
                 target_version: d.target_version,
                 host: d.host,
+                settings_json: if d.settings.is_empty() {
+                    Vec::new()
+                } else {
+                    canonical_map(&d.settings).into_bytes()
+                },
                 resources: d
                     .resources
                     .into_iter()
@@ -1071,12 +1086,19 @@ pub fn import_response_from_wire(
                 origin: r.origin,
             });
         }
+        let settings = if d.settings_json.is_empty() {
+            BTreeMap::new()
+        } else {
+            decode_map(&d.settings_json)
+                .map_err(|e| format!("document {:?}: settings: {e}", d.name))?
+        };
         imported.documents.push(ImportedDocument {
             kind,
             name: d.name,
             target: d.target,
             target_version: d.target_version,
             host: d.host,
+            settings,
             resources,
             outputs: d
                 .outputs
@@ -1239,6 +1261,25 @@ mod tests {
             with_credentials
         );
         assert!(!capabilities_from_wire(None).credentials);
+    }
+
+    #[test]
+    fn settings_cross_the_wire_with_their_value_types() {
+        let graph = ResourceGraph {
+            name: "web".to_owned(),
+            settings: BTreeMap::from([
+                ("engine".to_owned(), Value::from("DscV2")),
+                ("depth".to_owned(), Value::Int(3)),
+            ]),
+            ..ResourceGraph::default()
+        };
+        let wire = graph_to_wire(&graph);
+        assert_eq!(wire.settings_json, br#"{"depth":3,"engine":"DscV2"}"#);
+        assert_eq!(graph_from_wire(wire).unwrap().settings, graph.settings);
+        // None set is no bytes at all, as a plugin before settings sent.
+        let wire = graph_to_wire(&ResourceGraph::default());
+        assert!(wire.settings_json.is_empty());
+        assert!(graph_from_wire(wire).unwrap().settings.is_empty());
     }
 
     fn declared_credential() -> Credential {

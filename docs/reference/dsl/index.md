@@ -263,6 +263,7 @@ every `-l` given. Rules:
 | `conditions` | no | a mapping of named conditions, read as `cond.<name>`. See [named conditions](interpolation.md#named-conditions) |
 | `secrets` | no | a list of secrets, each a name and where it comes from, read as `secret.<name>`. See [secrets](secrets.md) |
 | `credentials` | no | a list of credentials, each a name, a type and the type's fields, used by name. See [credentials](credentials.md) |
+| `settings` | no | a mapping of the tool's own settings for the whole document. See [`settings`](#settings) |
 | `imports` | no | a list of [imports](#imports): values handed to this document from others |
 | `resources` | yes | a list of at least one [resource](#resources) |
 | `outputs` | no | a list of [outputs](#outputs) |
@@ -281,6 +282,7 @@ every `-l` given. Rules:
 | `secrets` | no | a list of secrets, each a name and where it comes from, read as `secret.<name>`. See [secrets](secrets.md) |
 | `credentials` | no | a list of credentials, each a name, a type and the type's fields, used by name. See [credentials](credentials.md) |
 | `targetHost` | yes, to compile | the machine, and the credential it is reached as. See [`targetHost`](#targethost) |
+| `settings` | no | a mapping of the tool's own settings for the whole document. See [`settings`](#settings) |
 | `imports` | no | a list of [imports](#imports): values handed to this document from others |
 | `resources` | yes | a list of at least one [resource](#resources) |
 
@@ -327,6 +329,48 @@ Which targets declare versions today:
 
 The check needs the plugin, so `compile`, `plan` and `apply` make it and
 `validate` does not.
+
+## `settings`
+
+```yaml
+spec:
+  target: dsc
+  settings:
+    engine: DscV2
+    target: WinRM
+```
+
+A tool has settings that belong to the whole document and to no resource of
+it: which engine runs it, how its host is reached. `settings` is one mapping
+for them. The target checks it exactly as it checks a resource's `params`: each
+target's page lists the keys it takes and what each accepts, and a value may
+hold interpolation.
+
+The rules:
+
+- A plugin declares the keys it reads, and `meridian plugins` lists them on
+  its `settings:` line. A document that sets any other key is refused before
+  the plugin is asked: `the document sets spec.settings.transport, and target
+  "dsc" takes only: credential, engine, target`. A plugin that declares no keys
+  takes no settings, so a document that sets any is refused the same way,
+  which is also what happens with a plugin built before `settings` existed.
+  Dropping a setting nothing reads would be a silent loss.
+- The values are the plugin's to check. What each accepts is on the target's
+  page, with the rule it refuses under.
+- A setting is not a resource: it has no `id`, no `when` of its own, and takes
+  no `dependsOn` or `notifies`. `spec.when` skips the whole document, settings
+  included.
+
+Which targets take settings today:
+
+| Target | Keys | What they say |
+|---|---|---|
+| `dsc` | `engine`, `target`, `credential` | [how the configuration is run](../../targets/dsc.md#how-the-configuration-is-run) |
+| every other target | none | the tool's own settings are a [settings resource](resources.md#type) for now, such as `stack` or `cluster` |
+
+The settings resources will move under `settings`, one target at a time, and
+each keeps compiling with a warning until the next `apiVersion` removes it. The
+`dsc` target's `runner` resource is the first to have moved.
 
 ## `targetHost`
 

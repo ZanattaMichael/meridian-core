@@ -87,6 +87,7 @@ CATEGORIES = {
     "configuration-management": ("Configuration management", "#FF8A4C"),
     "containerization": ("Containers", "#35D0C2"),
     "container-orchestration": ("Orchestration", "#B48CFF"),
+    "pipeline": ("Pipelines", "#FFC857"),
 }
 OTHER_COLOUR = "#9AA4C7"
 

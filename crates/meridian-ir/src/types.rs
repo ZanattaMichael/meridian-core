@@ -324,6 +324,9 @@ pub struct InfrastructureSpec {
     pub secrets: Vec<Secret>,
     /// `spec.credentials`: the identities the document names.
     pub credentials: Vec<Credential>,
+    /// `spec.settings`: the tool's own settings, which the target checks as
+    /// it checks a resource's params.
+    pub settings: BTreeMap<String, Value>,
     pub imports: Vec<Import>,
     pub resources: Vec<Resource>,
     pub outputs: Vec<Output>,
@@ -362,6 +365,9 @@ pub struct ResourceSetSpec {
     /// `spec.credentials`: the identities the document names.
     pub credentials: Vec<Credential>,
     pub target_host: Option<TargetHost>,
+    /// `spec.settings`: the tool's own settings, which the target checks as
+    /// it checks a resource's params.
+    pub settings: BTreeMap<String, Value>,
     pub imports: Vec<Import>,
     pub resources: Vec<Resource>,
 }
@@ -450,6 +456,15 @@ impl Document {
         match self {
             Document::Infrastructure(d) => &d.spec.variables,
             Document::ResourceSet(d) => &d.spec.variables,
+        }
+    }
+
+    /// `spec.settings`: the tool's own settings; empty when the document
+    /// sets none.
+    pub fn settings(&self) -> &BTreeMap<String, Value> {
+        match self {
+            Document::Infrastructure(d) => &d.spec.settings,
+            Document::ResourceSet(d) => &d.spec.settings,
         }
     }
 

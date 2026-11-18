@@ -225,6 +225,7 @@ impl Client {
             placed_text: wire::placed_text_from_wire(reply.placed_text),
             category: wire::category_from_wire(reply.category),
             target_versions: reply.target_versions,
+            settings_keys: reply.settings_keys,
             resource_schemas: reply
                 .resource_schemas
                 .into_iter()

@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ZanattaMichael/meridian-core/schemas/output/module-sign.schema.json",
+  "title": "module sign",
+  "description": "The signature written.",
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "const": "module sign",
+      "description": "The subcommand as it is typed"
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "Whether the command did what was asked: false means it exited 1, or 130 when interrupted"
+    },
+    "name": {
+      "type": "string"
+    },
+    "version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "keyId": {
+      "type": "string"
+    },
+    "integrity": {
+      "type": "string"
+    },
+    "wrote": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command",
+    "ok",
+    "name",
+    "version",
+    "keyId",
+    "integrity",
+    "wrote"
+  ],
+  "additionalProperties": false
+}
