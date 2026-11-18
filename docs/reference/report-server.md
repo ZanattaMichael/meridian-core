@@ -1,17 +1,11 @@
 # The report server
 
-`meridian-report-server` is an optional place to send your runs' events and
-view them later: every project's runs in one list, each run's report as a page,
-and every [report format](reporting.md#the-formats) over HTTP. Meridian runs
-fine without it.
+`meridian-report-server` is optional. It receives events from the `server`
+[sink](reporting.md#sinks), keeps them, lists runs per project, and serves every
+[report format](reporting.md#the-formats) over HTTP.
 
-**Does:** receive events from the `server` [sink](reporting.md#sinks); keep
-them; show runs per project, a run's report, a run in progress; serve a
-run's JSON, JUnit, Markdown and HTML reports and its events.
-**Does not:** start, schedule, approve or cancel runs; hold state about
-your infrastructure; hold a value or a secret, because an event has none;
-speak TLS (put it behind what already does); manage users (there are two
-tokens, one to write and one to read).
+It does not run or approve anything, hold infrastructure state or values, speak TLS (put it
+behind a proxy), or manage users (one write token, one read token).
 
 ## How it fits
 
@@ -28,10 +22,8 @@ flowchart LR
     API --> TOOLS["a dashboard, a script"]
 ```
 
-The server stores only events, in the same layout as a run's
-[record](state.md). Everything it shows is built from them on request by the
-same code as `meridian report`, so the server, the command and the run's own
-report always agree.
+It stores only events, laid out like a run's [record](state.md), and builds pages with the
+same code as `meridian report`.
 
 ## Running it
 
@@ -48,8 +40,7 @@ MERIDIAN_SERVER_TOKEN="$(openssl rand -hex 32)" \
 | `--read-token-file FILE` | `MERIDIAN_SERVER_READ_TOKEN` holds the token itself | reading is open | the read token: what a reader must present |
 | `--keep-runs N` | | `1000` | how many runs each project keeps; the oldest are removed |
 
-A token is read from a file or the environment and never from an argument,
-which every user of the machine could see.
+Tokens come from a file or the environment, never an argument.
 
 ### Before you expose it
 
@@ -60,14 +51,13 @@ which every user of the machine could see.
 | Writing | the write token lets its holder add events to any project. It cannot read a secret, change a run that is stored, or start anything. Give CI the write token only |
 | Disk | a request may carry 4 MiB and a run 200,000 events; `--keep-runs` bounds each project. Projects are created by whoever holds the write token |
 
-A browser is asked for the read token as a password; the user name is
-ignored. A program sends `Authorization: Bearer <token>`. The write token
-also reads.
+Browsers give the read token as the password. Programs send
+`Authorization: Bearer <token>`. The write token also reads.
 
 ## Sending runs to it
 
-The `server` sink is [`examples/sinks/meridian-notify-server`](../../examples/sinks/meridian-notify-server),
-a short script that needs `curl`. Put it in a plugin directory.
+The sink is [`examples/sinks/meridian-notify-server`](../../examples/sinks/meridian-notify-server),
+a `curl` script, placed in a plugin directory.
 
 ```
 export MERIDIAN_NOTIFY_TOKEN=...            # the server's write token
@@ -83,12 +73,8 @@ meridian apply site.yaml --sink server \
 | `token` | the write token. Required. Set it as `MERIDIAN_NOTIFY_TOKEN` in the environment, not with `--sink-config`, which would leave it in your shell history |
 | `timeout` | seconds to allow each request; `10` by default |
 
-Like every sink, it gets every event unless `server.on` narrows it, and never
-delays a step. A server that is down is a warning, not a failed run, unless you
-set `server.required=true`.
-
-A run that was never sent can be sent later from its record, with nothing
-but `curl`:
+`server.on` filters events. A down server is a warning unless `server.required=true`. To
+send an old run:
 
 ```
 meridian events RUN | curl --fail --data-binary @- \
@@ -114,9 +100,7 @@ meridian events RUN | curl --fail --data-binary @- \
 | `GET /v1/projects/{project}/runs/{run}/report/{format}` | the run's report: `json`, `junit`, `markdown` or `html` |
 | `GET /healthz` | `ok`. Needs no token |
 
-Sending events is idempotent: an event the run already has (by sequence number)
-is ignored, so an unsure sender can resend. Events may arrive in any order and
-are served in the order they happened.
+Sending is idempotent by sequence number. Events may arrive in any order.
 
 | Status | Means |
 |---|---|
@@ -125,8 +109,7 @@ are served in the order they happened.
 | `404` | no such project, run or format |
 | `413` | the request is over 4 MiB, or the run is full |
 
-What is stored is each event written out again, not the bytes that arrived,
-so a field an event does not have is never kept.
+Events are re-serialised, so unknown fields are dropped.
 
 ## What is on disk
 
@@ -134,12 +117,6 @@ so a field an event does not have is never kept.
 <data>/projects/<project>/runs/<run>/events.jsonl
 ```
 
-One file per run, one event per line. There is no database and no index:
-back the directory up, move it, or read a run with
-`meridian report --from <data>/projects/shop/runs/<run>/events.jsonl`.
-Removing a run's directory removes the run.
-
-The server reads nothing outside the data directory. Requested projects and
-runs are matched only against the directory's listing, and a directory is read
-only if it resolves inside the data directory, so planted links pointing
-elsewhere are not followed.
+One file per run, one event per line, no database. Read one with
+`meridian report --from <data>/projects/shop/runs/<run>/events.jsonl`; delete a directory
+to delete a run. Nothing outside the data directory is read, links included.
