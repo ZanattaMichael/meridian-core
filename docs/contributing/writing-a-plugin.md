@@ -861,6 +861,16 @@ The rules a schema source keeps:
   following `$ref`s through a resolver you give it, and stops at a depth so
   a recursive schema ends. `meridian_sdk::version_in` finds the version in
   what `tool --version` prints.
+- **Fetch a published file through `meridian_sdk::fetch`.** When the vendor
+  publishes the catalogue as a file instead of a command (CloudFormation's
+  registry zip, the Azure type definitions, a JSON Schema in a repository),
+  `fetch(url, &request.work_dir, name, what, log)` downloads it over HTTPS
+  into the work directory, keeps it with the server's `ETag` so the next
+  sync downloads nothing when it is unchanged, uses the last copy with a
+  note when the server cannot be reached, and gives you its SHA-256 to pin
+  (`Fetched::pin`). The rules are
+  [decision 0036](../decisions/0036-a-published-schema-file-is-fetched-over-https-pinned-by-hash-and-reused-offline.md);
+  the CloudFormation and Compose plugins are the shortest examples.
 
 Test it twice: a unit test that reads a saved sample of the tool's output
 into schemas, and a [real-tool test](real-tool-tests.md) in `tests/real.rs`

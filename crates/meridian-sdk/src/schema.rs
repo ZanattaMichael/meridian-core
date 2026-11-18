@@ -345,10 +345,12 @@ fn json_object<'a>(
     };
     let mut params: Vec<ParamSchema> = Vec::new();
     let mut open = match map.get("additionalProperties") {
-        Some(Value::Bool(false)) => false,
+        // Keys taken by pattern (Compose's `x-` extensions) keep a mapping
+        // open whatever it says about other keys.
+        Some(Value::Bool(false)) => map.contains_key("patternProperties"),
         // A schema that lists no properties and says nothing about others
         // is a free mapping.
-        _ => !map.contains_key("properties"),
+        _ => !map.contains_key("properties") || map.contains_key("patternProperties"),
     };
     let required: Vec<&str> = map
         .get("required")
@@ -372,7 +374,12 @@ fn json_object<'a>(
                 break;
             }
             let (more, branch_open) = json_object(branch, resolve, depth + 1, seen);
-            open |= branch_open && combinator != "allOf";
+            // An allOf part that takes keys by pattern (Compose's `x-`
+            // extensions on what a service is made of) opens the whole.
+            let by_pattern = json_deref(branch, resolve, seen)
+                .and_then(Value::as_map)
+                .is_some_and(|m| m.contains_key("patternProperties"));
+            open |= branch_open && (combinator != "allOf" || by_pattern);
             for p in more {
                 if !params.iter().any(|q| q.name == p.name) {
                     params.push(p);
@@ -1035,6 +1042,32 @@ mod tests {
         );
         assert!(schema.at_path(&["spec", "nothing"]).is_none());
         assert!(schema.at_path(&[]).unwrap().is_none());
+    }
+
+    #[test]
+    fn keys_taken_by_pattern_keep_a_mapping_open() {
+        let text = br##"{
+            "allOf": [{"$ref": "#/defs/base"}],
+            "properties": {"restart": {"type": "string"}},
+            "unevaluatedProperties": false
+        }"##;
+        let defs = meridian_value::decode_value(
+            br##"{
+                "base": {"type": "object", "properties": {"image": {"type": "string"}}, "patternProperties": {"^x-": {}}},
+                "closed": {"type": "object", "properties": {"a": {"type": "string"}}, "additionalProperties": false},
+                "patterned": {"type": "object", "properties": {"a": {"type": "string"}}, "additionalProperties": false, "patternProperties": {"^x-": {}}}
+            }"##,
+        )
+        .unwrap();
+        let resolve = |r: &str| defs.as_map().unwrap().get(r.trim_start_matches("#/defs/"));
+        let schema = meridian_value::decode_value(text).unwrap();
+        let (params, open) = params_from_json_schema(&schema, &resolve);
+        assert!(open, "an allOf part with patternProperties opens the whole");
+        assert_eq!(params.len(), 2);
+        let closed = defs.as_map().unwrap().get("closed").unwrap();
+        assert!(!params_from_json_schema(closed, &resolve).1);
+        let patterned = defs.as_map().unwrap().get("patterned").unwrap();
+        assert!(params_from_json_schema(patterned, &resolve).1);
     }
 
     #[test]

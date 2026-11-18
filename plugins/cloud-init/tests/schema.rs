@@ -19,6 +19,8 @@ use meridian_plugin_testkit::{artifact, scratch, KeptLog};
 use meridian_sdk::{RunContext, Runner};
 use meridian_target_cloud_init::{CloudInitRunner, PROGRAM_VARIABLE};
 
+const TMP: &str = env!("CARGO_TARGET_TMPDIR");
+
 const REQUIRED_VARIABLE: &str = "MERIDIAN_TEST_REAL_CLOUD_INIT";
 
 /// The real cloud-init to test with, if this machine has one.
@@ -129,5 +131,87 @@ fn the_runner_checks_with_the_real_tool() {
     assert_eq!(
         fs::read_to_string(dir.join("work/seed/user-data")).unwrap(),
         user_data
+    );
+}
+
+/// The schema source against the published cloud-config schema, at the
+/// tag of the installed cloud-init. Needs the network; without cloud-init
+/// it reads the main branch and says so.
+#[ignore = "needs the network; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn the_cloud_config_schema_is_exported_for_an_editor() {
+    use meridian_plugin_testkit::graph_from_text;
+    use meridian_sdk::{ParamKind, SchemaRequest, SchemaSource};
+    use meridian_target_cloud_init::CloudInitSchemas;
+    if std::env::var(REQUIRED_VARIABLE).ok().as_deref() != Some("1") {
+        eprintln!("skipped: set {REQUIRED_VARIABLE}=1 to fetch the real cloud-config schema");
+        return;
+    }
+    // The schema is fetched whether or not cloud-init is installed; its
+    // version only chooses the tag.
+    let program = std::env::var(PROGRAM_VARIABLE).unwrap_or_else(|_| "cloud-init".to_owned());
+    let installed = Command::new(&program)
+        .arg("--version")
+        .output()
+        .is_ok_and(|out| out.status.success())
+        .then_some(program);
+    let dir = scratch(TMP, "real-schemas");
+    let text = "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: site\nspec:\n  target: cloud-init\n  targetHost:\n    from: inline\n    host: localhost\n  resources:\n    - id: clock\n      type: ntp\n      params:\n        servers: [0.pool.ntp.org]\n    - id: zone\n      type: timezone\n      params:\n        value: Europe/Amsterdam\n    - id: nowhere\n      type: no_such_module\n      params:\n        value: 1\n";
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_text("site.yaml", text, "cloud-init")],
+    );
+    let log = KeptLog::default();
+    let export = CloudInitSchemas::from_env()
+        .export(&request, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(export.tool, "cloud-init");
+    match &installed {
+        Some(_) => assert!(
+            export
+                .tool_version
+                .starts_with(|c: char| c.is_ascii_digit()),
+            "the installed version: {}",
+            export.tool_version
+        ),
+        None => assert_eq!(export.tool_version, "main"),
+    }
+    assert_eq!(export.pins.get("cloud-init"), Some(&export.tool_version));
+    assert!(export.pins.contains_key("schema"));
+    let ntp = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "ntp")
+        .unwrap_or_else(|| panic!("ntp is described: {:?}", export.notes));
+    assert!(ntp
+        .find_param("servers")
+        .is_some_and(|p| p.kind == ParamKind::List));
+    assert!(ntp
+        .find_param("enabled")
+        .is_some_and(|p| p.kind == ParamKind::Bool));
+    let timezone = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "timezone")
+        .unwrap();
+    assert_eq!(timezone.params.len(), 1);
+    assert_eq!(timezone.params[0].name, "value");
+    assert_eq!(timezone.params[0].kind, ParamKind::String);
+    // The keys the shared types write are not modules.
+    for shared in ["packages", "write_files", "users", "groups", "runcmd"] {
+        assert!(
+            !export.schemas.iter().any(|s| s.r#type == shared),
+            "{shared}"
+        );
+    }
+    assert!(
+        export.schemas.len() > 40,
+        "{} modules",
+        export.schemas.len()
+    );
+    assert!(
+        export.notes.iter().any(|n| n.contains("no_such_module")),
+        "{:?}",
+        export.notes
     );
 }

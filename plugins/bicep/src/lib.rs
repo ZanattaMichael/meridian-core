@@ -26,6 +26,7 @@
 
 mod emit;
 mod runner;
+pub mod schemas;
 mod sort;
 mod transform;
 mod validate;
@@ -51,6 +52,7 @@ pub fn secret_reference(name: &str) -> String {
 
 pub use emit::{DEPLOYMENT_PATH, TEMPLATE_PATH};
 pub use runner::BicepRunner;
+pub use schemas::{AzureSchemas, Dialect};
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "bicep";

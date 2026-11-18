@@ -21,6 +21,7 @@ its SSH key, and the packages a configuration tool needs to find there.
 | Apply | Writes the user-data and a NoCloud seed on the machine running Meridian. The new machine applies it by itself on its first boot. `apply` can wait for that boot over SSH ([plan and apply](#plan-and-apply)) |
 | Outputs | Yes: `seed_dir` and `user_data_file` ([outputs](#outputs)) |
 | Host | Required. It names the machine in `meta-data` and is where `apply` waits |
+| Editor schemas | Yes: `meridian schema sync` reads the cloud-config schema cloud-init publishes, at the installed version's tag ([editor schemas](#editor-schemas)) |
 | Plugin binary | `meridian-target-cloud-init` |
 | Needs | `cloud-init` for the check (Linux only; the check can be turned off), and `ssh` only to wait ([settings](#settings)) |
 
@@ -553,6 +554,28 @@ cloud-init only. The [`native-type`](../reference/lint.md#native-type) lint rule
 each such resource. The six shared types stay the portable way to say what they can
 say; a module is for everything else. The split is
 [decision 0032](../decisions/0032-native-types-beside-the-six-and-a-prefix-for-colliding-names.md).
+
+## Editor schemas
+
+`meridian schema sync` reads the cloud-config schema cloud-init validates
+user-data against (`cloudinit/config/schemas/schema-cloud-config-v1.json` in
+the [cloud-init repository](https://github.com/canonical/cloud-init)), so an
+editor completes and checks the keys of every module beside the six
+([Tool schemas](../tooling/schema-sync.md)). The schema is fetched at the tag
+of the installed `cloud-init`'s version, so the editor knows the modules of
+the cloud-init the machine will run, and from the `main` branch when
+cloud-init is not installed, with a note.
+
+| | |
+|---|---|
+| Described in full | every module: a module whose value is a mapping takes its keys as params, with their kinds and values; a module whose value is a string or a list takes the one param `value`, as the compiler reads it |
+| Listed by name | nothing: the schema is small and every module is described |
+| Pinned | the cloud-init version or branch, and the schema's SHA-256 |
+
+The keys the six shared types write (`write_files`, `packages`, `users`,
+`groups`, `runcmd`) are not modules in the cache, because a document cannot
+write them as types. The source is tested against the real schema in the
+`cloud-init` workflow.
 
 ## References
 

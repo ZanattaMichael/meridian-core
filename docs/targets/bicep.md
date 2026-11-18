@@ -21,6 +21,7 @@ it, previews it with `what-if` and deploys it.
 | Plan | Yes: `what-if`. Where Azure cannot analyse a resource type, the plan is reported as unknown |
 | Apply | Yes: the same preview, then `create` |
 | Outputs | Yes, always as strings |
+| Editor schemas | Yes: `meridian schema sync` reads the Azure type definitions Bicep compiles against, published as files; no account and no compiler. See [Editor schemas](#editor-schemas) |
 | Compiles to | `main.bicep` and `deployment.json` |
 | Runs with | `az deployment group` |
 
@@ -44,6 +45,7 @@ Contents: [Requirements](#requirements) ·
 [References and expressions](#references-and-expressions) ·
 [Ordering](#ordering) ·
 [What a compile writes](#what-a-compile-writes) ·
+[Editor schemas](#editor-schemas) ·
 [Running](#running) ·
 [Settings](#settings) ·
 [What is refused](#what-is-refused) ·
@@ -211,6 +213,34 @@ Strings are written as single-quoted Bicep strings, with `\\`, `\'`, `\n`,
 `\r` and `\t` escaped and a `${` in literal text written `\${`, so only
 what the document meant as an expression is one. A key that is not a plain
 identifier, such as `cost-center`, is quoted.
+
+## Editor schemas
+
+`meridian schema sync` reads the type definitions the Bicep compiler itself
+compiles against, so an editor completes and checks a resource's properties
+at its API version ([Tool schemas](../tooling/schema-sync.md)). They are
+published as files in
+[Azure/bicep-types-az](https://github.com/Azure/bicep-types-az), generated
+from the Azure REST API specifications: an index of every
+`Namespace/type@api-version`, and a `types.json` per provider and version
+holding the type graph. The sync fetches the index and the files the
+documents' types live in; no account and no compiler is needed.
+
+| | |
+|---|---|
+| Described in full | the `Namespace/type@api-version` types the documents use: every property with its kind, whether it is required, the values it allows (a union of literals), its nested properties; properties Azure sets, such as `id`, as read-only; write-only properties as sensitive. `type` and `apiVersion` are left out because the type gives them |
+| Listed by name | every other API version of a used type, and the newest stable API version of every other type in the index |
+| Pinned | the index and each `types.json` read, to their SHA-256 |
+
+A type is matched without regard to case, as Azure matches resource types.
+An extensible enum, literals beside a plain string, is a string with no
+values listed, because Azure takes values beyond the known ones. A
+discriminated object, whose properties depend on a `kind`, takes the base
+properties and every variant's, open. The files are kept in the work
+directory and fetched again only when they changed; when GitHub cannot be
+reached, the last copy is used and the sync says so. The source is tested
+against the real files in the `azure` workflow. The [ARM target](arm.md)
+reads the same files.
 
 ## Running
 

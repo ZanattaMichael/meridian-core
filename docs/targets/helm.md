@@ -21,6 +21,7 @@ overlay, which is applied to what the chart renders before Helm installs it.
 | Apply | Yes: `helm upgrade --install`. An unchanged document adds no revision |
 | Outputs | Yes: anything a template can read, and any path into a live object, read with `kubectl` |
 | Subcharts, hand-written hooks, `lookup` | No. The chart holds only what the document declares |
+| Editor schemas | Yes: `meridian schema sync` asks the cluster what each kind's fields are, as the kubernetes target does. See [Editor schemas](#editor-schemas) |
 
 Nothing in this list degrades silently. A document that needs something the
 target lacks fails at compile time with the rule named in
@@ -510,6 +511,26 @@ release.json                   for Meridian's runner; Helm never reads it
 `chart/` is an ordinary Helm chart. `helm lint chart` passes on it and `helm install`
 installs it, with or without Meridian. `release.json` holds the release's settings, the
 object each resource became, and how to read each output.
+
+## Editor schemas
+
+`meridian schema sync` asks the cluster for its OpenAPI document through this
+target's `kubectl` (the `kubectl` and `kubectl-args` settings, so
+`--context` goes in `MERIDIAN_KUBECTL_ARGS`), exactly as the
+[kubernetes target](kubernetes.md#editor-schemas) does, so an editor
+completes and checks the fields of every object a chart's templates declare,
+custom resources included ([Tool schemas](../tooling/schema-sync.md)).
+
+| | |
+|---|---|
+| Described in full | the `<apiVersion>/<Kind>` types the documents use, as for kubernetes |
+| Listed by name | every other kind the server describes |
+| Pinned | the server's version |
+
+`chart`, `release`, `values` and `kustomization` are Meridian's own and are
+not asked of the cluster; the plugin describes them. What `values` holds is
+whatever the templates read, and no schema describes it. The source is
+tested against a kind cluster in the `helm` workflow.
 
 ## Running
 

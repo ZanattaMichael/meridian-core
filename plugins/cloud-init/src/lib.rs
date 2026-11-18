@@ -27,6 +27,7 @@
 
 mod emit;
 mod runner;
+mod schemas;
 mod shell;
 mod sort;
 mod transform;
@@ -45,6 +46,7 @@ pub use runner::{
     CloudInitRunner, Wait, PROGRAM_VARIABLE, SSH_ARGS_VARIABLE, SSH_VARIABLE, VALIDATE_VARIABLE,
     WAIT_VARIABLE,
 };
+pub use schemas::CloudInitSchemas;
 pub use transform::{supported_resource_types, NATIVE_PATTERN};
 
 /// The target name a document selects with `spec.target`.

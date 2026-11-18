@@ -367,3 +367,87 @@ fn a_secret_reaches_the_stack_as_a_noecho_parameter_and_is_in_nothing_shown() {
         .unwrap()
         .contains(SECRET));
 }
+
+/// The schema source against the registry CloudFormation publishes, which
+/// needs the network and nothing else: no account, no `aws`.
+#[ignore = "needs the network; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn the_registry_schemas_are_exported_for_an_editor() {
+    use meridian_sdk::{SchemaRequest, SchemaSource};
+    use meridian_target_cloudformation::CloudFormationSchemas;
+    if std::env::var("MERIDIAN_TEST_REAL_CLOUDFORMATION")
+        .ok()
+        .as_deref()
+        != Some("1")
+    {
+        eprintln!("skipped: set MERIDIAN_TEST_REAL_CLOUDFORMATION=1 to fetch the real registry");
+        return;
+    }
+    let dir = scratch(TMP, "real-schemas");
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: site\nspec:\n  target: cloudformation\n  resources:\n    - id: stack\n      type: stack\n      params:\n        name: site\n        region: us-east-1\n    - id: queue\n      type: AWS::SQS::Queue\n      params:\n        QueueName: site\n    - id: nowhere\n      type: Example::Missing::Type\n      params:\n        x: 1\n";
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_text("site.yaml", text, "cloudformation")],
+    );
+    let log = KeptLog::default();
+    let source = CloudFormationSchemas::from_env();
+    let export = source
+        .export(&request, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(export.tool, "cloudformation-registry");
+    assert!(
+        export.tool_version.starts_with("sha256:"),
+        "{}",
+        export.tool_version
+    );
+    assert_eq!(export.pins.get("us-east-1"), Some(&export.tool_version));
+    let queue = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "AWS::SQS::Queue")
+        .unwrap_or_else(|| panic!("the queue is described: {:?}", export.notes));
+    assert!(!queue.open);
+    assert!(queue.find_param("QueueName").is_some());
+    assert!(
+        queue.find_param("Arn").is_some_and(|p| p.computed),
+        "the ARN is read-only"
+    );
+    assert!(
+        queue.source.starts_with("us-east-1 registry sha256:"),
+        "{}",
+        queue.source
+    );
+    // Every other type of the registry is listed by name, open.
+    let bucket = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "AWS::S3::Bucket")
+        .expect("the bucket is listed");
+    assert!(bucket.open && bucket.params.is_empty() && !bucket.description.is_empty());
+    assert!(
+        export.schemas.len() > 1000,
+        "{} types",
+        export.schemas.len()
+    );
+    // The type nobody has is a note, not a failure.
+    assert!(
+        export
+            .notes
+            .iter()
+            .any(|n| n.contains("Example::Missing::Type")),
+        "{:?}",
+        export.notes
+    );
+    // The second sync asks the server whether the zip changed and fetches
+    // nothing when it has not.
+    let log = KeptLog::default();
+    let again = source.export(&request, &log).unwrap();
+    assert_eq!(again.pins, export.pins);
+    assert!(
+        log.text()
+            .iter()
+            .any(|l| l.contains("unchanged since the last sync")),
+        "{:?}",
+        log.text()
+    );
+}
