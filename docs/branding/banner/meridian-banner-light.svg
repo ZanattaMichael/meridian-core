@@ -7,7 +7,7 @@
 <g clip-path="url(#mb-clip)">
 <rect width="1280" height="320" fill="url(#mb-bg)"/>
 <g fill="none" stroke="#0F1B3D" stroke-width="3" opacity=".08" stroke-linecap="round"><path d="M930 160A260 101 0 0 0 1450 160"/><path d="M930 160A260 101 0 0 1 1450 160"/><path d="M930 160H1280"/></g>
-<g fill="none" stroke-width="9" stroke-linecap="round"><path d="M930 160A260 150 0 0 1 1450 160" stroke="#2457F5"/><path d="M930 160A260 52 0 0 1 1450 160" stroke="#C2410C"/><path d="M930 160A260 52 0 0 0 1450 160" stroke="#0F766E"/><path d="M930 160A260 150 0 0 0 1450 160" stroke="#6D28D9"/></g>
+<g fill="none" stroke-width="9" stroke-linecap="round"><path d="M930 160A260 150 0 0 1 1450 160" stroke="#2457F5"/><path d="M930 160A260 52 0 0 1 1450 160" stroke="#C2410C"/><path d="M930 160A260 52 0 0 0 1450 160" stroke="#0F766E"/><path d="M930 160A260 150 0 0 0 1450 160" stroke="#6D28D9"/><path d="M930 160H1450" stroke="#B7791F"/></g>
 <circle cx="930" cy="160" r="17" fill="#0F1B3D"/>
 </g>
 <rect x=".5" y=".5" width="1279" height="319" rx="23.5" fill="none" stroke="#C9D2F0"/>
@@ -15,6 +15,6 @@
 <text x="70" y="136" font-size="88" font-weight="700" letter-spacing="-2" fill="#0F1B3D">Meridian</text>
 <text x="72" y="190" font-size="30" font-weight="600" fill="#0F1B3D">One DSL for everything.</text>
 <text x="72" y="224" font-size="19" fill="#3B4874">Write it once. Compile it to the tools you already run.</text>
-<circle cx="79" cy="262" r="7" fill="#2457F5"/><text x="96" y="268" font-size="17" fill="#263056">Infrastructure as code</text><circle cx="326" cy="262" r="7" fill="#C2410C"/><text x="343" y="268" font-size="17" fill="#263056">Configuration management</text><circle cx="591" cy="262" r="7" fill="#0F766E"/><text x="608" y="268" font-size="17" fill="#263056">Containers</text><circle cx="732" cy="262" r="7" fill="#6D28D9"/><text x="749" y="268" font-size="17" fill="#263056">Orchestration</text>
+<circle cx="79" cy="262" r="7" fill="#2457F5"/><text x="96" y="268" font-size="17" fill="#263056">Infrastructure as code</text><circle cx="307" cy="262" r="7" fill="#C2410C"/><text x="324" y="268" font-size="17" fill="#263056">Configuration management</text><circle cx="565" cy="262" r="7" fill="#0F766E"/><text x="582" y="268" font-size="17" fill="#263056">Containers</text><circle cx="703" cy="262" r="7" fill="#6D28D9"/><text x="720" y="268" font-size="17" fill="#263056">Orchestration</text><circle cx="861" cy="262" r="7" fill="#B7791F"/><text x="878" y="268" font-size="17" fill="#263056">Pipelines</text>
 </g>
 </svg>
