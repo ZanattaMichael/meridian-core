@@ -1,0 +1,417 @@
+//! The commands that run or read a run: `compile`, `plan`, `apply`, `drift`,
+//! `rollback`, `status`, `runs`, `events`, `report` and `unlock`.
+
+use crate::*;
+
+/// What a command adds to the workflow it runs.
+#[derive(Default)]
+pub(crate) struct How<'a> {
+    /// `compile --out`
+    pub(crate) out: Option<&'a Path>,
+    /// `apply --resume`
+    pub(crate) resume: Option<&'a str>,
+    /// `apply --on-failure rollback`
+    pub(crate) rollback_on_failure: bool,
+    /// `rollback --run`
+    pub(crate) rollback_of: Option<&'a str>,
+}
+
+pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Result<(), Failure> {
+    let (out, resume) = (how.out, how.resume);
+    let bundle = load(&workflow.files, &workflow.state.state_dir)?;
+    let mut selector = Selector::all();
+    for text in &workflow.selector {
+        selector = selector.and(Selector::parse(text).map_err(Failure::Message)?);
+    }
+    let mut data = read_data(&workflow.data, &workflow.state.state_dir)?;
+    apply_sets(&mut data, &workflow.set)?;
+    if selected(&bundle, &selector, &data) == 0 {
+        // Doing nothing and reporting success would read as "all applied".
+        return Err(Failure::Message(format!(
+            "no document's labels match the selector {selector}"
+        )));
+    }
+    // Where the reports go and who is sent the events are settled before
+    // anything runs, so a misspelt format cannot cost a finished apply its
+    // report.
+    let reports = workflow
+        .report
+        .iter()
+        .map(|text| parse_report(text))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Failure::Message)?;
+    let sinks = sink::specs(
+        &workflow.sink,
+        &workflow.sink_config,
+        &plugin_dirs(&workflow.state.plugins),
+    )
+    .map_err(Failure::Message)?;
+    // What was typed, for the record: the files and the selection. Backend
+    // settings are left out, because one of them can be a credential.
+    let mut command = vec![mode.as_str().to_owned()];
+    command.extend(workflow.files.iter().map(|f| f.display().to_string()));
+    for text in &workflow.selector {
+        command.push(format!("-l {text}"));
+    }
+    match resume {
+        None => {}
+        Some("last") => command.push("--resume".to_owned()),
+        Some(run) => command.push(format!("--resume={run}")),
+    }
+    if how.rollback_on_failure {
+        command.push("--on-failure rollback".to_owned());
+    }
+    if let Some(limit) = workflow.stage_timeout {
+        command.push(format!("--stage-timeout {}", describe_duration(limit)));
+    }
+    for path in &workflow.policy {
+        command.push(format!("--policy {}", path.display()));
+    }
+    let policy = if workflow.policy.is_empty() {
+        None
+    } else if !matches!(mode, Mode::Plan | Mode::Apply) {
+        // Saying nothing would read as "checked".
+        return Err(Failure::Message(format!(
+            "--policy is checked by plan and apply, and {} asks no policy; remove it",
+            mode.as_str()
+        )));
+    } else {
+        Some(
+            Policy::find(
+                &workflow.policy_engine,
+                &plugin_dirs(&workflow.state.plugins),
+                workflow.policy.clone(),
+            )
+            .map_err(Failure::Message)?,
+        )
+    };
+    let options = Options {
+        data,
+        // Compiling keeps no record, so it needs no backend to be there.
+        backend: match mode {
+            Mode::Compile => None,
+            Mode::Plan | Mode::Apply | Mode::Drift | Mode::Rollback => {
+                Some(backend(&workflow.state)?)
+            }
+        },
+        lock_timeout: workflow.lock_timeout,
+        resume: resume.map(|run| match run {
+            "last" => Resume::Last,
+            id => Resume::Run(id.to_owned()),
+        }),
+        command: command.join(" "),
+        keep_runs: workflow.keep_runs,
+        on_failure: if how.rollback_on_failure {
+            OnFailure::Rollback
+        } else {
+            OnFailure::Stop
+        },
+        rollback_of: match how.rollback_of {
+            None => Resume::Last,
+            Some(id) => Resume::Run(id.to_owned()),
+        },
+        policy,
+        strict_secrets: workflow.strict_secrets,
+        // Compiling drives no tool, so there is nothing to interrupt but the
+        // process itself, which Ctrl-C does as it always did.
+        stop: Stop {
+            when: (mode != Mode::Compile).then(interrupt::install),
+            after: workflow.stage_timeout,
+            ..Stop::default()
+        },
+        ..Options::new(&workflow.state.state_dir)
+    };
+    let registry = registry(&workflow.state.plugins)?;
+    let mut printer = Printer {
+        mode,
+        out,
+        events: workflow.events.is_some(),
+        seen: Vec::new(),
+        sinks: Dispatcher::start(sinks, workflow.sink_timeout).map_err(Failure::Message)?,
+    };
+    let report = run_selected(&bundle, &registry, mode, &options, &selector, &mut printer);
+    // The sinks are closed and the reports written whatever the run did: a
+    // failed run is the one most worth hearing about.
+    let mut sink_failed = false;
+    for delivery in printer.sinks.finish() {
+        if let Some(problem) = delivery.problem() {
+            if delivery.required {
+                sink_failed = true;
+                eprintln!("error: {problem}");
+            } else {
+                eprintln!("warning: {problem}");
+            }
+        }
+    }
+    if !printer.seen.is_empty() {
+        let mut folded = Report::from_events(&printer.seen);
+        if let Some(backend) = &options.backend {
+            if let Ok(Some(record)) = record::load_run(backend.as_ref(), &report.run_id) {
+                folded = folded.with_record(&record);
+            }
+        }
+        for (format, path) in &reports {
+            match write_report(&folded, *format, path) {
+                Ok(()) => eprintln!("report: wrote {} to {}", format.as_str(), path.display()),
+                Err(why) => eprintln!("warning: {why}"),
+            }
+        }
+    }
+    // A plugin that will not exit is worth a warning, not a failed run.
+    if let Err(e) = registry.close() {
+        eprintln!("warning: {e}");
+    }
+    for warning in &report.warnings {
+        eprintln!("warning: {warning}");
+    }
+    if let Some(refusal) = &report.refused {
+        return Err(Failure::Message(refusal.to_string()));
+    }
+    if mode == Mode::Drift {
+        let drifted = report
+            .stages
+            .iter()
+            .filter(|s| matches!(s.outcome, Outcome::Drift(Drift::Drifted(_))))
+            .count();
+        let line = format!(
+            "drift: {drifted} of {} drifted",
+            count(report.stages.len(), "stage")
+        );
+        if workflow.events.is_some() {
+            eprintln!("{line}");
+        } else {
+            outln!("{line}");
+        }
+    }
+    if !report.succeeded() {
+        let failed: Vec<&StageReport> = report
+            .stages
+            .iter()
+            .filter(|s| matches!(s.outcome, Outcome::Failed(_)))
+            .collect();
+        let denied = !failed.is_empty()
+            && failed
+                .iter()
+                .all(|s| s.reason == Some(Reason::PolicyDenied));
+        let applied = report
+            .stages
+            .iter()
+            .any(|s| matches!(s.outcome, Outcome::Applied { .. }));
+        // A line that can be pasted: the same documents and selection.
+        let files: Vec<String> = workflow
+            .files
+            .iter()
+            .map(|f| f.display().to_string())
+            .collect();
+        let selectors: Vec<String> = workflow
+            .selector
+            .iter()
+            .map(|text| format!(" -l {text}"))
+            .collect();
+        if report.interrupted() {
+            if mode == Mode::Apply {
+                eprintln!(
+                    "run {} was interrupted. `meridian apply --resume {}{}` continues from the \
+                     stage that was stopped",
+                    report.run_id,
+                    files.join(" "),
+                    selectors.join("")
+                );
+            } else {
+                eprintln!("run {} was interrupted", report.run_id);
+            }
+            return Err(Failure::Interrupted);
+        }
+        if denied && mode == Mode::Apply && !applied {
+            eprintln!(
+                "run {} was stopped by its policy before anything was applied",
+                report.run_id
+            );
+        } else if mode == Mode::Apply && report.rollbacks.is_empty() {
+            eprintln!(
+                "run {} failed. Once the cause is fixed, `meridian apply --resume {}{}` \
+                 continues from the stage that failed",
+                report.run_id,
+                files.join(" "),
+                selectors.join("")
+            );
+        }
+        return Err(Failure::Reported);
+    }
+    if report.drifted() {
+        return Err(Failure::Drifted);
+    }
+    if sink_failed {
+        return Err(Failure::Reported);
+    }
+    Ok(())
+}
+
+/// Writes a report to a file, making the directory it goes in.
+pub(crate) fn write_report(report: &Report, format: Format, path: &Path) -> Result<(), String> {
+    let failed = |e: std::io::Error| {
+        format!(
+            "the {} report could not be written to {}: {e}",
+            format.as_str(),
+            path.display()
+        )
+    };
+    if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(failed)?;
+    }
+    std::fs::write(path, meridian_report::render(report, format)).map_err(failed)
+}
+
+/// Reports on a recorded run, or on a file of events.
+pub(crate) fn report(
+    state: &State,
+    run: Option<&str>,
+    format: Format,
+    out: Option<&Path>,
+    from: Option<&Path>,
+) -> Result<(), Failure> {
+    let folded = match from {
+        Some(path) => {
+            let text = if path == Path::new("-") {
+                std::io::read_to_string(std::io::stdin())
+            } else {
+                std::fs::read_to_string(path)
+            }
+            .map_err(|e| Failure::Message(format!("reading {}: {e}", path.display())))?;
+            let events = meridian_orchestrator::event::from_jsonl(&text);
+            if events.is_empty() {
+                return Err(Failure::Message(format!(
+                    "{} holds no events; it should be what `--events json` wrote",
+                    path.display()
+                )));
+            }
+            Report::from_events(&events)
+        }
+        None => {
+            let backend = backend(state)?;
+            let backend = backend.as_ref();
+            let record = match run {
+                Some(id) => record::load_run(backend, id)
+                    .map_err(Failure::Message)?
+                    .ok_or_else(|| {
+                        Failure::Message(format!("there is no run {id} in {}", backend.describe()))
+                    })?,
+                None => record::last_run(backend, None)
+                    .map_err(Failure::Message)?
+                    .ok_or_else(|| {
+                        Failure::Message(format!(
+                            "no run has been recorded in {}",
+                            backend.describe()
+                        ))
+                    })?,
+            };
+            let events = record::load_events(backend, &record.id).map_err(Failure::Message)?;
+            Report::from_events(&events).with_record(&record)
+        }
+    };
+    match out {
+        Some(path) => write_report(&folded, format, path).map_err(Failure::Message),
+        None => {
+            let _ = std::io::stdout()
+                .lock()
+                .write_all(meridian_report::render(&folded, format).as_bytes());
+            Ok(())
+        }
+    }
+}
+
+/// Shows the current or last run, and whether the state is locked.
+pub(crate) fn status(state: &State) -> Result<(), Failure> {
+    let backend = backend(state)?;
+    let backend = backend.as_ref();
+    let held = lock::holder(backend).map_err(Failure::Message)?;
+    match record::last_run(backend, None).map_err(Failure::Message)? {
+        None => outln!("no run has been recorded in {}", backend.describe()),
+        Some(run) => print_run(&run, held.as_ref().is_some_and(|lock| lock.id == run.id)),
+    }
+    match held {
+        Some(lock) => outln!("locked: {lock}"),
+        None => outln!("not locked"),
+    }
+    Ok(())
+}
+
+/// Lists every recorded run, oldest first.
+pub(crate) fn runs(state: &State) -> Result<(), Failure> {
+    let backend = backend(state)?;
+    let backend = backend.as_ref();
+    let ids = record::list_runs(backend).map_err(Failure::Message)?;
+    if ids.is_empty() {
+        outln!("no run has been recorded in {}", backend.describe());
+        return Ok(());
+    }
+    for id in ids {
+        let Some(run) = record::load_run(backend, &id).map_err(Failure::Message)? else {
+            continue;
+        };
+        let failed = run
+            .steps
+            .iter()
+            .filter(|step| step.status == record::StepStatus::Failed)
+            .count();
+        let mut line = format!(
+            "{}  {:<8} {:<10} {}",
+            run.id,
+            run.mode,
+            run.status.as_str(),
+            count(run.steps.len(), "step")
+        );
+        if failed > 0 {
+            line.push_str(&format!(", {failed} failed"));
+        }
+        if !run.resumes.is_empty() {
+            line.push_str(&format!(", resumes {}", run.resumes));
+        }
+        outln!("{line}");
+    }
+    Ok(())
+}
+
+/// Prints a run's events as they were recorded.
+pub(crate) fn events(state: &State, run: Option<&str>, types: &[String]) -> Result<(), Failure> {
+    let backend = backend(state)?;
+    let backend = backend.as_ref();
+    let id = match run {
+        Some(id) => {
+            if record::load_run(backend, id)
+                .map_err(Failure::Message)?
+                .is_none()
+            {
+                return Err(Failure::Message(format!(
+                    "there is no run {id} in {}",
+                    backend.describe()
+                )));
+            }
+            id.to_owned()
+        }
+        None => match record::last_run(backend, None).map_err(Failure::Message)? {
+            Some(run) => run.id,
+            None => {
+                return Err(Failure::Message(format!(
+                    "no run has been recorded in {}",
+                    backend.describe()
+                )))
+            }
+        },
+    };
+    let mut out = Stdout;
+    for event in record::load_events(backend, &id).map_err(Failure::Message)? {
+        if types.is_empty() || types.iter().any(|pattern| event.matches(pattern)) {
+            let _ = writeln!(out, "{}", event.to_json());
+        }
+    }
+    Ok(())
+}
+
+/// Removes a lock a run left behind.
+pub(crate) fn unlock(state: &State, id: &str) -> Result<(), Failure> {
+    let backend = backend(state)?;
+    let removed = lock::force_unlock(backend.as_ref(), id).map_err(Failure::Message)?;
+    outln!("removed {removed}");
+    Ok(())
+}
