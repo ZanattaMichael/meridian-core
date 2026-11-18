@@ -606,12 +606,12 @@ fn cloud_credential(target: &str, files: &[PathBuf]) -> Vec<String> {
                     ));
                 }
             }
-        } else if outcome.succeeded {
-            // The tool is not installed here; a plan that reached it fails
-            // at the tool, which is as far as a plan with the credential
-            // should get. One that succeeded ran nothing.
+        } else if !outcome.said.contains(", in the tool's environment)") {
+            // The plan says where the credential goes before the tool runs,
+            // whether the tool is installed here (some CI images carry one)
+            // or the plan fails at it.
             failures.push(format!(
-                "{target}: plan with a cloud credential succeeded without the tool:\n{}",
+                "{target}: plan with a cloud credential does not report the channel:\n{}",
                 outcome.said
             ));
         }
