@@ -18,9 +18,8 @@ Meridian comes with the tools an author needs while writing, all in the one
 
 ## They are the compiler
 
-None of these tools has its own idea of the language. There is one description
-of a document's fields, and one of each target's resource types, and everything
-reads those:
+None of these tools has its own idea of the language. They all read the same
+descriptions of a document's fields and each target's resource types:
 
 ```mermaid
 flowchart LR
@@ -51,32 +50,30 @@ flowchart LR
 ```
 
 - **The language's fields** (`apiVersion`, `kind`, `spec.resources`,
-  `dependsOn`, and the rest) are listed once, in tables the parser itself
-  reads to decide which fields a document may have. Completion, hover
-  documentation, the formatter's field order and the JSON Schema are produced
-  from the same tables. A field added to the language appears in every tool
-  the moment the compiler accepts it.
-- **Resource types, params and states** come from the target plugins. Each
-  plugin says what it takes when it is loaded, and the tools ask the plugins
-  you have installed. A plugin that is added or updated changes what your
+  `dependsOn`, and the rest) are listed once, in the tables the parser uses.
+  Completion, hover docs, the formatter's field order and the JSON Schema come
+  from the same tables, so a new field appears in every tool as soon as the
+  compiler accepts it.
+- **Resource types, params and states** come from the installed plugins, which
+  describe themselves when loaded. Adding or updating a plugin changes what the
   editor offers, with no change to the tools.
 - **A tool's own types** (`aws_instance`, `apps/v1/Deployment`,
-  `random:index:RandomPet`, `PSDscResources/Service`) come from the tool,
-  through its plugin: `meridian schema sync` asks once and caches the answer
-  in the project, and the editor tools read the cache. See
+  `random:index:RandomPet`, `PSDscResources/Service`) come from the tool via
+  its plugin: `meridian schema sync` asks once and caches the answer in the
+  project for the editor tools. See
   [Tool schemas](schema-sync.md).
-- **Errors** are the compiler's. The language server and the linter validate
-  your documents with the same code as `meridian validate`, and then hand each
-  one to its target's real plugin, exactly as `meridian compile` does, without
-  writing any file or running any tool.
+- **Errors** are the compiler's. The language server and linter validate with
+  the same code as `meridian validate`, then pass each document to its
+  target's real plugin as `meridian compile` does, without writing files or
+  running tools.
 
-The result is that an editor never accepts what `meridian compile` refuses, and
-never refuses what it accepts.
+So an editor never accepts what `meridian compile` refuses, and never refuses
+what it accepts.
 
 ## What a target describes
 
 How much the tools can say about a resource depends on how much its target
-says about itself.
+describes.
 
 | Targets | What the tools know |
 |---|---|
@@ -89,8 +86,8 @@ A plugin author adds descriptions with one method; see
 
 ## About the pictures
 
-The pictures in these pages show the Monaco editor, the editor Visual Studio
-Code is built on, connected to a real `meridian lsp` with the real plugins.
-Everything in them is what the server answered.
+The pictures show the Monaco editor (the core of Visual Studio Code) connected
+to a real `meridian lsp` with the real plugins. Everything shown is the
+server's real answer.
 [`tools/editor_screenshots`](../../tools/editor_screenshots/capture.js)
 produces them again after a change.

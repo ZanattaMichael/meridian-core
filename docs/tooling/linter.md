@@ -5,18 +5,18 @@ meridian lint <paths>... [--plugin-dir DIR] [--data FILE] [--set KEY=VALUE] [--s
 ```
 
 `meridian lint` checks a whole project the way the editor checks an open file.
-It reports two kinds of thing:
+It reports two kinds of finding:
 
 - **Errors**: everything `meridian validate` and `meridian compile` would
-  refuse. Each document is validated and then compiled by its target's real
-  plugin, in memory. Nothing is written and no tool is run.
-- **Lint findings**: things that compile and are probably not what you meant,
-  such as a file mode that YAML read as a number. Each has a rule, listed in
+  refuse. Each document is validated, then compiled in memory by its target's
+  real plugin. Nothing is written and no tool runs.
+- **Lint findings**: things that compile but are probably mistakes, such as a
+  file mode YAML read as a number. Each has a rule, listed in
   the [lint rule reference](../reference/lint.md).
 
-A path may be a file or a directory. A directory is searched for `.yaml`,
-`.yml` and `.json` files that are Meridian documents; hidden directories,
-`node_modules` and `target` are skipped.
+A path may be a file or directory. Directories are searched for `.yaml`, `.yml`
+and `.json` Meridian documents; hidden directories, `node_modules` and `target`
+are skipped.
 
 ```console
 $ meridian lint web.yaml
@@ -40,7 +40,7 @@ systems recognise.
 | `warning` | it compiles and is very likely a mistake | `0`, or `1` with `--strict` |
 | `info` | worth a look, often deliberate | `0` |
 
-Use `--strict` in CI to fail on warnings as well. Notes never fail a run.
+Use `--strict` in CI to also fail on warnings. Notes never fail a run.
 
 ## Fixing
 
@@ -53,16 +53,14 @@ $ meridian lint --fix web.yaml
 fixed 1 finding
 ```
 
-Two rules have a fix: [`unquoted-mode`](../reference/lint.md#unquoted-mode)
-and [`lossy-number`](../reference/lint.md#lossy-number) both add quotes around
-a number that was meant as text. The `unquoted-mode` fix also clears the
-`invalid-param` error the plugin reports on the same line, since the two
-describe one mistake.
+Two rules have fixes: [`unquoted-mode`](../reference/lint.md#unquoted-mode) and
+[`lossy-number`](../reference/lint.md#lossy-number) both quote a number meant as
+text. The `unquoted-mode` fix also clears the plugin's `invalid-param` error on
+the same line, since both describe one mistake.
 
 ## Silencing a rule
 
-A finding that is deliberate can be silenced where it is, with a comment that
-names the rule:
+Silence a deliberate finding in place with a comment naming the rule:
 
 ```yaml
 params:
@@ -78,56 +76,52 @@ params:
 | `# meridian-lint: disable=RULE` at the end of a line | that line |
 | `# meridian-lint: disable-file=RULE` anywhere in the file | the whole file |
 
-Several rules are separated by commas, and `all` stands for every rule. Only
-lint findings can be silenced. An error is the compiler's, and the document
-will not compile until it is fixed.
+Separate several rules with commas; `all` means every rule. Only lint findings
+can be silenced. Errors come from the compiler and must be fixed.
 
 ## Conditions and data
 
-A document can read data: in a `when`, in `spec.conditions`, and in
-`${{ ... }}` interpolation. What the linter can check depends on whether it
-has that data.
+A document can read data in a `when`, in `spec.conditions`, and in
+`${{ ... }}` interpolation. What the linter can check depends on whether it has
+that data.
 
-- **A document that needs no data** (its conditions and interpolation read
-  only `spec.variables` and literals) is worked out exactly as
-  `meridian compile` would, and then compiled.
-- **A document that needs data, with none given.** Every `when` is treated as
-  true, so that a mistake in a resource that is usually switched off is still
-  found. If the document also interpolates values with `${{ ... }}`, the
-  values are not known, so it is checked against the language (fields, types,
-  references, dependencies) and is not handed to the plugin.
-- **With `--data FILE` or `--set KEY=VALUE`** (each may be repeated, and they
-  mean what they mean for
-  [`meridian compile`](../reference/cli.md#deciding-conditions)), conditions
-  and interpolation are decided from the data. Resources that are switched off
-  are not compiled, a document whose `spec.when` is false is not compiled, and a condition that cannot be decided is an `invalid-condition`
-  error.
+- **No data needed** (conditions and interpolation read only `spec.variables`
+  and literals): evaluated and compiled exactly as `meridian compile` would.
+- **Data needed but not given:** every `when` is treated as true, so mistakes
+  in usually-disabled resources are still found. If the document also
+  interpolates `${{ ... }}`, the values are unknown, so it is checked against
+  the language only (fields, types, references, dependencies), not passed to
+  the plugin.
+- **With `--data FILE` or `--set KEY=VALUE`** (repeatable, as for
+  [`meridian compile`](../reference/cli.md#deciding-conditions)): conditions and
+  interpolation are decided from the data. Disabled resources and documents
+  whose `spec.when` is false are not compiled. An undecidable condition is an
+  `invalid-condition` error.
 
-`--state-dir DIR` (or `MERIDIAN_STATE_DIR`, default `.meridian`) is where the
-project's fetched modules are, for `--data` files named inside a module, and
-where the [tool schemas](schema-sync.md) `meridian schema sync` cached are
-read from, so a tool's own params are checked as a plugin's are.
+`--state-dir DIR` (or `MERIDIAN_STATE_DIR`, default `.meridian`) holds the
+project's fetched modules (for `--data` files inside a module) and the
+[tool schemas](schema-sync.md) cached by `meridian schema sync`, so a tool's own
+params are checked like a plugin's.
 
 ## Module manifests and tests
 
-A `meridian.yaml` with `kind: Module` describes a module and is not a document
-to compile. `meridian lint` and `meridian fmt` leave it alone;
-`meridian module` checks it. A document of `kind: Test` is left alone the
-same way; [`meridian test`](../reference/testing.md) reads it, and refuses a
-mistake in it before any case runs.
+A `meridian.yaml` with `kind: Module` describes a module, not a document to
+compile. `meridian lint` and `meridian fmt` skip it; `meridian module` checks it.
+`kind: Test` documents are skipped too; [`meridian test`](../reference/testing.md)
+reads them and refuses mistakes before any case runs.
 
 ## Plugins
 
-The plugins are found as they are for every other command: `--plugin-dir`,
-`MERIDIAN_PLUGIN_DIR`, and the directory `meridian` is in. A document whose
-target has no plugin gets an `unknown-target` error.
+Plugins are found as for every other command: `--plugin-dir`,
+`MERIDIAN_PLUGIN_DIR`, and `meridian`'s own directory. A document whose target
+has no plugin gets an `unknown-target` error.
 
 ## Files are checked one at a time
 
-Each file is its own project. Two files in a directory may both hold a document
-called `web`; they are alternatives, not a clash. A ResourceSet that takes its
-host from an Infrastructure in another file under the same paths is checked
-against that Infrastructure, nearest directory first.
+Each file is its own project. Two files may both hold a document called `web`;
+they are alternatives, not a clash. A ResourceSet that takes its host from an
+Infrastructure in another file under the same paths is checked against it,
+nearest directory first.
 
 ## Machine-readable output
 
@@ -137,8 +131,8 @@ against that Infrastructure, nearest directory first.
 {"file":"web.yaml","line":16,"column":15,"endLine":16,"endColumn":19,"severity":"warning","code":"unquoted-mode","source":"meridian-lint","message":"mode 0644 is read as a number, not as permissions; write it as a quoted string","fixable":true}
 ```
 
-`source` is `meridian-lint` for a lint rule, `meridian` for the language, and
-the target's name for something its plugin said. Lines and columns start at 1.
+`source` is `meridian-lint` for a lint rule, `meridian` for the language, or the
+target's name for a plugin finding. Lines and columns start at 1.
 
 ## In CI
 

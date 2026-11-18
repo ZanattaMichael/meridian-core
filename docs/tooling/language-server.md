@@ -88,24 +88,23 @@ come from four places, and each says which in its code:
 Two things are different from `meridian compile`, both because an editor has
 less to go on:
 
-- **Conditions and interpolation.** The server is given no `--data` files. A
-  document that needs none (its conditions and `${{ ... }}` read only
-  `spec.variables` and literals) is worked out and compiled exactly as
-  `meridian compile` would. A document that needs data is checked with every
-  `when` treated as true, and if it interpolates values it is checked against
-  the language only and not handed to the plugin, because the values are not
-  known. A condition that is not written correctly is still reported. See
+- **Conditions and interpolation.** The server has no `--data` files. A
+  document that needs none (conditions and `${{ ... }}` read only
+  `spec.variables` and literals) is compiled exactly as `meridian compile`
+  would. A document that needs data is checked with every `when` true; if it
+  interpolates values, it is checked against the language only, since the
+  values are unknown. Malformed conditions are still reported. See
   [conditions and data](linter.md#conditions-and-data).
-- **Secrets.** Neither the server nor `meridian lint` ever fetches a secret:
-  no environment variable is read, no file is opened and no `exec` command is
-  run because a document was opened or checked.
-- **Module manifests.** A `meridian.yaml` with `kind: Module` is not a
-  document to compile, and the server says nothing about it.
-- **A missing plugin.** A document whose target has no installed plugin gets
-  one error on `spec.target` (`unknown-target`) that lists the targets that
-  are installed, and is otherwise checked against the language only. When no
-  plugin is installed at all, nothing is said about targets, so the language
-  is still checked on a machine that has only the `meridian` binary.
+- **Secrets.** Neither the server nor `meridian lint` fetches a secret: opening
+  or checking a document reads no environment variable, opens no file and runs
+  no `exec` command.
+- **Module manifests.** A `meridian.yaml` with `kind: Module` is not compiled,
+  and the server ignores it.
+- **A missing plugin.** A document whose target has no plugin gets one
+  `unknown-target` error on `spec.target` listing the installed targets, and is
+  otherwise checked against the language only. With no plugins installed at
+  all, targets are not reported, so the language is still checked on a machine
+  with only the `meridian` binary.
 
 Documents in other files of the workspace are read too, so a ResourceSet whose
 `targetHost` refers to an Infrastructure in another file is checked against it.
@@ -157,29 +156,27 @@ way `lint` and every other command does: `--plugin-signatures` and
 apply to `meridian lsp` too, with the same defaults, and a plugin that does not
 pass is reported to the editor instead of started.
 
-Directories in `pluginDirs` are held to a stricter rule. They come from the
-editor's settings, which a project can carry with it, so a plugin found there
-is started only when it is signed by a trusted key, whatever the policy. To
-load any plugin from those directories, such as one you are building yourself,
-start the server with `meridian lsp --trust-editor-plugin-dirs` (or set
-`MERIDIAN_LSP_TRUST_EDITOR_PLUGIN_DIRS=true` in its environment); the
-command-line policy then applies to them as well.
+`pluginDirs` directories have a stricter rule. They come from editor settings,
+which a project can ship, so plugins there start only if signed by a trusted
+key, whatever the policy. To load any plugin from them (such as one you are
+building), start the server with `meridian lsp --trust-editor-plugin-dirs` (or
+set `MERIDIAN_LSP_TRUST_EDITOR_PLUGIN_DIRS=true`); the command-line policy then
+applies to them too.
 
 The server loads plugins when it starts. After installing or rebuilding one,
 run the `meridian.reloadPlugins` command (in VS Code, **Meridian: Reload Target
 Plugins**) or restart the server.
 
-The server also reads the tool schemas `meridian schema sync` cached under
-each workspace folder's state directory, when it starts and again whenever
-the cache changes, so a sync run in a terminal shows in the editor without
-a restart. It never runs a sync itself. When `meridian.lock` records schemas
-that are not cached here, or the cache is not what the lock records, it says
-so once in a message.
+The server reads the tool schemas cached by `meridian schema sync` in each
+workspace folder's state directory, at start and whenever the cache changes, so
+a sync in a terminal shows up without a restart. It never syncs itself. If
+`meridian.lock` records schemas not cached here, or the cache differs from the
+lock, it shows one message.
 
 ## What the server supports
 
-For anyone connecting an editor by hand: the server uses full-document
-synchronisation and UTF-16 positions, and answers `textDocument/completion`,
+For connecting an editor by hand: the server uses full-document sync and UTF-16
+positions, and answers `textDocument/completion`,
 `hover`, `definition`, `references`, `prepareRename`, `rename`,
 `documentSymbol`, `formatting` and `codeAction` (kind `quickfix`),
 `workspace/executeCommand` for `meridian.reloadPlugins`, and publishes

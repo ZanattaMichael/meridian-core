@@ -1,12 +1,11 @@
 # The MCP server
 
 `meridian mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
-server. An AI client such as Claude Desktop, Claude Code, Cursor or VS Code
-starts it, and the model it runs calls the server's tools to look up what
-exists, draft a document, be told exactly what is wrong and what is accepted
-instead, and correct. It speaks the protocol on standard input and output,
-needs no network and no account, and is the compiler: what it accepts is what
-`meridian compile` accepts.
+server. An AI client (Claude Desktop, Claude Code, Cursor, VS Code) starts it,
+and the model calls its tools to look up what exists, draft a document, learn
+exactly what is wrong and what would be accepted, and correct it. It speaks the
+protocol on stdin and stdout, needs no network or account, and is the compiler:
+it accepts exactly what `meridian compile` accepts.
 
 It is for models that have never seen a Meridian document. There is no body
 of public Meridian files for a model to have learned from, so an unaided
@@ -23,10 +22,9 @@ need to know the language: it asks.
 
 ## Setting up a client
 
-The command is `meridian mcp`. The `meridian-target-*` plugin binaries must
-be beside the `meridian` binary, or named with `--plugin-dir`, as for every
-command; start it in the project's directory so that the tool schemas
-`meridian schema sync` cached are read.
+The command is `meridian mcp`. The `meridian-target-*` plugins must be beside
+the `meridian` binary or given with `--plugin-dir`. Start it in the project
+directory so it reads the tool schemas cached by `meridian schema sync`.
 
 **Claude Code**
 
@@ -137,9 +135,9 @@ names and meanings there.
 | `fix` | `{line, column, endLine, endColumn, replace}`: a replacement the linter knows is safe, with `fixable: true` |
 | `explain` | the `explain` call to make for more |
 
-Two codes are the server's own. `needs-data` (info) says a document reads
-`data.<key>` or a secret in a condition or an interpolation, so it was
-checked against the language and not compiled, as the language server does
+Two codes are the server's own. `needs-data` (info): the document reads
+`data.<key>` or a secret in a condition or interpolation, so it was checked
+against the language only, as the language server does
 (see [decision 0003](../decisions/0003-editors-treat-every-when-as-true.md)).
 `import-source` says the importer could not read the source text.
 
@@ -148,8 +146,8 @@ checked against the language and not compiled, as the language server does
 - The prompt `authoring-guide` is the loop to follow, in under a page: pick
   a target, read an example, list and describe the types, draft, `validate`,
   `compile`, fix from `accepted`, repeat, then `lint` and `format`. It takes
-  an optional `target` and `task`. Small models follow a stated procedure far
-  better than they infer one, so a client should attach it.
+  an optional `target` and `task`. Small models follow a stated procedure much
+  better than they infer one, so clients should attach it.
 - The resources are the [DSL reference](../reference/dsl/index.md) pages, the
   [capability matrix](../reference/capability-matrix.md), the
   [lint rules](../reference/lint.md) and every target's page, embedded in the
@@ -159,18 +157,17 @@ checked against the language and not compiled, as the language server does
 ## Safety
 
 - **Read-only.** `compile` runs the plugin's emitter in memory, the same call
-  the language server makes for every keystroke; nothing is written to
-  `--out` or to the state directory. `apply`, `rollback` and `destroy` do not
-  exist as tools. `plan` is opt-in because it runs the real tool, takes the
-  project's [lock](../concepts/run-safety.md) and writes a run record; when
-  allowed it runs the `meridian` binary itself with `--output json`, so what
-  the model sees is exactly what `meridian plan` prints.
-- **Secrets.** A document given to the server is compiled with no data and no
-  secret is fetched: no environment variable is read, no file opened and no
-  `exec` command run because a model asked for a compile. A document that
-  reads a secret or data is checked against the language and reported as
-  `needs-data`. Values a model writes into a document are its own; the
-  `literal-secret` lint says when one looks like a password.
+  the language server makes on each keystroke; nothing is written to `--out` or
+  the state directory. There are no `apply`, `rollback` or `destroy` tools.
+  `plan` is opt-in because it runs the real tool, takes the project's
+  [lock](../concepts/run-safety.md) and writes a run record. When allowed, it
+  runs the `meridian` binary with `--output json`, so the model sees exactly
+  what `meridian plan` prints.
+- **Secrets.** Documents are compiled with no data and no secret fetched: a
+  compile request reads no environment variable, opens no file and runs no
+  `exec` command. A document that reads a secret or data is checked against the
+  language and reported as `needs-data`. Values a model writes into a document
+  are its own; the `literal-secret` lint flags one that looks like a password.
 - **No outbound connections**, in keeping with the
   [observability plan](../plans/observability.md#4-telemetry). The server
   is a local process the client starts; it has no hosted mode.
@@ -185,17 +182,15 @@ The design and its alternatives are in
 
 ## How we know it works
 
-The server is worth shipping when a small model with it does clearly better
-than the same model without. That is measured, not assumed: a test set of
-tasks in plain words sits under
+The server is worth shipping if a small model does clearly better with it than
+without. That is measured, not assumed: a set of plain-language tasks sits under
 [`tools/mcp_eval/`](https://github.com/ZanattaMichael/meridian-core/tree/main/tools/mcp_eval),
-each with the target it is for, the resource types a correct answer uses, and
-a check that the answer compiles. `tools/mcp_eval/check.py` runs the check
-over a directory of answers through the server itself, so it needs no model
-access and any client can be scored. Running the tasks with a model needs
-that model, so it runs on demand and not in CI; the results, when they are
-recorded, go in this section with the share that compiled, the share that
-used the expected types, and the number of turns.
+each with its target, the resource types a correct answer uses, and a compile
+check. `tools/mcp_eval/check.py` checks a directory of answers through the
+server itself, so it needs no model access and can score any client. Running
+the tasks needs the model, so it runs on demand, not in CI. Recorded results
+will go here: the share that compiled, the share that used the expected types,
+and the number of turns.
 
 The protocol itself is tested in CI: `crates/meridian-mcp/tests/protocol.rs`
 speaks to the server with real plugins loaded in process, and

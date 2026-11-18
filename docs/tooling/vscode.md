@@ -122,9 +122,9 @@ The server found no plugin for the target. Plugins are looked for in
 and where.
 
 **"A plugin directory named in the editor's settings only loads plugins
-signed by a trusted key."** A plugin in a `meridian.pluginDirs` directory is
-started only when it is signed, since those settings can come with a project.
-Sign it, or trust the directory by starting the server with
+signed by a trusted key."** A plugin in a `meridian.pluginDirs` directory
+starts only if signed, since a project can ship those settings. Sign it, or
+trust the directory by starting the server with
 `MERIDIAN_LSP_TRUST_EDITOR_PLUGIN_DIRS=true` in VS Code's environment;
 [the language server](language-server.md#plugin-signatures) explains.
 
@@ -147,10 +147,9 @@ npm run build          # bundle to out/extension.js
 MERIDIAN_BIN=../../target/debug/meridian npm run test:e2e
 ```
 
-The last command downloads a copy of VS Code, starts it with the extension and
-the `meridian` binary named, opens a document and checks what the editor
-shows: diagnostics, completion, hover, go to definition, a quick fix and
-formatting. Build the binary and a plugin first with
+The last command downloads VS Code, starts it with the extension and the
+`meridian` binary, opens a document, and checks the editor shows diagnostics,
+completion, hover, go to definition, a quick fix and formatting. Build the binary and a plugin first with
 `cargo build -p meridian-cli -p meridian-target-ansible`.
 
 Open `editors/vscode` in VS Code and press `F5` to run the extension in a
