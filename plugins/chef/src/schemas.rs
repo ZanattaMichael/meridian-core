@@ -349,6 +349,7 @@ mod tests {
                 "arch",
                 "components",
                 "keyserver",
+                "name",
                 "repo_name",
                 "trusted",
                 "uri"
