@@ -46,10 +46,100 @@ mod validate;
 use std::collections::BTreeMap;
 
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, Value,
+    holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph, SecretName, Value,
 };
 use meridian_yaml::Yaml;
+
+/// What a secret in the chart's values is written as in `values.yaml`: a
+/// token inside a JSON string. The runner replaces it with the value in
+/// protected memory and hands the whole values file to Helm on standard
+/// input (`--values -`), so the file on disk never holds the value and the
+/// templates read it as any value, `${values.<path>}`.
+pub fn secret_token(name: &str) -> String {
+    format!("${{meridian_secret_{name}}}")
+}
+
+/// A secret may be a value, and nothing else: a setting is the command line
+/// `helm` is given, an object is written into a template file on disk, and
+/// a Kustomize overlay has the rendered manifests written to disk too.
+fn refuse_secrets_outside_values(graph: &ResourceGraph) -> Result<(), CompileError> {
+    let kustomized = graph.resources.iter().any(|r| r.r#type == "kustomization");
+    for r in &graph.resources {
+        let Some((key, _)) = r.params.iter().find(|(_, v)| holds_secret(v)) else {
+            continue;
+        };
+        let msg = match r.r#type.as_str() {
+            "values" if kustomized => format!(
+                "value {key:?} holds a secret, and this document has a kustomization, for which \
+                 the rendered manifests are written to a file in the work directory, where a \
+                 secret cannot go; a document with a secret in its values has no kustomization"
+            ),
+            "values" => continue,
+            "chart" | "release" | "kustomization" => format!(
+                "param {key:?} of the {} holds a secret, and the settings are the command line \
+                 helm is given, where a secret cannot go. A secret goes in the values, which the \
+                 templates read with ${{values.<path>}} and Helm is handed on standard input",
+                r.r#type
+            ),
+            _ => format!(
+                "param {key:?} of {:?} holds a secret, and an object is written into a template \
+                 file as it stands, where a secret cannot go. Put the secret in the values and \
+                 read it here with ${{values.<path>}}, in the stringData of a v1/Secret",
+                r.r#type
+            ),
+        };
+        return Err(refuse(r, "unsupported-secret-place", msg));
+    }
+    Ok(())
+}
+
+/// Text the document writes that would read as a secret's token is refused,
+/// so the runner cannot be made to fill a value in where the document put
+/// the token itself.
+fn refuse_token_text(graph: &ResourceGraph) -> Result<(), CompileError> {
+    fn has_token(value: &Value) -> bool {
+        match value {
+            Value::String(s) => s.contains("${meridian_secret_"),
+            Value::List(items) => items.iter().any(has_token),
+            Value::Map(map) => {
+                map.keys().any(|k| k.contains("${meridian_secret_")) || map.values().any(has_token)
+            }
+            _ => false,
+        }
+    }
+    for r in graph.resources.iter().filter(|r| r.r#type == "values") {
+        if let Some((key, _)) = r.params.iter().find(|(_, v)| has_token(v)) {
+            return Err(refuse(
+                r,
+                "reserved-text",
+                format!(
+                    "value {key:?} holds the text \"${{meridian_secret_\", which is how this \
+                     target writes a secret's place in the values; write the secret as \
+                     ${{{{ secret.<name> }}}} or choose other text"
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The chart's values as `values.yaml`, each secret as its token.
+pub(crate) fn values_yaml(value: &Value, secrets: &[SecretName]) -> Yaml {
+    match value {
+        Value::Secret(slot) => match secrets.iter().find(|s| s.secret == *slot) {
+            Some(named) => Yaml::Raw(format!("\"{}\"", secret_token(&named.name))),
+            None => Yaml::str(meridian_sdk::SENSITIVE),
+        },
+        Value::List(items) => Yaml::Seq(items.iter().map(|v| values_yaml(v, secrets)).collect()),
+        Value::Map(map) => Yaml::Map(
+            map.iter()
+                .map(|(k, v)| (k.clone(), values_yaml(v, secrets)))
+                .collect(),
+        ),
+        other => plain(other),
+    }
+}
 
 pub use emit::{CHART_DIR, KUSTOMIZE_DIR, RELEASE_PATH};
 pub use runner::{
@@ -151,6 +241,8 @@ pub(crate) struct Chart {
     pub manifests: Vec<Manifest>,
     pub kustomization: Option<Kustomization>,
     pub outputs: Vec<OutputSpec>,
+    /// The name of each secret a value stands for.
+    pub secrets: Vec<SecretName>,
 }
 
 impl Chart {
@@ -223,7 +315,7 @@ impl Emitter for Helm {
             native_notify: false,
             synthetic_notify: true,
             runtime_condition: false,
-            secrets: false,
+            secrets: true,
             credentials: false,
         }
     }
@@ -233,7 +325,10 @@ impl Emitter for Helm {
     }
 
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        refuse_secrets_outside_values(graph)?;
+        refuse_token_text(graph)?;
         let mut chart = transform::transform(graph)?;
+        chart.secrets = graph.secrets.clone();
         let warnings = order::apply_edges(graph, &mut chart)?;
         validate::validate(&chart)?;
         Ok(Emitted {

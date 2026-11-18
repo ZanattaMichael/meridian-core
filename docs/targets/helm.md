@@ -360,6 +360,62 @@ Meridian follows an overlay's `namePrefix`, `nameSuffix` and `namespace`, so pla
 outputs and reports still name the resource you wrote. An object that a patch renames in
 some other way is reported under the tool's own name, such as `Deployment/other-name`.
 
+## Secrets
+
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in the document goes in
+one place: the `values`. A template reads it from there with `${values.<path>}`, into the
+`stringData` of a `v1/Secret`, and Helm is handed the values on standard input.
+
+```yaml
+spec:
+  target: helm
+  secrets:
+    - name: db_password
+      from: env
+      key: APP_DB_PASSWORD
+  resources:
+    - id: values
+      type: values
+      params:
+        dbPassword: ${{ secret.db_password }}
+
+    - id: db_login
+      type: v1/Secret
+      params:
+        stringData:
+          password: ${values.dbPassword}
+```
+
+**What the compile writes.** In `chart/values.yaml` the value is a token,
+`"${meridian_secret_db_password}"`, inside the quotes of a string, and the template reads
+`{{ .Values.dbPassword }}` as any other value. The compiled chart holds the token and never
+the value.
+
+**How the value reaches the tool.** `helm template`, which the plan renders with, and
+`helm upgrade --install` are each given `--values -`: the runner fills each token in with
+its value, escaped as a JSON string, on the way into `helm`, and the filled text is in
+protected memory only. The chart on disk is unchanged, the command line names no file and
+no value, and `helm`'s environment holds nothing of it.
+
+**What Helm keeps.** Helm stores a release's values and its rendered manifests in a Secret
+in the release's namespace, base64-encoded, and `helm get values` prints them. Anyone who
+may read Secrets in that namespace reads them. An output that reads a Secret's `data` is
+marked sensitive and masked wherever Meridian shows it.
+
+**What is refused.** A secret anywhere else is refused at compile, rule
+`unsupported-secret-place`: in the `chart`, `release` or `kustomization` resource it would
+be on `helm`'s command line; in an object's params it would be written into a template
+file as it stands. A document with a [Kustomize overlay](#kustomize-overlays) takes no
+secret in its values either: Kustomize reads the rendered manifests from a file in the
+work directory, where a secret cannot go. Text that reads as a token,
+`${meridian_secret_`, is refused too, rule `reserved-text`, so a document cannot make the
+runner fill a value in where the document wrote the token itself.
+
+The handover is tested against a stand-in `helm` that keeps what it reads
+(`plugins/helm/tests/run.rs`) and against the real `helm` in CI
+(`plugins/helm/tests/real.rs`): the value is in the rendered Secret, in no file the plugin
+wrote, and in nothing the plan prints.
+
 ## Outputs
 
 An output is a value later stages can use. It may hold:
@@ -506,6 +562,8 @@ kubeconfig, or `KUBECONFIG`. Point both at the same cluster.
 | `unsupported-dependency` | A `dependsOn` Helm's install order does not honour, or one on a settings resource. | Remove it; see [Ordering](#ordering). |
 | `unsupported-action` | A notification other than a restart of a workload, or two objects that notify each other. | See [Notifications](#notifications). |
 | `unsupported-state`, `unsupported-runtime-condition` | `state: absent` or `runtimeWhen`. | Remove the resource or the condition. |
+| `unsupported-secret-place` | A secret anywhere but the `values`, or in the values of a document with a Kustomize overlay. | See [Secrets](#secrets). |
+| `reserved-text` | A value holds the text `${meridian_secret_`, which is how a secret's place is written. | Write the secret as `${{ secret.<name> }}`, or choose other text. |
 
 ## Run errors
 

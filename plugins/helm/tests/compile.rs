@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text};
+use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text, secret_at};
 use meridian_sdk::{CompileError, Data, Emitted, Emitter, ResourceGraph};
 use meridian_target_helm::Helm;
 
@@ -572,4 +572,90 @@ fn an_output_that_refers_to_nothing_is_refused() {
 fn compiling_twice_gives_the_same_bytes() {
     let graph = graph_from_file("examples/helm/web-app.yaml", "helm");
     assert_eq!(emit(&graph).unwrap(), emit(&graph).unwrap());
+}
+
+/// The document with the given place made a secret called `db_password`.
+fn with_secret(spec: &str, id: &str, path: &[&str]) -> ResourceGraph {
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: app\nspec:\n  target: helm\n{spec}"
+    );
+    let mut graph = graph_from_text("app.yaml", &text, "helm");
+    secret_at(&mut graph, id, path, "db_password");
+    graph
+}
+
+const LOGIN: &str = "    - id: login\n      type: v1/Secret\n      params:\n        stringData:\n          password: ${values.db.password}\n";
+
+#[test]
+fn a_secret_in_the_values_is_a_token_the_runner_fills_on_the_way_to_helm() {
+    let graph = with_secret(
+        &format!("  resources:\n{VALUES}        db: {{user: app, password: placeholder}}\n{LOGIN}"),
+        "values",
+        &["db", "password"],
+    );
+    let emitted = emit(&graph).unwrap();
+    let values = &emitted.artifact.files["chart/values.yaml"];
+    assert!(
+        values.contains("db:\n  password: \"${meridian_secret_db_password}\"\n  user: app\n"),
+        "{values}"
+    );
+    assert!(!values.contains("(secret "), "{values}");
+    // The template reads the value as any other.
+    let template = &emitted.artifact.files["chart/templates/login.yaml"];
+    assert!(template.contains(".Values.db.password"), "{template}");
+    assert_eq!(
+        meridian_target_helm::secret_token("db_password"),
+        "${meridian_secret_db_password}"
+    );
+    assert!(Helm.capabilities().secrets);
+}
+
+#[test]
+fn a_secret_anywhere_but_the_values_is_refused_with_where_it_goes() {
+    let cases: [(&str, &str, &[&str], &str); 4] = [
+        (
+            "    - id: chart\n      type: chart\n      params:\n        version: 1.0.0\n",
+            "chart",
+            &["version"],
+            "the command line helm is given",
+        ),
+        (
+            "    - id: release\n      type: release\n      params:\n        namespace: web\n",
+            "release",
+            &["namespace"],
+            "the command line helm is given",
+        ),
+        (
+            CONFIG,
+            "settings",
+            &["data", "mode"],
+            "written into a template file as it stands",
+        ),
+        (
+            &format!("{VALUES}    - id: overlay\n      type: kustomization\n      params:\n        namePrefix: prod-\n"),
+            "values",
+            &["replicas"],
+            "has a kustomization",
+        ),
+    ];
+    for (resources, id, path, said) in cases {
+        let err = emit(&with_secret(
+            &format!("  resources:\n{resources}"),
+            id,
+            path,
+        ))
+        .unwrap_err();
+        assert_eq!(err.rule, "unsupported-secret-place", "{path:?}: {err}");
+        assert!(err.msg.contains(said), "{path:?}: {err}");
+        assert!(!err.msg.contains("(secret "), "{err}");
+    }
+}
+
+#[test]
+fn text_that_reads_as_a_secrets_token_is_refused() {
+    let err = refusal(
+        "  resources:\n    - id: values\n      type: values\n      params:\n        x: \"${meridian_secret_db_password}\"\n",
+    );
+    assert_eq!(err.rule, "reserved-text");
+    assert!(err.msg.contains("choose other text"), "{err}");
 }

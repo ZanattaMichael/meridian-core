@@ -8,8 +8,16 @@ use std::path::Path;
 use meridian_sdk::tool::{write_artifact, Finished, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
-    RunContext, RunError, Runner, Value,
+    RunContext, RunError, Runner, Value, Written,
 };
+
+use crate::podman_secret;
+
+/// The text that stands for a secret's value in the secrets script until
+/// the runner fills it in: it is unlike anything else the script holds.
+fn secret_token(name: &str) -> String {
+    format!("${{meridian_secret_{name}}}")
+}
 
 use crate::script::{self, Desired, FileState, Generator, Probe, Settings, Steps};
 use crate::META_PATH;
@@ -154,7 +162,62 @@ impl PodmanRunner {
         script: String,
         log: &dyn Log,
     ) -> Result<Finished, RunError> {
-        let tool = if is_local(&context.host) {
+        let tool = self.host_shell(context)?.stdin(script);
+        self.finished(context, tool.capture_stdout().run(log)?)
+    }
+
+    /// Creates the run's secrets in Podman on the host, before anything
+    /// else of an apply. The script holds the values, so it is put together
+    /// in protected memory and read by the host's shell on standard input
+    /// like every other script: locally a pipe, elsewhere the ssh
+    /// connection. A changed value is created anew; the container reads it
+    /// when it is next started.
+    fn secrets_on_host(&self, context: &RunContext, log: &dyn Log) -> Result<(), RunError> {
+        if context.secrets.is_empty() {
+            return Ok(());
+        }
+        let names: Vec<(String, String)> = context
+            .secrets
+            .names()
+            .into_iter()
+            .map(|name| (podman_secret(name), secret_token(name)))
+            .collect();
+        let script = context
+            .secrets
+            .filled_text(
+                &self.settings().secrets(&names),
+                secret_token,
+                Written::ShellSingleQuoted,
+            )
+            .map_err(|e| {
+                RunError::new(format!(
+                    "the secrets could not be put into the script for podman: {e}"
+                ))
+            })?;
+        log.out(&format!(
+            "creating {} in podman on {}",
+            names
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            host_name(context)
+        ));
+        let tool = self.host_shell(context)?.stdin_secret(script);
+        let finished = self.finished(context, tool.capture_stdout().run(log)?)?;
+        if !finished.success() {
+            return Err(finished.into_error(format!(
+                "could not create the secrets in podman on {}",
+                host_name(context)
+            )));
+        }
+        Ok(())
+    }
+
+    /// The shell on the host a context names, reading its script from
+    /// standard input.
+    fn host_shell(&self, context: &RunContext) -> Result<Tool, RunError> {
+        Ok(if is_local(&context.host) {
             Tool::new(&self.shell).args(["-c", READ_AND_RUN])
         } else {
             let host = context.host.as_str();
@@ -166,8 +229,11 @@ impl PodmanRunner {
                 .args(self.ssh_args.iter().cloned())
                 .arg(host)
                 .arg(format!("sh -c {}", script::quote(READ_AND_RUN)))
-        };
-        let finished = tool.stdin(script).capture_stdout().run(log)?;
+        })
+    }
+
+    /// A script's end, with ssh's own failures told apart from the script's.
+    fn finished(&self, context: &RunContext, finished: Finished) -> Result<Finished, RunError> {
         // ssh keeps 255 for its own failures; the script never exits with it.
         if finished.code == Some(255) && !is_local(&context.host) {
             return Err(finished.into_error(format!("could not reach {} over ssh", context.host)));
@@ -316,6 +382,9 @@ impl Runner for PodmanRunner {
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
         let survey = self.survey(context, artifact, log)?;
+        // The secrets first, so a unit that names one can start, and on
+        // every apply, so a changed value is in place for the next start.
+        self.secrets_on_host(context, log)?;
         let now_installed: Vec<Installed> = survey
             .meta
             .units

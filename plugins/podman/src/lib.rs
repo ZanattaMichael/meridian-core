@@ -56,6 +56,21 @@ use meridian_sdk::{
     ResourceGraph,
 };
 
+/// The name of the Podman secret a document's secret becomes. The runner
+/// creates it on the host from the value, over the script's own standard
+/// input, before the units are installed; the unit names it and never
+/// holds the value.
+pub fn podman_secret(name: &str) -> String {
+    format!("meridian_secret_{name}")
+}
+
+/// What a secret in a container's `Environment` is written as: Quadlet's
+/// `Secret=` key, which has Podman put the secret's value in the variable
+/// when the container starts.
+pub fn secret_reference(name: &str, variable: &str) -> String {
+    format!("{},type=env,target={variable}", podman_secret(name))
+}
+
 pub use emit::META_PATH;
 pub use runner::{PodmanRunner, Scope};
 
@@ -246,7 +261,7 @@ impl Emitter for Podman {
             native_notify: true,
             synthetic_notify: false,
             runtime_condition: false,
-            secrets: false,
+            secrets: true,
             credentials: false,
         }
     }
