@@ -39,8 +39,7 @@ params:
 
 ## How a reference is resolved
 
-Meridian's core only *finds* references. The plugin *rewrites* each one into its
-tool's own form, and the tool produces the value when it runs.
+The core finds references; the plugin rewrites them into the tool's form.
 
 ```mermaid
 flowchart LR
@@ -50,7 +49,7 @@ flowchart LR
     C --> D["the tool reads the value<br/>when it plans or applies"]
 ```
 
-So two things are checked when the document is compiled, before anything runs:
+Checked at compile:
 
 1. **The resource exists.**
 
