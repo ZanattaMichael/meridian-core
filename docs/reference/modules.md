@@ -117,6 +117,7 @@ spec:
 | `spec.modules` | no | The modules this one needs. See [requiring a module](#requiring-a-module) |
 | `spec.credentials` | no | Logins for registries, each naming where its password comes from. See [registry logins](#registry-logins) |
 | `spec.settings` | no | How each target's runner is configured for this project, by target and then by setting name. See [plugin settings](#plugin-settings) |
+| `spec.retarget.out` | no | Where [`meridian retarget`](../operations/retargeting.md#where-the-moved-file-goes) writes a moved file, as a pattern of `{name}`, `{target}` and `{ext}` |
 | `spec.schemas` | no | Where `meridian schema sync` fetches signed schema bundles from, and how strict to be about their signatures. See [schema registries](#schema-registries) |
 
 A field that is not in this table is an error, not something silently ignored.

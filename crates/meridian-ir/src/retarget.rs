@@ -212,11 +212,16 @@ fn replace_scalar(lines: &Lines, node: &Node, with: &str) -> Result<Edit, String
             .find(quote as char)
             .map(|end| end + 2)
             .ok_or("spec.target is a quoted value over several lines")?,
-        _ => rest
-            .find([',', '}', ']', '\r'])
-            .or_else(|| rest.find(" #"))
-            .unwrap_or(rest.len())
-            .min(rest.trim_end().len()),
+        // A plain value ends at the first of a flow separator, a comment
+        // or the end of the line, without the spaces before it.
+        _ => {
+            let end = [rest.find([',', '}', ']', '\r']), rest.find(" #")]
+                .into_iter()
+                .flatten()
+                .min()
+                .unwrap_or(rest.len());
+            rest[..end].trim_end().len()
+        }
     };
     let quoted = matches!(rest.as_bytes().first(), Some(b'"' | b'\''));
     Ok(Edit {
@@ -243,17 +248,31 @@ fn insert_adopt(lines: &Lines, item: &Node, identifier: &str) -> Option<Edit> {
     if rest.starts_with('{') || value.line != key.line {
         return None;
     }
+    // A tab before the key would make the new line's indent ambiguous.
+    let line_start = lines.starts.get(key.line.checked_sub(1)?).copied()?;
+    let (key_at, _) = lines.at(key)?;
+    if lines.text[line_start..key_at].contains('\t') {
+        return None;
+    }
     let end = lines.line_end(key).unwrap_or(lines.text.len());
-    let newline = if lines.text[..end].ends_with('\n') {
-        ""
+    // The file's own line ending, so a CRLF file stays CRLF.
+    let eol = if lines.text[..end].ends_with("\r\n")
+        || (!lines.text[..end].ends_with('\n') && lines.text.contains("\r\n"))
+    {
+        "\r\n"
     } else {
         "\n"
+    };
+    let before = if lines.text[..end].ends_with('\n') {
+        ""
+    } else {
+        eol
     };
     let indent = " ".repeat(key.column.saturating_sub(1));
     Some(Edit {
         start: end,
         end,
-        with: format!("{newline}{indent}adopt: {}\n", quote(identifier)),
+        with: format!("{before}{indent}adopt: {}{eol}", quote(identifier)),
     })
 }
 
@@ -268,12 +287,25 @@ fn quote(text: &str) -> String {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
             '$' if chars.peek() == Some(&'{') => out.push_str("$$"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c if !printable(c) => out.push_str(&format!("\\u{:04x}", c as u32)),
             c => out.push(c),
         }
     }
     out.push('"');
     out
+}
+
+/// Whether YAML lets `c` stand as it is in a quoted scalar (its printable
+/// set, less the line breaks, which a quoted line must not hold).
+fn printable(c: char) -> bool {
+    matches!(c,
+        '\u{20}'..='\u{7e}'
+        | '\u{a0}'..='\u{d7ff}'
+        | '\u{e000}'..='\u{fffd}'
+        | '\u{10000}'..='\u{10ffff}')
+        && c != '\u{feff}'
+        && c != '\u{2028}'
+        && c != '\u{2029}'
 }
 
 #[cfg(test)]
@@ -410,5 +442,123 @@ spec:
         )
         .unwrap();
         assert_eq!(out.text, text.replace("ansible", "salt"));
+    }
+
+    fn move_to(
+        text: &str,
+        to: &str,
+        found: &BTreeMap<String, BTreeMap<String, String>>,
+    ) -> Retargeted {
+        retarget(
+            "a.yaml",
+            text,
+            &Retarget {
+                to,
+                adopt: true,
+                identifiers: found,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn each_document_of_a_file_takes_its_own_identifiers() {
+        let text = "\
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: net
+spec:
+  target: terraform
+  resources:
+    - id: web
+      type: aws_instance
+---
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: data
+spec:
+  target: terraform
+  resources:
+    - id: web
+      type: aws_instance
+";
+        let mut found = ids("net", &[("web", "i-net")]);
+        found.extend(ids("data", &[("web", "i-data")]));
+        let out = move_to(text, "opentofu", &found);
+        let (first, second) = out.text.split_once("---\n").unwrap();
+        assert!(first.contains("  target: opentofu\n"));
+        assert!(first.contains("      adopt: \"i-net\"\n"));
+        assert!(second.contains("  target: opentofu\n"));
+        assert!(second.contains("      adopt: \"i-data\"\n"));
+        assert_eq!(out.moved.len(), 2);
+        assert_eq!(out.moved[1].name, "data");
+        crate::parse("a.yaml", out.text.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn a_crlf_file_stays_crlf_and_other_layouts_keep_their_indent() {
+        let text = "apiVersion: meridian/v1\r\nkind: Infrastructure\r\nmetadata:\r\n  name: net\r\nspec:\r\n    target: terraform\r\n    resources:\r\n        # the vm\r\n        -   id: web\r\n            type: aws_instance\r\n";
+        let out = move_to(text, "opentofu", &ids("net", &[("web", "i-1")]));
+        assert_eq!(
+            out.text,
+            text.replace("terraform", "opentofu")
+                .replace("id: web\r\n", "id: web\r\n            adopt: \"i-1\"\r\n")
+        );
+        assert!(!out.text.replace("\r\n", "").contains('\n'));
+        crate::parse("a.yaml", out.text.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn the_last_line_of_a_file_without_a_newline_is_extended() {
+        let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata: {name: net}\nspec:\n  target: terraform\n  resources:\n    - type: aws_instance\n      id: web";
+        let out = move_to(text, "opentofu", &ids("net", &[("web", "i-1")]));
+        assert!(
+            out.text.ends_with("      id: web\n      adopt: \"i-1\"\n"),
+            "{}",
+            out.text
+        );
+        crate::parse("a.yaml", out.text.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn a_flow_spec_has_its_target_replaced_in_place() {
+        let text = "kind: ResourceSet\nmetadata: {name: web, labels: {owner: \"Zoë\"}}\nspec: {targetVersion: \"ü1\", target: ansible, resources: []}\n";
+        let out = move_to(text, "salt", &BTreeMap::new());
+        assert_eq!(out.text, text.replace("ansible", "salt"));
+        assert!(out.moved[0]
+            .notes
+            .iter()
+            .any(|n| n.contains("targetVersion")));
+    }
+
+    #[test]
+    fn a_tab_before_the_id_is_left_for_the_author() {
+        let text = "kind: Infrastructure\nmetadata: {name: net}\nspec:\n  target: terraform\n  resources:\n    -\tid: web\n      type: aws_instance\n";
+        let out = move_to(text, "opentofu", &ids("net", &[("web", "i-1")]));
+        assert!(!out.text.contains("adopt"));
+        assert!(out.moved[0].notes.iter().any(|n| n.contains("by hand")));
+    }
+
+    #[test]
+    fn a_moved_file_moves_back_and_keeps_its_adopt_lines() {
+        let found = ids("net", &[("vpc", "vpc-123")]);
+        let there = move_to(DOC, "opentofu", &found);
+        let back = move_to(&there.text, "terraform", &found);
+        assert_eq!(
+            back.text,
+            there.text.replace("\"opentofu\"", "\"terraform\"")
+        );
+        assert!(back.moved[0].adopted.is_empty());
+    }
+
+    #[test]
+    fn characters_yaml_cannot_hold_as_they_are_are_escaped() {
+        assert_eq!(
+            quote("a\tb\u{7}c\u{feff}d\u{85}"),
+            "\"a\\u0009b\\u0007c\\ufeffd\\u0085\""
+        );
+        assert_eq!(quote("ü 🎉 #x: y"), "\"ü 🎉 #x: y\"");
     }
 }

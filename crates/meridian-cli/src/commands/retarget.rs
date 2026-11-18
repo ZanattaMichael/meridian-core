@@ -66,15 +66,27 @@ pub(crate) fn retarget(
     )
     .map_err(|e| Failure::Message(format!("{name}: {e}")))?;
 
-    let out = match out {
-        Some(path) => path.to_path_buf(),
-        None => beside(file, to),
+    // `--out`, else the project's `spec.retarget.out`, else beside the file.
+    let (out, out_from) = match out {
+        Some(path) => (path.to_path_buf(), "cli"),
+        None => match manifest_pattern()? {
+            Some(pattern) => (from_pattern(file, to, &pattern), "manifest"),
+            None => (from_pattern(file, to, DEFAULT_PATTERN), "default"),
+        },
     };
     if out.exists() {
         return Err(Failure::Message(format!(
             "{} already exists; remove it or give --out",
             out.display()
         )));
+    }
+    if let Some(parent) = out.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            Failure::Message(format!(
+                "{}: cannot create directory: {e}",
+                parent.display()
+            ))
+        })?;
     }
     std::fs::write(&out, &moved.text)
         .map_err(|e| Failure::Message(format!("{}: cannot write file: {e}", out.display())))?;
@@ -107,6 +119,7 @@ pub(crate) fn retarget(
             body([
                 ("file", name.clone().into()),
                 ("out", out.display().to_string().into()),
+                ("outFrom", out_from.into()),
                 ("to", to.into()),
                 ("adoption", adoption.as_str().into()),
                 ("documents", documents.into()),
@@ -139,15 +152,36 @@ pub(crate) fn retarget(
     Ok(())
 }
 
-/// `site.yaml` moved to `opentofu` is `site.opentofu.yaml`, beside it.
-fn beside(file: &Path, to: &str) -> PathBuf {
-    let stem = file
+/// Where a moved file goes when neither `--out` nor the project says.
+const DEFAULT_PATTERN: &str = "{name}.{target}.{ext}";
+
+/// The project's `spec.retarget.out`, from `meridian.yaml` in the current
+/// directory, when it has one.
+fn manifest_pattern() -> Result<Option<String>, Failure> {
+    let dir = Path::new(".");
+    if !dir.join(meridian_module::MANIFEST_FILE).is_file() {
+        return Ok(None);
+    }
+    meridian_module::Manifest::load(dir)
+        .map(|manifest| manifest.retarget_out)
+        .map_err(module_failure)
+}
+
+/// A pattern of `{name}`, `{target}` and `{ext}`, relative to the file moved:
+/// `site.yaml` moved to `opentofu` by the default is `site.opentofu.yaml`,
+/// beside it.
+fn from_pattern(file: &Path, to: &str, pattern: &str) -> PathBuf {
+    let name = file
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let extension = file
+    let ext = file
         .extension()
         .map(|e| e.to_string_lossy().into_owned())
         .unwrap_or_else(|| "yaml".to_owned());
-    file.with_file_name(format!("{stem}.{to}.{extension}"))
+    let relative = pattern
+        .replace("{name}", &name)
+        .replace("{target}", to)
+        .replace("{ext}", &ext);
+    file.parent().unwrap_or(Path::new("")).join(relative)
 }

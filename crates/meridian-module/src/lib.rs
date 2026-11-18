@@ -34,7 +34,8 @@ mod signature;
 pub use integrity::hash_dir;
 pub use lock::{valid_digest, Lock, Locked, LockedBundle, LockedSchemas, LOCK_FILE, LOCK_VERSION};
 pub use manifest::{
-    valid_name, Manifest, Requirement, SchemaRegistry, SchemaSettings, Source, MANIFEST_FILE,
+    check_retarget_out, valid_name, Manifest, Requirement, SchemaRegistry, SchemaSettings, Source,
+    MANIFEST_FILE, RETARGET_PLACEHOLDERS,
 };
 pub use oci::{
     list_tags, pull_artifact, push, push_artifact, valid_tag, Artifact, ArtifactKind, Pushed,

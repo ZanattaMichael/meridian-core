@@ -223,3 +223,279 @@ fn the_result_is_one_json_object_the_schema_accepts() {
     assert_eq!(value["adoption"], "import");
     assert_eq!(value["documents"][0]["adopted"][0], "motd");
 }
+
+fn meridian_with(dir: &Path, env: &[(&str, &str)], args: &[&str]) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_meridian"));
+    command
+        .env("MERIDIAN_ANNOTATIONS", "off")
+        .env("MERIDIAN_PLUGIN_DIR", plugin_dirs())
+        .env_remove("MERIDIAN_STATE_DIR")
+        .env_remove("MERIDIAN_BACKEND")
+        .args(args)
+        .current_dir(dir);
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    command.output().expect("meridian runs")
+}
+
+fn refused(output: &Output) -> String {
+    assert!(!output.status.success(), "it succeeded:\n{}", text(output));
+    text(output)
+}
+
+const MANIFEST: &str = "apiVersion: meridian/v1\nkind: Module\nmetadata:\n  name: estate\nspec:\n  retarget:\n    out: \"moved/{name}.{target}.{ext}\"\n";
+
+#[test]
+fn the_project_names_where_a_moved_file_goes_unless_the_command_line_does() {
+    let dir = scratch("manifest");
+    ok(&meridian(&dir, "import", &["apply", "site.yaml"]));
+    fs::write(dir.join("meridian.yaml"), MANIFEST).unwrap();
+
+    let output = meridian(
+        &dir,
+        "import",
+        &[
+            "retarget",
+            "site.yaml",
+            "--to",
+            "fake-next",
+            "--output",
+            "json",
+        ],
+    );
+    ok(&output);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["outFrom"], "manifest");
+    assert!(dir.join("moved/site.fake-next.yaml").is_file());
+    assert!(!dir.join("site.fake-next.yaml").exists());
+
+    let output = meridian(
+        &dir,
+        "import",
+        &[
+            "retarget",
+            "site.yaml",
+            "--to",
+            "fake-next",
+            "--out",
+            "here.yaml",
+            "--output",
+            "json",
+        ],
+    );
+    ok(&output);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["outFrom"], "cli");
+    assert!(dir.join("here.yaml").is_file());
+
+    // Without a manifest the default is used, and says so.
+    fs::remove_file(dir.join("meridian.yaml")).unwrap();
+    let output = meridian(
+        &dir,
+        "import",
+        &[
+            "retarget",
+            "site.yaml",
+            "--to",
+            "fake-next",
+            "--output",
+            "json",
+        ],
+    );
+    ok(&output);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["outFrom"], "default");
+    assert!(dir.join("site.fake-next.yaml").is_file());
+}
+
+#[test]
+fn a_pattern_the_project_gets_wrong_is_refused_before_anything_is_read() {
+    let dir = scratch("bad-manifest");
+    fs::write(
+        dir.join("meridian.yaml"),
+        MANIFEST.replace("{name}.{target}.{ext}", "{name}.yaml"),
+    )
+    .unwrap();
+    let said = refused(&meridian(
+        &dir,
+        "import",
+        &["retarget", "site.yaml", "--to", "fake-next", "--no-adopt"],
+    ));
+    assert!(said.contains("spec.retarget.out"), "{said}");
+    assert!(said.contains("must hold {target}"), "{said}");
+}
+
+#[test]
+fn only_what_the_old_tool_applied_is_adopted_and_the_rest_is_created() {
+    let dir = scratch("partial");
+    // The old tool has applied the motd only.
+    let first = SITE.split("    - id: banner").next().unwrap().to_owned();
+    fs::write(dir.join("first.yaml"), &first).unwrap();
+    ok(&meridian(&dir, "import", &["apply", "first.yaml"]));
+
+    let said = ok(&meridian(
+        &dir,
+        "import",
+        &["retarget", "site.yaml", "--to", "fake-next"],
+    ));
+    assert!(said.contains("1 resource adopted"), "{said}");
+    let moved = fs::read_to_string(dir.join("site.fake-next.yaml")).unwrap();
+    assert!(
+        moved.contains("    - id: motd\n      adopt: \"fake-motd\"\n"),
+        "{moved}"
+    );
+    assert!(
+        moved.contains("    - id: banner\n      type: file\n"),
+        "{moved}"
+    );
+    let plan = ok(&meridian(&dir, "import", &["plan", "site.fake-next.yaml"]));
+    assert!(plan.contains("= adopt files/motd"), "{plan}");
+    assert!(plan.contains("+ create files/banner"), "{plan}");
+}
+
+#[test]
+fn each_document_of_a_file_adopts_what_its_own_tool_manages() {
+    let dir = scratch("documents");
+    let db = SITE
+        .replace("name: web", "name: db")
+        .replace("web01", "db01")
+        .replace("id: banner", "id: schema");
+    let both = format!("{SITE}---\n{db}");
+    fs::write(dir.join("site.yaml"), &both).unwrap();
+    ok(&meridian(&dir, "import", &["apply", "site.yaml"]));
+
+    let said = ok(&meridian(
+        &dir,
+        "import",
+        &["retarget", "site.yaml", "--to", "fake-next"],
+    ));
+    assert!(
+        said.contains("web: fake -> fake-next, 2 resources adopted"),
+        "{said}"
+    );
+    assert!(
+        said.contains("db: fake -> fake-next, 2 resources adopted"),
+        "{said}"
+    );
+    let moved = fs::read_to_string(dir.join("site.fake-next.yaml")).unwrap();
+    assert!(moved.contains("adopt: \"fake-banner\""), "{moved}");
+    assert!(moved.contains("adopt: \"fake-schema\""), "{moved}");
+    let plan = ok(&meridian(&dir, "import", &["plan", "site.fake-next.yaml"]));
+    assert_eq!(plan.matches("= adopt").count(), 4, "{plan}");
+    assert!(!plan.contains("create"), "{plan}");
+}
+
+#[test]
+fn an_old_tool_that_cannot_report_what_it_manages_is_refused() {
+    let dir = scratch("cannot-report");
+    ok(&meridian(&dir, "import", &["apply", "site.yaml"]));
+    let said = refused(&meridian_with(
+        &dir,
+        &[("FAKE_ADOPT", "import"), ("FAKE_IDENTIFIERS", "off")],
+        &["retarget", "site.yaml", "--to", "fake-next"],
+    ));
+    assert!(said.contains("cannot report what it manages"), "{said}");
+    assert!(said.contains("--no-adopt"), "{said}");
+    assert!(!dir.join("site.fake-next.yaml").exists());
+}
+
+#[test]
+fn a_moved_document_moves_back_without_anything_to_do() {
+    let dir = scratch("back");
+    ok(&meridian(&dir, "import", &["apply", "site.yaml"]));
+    ok(&meridian(
+        &dir,
+        "import",
+        &["retarget", "site.yaml", "--to", "fake-next"],
+    ));
+    ok(&meridian(&dir, "import", &["apply", "site.fake-next.yaml"]));
+    ok(&meridian(
+        &dir,
+        "import",
+        &[
+            "retarget",
+            "site.fake-next.yaml",
+            "--to",
+            "fake",
+            "--out",
+            "back.yaml",
+        ],
+    ));
+    let back = fs::read_to_string(dir.join("back.yaml")).unwrap();
+    // Each resource keeps the one adopt line it had.
+    assert_eq!(back.matches("adopt:").count(), 2, "{back}");
+    let plan = ok(&meridian(&dir, "import", &["plan", "back.yaml"]));
+    assert!(!plan.contains("create"), "{plan}");
+    assert!(!plan.contains("adopt files"), "{plan}");
+}
+
+#[test]
+fn a_target_that_cannot_adopt_is_moved_with_a_warning() {
+    let dir = scratch("none");
+    let said = ok(&meridian(
+        &dir,
+        "none",
+        &["retarget", "site.yaml", "--to", "fake-next"],
+    ));
+    assert!(said.contains("cannot adopt what exists"), "{said}");
+    let moved = fs::read_to_string(dir.join("site.fake-next.yaml")).unwrap();
+    assert!(!moved.contains("adopt"), "{moved}");
+}
+
+#[test]
+fn what_cannot_be_moved_is_refused_and_writes_nothing() {
+    let dir = scratch("refusals");
+    let said = refused(&meridian(
+        &dir,
+        "import",
+        &["retarget", "site.yaml", "--to", "nowhere"],
+    ));
+    assert!(
+        said.contains("no plugin is installed for the target \"nowhere\""),
+        "{said}"
+    );
+    let said = refused(&meridian(
+        &dir,
+        "import",
+        &["retarget", "site.yaml", "--to", "fake", "--no-adopt"],
+    ));
+    assert!(said.contains("already on fake"), "{said}");
+    let said = refused(&meridian(
+        &dir,
+        "import",
+        &["retarget", "missing.yaml", "--to", "fake-next"],
+    ));
+    assert!(said.contains("missing.yaml"), "{said}");
+
+    // A JSON document is refused: its layout could not be kept.
+    let json = r#"{"apiVersion": "meridian/v1", "kind": "ResourceSet", "metadata": {"name": "web"},
+  "spec": {"target": "fake", "targetHost": {"from": "inline", "host": "h"},
+           "resources": [{"id": "motd", "type": "file", "params": {"content": "x"}}]}}"#;
+    fs::write(dir.join("site.json"), json).unwrap();
+    let said = refused(&meridian(
+        &dir,
+        "import",
+        &["retarget", "site.json", "--to", "fake-next", "--no-adopt"],
+    ));
+    assert!(said.contains("rewrites YAML only"), "{said}");
+
+    // A document that does not validate is never moved.
+    fs::write(
+        dir.join("bad.yaml"),
+        SITE.replace("type: file", "tpye: file"),
+    )
+    .unwrap();
+    refused(&meridian(
+        &dir,
+        "import",
+        &["retarget", "bad.yaml", "--to", "fake-next", "--no-adopt"],
+    ));
+    let written: Vec<_> = fs::read_dir(&dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains("fake-next"))
+        .collect();
+    assert!(written.is_empty(), "{written:?}");
+}

@@ -22,6 +22,15 @@
       "type": "string",
       "description": "The file written"
     },
+    "outFrom": {
+      "type": "string",
+      "enum": [
+        "cli",
+        "manifest",
+        "default"
+      ],
+      "description": "What chose `out`: --out, spec.retarget.out in meridian.yaml, or the default {name}.{target}.{ext}"
+    },
     "to": {
       "type": "string"
     },
@@ -83,6 +92,7 @@
     "ok",
     "file",
     "out",
+    "outFrom",
     "to",
     "adoption",
     "documents",

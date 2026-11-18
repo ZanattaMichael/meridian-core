@@ -438,8 +438,9 @@ meridian retarget site.yaml --to opentofu --out next/site.yaml
 meridian retarget web.yaml --to salt --no-adopt
 ```
 
-- `--out` names the file to write. Default: `site.opentofu.yaml` beside
-  `site.yaml`. An existing file is refused.
+- `--out` names the file to write. Without it, `spec.retarget.out` in the
+  project's `meridian.yaml` decides, and without that `site.opentofu.yaml`
+  beside `site.yaml`. An existing file is refused.
 - `--no-adopt` reads nothing from the old tool and writes no `adopt:`.
 - Without `--no-adopt`, a document the old tool has not applied, or an old
   target whose plugin cannot report what it manages, is refused.

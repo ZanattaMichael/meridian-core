@@ -103,7 +103,28 @@ struct Cli {
     annotations: AnnotationMode,
 }
 
+/// The stack the command runs on. Windows gives the main thread 1 MiB, which
+/// an unoptimised build of `run`, holding every command's locals in one
+/// frame, outgrew; the stack is set here rather than by each platform.
+const STACK: usize = 16 * 1024 * 1024;
+
 fn main() -> ExitCode {
+    match std::thread::Builder::new()
+        .name("meridian".to_owned())
+        .stack_size(STACK)
+        .spawn(run)
+    {
+        Ok(command) => command
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+        Err(e) => {
+            eprintln!("error: starting the command: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> ExitCode {
     // Before anything is read: no core dump of this process, and no other
     // process of the same user reading its memory, so a secret fetched later
     // cannot leave that way.

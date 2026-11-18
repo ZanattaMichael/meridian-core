@@ -33,6 +33,12 @@ this part fills it in.
 - **Refuse rather than move silently.** With `import`, a document the old tool
   never applied, or an old tool that cannot report, is refused unless
   `--no-adopt` is given.
+- **Where the new file goes: three sources, the first set wins** (the owner's
+  answer on the pull request): `--out`, then `spec.retarget.out` in the
+  project's `meridian.yaml` (a pattern of `{name}`, `{target}` and `{ext}`
+  that must hold `{target}`), then `{name}.{target}.{ext}` beside the file.
+  A setting for every project of a user or an organisation waits on a global
+  settings file, issue 219.
 - **No tool changes anything.** `retarget` does not clean the old tool's state
   and does not plan; the output says to run `meridian plan` on the new file.
 
@@ -47,6 +53,5 @@ this part fills it in.
 
 ## Status
 
-Proposed. Open to the owner: the default output name (`site.<target>.yaml`),
-whether `retarget` should also run a compile of the new file, and whether a
+Proposed. The output name was settled by the owner. Still open: whether `retarget` should also run a compile of the new file, and whether a
 later command should remove adopted resources from the old tool's state.

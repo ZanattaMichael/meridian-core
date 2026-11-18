@@ -630,8 +630,10 @@ impl Runner for FakeRunner {
         Ok(outputs_of(&state, context))
     }
 
+    /// `FAKE_IDENTIFIERS=off` stands it in for a plugin that cannot report
+    /// what it manages.
     fn reads_identifiers(&self) -> bool {
-        true
+        std::env::var("FAKE_IDENTIFIERS").as_deref() != Ok("off")
     }
 
     /// Each file the state holds, by its resource id; its identifier is
