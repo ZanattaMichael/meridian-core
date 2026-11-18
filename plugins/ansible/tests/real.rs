@@ -398,10 +398,13 @@ fn a_credential_names_the_user_in_the_inventory_and_its_key_reaches_ansible_priv
 
 /// A module named in full, beside the shared types: a line kept in a
 /// file, and a module that only reads.
+/// `create: true` is the module's own argument: in a check run the file the
+/// copy would write does not exist yet, and without it lineinfile fails
+/// rather than reporting the line it would add.
 fn with_modules(root: &Path, line: &str) -> Artifact {
     let root = root.display();
     compile(&format!(
-        "    - id: conf\n      type: file\n      params:\n        path: {root}/app.conf\n        content: \"# settings\\n\"\n    - id: workers\n      type: ansible.builtin.lineinfile\n      state: present\n      params:\n        path: {root}/app.conf\n        regexp: '^workers'\n        line: \"{line}\"\n      dependsOn:\n        - resource: conf\n      notifies:\n        - resource: stamp\n          action: run\n    - id: stamp\n      type: ansible.builtin.copy\n      params:\n        dest: {root}/stamp\n        content: \"changed\\n\"\n    - id: looked\n      type: ansible.builtin.stat\n      params:\n        path: {root}/app.conf\n      dependsOn:\n        - resource: workers\n"
+        "    - id: conf\n      type: file\n      params:\n        path: {root}/app.conf\n        content: \"# settings\\n\"\n    - id: workers\n      type: ansible.builtin.lineinfile\n      state: present\n      params:\n        path: {root}/app.conf\n        regexp: '^workers'\n        line: \"{line}\"\n        create: true\n      dependsOn:\n        - resource: conf\n      notifies:\n        - resource: stamp\n          action: run\n    - id: stamp\n      type: ansible.builtin.copy\n      params:\n        dest: {root}/stamp\n        content: \"changed\\n\"\n    - id: looked\n      type: ansible.builtin.stat\n      params:\n        path: {root}/app.conf\n      dependsOn:\n        - resource: workers\n"
     ))
 }
 
