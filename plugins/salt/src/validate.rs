@@ -65,7 +65,7 @@ pub(crate) fn validate(sls: &Sls) -> Result<(), CompileError> {
                 "state has no function".to_owned(),
             ));
         }
-        if !state.args.iter().any(|(name, _)| name == "name") {
+        if !state.native && !state.args.iter().any(|(name, _)| name == "name") {
             return Err(fail(
                 state,
                 "missing-name",
@@ -247,11 +247,11 @@ mod tests {
     use super::*;
     use meridian_sdk::{Position, Value};
 
-    fn state(module: &'static str, function: &'static str, id: &str) -> State {
+    fn state(module: &str, function: &str, id: &str) -> State {
         State {
             id: id.to_owned(),
-            module,
-            function,
+            module: module.to_owned(),
+            function: function.to_owned(),
             args: vec![("name".to_owned(), Value::String("nginx".to_owned()))],
             resource_id: id.to_owned(),
             pos: Position {
@@ -262,9 +262,9 @@ mod tests {
         }
     }
 
-    fn to(module: &'static str, id: &str) -> Reference {
+    fn to(module: &str, id: &str) -> Reference {
         Reference {
-            module,
+            module: module.to_owned(),
             id: id.to_owned(),
         }
     }
@@ -323,8 +323,8 @@ mod tests {
             ("duplicate-state-id", "svc", |s| {
                 s.reactions[0].id = "conf".to_owned()
             }),
-            ("missing-function", "pkg", |s| s.states[0].function = ""),
-            ("missing-function", "pkg", |s| s.states[0].module = ""),
+            ("missing-function", "pkg", |s| s.states[0].function.clear()),
+            ("missing-function", "pkg", |s| s.states[0].module.clear()),
             ("missing-name", "pkg", |s| s.states[0].args.clear()),
             ("missing-requisite", "conf", |s| {
                 s.states[1].require = vec![to("pkg", "gone")];

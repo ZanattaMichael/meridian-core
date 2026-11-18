@@ -9,7 +9,7 @@ use crate::{refuse_at, Block, Cookbook, NAME};
 /// The property Chef identifies the managed thing by, for the resources
 /// where two blocks managing one thing would fight each other.
 fn identity(block: &Block) -> Option<(&'static str, &Value)> {
-    let property = match block.resource {
+    let property = match block.resource.as_str() {
         "package" => "package_name",
         "service" => "service_name",
         "file" | "directory" => "path",
@@ -40,7 +40,7 @@ pub(crate) fn validate(cookbook: &Cookbook) -> Result<(), CompileError> {
         let kind = if block.resource == "directory" {
             "file"
         } else {
-            block.resource
+            block.resource.as_str()
         };
         if let Some(previous) = seen.insert((kind, value.canonical()), &block.resource_id) {
             return Err(refuse_at(
@@ -74,7 +74,7 @@ mod tests {
 
     fn block(resource: &'static str, id: &str, property: &str, value: &str) -> Block {
         Block {
-            resource,
+            resource: resource.to_owned(),
             name: id.to_owned(),
             properties: [(property.to_owned(), Value::String(value.to_owned()))].into(),
             resource_id: id.to_owned(),

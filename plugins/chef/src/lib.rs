@@ -61,7 +61,7 @@ fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
 
 pub use emit::{metadata_path, recipe_path};
 pub use runner::{ChefRunner, Transport};
-pub use transform::supported_resource_types;
+pub use transform::{supported_resource_types, NATIVE_PATTERN};
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "chef";
@@ -90,13 +90,14 @@ pub(crate) struct Notify {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Block {
     /// The Chef resource: `package`, `execute`, `directory`.
-    pub resource: &'static str,
+    pub resource: String,
     /// The block's name, unique for its resource across the recipe.
     pub name: String,
     /// The properties, keyed by Chef's own name for each.
     pub properties: BTreeMap<String, Value>,
-    /// The actions, in the order Chef takes them.
-    pub actions: Vec<&'static str>,
+    /// The actions, in the order Chef takes them. Empty on a resource of
+    /// Chef's own that was given no state: it takes its default action.
+    pub actions: Vec<String>,
     /// The Ruby an `only_if` guard holds, or empty.
     pub only_if: String,
     pub notifies: Vec<Notify>,

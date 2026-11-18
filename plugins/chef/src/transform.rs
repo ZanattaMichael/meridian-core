@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
+use meridian_sdk::{CompileError, Resource, ResourceGraph, ResourceSchema, TypeName, Value};
 
 use crate::{refuse, Block, Cookbook, NAME};
 
@@ -121,32 +121,162 @@ pub(crate) fn mapping(resource_type: &str) -> Option<Mapping> {
     })
 }
 
-const TYPES: [&str; 6] = ["exec", "file", "group", "package", "service", "user"];
+/// The six shared types, sorted.
+const SHARED: &[&str] = &["exec", "file", "group", "package", "service", "user"];
+
+/// How an editor is told that any Chef resource is a type: its name, as a
+/// recipe writes it.
+pub const NATIVE_PATTERN: &str = "<resource>";
 
 /// What each resource type takes, read from the same table a resource is
 /// checked against, so an editor is never told something `emit` refuses.
-pub fn resource_schemas() -> Vec<meridian_sdk::ResourceSchema> {
-    supported_resource_types()
-        .iter()
-        .filter_map(|name| {
-            let m = mapping(name)?;
-            let params: Vec<&str> = m.params.iter().map(|(param, _)| *param).collect();
-            let states: Vec<&str> = m.states.iter().map(|(state, _)| *state).collect();
-            Some(meridian_sdk::schema::shared(
-                name,
-                &params,
-                m.required,
-                &states,
-                m.default_state,
-                m.actions,
-            ))
-        })
-        .collect()
+pub fn resource_schemas() -> Vec<ResourceSchema> {
+    let mut schemas = vec![ResourceSchema::open(
+        NATIVE_PATTERN,
+        "Any Chef resource, by the name a recipe writes: template, cron, apt_repository. \
+         The params are the resource's properties, passed through as written; a state is \
+         the action it takes. When notified it takes the action named. A resource whose \
+         name is a shared type is written native/<name>: native/package is Chef's own \
+         package. The document then compiles for Chef only.",
+    )];
+    schemas.extend(SHARED.iter().filter_map(|name| {
+        let m = mapping(name)?;
+        let params: Vec<&str> = m.params.iter().map(|(param, _)| *param).collect();
+        let states: Vec<&str> = m.states.iter().map(|(state, _)| *state).collect();
+        Some(meridian_sdk::schema::shared(
+            name,
+            &params,
+            m.required,
+            &states,
+            m.default_state,
+            m.actions,
+        ))
+    }));
+    schemas
 }
 
-/// Every IR resource type this target maps, sorted.
+/// Every IR resource type this target maps: the pattern every Chef resource
+/// fits, then the shared six, sorted.
 pub fn supported_resource_types() -> Vec<String> {
-    TYPES.map(str::to_owned).to_vec()
+    let mut types = vec![NATIVE_PATTERN.to_owned()];
+    types.extend(SHARED.iter().map(|t| (*t).to_owned()));
+    types
+}
+
+/// The Chef resource a native type names, when the type is one: the bare
+/// name under `native/`, which Chef has for five of the six (its command is
+/// `execute`, which has no shared name to collide with), or the name as
+/// written, which is a resource name when it is one lower-case word.
+pub(crate) fn native_resource(r: &Resource) -> Result<Option<&str>, CompileError> {
+    match TypeName::read(&r.r#type) {
+        TypeName::Shared(_) => Ok(None),
+        TypeName::NativeNamedLikeShared("exec") => Err(refuse(
+            r,
+            "unsupported-resource-type",
+            format!(
+                "resource type {:?} names no Chef resource: Chef runs a command with execute, \
+                 which is written as it is",
+                r.r#type
+            ),
+        )),
+        TypeName::NativeNamedLikeShared(bare) if meridian_sdk::schema::is_shared_type(bare) => {
+            Ok(Some(bare))
+        }
+        // The prefix is for the names a shared type has taken; any other
+        // resource has one spelling.
+        TypeName::NativeNamedLikeShared(_) => Err(refuse(
+            r,
+            "unsupported-resource-type",
+            format!(
+                "resource type {:?} carries the native/ prefix, which reaches only a Chef \
+                 resource whose name is a shared type ({}); every other resource is written \
+                 as it is",
+                r.r#type,
+                SHARED.join(", ")
+            ),
+        )),
+        TypeName::Native(name) if is_word(name) => Ok(Some(name)),
+        TypeName::Native(_) => Err(unsupported_type(r)),
+    }
+}
+
+/// Whether `name` is shaped like a Chef resource or action name: one
+/// lower-case word, as Ruby writes a method.
+fn is_word(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_ascii_lowercase())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+fn unsupported_type(r: &Resource) -> CompileError {
+    refuse(
+        r,
+        "unsupported-resource-type",
+        format!(
+            "unsupported resource type {:?} on this target: it is not one of the shared types \
+             ({}), and a Chef resource is written as a recipe names it, such as template or \
+             apt_repository",
+            r.r#type,
+            SHARED.join(", ")
+        ),
+    )
+}
+
+/// A resource whose type is Chef's own: the params are the resource's
+/// properties as written, and a state is the action it takes. Nothing is
+/// checked against a list of what the resource takes; a property the
+/// resource does not have is Chef's to refuse when the recipe is compiled,
+/// until the resource's schema is synced and the editor reports it in
+/// place.
+fn native_block(r: &Resource, resource: &str) -> Result<Block, CompileError> {
+    let mut properties = BTreeMap::new();
+    for (name, value) in &r.params {
+        if *value == Value::Null {
+            return Err(refuse(
+                r,
+                "empty-param",
+                format!("param {name:?} on resource {resource} has no value"),
+            ));
+        }
+        properties.insert(name.clone(), value.clone());
+    }
+    let mut actions = Vec::new();
+    if !r.state.is_empty() {
+        if r.params.contains_key("action") {
+            return Err(refuse(
+                r,
+                "param-conflicts-with-state",
+                format!(
+                    "state {:?} and param \"action\" both set the resource's action; write one \
+                     of them",
+                    r.state
+                ),
+            ));
+        }
+        if !is_word(&r.state) {
+            return Err(refuse(
+                r,
+                "unsupported-state",
+                format!(
+                    "state {:?} is not a Chef action: on resource {resource} the state is the \
+                     action the resource takes, one lower-case word such as create or upgrade",
+                    r.state
+                ),
+            ));
+        }
+        actions.push(r.state.clone());
+    }
+    Ok(Block {
+        resource: resource.to_owned(),
+        name: r.id.clone(),
+        properties,
+        actions,
+        only_if: r.runtime_when.clone(),
+        notifies: Vec::new(),
+        resource_id: r.id.clone(),
+        pos: r.pos.clone(),
+    })
 }
 
 fn keys(pairs: &[(&str, &str)]) -> String {
@@ -178,17 +308,10 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Cookbook, CompileError>
 }
 
 fn blocks_for(r: &Resource) -> Result<Vec<Block>, CompileError> {
-    let Some(m) = mapping(&r.r#type) else {
-        return Err(refuse(
-            r,
-            "unsupported-resource-type",
-            format!(
-                "unsupported resource type {:?} on this target (supported: {})",
-                r.r#type,
-                TYPES.join(", ")
-            ),
-        ));
-    };
+    if let Some(resource) = native_resource(r)? {
+        return Ok(vec![native_block(r, resource)?]);
+    }
+    let m = mapping(&r.r#type).ok_or_else(|| unsupported_type(r))?;
 
     let mut properties = BTreeMap::new();
     for (name, value) in &r.params {
@@ -248,7 +371,7 @@ fn blocks_for(r: &Resource) -> Result<Vec<Block>, CompileError> {
                 ),
             ));
         }
-        actions.push("run");
+        actions.push("run".to_owned());
     } else {
         let Some(action) = lookup(m.states, state) else {
             return Err(refuse(
@@ -262,15 +385,15 @@ fn blocks_for(r: &Resource) -> Result<Vec<Block>, CompileError> {
                 ),
             ));
         };
-        actions.push(action);
+        actions.push(action.to_owned());
     }
 
     let mut chef = m.chef;
     match r.r#type.as_str() {
         "service" => match r.params.get("enabled") {
             None => {}
-            Some(Value::Bool(true)) => actions.insert(0, "enable"),
-            Some(Value::Bool(false)) => actions.insert(0, "disable"),
+            Some(Value::Bool(true)) => actions.insert(0, "enable".to_owned()),
+            Some(Value::Bool(false)) => actions.insert(0, "disable".to_owned()),
             Some(_) => {
                 return Err(refuse(
                     r,
@@ -300,7 +423,7 @@ fn blocks_for(r: &Resource) -> Result<Vec<Block>, CompileError> {
     }
 
     let block = Block {
-        resource: chef,
+        resource: chef.to_owned(),
         name: r.id.clone(),
         properties,
         actions,
@@ -325,14 +448,14 @@ fn blocks_for(r: &Resource) -> Result<Vec<Block>, CompileError> {
         for group in groups.as_list().ok_or_else(invalid)? {
             let name = group.as_str().ok_or_else(invalid)?;
             memberships.push(Block {
-                resource: "group",
+                resource: "group".to_owned(),
                 name: format!("{}:{name}", r.id),
                 properties: BTreeMap::from([
                     ("append".to_owned(), Value::Bool(true)),
                     ("group_name".to_owned(), group.clone()),
                     ("members".to_owned(), Value::List(vec![user.clone()])),
                 ]),
-                actions: vec!["modify"],
+                actions: vec!["modify".to_owned()],
                 only_if: r.runtime_when.clone(),
                 ..block.clone()
             });

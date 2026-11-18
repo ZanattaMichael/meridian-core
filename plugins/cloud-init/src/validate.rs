@@ -105,6 +105,21 @@ pub(crate) fn validate(config: &CloudConfig) -> Result<(), CompileError> {
             ));
         }
     }
+    // cloud-init reads one mapping, so a key written twice would keep one
+    // value and lose the other without a word.
+    names.clear();
+    for module in &config.modules {
+        if let Some(previous) = names.insert(&module.item.key, &module.id) {
+            return Err(module.refuse(
+                "duplicate-module",
+                format!(
+                    "module {:?} is already written by resource {:?}; one resource writes a \
+                     module's whole value",
+                    module.item.key, previous
+                ),
+            ));
+        }
+    }
     names.clear();
     for package in &config.packages {
         // A colon is part of a package name on a multi-architecture system.
@@ -210,6 +225,7 @@ mod tests {
             users: vec![user("deploy", "deploy")],
             packages: vec![package("pkg", "nginx")],
             commands: Vec::new(),
+            modules: Vec::new(),
         }
     }
 

@@ -52,7 +52,13 @@ pub(crate) fn serialise(cookbook: &Cookbook) -> BTreeMap<String, String> {
 fn write_block(out: &mut String, block: &Block, secrets: &[SecretName]) {
     let _ = writeln!(out, "{} {} do", block.resource, quote(&block.name));
     for (name, value) in &block.properties {
-        let _ = writeln!(out, "  {name} {}", literal(value, secrets));
+        // A hash after a bare method name is a block to Ruby; parentheses
+        // make it the argument.
+        if matches!(value, Value::Map(_)) {
+            let _ = writeln!(out, "  {name}({})", literal(value, secrets));
+        } else {
+            let _ = writeln!(out, "  {name} {}", literal(value, secrets));
+        }
     }
     // A resource handed a secret is not allowed to show it: `sensitive`
     // keeps its diff and its properties out of what chef-client prints.
@@ -71,6 +77,7 @@ fn write_block(out: &mut String, block: &Block, secrets: &[SecretName]) {
         );
     }
     match block.actions.as_slice() {
+        [] => {}
         [one] => {
             let _ = writeln!(out, "  action :{one}");
         }
