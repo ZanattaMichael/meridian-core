@@ -20,7 +20,7 @@ const PROTOCOL_HISTORY: &[(u32, &str)] = &[
     ),
     (
         2,
-        "The plugin's category and operations in `Describe`; the `Runner` service (plan, apply, outputs)",
+        "The plugin's category and operations in `Describe`; the `Runner` service (plan, apply, outputs). Later additions within 2, each ignored by a side that predates it: `Describe` fields up to `settings`; `Runner.Cancel`, which stops a plan or apply (a plugin without it cannot be stopped, and `meridian` says so)",
     ),
 ];
 

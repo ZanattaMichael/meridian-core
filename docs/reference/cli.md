@@ -4,7 +4,7 @@
 meridian validate <files>...
 meridian compile  <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--out DIR]
 meridian plan     <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets]
-meridian apply    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets] [--resume | --resume=RUN] [--on-failure stop|rollback]
+meridian apply    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets] [--resume | --resume=RUN] [--on-failure stop|rollback] [--stage-timeout DURATION]
 meridian drift    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE]
 meridian rollback <files>... [--run RUN]
 meridian status
@@ -154,6 +154,13 @@ With `--on-failure rollback`, a failed apply instead
 changed, the failed one first and then the ones before it, by applying what
 each was last applied from successfully. The command still exits `1`: the
 apply failed.
+
+Ctrl-C [stops the run](../concepts/run-safety.md#stopping-a-run): the tool is
+stopped, the stage is recorded as `interrupted`, the lock is released and the
+command exits `130`. A second Ctrl-C exits at once. `--stage-timeout 30m`
+stops a stage whose tool has run that long and records it as `timed-out`;
+without it a tool may take as long as it takes. Both apply to `plan`,
+`drift` and `rollback` as well.
 
 ### `drift`
 
@@ -567,6 +574,7 @@ meridian signing verify --trusted-key acme.pub meridian-target-acme
 | `--lock-timeout DURATION` | | `0s` | `plan`, `apply`, `drift`, `rollback`: how long to wait for another run to release the lock, as in `30s`, `5m`, `1h`. By default a locked state is refused at once |
 | `--resume`, `--resume=RUN` | | | `apply` only: continue the last apply, or the run named (joined with `=`) |
 | `--on-failure ACTION` | | `stop` | `apply` only: `stop` leaves what was applied in place; `rollback` puts back every stage the run changed |
+| `--stage-timeout DURATION` | | none | `plan`, `apply`, `drift`, `rollback`: stop a stage whose tool has run this long, as in `30m` or `2h`, and fail the run as `timed-out`. By default a tool may take as long as it takes |
 | `--run RUN` | | the last apply | `rollback` only: the apply to put back |
 | `--policy PATH` | | no policy | `plan`, `apply`: a [policy](policy.md) file or directory every stage is checked against before anything is applied; may be repeated |
 | `--policy-engine NAME` | `MERIDIAN_POLICY_ENGINE` | `opa` | `plan`, `apply`: the program `meridian-policy-<NAME>` that reads the policies |
@@ -684,7 +692,10 @@ refused because the state is locked or there was nothing to resume or roll
 back, or a [sink](reporting.md#sinks) marked `required` failed; when
 `fmt --check` found a file that is not formatted; and when `lint` found an
 error, or a warning with `--strict`. `2` for a mistake in the command line
-itself, and from `drift` when a stage has drifted.
+itself, and from `drift` when a stage has drifted. `130` when the run was
+[stopped with Ctrl-C](../concepts/run-safety.md#stopping-a-run), as a shell
+reports a command ended that way; a run stopped by `--stage-timeout` is a
+failure and exits `1`.
 
 `import` exits `0` when it wrote its documents, whatever it reported about
 them; `1` when the source could not be read or no plugin imports it, and, with

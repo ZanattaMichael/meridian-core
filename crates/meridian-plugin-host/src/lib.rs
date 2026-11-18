@@ -26,10 +26,13 @@ pub mod signature {
 }
 
 use std::fmt;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::time::Duration;
 
 use meridian_sdk::{
-    Capabilities, Category, CompileError, ImportError, ImportFormat, Operations, PlacedEscape,
-    RunError, SecretRef, Value,
+    Capabilities, Category, Change, CompileError, ImportError, ImportFormat, Operations,
+    PlacedEscape, RunError, SecretRef, Value,
 };
 
 pub use client::{Client, StartOptions, HANDSHAKE_TIMEOUT};
@@ -156,6 +159,10 @@ pub enum RunFailure {
     /// The plugin mechanism failed: the target does not offer the operation,
     /// the process died, or it sent something this host cannot read.
     Plugin(Error),
+    /// The run was stopped before the tool finished: the operator asked, or
+    /// it ran past its time limit. Nothing is wrong with the tool or the
+    /// plugin.
+    Stopped(Stopped),
 }
 
 impl fmt::Display for RunFailure {
@@ -163,8 +170,143 @@ impl fmt::Display for RunFailure {
         match self {
             RunFailure::Tool(e) => e.fmt(f),
             RunFailure::Plugin(e) => e.fmt(f),
+            RunFailure::Stopped(e) => e.fmt(f),
         }
     }
+}
+
+/// When a plan or an apply is to be stopped before the tool finishes.
+///
+/// The default stops nothing: a tool takes as long as it takes, as it always
+/// did. Either way of stopping asks the plugin to cancel, waits for it to say
+/// what the tool had done, and reports the run as [`RunFailure::Stopped`].
+#[derive(Clone, Debug)]
+pub struct Stop {
+    /// Set to true by whoever wants the run stopped now: a signal handler on
+    /// Ctrl-C, or another thread. Read, never cleared, by the host.
+    pub when: Option<Arc<AtomicBool>>,
+    /// How long one plan or apply may take before it is stopped.
+    pub after: Option<Duration>,
+    /// How long, after asking the plugin to stop, to wait for it to report
+    /// what the tool had done. A plugin that says nothing by then is left to
+    /// itself and the run is reported with nothing done.
+    pub grace: Duration,
+}
+
+/// How long a plugin has to answer a stop unless a caller says otherwise. The
+/// SDK gives a tool ten seconds to exit on its own before killing it, so a
+/// well-behaved plugin answers within that; a little more covers the answer
+/// itself.
+pub const STOP_GRACE: Duration = Duration::from_secs(20);
+
+impl Default for Stop {
+    fn default() -> Self {
+        Stop {
+            when: None,
+            after: None,
+            grace: STOP_GRACE,
+        }
+    }
+}
+
+impl Stop {
+    /// Stops a run when `flag` turns true.
+    pub fn when(flag: Arc<AtomicBool>) -> Self {
+        Stop {
+            when: Some(flag),
+            ..Stop::default()
+        }
+    }
+
+    /// Stops a run that has taken longer than `limit`.
+    pub fn after(limit: Duration) -> Self {
+        Stop {
+            after: Some(limit),
+            ..Stop::default()
+        }
+    }
+
+    /// Whether this ever stops anything.
+    pub fn is_set(&self) -> bool {
+        self.when.is_some() || self.after.is_some()
+    }
+}
+
+/// A run that was stopped before the tool finished.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Stopped {
+    pub cause: StopCause,
+    /// What the tool had done before it was stopped, as far as the plugin
+    /// reported it. Empty when the plugin could not say.
+    pub changes: Vec<Change>,
+    /// The end of what the tool printed, when the plugin reported it.
+    pub output: String,
+    /// What the plugin was running, with any secret removed.
+    pub command: String,
+    /// Whether the plugin answered the request to stop. When it did not, the
+    /// tool may still be running on its own.
+    pub answered: bool,
+}
+
+/// Why a run was stopped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StopCause {
+    /// Whoever drives the run asked for it to stop.
+    Interrupted,
+    /// The run reached its time limit.
+    TimedOut(Duration),
+}
+
+impl fmt::Display for Stopped {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.cause {
+            StopCause::Interrupted => write!(f, "interrupted: the run was stopped")?,
+            StopCause::TimedOut(limit) => {
+                write!(f, "timed out after {}", describe_duration(limit))?
+            }
+        }
+        if !self.command.is_empty() {
+            write!(f, " (was running `{}`)", self.command)?;
+        }
+        if !self.answered {
+            write!(
+                f,
+                "; the plugin did not confirm that the tool was stopped, so it may still be \
+                 running"
+            )?;
+        }
+        if !self.output.is_empty() {
+            write!(f, "\n{}", self.output.trim_end())?;
+        }
+        Ok(())
+    }
+}
+
+/// A duration as a person writes one: `30s`, `5m`, `1h30m`, `250ms`.
+pub fn describe_duration(d: Duration) -> String {
+    let millis = d.as_millis();
+    if millis == 0 {
+        return "0s".to_owned();
+    }
+    if millis < 1000 {
+        return format!("{millis}ms");
+    }
+    let total = d.as_secs();
+    let (h, m, s) = (total / 3600, total % 3600 / 60, total % 60);
+    let mut text = String::new();
+    if h > 0 {
+        text.push_str(&format!("{h}h"));
+    }
+    if m > 0 {
+        text.push_str(&format!("{m}m"));
+    }
+    if s > 0 || text.is_empty() {
+        text.push_str(&format!("{s}s"));
+    }
+    if !millis.is_multiple_of(1000) {
+        text.push_str(&format!("{}ms", millis % 1000));
+    }
+    text
 }
 
 impl std::error::Error for RunFailure {}
@@ -326,4 +468,47 @@ pub fn name_secrets(graph: &mut meridian_sdk::ResourceGraph, declared: &[(String
             meridian_sdk::SecretName { secret, name }
         })
         .collect();
+}
+
+#[cfg(test)]
+mod duration_tests {
+    use super::*;
+
+    #[test]
+    fn a_duration_reads_as_a_person_writes_one() {
+        assert_eq!(describe_duration(Duration::ZERO), "0s");
+        assert_eq!(describe_duration(Duration::from_millis(300)), "300ms");
+        assert_eq!(describe_duration(Duration::from_secs(1)), "1s");
+        assert_eq!(describe_duration(Duration::from_secs(90)), "1m30s");
+        assert_eq!(describe_duration(Duration::from_secs(3600)), "1h");
+        assert_eq!(describe_duration(Duration::from_secs(3661)), "1h1m1s");
+        assert_eq!(describe_duration(Duration::from_millis(1500)), "1s500ms");
+    }
+
+    #[test]
+    fn a_stopped_run_describes_itself() {
+        let stopped = Stopped {
+            cause: StopCause::TimedOut(Duration::from_secs(300)),
+            changes: Vec::new(),
+            output: "last words\n".to_owned(),
+            command: "tool apply".to_owned(),
+            answered: true,
+        };
+        assert_eq!(
+            stopped.to_string(),
+            "timed out after 5m (was running `tool apply`)\nlast words"
+        );
+        let unanswered = Stopped {
+            cause: StopCause::Interrupted,
+            answered: false,
+            output: String::new(),
+            command: String::new(),
+            ..stopped
+        };
+        assert_eq!(
+            unanswered.to_string(),
+            "interrupted: the run was stopped; the plugin did not confirm that the tool was \
+             stopped, so it may still be running"
+        );
+    }
 }

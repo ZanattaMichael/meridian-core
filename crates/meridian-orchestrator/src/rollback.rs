@@ -21,7 +21,7 @@
 
 use meridian_ir::Document;
 
-use crate::Stop;
+use crate::NotCompiled;
 use meridian_sdk::{Change, Data, LogLine, RunContext, Value};
 use meridian_secret::Masker;
 
@@ -220,11 +220,11 @@ pub(crate) fn items_of(run: &mut Run<'_>, of: &RunRecord) -> Vec<Item> {
         let mut inputs = inputs;
         match run.imports_of(document) {
             Ok(imports) => inputs.extend(imports),
-            Err(Stop::Failed { why, .. }) => {
+            Err(NotCompiled::Failed { why, .. }) => {
                 items.push(unavailable(why, "imports-unknown"));
                 continue;
             }
-            Err(Stop::Deferred { waiting_on, output }) => {
+            Err(NotCompiled::Deferred { waiting_on, output }) => {
                 items.push(unavailable(
                     format!(
                         "it imports the output {output:?} of {waiting_on}, whose tool can no \
@@ -462,7 +462,7 @@ fn one(
         line.text = masker.mask(&mask(&line.text, &secrets));
         observer.log(&id, &line);
     };
-    let outcome = target.apply(&context, &artifact, &mut log);
+    let outcome = target.apply_with(&context, &artifact, &mut log, &run.options.stop);
     let resource = |change: &Change| {
         vec![
             ("resource", Value::from(change.resource.as_str())),

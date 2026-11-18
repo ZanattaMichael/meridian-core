@@ -719,7 +719,13 @@ fn schema_sync(args: &SyncArgs<'_>) -> Result<(), Failure> {
                 }
                 synced += 1;
             }
+            // A schema export is given no time limit, so it is never stopped;
+            // if it ever were, that is a failure of this sync like any other.
             Err(meridian_plugin_host::RunFailure::Tool(e)) => {
+                eprintln!("error: {name}: {e}");
+                failed += 1;
+            }
+            Err(meridian_plugin_host::RunFailure::Stopped(e)) => {
                 eprintln!("error: {name}: {e}");
                 failed += 1;
             }

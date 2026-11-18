@@ -451,6 +451,33 @@ the [plugin settings reference](../reference/plugin-settings.md) is generated
 from it, and `crates/meridian-cli/tests/plugin_settings.rs` fails when a
 `MERIDIAN_*` constant in your `runner.rs` is not declared.
 
+### Being stopped
+
+An operator can press Ctrl-C, and a run can have a `--stage-timeout`. Either
+way the host calls your plugin's `Cancel`, which the SDK answers for you: the
+log handed to `plan` and `apply` starts saying `log.cancelled()`, and
+[`Tool::run`](../../crates/meridian-sdk/src/tool.rs) notices while the tool
+runs, stops the tool and everything it started (`SIGTERM`, then `SIGKILL`
+ten seconds later; on Windows the process is killed) and returns a `RunError`
+that says the run was cancelled. A runner that only drives tools through
+`Tool` needs to do nothing.
+
+A runner that works in a loop of its own, or runs several tools in a row,
+should check `log.cancelled()` between steps and return a `RunError` whose
+`changes` list what it had done, so that the record and the terminal show it:
+
+```rust
+for step in steps {
+    if log.cancelled() {
+        return Err(RunError { msg: "stopped".into(), changes: done, ..RunError::default() });
+    }
+    done.push(run_one(step, log)?);
+}
+```
+
+Never swallow the error `Tool::run` returns on a cancel and go on to the next
+tool: the operator asked for the run to stop.
+
 ### Secrets
 
 A document can put a [secret](../reference/dsl/secrets.md) in a resource's

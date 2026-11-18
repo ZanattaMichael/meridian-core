@@ -290,6 +290,15 @@ pub trait Log: Send + Sync {
             text: text.to_owned(),
         });
     }
+
+    /// Whether the host has asked for this run to stop: the operator
+    /// interrupted it, or it ran past its time limit. [`crate::Tool::run`]
+    /// checks this while the tool runs and stops the tool's process when it
+    /// turns true. A runner that does its own work in a loop should check it
+    /// between steps and return a [`RunError`] carrying what it had done.
+    fn cancelled(&self) -> bool {
+        false
+    }
 }
 
 /// A log that keeps nothing, for a caller with nowhere to show the output.
