@@ -241,9 +241,12 @@ pub(crate) fn read_type(name: &str, text: &str) -> Option<ResourceSchema> {
         if !in_parameters {
             continue;
         }
+        // `- **name**`, or `- **name** (*namevar*)` for the attribute the
+        // title supplies.
         if let Some(pname) = trimmed
             .strip_prefix("- **")
-            .and_then(|t| t.strip_suffix("**"))
+            .and_then(|t| t.split_once("**"))
+            .map(|(name, _)| name)
         {
             finish(&mut current, &mut params);
             current = Some((pname.to_owned(), Vec::new()));
@@ -373,7 +376,7 @@ Parameters
     The hour at which to run the cron job. Cron
     understands cron-style ranges.
 
-- **name**
+- **name** (*namevar*)
     The symbolic name of the cron job.  This name
     is used for human reference only.
 
