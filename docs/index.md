@@ -94,6 +94,7 @@ and checked against the file in every build, so none can fall behind the script 
 | [The linter](tooling/linter.md) | `meridian lint`: every error in a project, plus probable mistakes |
 | [The JSON Schema](tooling/json-schema.md) | `meridian schema`: validation for editors that only know YAML |
 | [Tool schemas](tooling/schema-sync.md) | `meridian schema sync`: a tool's own types, read once from the tool and cached, so the editor completes and checks them |
+| [The MCP server](tooling/mcp-server.md) | `meridian mcp`: the compiler and the catalogue as tools for an AI model, read-only, with the one diagnostic shape a small model can act on |
 
 | Reference | |
 |---|---|

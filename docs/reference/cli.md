@@ -26,6 +26,7 @@ meridian schema   sync <paths>... [--target TARGET] [--data FILE] [--set KEY=VAL
 meridian schema   status [--state-dir DIR] [--json]
 meridian schema   clean [TARGET]... [--state-dir DIR]
 meridian lsp
+meridian mcp      [--allow-plan] [--root DIR] [--state-dir DIR]
 ```
 
 Every command also takes `--output text|json`: with `json` it prints one JSON
@@ -581,6 +582,17 @@ there is nothing to see when it is run by hand. It takes the plugin options
 plus `--trust-editor-plugin-dirs` to load unsigned plugins from directories the
 editor names. Full description:
 [The language server](../tooling/language-server.md).
+
+### `mcp`
+
+Runs the Model Context Protocol server on standard input and output. An AI
+client starts it; there is nothing to see when it is run by hand. It takes
+the plugin options like every command, `--root DIR` for the directory file
+arguments are confined to (the current directory by default), `--state-dir`
+for the cached tool schemas, and `--allow-plan` to offer the `plan` tool,
+which runs the real tool and takes the state lock; without it the server
+changes nothing anywhere. Full description:
+[The MCP server](../tooling/mcp-server.md).
 
 ### `signing`
 

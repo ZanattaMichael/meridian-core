@@ -208,7 +208,7 @@ def architecture() -> str:
         ("Documents", ["kind: Infrastructure, ResourceSet or Workflow", "YAML or JSON, one tool each"], 268),
         ("Data and rules", ["--data layers decide every when", "compile rules say what a layer may set"], 268),
         ("Modules", ["meridian.yaml names what you need", "meridian.lock pins what was fetched"], 268),
-        ("Editor tools", ["lsp, fmt, lint, schema:", "the same compiler"], 206),
+        ("Editor tools", ["lsp, mcp, fmt, lint, schema:", "the same compiler"], 206),
     ]
     x = L
     centres = []

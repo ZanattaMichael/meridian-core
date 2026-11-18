@@ -170,6 +170,29 @@ pub struct LspArgs {
     trust_editor_plugin_dirs: bool,
 }
 
+#[derive(Args)]
+pub struct McpArgs {
+    #[command(flatten)]
+    plugins: PluginDirs,
+    /// Offer the `plan` tool, which runs the real tool and takes the state
+    /// lock. Off by default: the server then changes nothing anywhere
+    #[arg(long, env = "MERIDIAN_MCP_ALLOW_PLAN")]
+    allow_plan: bool,
+    /// The directory file arguments are confined to. Defaults to the
+    /// current directory
+    #[arg(long, value_name = "DIR")]
+    root: Option<PathBuf>,
+    /// Where `meridian schema sync` cached each tool's own schemas, which
+    /// describe native types
+    #[arg(
+        long,
+        value_name = "DIR",
+        env = "MERIDIAN_STATE_DIR",
+        default_value = ".meridian"
+    )]
+    state_dir: PathBuf,
+}
+
 /// Whether a path names a YAML or JSON file by its extension.
 fn is_document_file(path: &Path) -> bool {
     matches!(
@@ -594,6 +617,59 @@ pub fn lsp(args: &LspArgs) -> Result<(), Failure> {
         editor_options,
     })
     .map_err(|e| Failure::Message(e.to_string()))
+}
+
+/// `meridian mcp`: the compiler and the catalogue as tools for an AI model,
+/// over the Model Context Protocol on standard input and output.
+pub fn mcp(args: &McpArgs) -> Result<(), Failure> {
+    let root = args.root.clone().unwrap_or_else(|| PathBuf::from("."));
+    let registry = registry(&args.plugins)?;
+    let mut catalog = Catalog::from_registry(&registry);
+    let store = Store::new(&root.join(&args.state_dir));
+    let mut server_notes = Vec::new();
+    for problem in catalog.read_cache(&store, schemas::lock_in(&root).as_ref()) {
+        eprintln!("warning: {problem}");
+        server_notes.push(format!(
+            "A cached tool schema could not be read: {problem}."
+        ));
+    }
+    let mut server = meridian_mcp::Server::new(registry, catalog, &root);
+    for note in server_notes {
+        server = server.note(note);
+    }
+    if args.allow_plan {
+        // `plan` is the command itself, with the plugin options it was
+        // started with, so the result is the object `meridian plan --output
+        // json` prints.
+        let program = std::env::current_exe()
+            .map_err(|e| Failure::Message(format!("finding the meridian binary: {e}")))?;
+        let mut plan_args = Vec::new();
+        for dir in &args.plugins.dirs {
+            plan_args.push("--plugin-dir".to_owned());
+            plan_args.push(dir.to_string_lossy().into_owned());
+        }
+        if let Some(policy) = args.plugins.signatures {
+            plan_args.push("--plugin-signatures".to_owned());
+            plan_args.push(
+                match policy {
+                    SignaturePolicy::Off => "off",
+                    SignaturePolicy::Warn => "warn",
+                    SignaturePolicy::Require => "require",
+                }
+                .to_owned(),
+            );
+        }
+        server = server.allow_plan(meridian_mcp::PlanCommand {
+            program,
+            args: plan_args,
+        });
+    }
+    let registry = meridian_mcp::run_stdio(server).map_err(|e| Failure::Message(e.to_string()))?;
+    // A plugin that will not exit is not worth failing the client over.
+    if let Some(registry) = registry {
+        let _ = registry.close();
+    }
+    Ok(())
 }
 
 struct SyncArgs<'a> {
