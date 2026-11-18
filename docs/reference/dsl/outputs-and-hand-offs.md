@@ -103,17 +103,11 @@ targetHost:
 | a ResourceSet has a `targetHost` at all | `compile` | `document "web" declares no targetHost` |
 | the host is a name and nothing a tool reads as more | `validate` for a host written inline; `compile` for one an interpolation places; `apply` for one read from an output | `"-oProxyCommand=..." starts with "-", which a tool would read as an option and not as a host` |
 
-The last rule keeps a host a host. It goes to `ssh`, Bolt, `chef-run` and
-`salt-ssh` as an argument (where a leading `-` is an option), into an Ansible
-inventory line (where a space starts a host variable), and into a Puppet
-`site.pp` string (where a quote ends it). Whitespace, control characters,
-quotes and other punctuation are refused wherever the host came from, and an
-output that is not a name fails the stage before its plugin is called. Plugins
-that run a tool against the host check again, and those that write it to a
-file refuse one that arrives another way (rule `invalid-host`).
+Whitespace, control characters, quotes and other punctuation in a host are refused
+wherever it came from; an output that is not a name fails the stage. Plugins check again
+(rule `invalid-host`).
 
-Both documents must be given to the same command. The link is by name, within
-one workflow, and nowhere else.
+Both documents must be given to the same command.
 
 ### What the host is used for
 

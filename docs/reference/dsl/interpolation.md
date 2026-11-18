@@ -1,9 +1,7 @@
 # Interpolation, variables and named conditions
 
-An expression can be written inside a value, between `${{` and `}}`. Meridian
-decides it before compiling and puts the result in its place, so a plugin is
-handed plain values and no target ever sees an expression. That is what makes
-an interpolation come to the same value on every target.
+`${{ ... }}` inside a value is decided by Meridian before compiling. The plugin gets the
+plain result, so it is the same on every target.
 
 ```yaml
 spec:
@@ -20,8 +18,7 @@ spec:
         workers: "${{ cond.is_prod ? 8 : 1 }}"
 ```
 
-The language inside the braces is the one a `when` is written in:
-[expressions and functions](expressions.md).
+The language is that of `when`: [expressions and functions](expressions.md).
 
 ```mermaid
 flowchart LR
@@ -34,8 +31,7 @@ flowchart LR
     style G fill:#eee,stroke:#999
 ```
 
-Steps 1 to 6 are Meridian's core and are the same for every target. Step 7 is
-the only one a plugin takes part in.
+Only step 7 involves the plugin.
 
 ## Contents
 
@@ -70,21 +66,18 @@ params:
 Only a value that is nothing but the interpolation keeps its type. A space
 before or after it makes it text: `" ${{ data.replicas }}"` is `" 3"`.
 
-A list, a mapping or `null` has no single text form, so placing one inside
-longer text is an error that says what to do instead:
+A list, mapping or `null` inside longer text is an error:
 
 ```
 in ${{ data.ports }}: a list cannot be placed inside text; use join(...) or toJson(...), or make the interpolation the whole value
 in ${{ data.nothing }}: the value is null, which has no text form; give a default with ??
 ```
 
-The end of an interpolation is found past quotes and brackets, so a mapping
-literal or a quoted `}}` inside it does not end it early:
-`${{ {a: {b: 1}}.a.b }}` is `1`, and `${{ '}}' }}` is the text `}}`.
+Quotes and brackets are skipped when finding the end: `${{ {a: {b: 1}}.a.b }}` is `1`,
+and `${{ '}}' }}` is the text `}}`.
 
-Everything that is not an interpolation is passed through byte for byte:
-`{{ ansible_hostname }}`, `%{ if x }`, `$5` and `${web.public_ip}` all reach the
-plugin exactly as written.
+Everything else passes through unchanged: `{{ ansible_hostname }}`, `%{ if x }`, `$5`,
+`${web.public_ip}`.
 
 ## Where it is allowed
 
@@ -115,8 +108,7 @@ site.yaml:9:7: spec.resources[0].state: resource "pkg": this field is text, and 
 
 ## Beside a reference
 
-Two things are written with a dollar sign, and they are decided at different
-times.
+`${{ }}` is decided by Meridian; `${ }` is a reference the tool resolves.
 
 | | `${{ ... }}` | `${id.path}` |
 |---|---|---|
@@ -137,7 +129,7 @@ They can share a value:
       Name: ${{ var.name }}-${main.id}       # both
 ```
 
-A variable is worked out before the tool runs, so it cannot hold a reference:
+A variable cannot hold a reference:
 
 ```
 site.yaml:1:1: spec.variables.addr: a variable is worked out before the tool runs, so it cannot hold a ${id.path} reference; write the reference where it is used
@@ -145,14 +137,9 @@ site.yaml:1:1: spec.variables.addr: a variable is worked out before the tool run
 
 ## Values from data are literal
 
-A value an interpolation places into `params` or an output's `value` is always
-literal text to the plugin. If the data holds `${HOME}/bin`, or something that
-looks like a reference to another resource, it is handed over with the escape
-for a literal `${`, and every plugin writes it out as the text it is.
-
-What the author wrote in the document is a reference. What the data supplied
-never becomes one. That holds however the value got there: through a variable,
-inside a list or a mapping, or joined into longer text.
+A value placed by an interpolation is literal text to the plugin. Data holding
+`${HOME}/bin` is escaped and written as that text, whether it came through a variable, a
+list, a mapping or longer text. Only what the author wrote is a reference.
 
 | The document says | The data says | The plugin is given | Ansible writes |
 |---|---|---|---|
@@ -160,15 +147,10 @@ inside a list or a mapping, or joined into longer text.
 | `cd ${app.dir}` | | `cd ${app.dir}` | the `dir` param of resource `app` |
 | `${{ data.sign }}{app.dir}` | `sign: $` | `$${app.dir}` | `${app.dir}`, as text |
 
-The last row is a value that holds no reference by itself but would complete
-one with the text beside it: a placed value that ends in `$`, followed by text
-or another placed value that opens with `{`. The join is made literal too, so
-two harmless halves cannot meet as a reference nobody wrote.
+The last row: a placed value ending in `$` followed by `{` is made literal too.
 
-One join cannot be made safe, and is refused. A dollar directly before a
-reference is how a literal is written, so a placed value that ends in `$`,
-directly before a reference the author wrote, would turn that reference into
-text and the tool would never resolve it:
+A placed value ending in `$` directly before an authored reference would make it a literal,
+so it is refused:
 
 ```yaml
 content: costs ${{ data.currency }}${price.amount}   # currency: $
@@ -178,11 +160,8 @@ content: costs ${{ data.currency }}${price.amount}   # currency: $
 the value placed before ${price.amount} ends in "$", and a "$" directly before a reference makes it literal text, so the reference would be lost; put a space or other text between the two
 ```
 
-Nothing is compiled. With a space between the two, or with a currency that
-does not end in a dollar, both are kept.
-
-Each tool gets its own spelling of the literal: Terraform, for instance, is
-given `$${HOME}`, which is how Terraform writes a literal `${HOME}`.
+A space between them avoids this. Each tool gets its own literal spelling (`$${HOME}` for
+Terraform).
 
 ### A tool's own expressions
 
@@ -205,16 +184,12 @@ string that starts with `[` and ends with `]`.
 | `${{ data.loc }}` | `loc: "[resourceGroup().location]"` | `[[resourceGroup().location]` | the text `[resourceGroup().location]` |
 | `"[resourceGroup().location]"` | | `[resourceGroup().location]` | the resource group's location |
 
-A join is made literal here too: a placed `{` directly before a `{` the
-author wrote cannot open a Jinja expression nobody wrote. Which openings a
-target declares is on its page; a target that declares none has no expression
-syntax of its own beyond `${`.
+Joins are made literal here too. Each target page lists the openings it declares.
 
 ## Writing one in YAML
 
-A value that starts with `${{` needs no quotes in YAML as long as the
-expression holds nothing YAML reads as its own. Two things do: a colon followed
-by a space, which is in every `a ? b : c`, and a space followed by `#`.
+A value starting with `${{` needs quotes in YAML only if it contains `: ` (as in
+`a ? b : c`) or ` #`.
 
 ```yaml
 count: ${{ data.replicas ?? 1 }}                  # fine
@@ -222,19 +197,17 @@ name: ${{ data.project }}-${{ data.env }}         # fine
 size: "${{ cond.is_prod ? 'large' : 'small' }}"   # needs quotes: it holds ": "
 ```
 
-Left unquoted, the third line is a YAML error, and Meridian adds the way out:
+Unquoted, the third line is a YAML error:
 
 ```
 site.yaml:14:36: mapping values are not allowed in this context; this line holds an interpolation, and YAML reads a colon followed by a space inside an unquoted value as its own: put the whole value in double quotes
 ```
 
-When in doubt, quote the whole value with double quotes and use single quotes
-for text inside the expression.
+Use double quotes outside and single quotes inside.
 
 ## Variables
 
-`spec.variables` names values that are worked out once per document and read
-as `var.<name>`.
+`spec.variables`: values evaluated once per document, read as `var.<name>`.
 
 ```yaml
 spec:
@@ -260,16 +233,13 @@ spec:
 | Worked out | every variable, once, before anything else in the document is decided. One that cannot be worked out is an error even if nothing reads it |
 | Not from outside | a variable is not set from the command line. What the caller chooses comes in as data |
 
-`type`, `enum`, `final` and the other checks of the long form arrive with typed
-declarations; until then they are refused by name and not ignored.
+`type`, `enum`, `final` and the other long-form checks are not built yet and are refused.
 
-A variable holds a plain value. Its type goes with it: `${{ var.ports }}` is a
-list, `${{ var.ports[0] }}` is a number, `${{ var.tags.Owner }}` is text.
+A variable keeps its type: `${{ var.ports }}` is a list, `${{ var.ports[0] }}` a number.
 
 ## Named conditions
 
-`spec.conditions` names conditions that are decided once per document and read
-as `cond.<name>`, which is `true` or `false`.
+`spec.conditions`: conditions decided once per document, read as `cond.<name>`.
 
 ```yaml
 spec:
@@ -294,9 +264,7 @@ spec:
 | Reads | data, variables and other named conditions, in any order; a circle is refused |
 | Used in | any `when`, and any interpolation: `"${{ cond.is_prod ? 3 : 1 }}"` |
 
-A named condition gives a decision one name and one place. The condition
-language, and what a false `when` does to a resource, a document, an output or
-an edge, are on the [conditions](conditions.md) page.
+See [conditions](conditions.md).
 
 ## What is checked, and when
 
@@ -314,17 +282,15 @@ an edge, are on the [conditions](conditions.md) page.
 | An interpolation in the skeleton | `spec.resources[1].id: cannot be interpolated: ...` |
 | A reference inside a variable | `a variable is worked out before the tool runs, so it cannot hold a ${id.path} reference; ...` |
 
-`compile`, `plan` and `apply` have the data, and find the rest. Each names the
-resource, the field and the interpolation:
+`compile`, `plan` and `apply` find the rest, naming the resource, field and
+interpolation:
 
 ```
 site.yaml:21:7: spec.resources[1].params.tags.Name[1]: resource "web": in ${{ data.missing }}: data.missing is not set (give it with --data or --set, or test for it with defined(data.missing))
 ```
 
-Nothing is guessed: a name that is not set is an error, not an empty string.
-A resource its `when` removed is not interpolated, and a document its
-`spec.when` skipped is not read further, so what only one environment needs is
-not an error in another.
+An unset name is an error. Resources and documents removed by `when` are not
+interpolated.
 
 ## Examples
 
@@ -337,9 +303,8 @@ file it reads beside it:
 | [`network-by-environment.yaml`](../../../examples/language/network-by-environment.yaml) | interpolation beside references, a whole mapping placed with its shape, a `when` on an output, on Terraform |
 | [`optional-monitoring.yaml`](../../../examples/language/optional-monitoring.yaml) | a `spec.when` that leaves a whole document out of the run, on Kubernetes |
 
-All of it together in one workflow of four documents and four tools is
-[`examples/workflow/tenants.yaml`](../../../examples/workflow/tenants.yaml),
-walked through in [worked workflows](../../quickstart/workflows.md#tenants).
+All together: [`examples/workflow/tenants.yaml`](../../../examples/workflow/tenants.yaml)
+([walk-through](../../quickstart/workflows.md#tenants)).
 
 ```
 meridian compile examples/language/site-by-environment.yaml \
