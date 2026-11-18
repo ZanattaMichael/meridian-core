@@ -1,7 +1,6 @@
 # Dependencies and notifications
 
-A resource can relate to another in two ways. They look alike but mean
-different things, so they are separate fields.
+`dependsOn` sets order. `notifies` sets a reaction to change.
 
 ## `dependsOn`: order
 
@@ -13,11 +12,8 @@ different things, so they are separate fields.
     - resource: nginx_pkg
 ```
 
-"Do not touch this until that is done." It is only about order.
-
-Meridian builds a graph from every `dependsOn`, refuses cycles (naming the
-resources), and hands each plugin the resources in an order that satisfies
-every edge. What the plugin does next depends on how its tool handles order:
+Meridian sorts resources by every `dependsOn`, refuses cycles (naming the resources), and
+hands each plugin the sorted list. What the plugin writes depends on the tool:
 
 | Tool orders by | Targets | What `dependsOn` becomes |
 |---|---|---|
@@ -29,10 +25,10 @@ every edge. What the plugin does next depends on how its tool handles order:
 | the kind of each object | `helm` | nothing written where Helm's own install order already agrees; refused where it does not ([helm](../targets/helm.md#ordering)) |
 | the stages of a first boot | `cloud-init` | nothing written; each resource is placed at the step cloud-init handles it, a file that has to wait is deferred, and a dependency that points backwards through those steps is refused |
 
-Where a reference already implies order, as `${web_vm.id}` does in Terraform
-or `Volume: ${data}:/srv` in a Podman unit, the plugin does not repeat it. ARM
-is the exception: Resource Manager infers no order from a resource id, so the
-`arm` target also writes a `dependsOn` for every reference.
+Where a reference already implies order (`${web_vm.id}` in Terraform,
+`Volume: ${data}:/srv` in a Podman unit), the plugin does not repeat it. The `arm` target
+writes a `dependsOn` for every reference, since Resource Manager infers no order from an
+id.
 
 ## `notifies`: reaction
 
@@ -45,21 +41,16 @@ is the exception: Resource Manager infers no order from a resource id, so the
       action: restart
 ```
 
-"When this actually changes, do that to the other." It is conditional: if the
-file is already right, nothing restarts. It is not an order: Meridian leaves it
-out of the sort, so add `dependsOn` if the notifier must also come first.
+When the notifier changes, the action runs on the other resource. If nothing changed,
+nothing runs. A notify does not order the two; add `dependsOn` for that.
 
-Tools differ most here, and Meridian is strict.
+**Native** notifies use the tool's own mechanism: Ansible handlers, Puppet and OpenVox
+`notify`, Chef `notifies`, Salt `watch` and `onchanges`, DscPipelineRunner `notify`,
+Compose `depends_on` with `restart: true`, and systemd `PartOf=` for
+[Podman](../targets/podman.md#notifications).
 
-**Native** means the tool has its own mechanism. Ansible's handlers, Puppet's
-and OpenVox's `notify`, Chef's `notifies`, Salt's `watch` and `onchanges` requisites,
-DscPipelineRunner's `notify`, Compose's `depends_on` with `restart: true`, and
-systemd's `PartOf=` for Podman units
-([podman](../targets/podman.md#notifications)) are native.
-
-**Synthetic** means the tool has no such mechanism, so Meridian builds the
-reaction from something it does have. It works and is visible in the tool's
-output, so each is documented on its target page:
+**Synthetic** notifies are built from something else the tool has, and always raise a
+compile warning:
 
 - Kubernetes: a checksum of the notifier in an annotation on the workload's pod
   template. When the checksum changes, the pods roll.
@@ -72,25 +63,17 @@ output, so each is documented on its target page:
   ([terraform](../targets/terraform.md#notifications))
 - OpenTofu: the same `replace_triggered_by`.
   ([opentofu](../targets/opentofu.md#notifications))
-- cloud-init: the notified action as a command that runs once, after every
-  other first-boot command. A first boot changes everything, so it is
-  unconditional. ([cloud-init](../targets/cloud-init.md#notifications))
+- cloud-init: the action as a command that runs once, after every other first-boot
+  command, unconditionally. ([cloud-init](../targets/cloud-init.md#notifications))
 
-A synthetic notify always produces a compile warning describing it.
+**Accepted actions.** A target accepts only actions its tool can perform; anything else is
+refused, never substituted:
 
-**The action matters.** A target accepts only the actions its tool can actually
-perform on that kind of resource. Puppet can restart
-a service on refresh but cannot reload it, so `action: reload` is refused on
-Puppet with the reason, not turned into a restart. Salt restarts and reloads a
-service through the state that keeps it running, so either action aimed at a
-service whose state is `stopped` is refused. Kubernetes and Helm can roll pods and
-nothing else, so only `restart` aimed at a Deployment, StatefulSet or DaemonSet
-is accepted. systemd can propagate a restart between Podman units and nothing
-else, so only `restart` is accepted there. CloudFormation, Bicep, ARM templates and Pulumi cannot react to a change at
-all and refuse every notify ([pulumi](../targets/pulumi.md#notifications) says
-what to write instead). So does Packer: a build runs each step once on a
-machine it then discards.
+- Puppet: `reload` is refused; refresh only restarts.
+- Salt: an action on a `stopped` service is refused.
+- Kubernetes and Helm: only `restart`, on a Deployment, StatefulSet or DaemonSet.
+- Podman: only `restart`.
+- CloudFormation, Bicep, ARM, Pulumi and Packer: every notify is refused
+  ([pulumi](../targets/pulumi.md#notifications) says what to write instead).
 
-The [capability matrix](../reference/capability-matrix.md) summarises this. The
-rule: Meridian does what the document says or refuses to compile it. See
-[the capability model](capability-model.md).
+See the [capability matrix](../reference/capability-matrix.md).
