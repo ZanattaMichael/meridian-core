@@ -212,12 +212,19 @@ jobs:
       - name: Check the manifests and the install script
         run: |
           (cd dist && sha256sum --check "meridian-$VERSION-checksums.txt")
+          # The trees the package managers workflow pushes can be laid out
+          # from these manifests, at the paths each manager expects.
+          python3 tools/release/package_managers.py --manifests dist/packaging --out trees
+          test -f trees/homebrew/Formula/meridian.rb
+          test -f trees/scoop/bucket/meridian.json
+          test -f "trees/winget/manifests/z/ZanattaMichael/Meridian/$VERSION/ZanattaMichael.Meridian.installer.yaml"
+          grep -qx "$VERSION" trees/VERSION
           ruby -c dist/packaging/homebrew/meridian.rb
           python3 -c 'import json, sys; json.load(open(sys.argv[1]))' dist/packaging/scoop/meridian.json
           for file in dist/packaging/winget/*.yaml; do
             ruby -ryaml -e 'YAML.safe_load(File.read(ARGV[0])) or abort("empty")' "$file"
           done
-          shellcheck packaging/install/install.sh
+          shellcheck packaging/install/install.sh tools/release/send_tree.sh
           sh -n packaging/install/install.sh
 
       # What a release is made from: every crate in Cargo.lock, by version.

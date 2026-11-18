@@ -4,11 +4,6 @@ Meridian is the `meridian` command and one plugin binary per target. They are
 installed together, in one directory, and `meridian` finds the plugins beside
 it. Releases are built for Linux, macOS and Windows, each on x86-64 and arm64.
 
-> **No release has been published yet.** Until the first one is, [build from
-> source](#build-from-source). The other ways to install on this page are how
-> a release is installed, and CI runs each of them against every change to the
-> release pipeline; they start working when the first release is published.
-
 | You have | Use |
 |---|---|
 | Linux or macOS | [the install script](#linux-and-macos), or [Homebrew](#homebrew) |
@@ -52,7 +47,8 @@ rights are needed. [Meridian on Windows](windows.md) covers what differs there.
 
 ## Homebrew
 
-A release carries a Homebrew formula. Once the project's tap is published:
+A release carries a Homebrew formula, kept in the project's tap. Once the tap
+is public:
 
 ```
 brew install zanattamichael/meridian/meridian
@@ -60,13 +56,21 @@ brew install zanattamichael/meridian/meridian
 
 ## Scoop and winget
 
-A release carries a Scoop manifest and winget manifests. Once they are
-published to a bucket and to winget:
+A release carries a Scoop manifest, kept in the project's bucket, and winget
+manifests, submitted to winget's community repository. Once the bucket is
+public and the winget submission is merged:
 
 ```
+scoop bucket add meridian https://github.com/ZanattaMichael/scoop-meridian
 scoop install meridian
 winget install ZanattaMichael.Meridian
 ```
+
+Neither the archives nor the package-manager listings carry an Apple or
+Microsoft code signature. Installed these ways, or with the scripts above,
+that changes nothing. An archive downloaded in a browser is quarantined, and
+macOS or SmartScreen will warn before it runs; what a release does sign is
+under [Check what you downloaded](#check-what-you-downloaded).
 
 ## Container image
 
