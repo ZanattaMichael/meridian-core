@@ -54,6 +54,7 @@ fn plugin_dir() -> PathBuf {
 
 fn meridian(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(args)
         .current_dir(dir)
         .env("MERIDIAN_PLUGIN_DIR", plugin_dir())
@@ -129,6 +130,7 @@ fn fmt_rewrites_files_and_check_only_reports() {
 fn fmt_reads_standard_input_and_refuses_what_does_not_parse() {
     let dir = scratch("fmt-stdin");
     let mut child = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(["fmt", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -253,6 +255,7 @@ fn lint_checks_each_file_of_a_directory_on_its_own() {
 #[test]
 fn every_example_passes_lint_with_the_real_plugins() {
     let mut command = Command::new(env!("CARGO_BIN_EXE_meridian"));
+    command.env("MERIDIAN_ANNOTATIONS", "off");
     command.arg("lint").arg(repo_root().join("examples"));
     // Every plugin, each from wherever it was built.
     for entry in fs::read_dir(repo_root().join("plugins")).unwrap() {
@@ -450,6 +453,7 @@ impl Client {
 #[test]
 fn lsp_serves_an_editor_over_standard_io_with_a_real_plugin() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(["lsp", "--plugin-dir"])
         .arg(plugin_dir())
         .stdin(Stdio::piped())

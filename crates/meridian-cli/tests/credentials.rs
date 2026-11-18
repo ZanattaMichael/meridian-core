@@ -24,6 +24,7 @@ fn scratch(test: &str) -> PathBuf {
 /// documents read, and with any further variables.
 fn meridian_with(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_meridian"));
+    command.env("MERIDIAN_ANNOTATIONS", "off");
     command
         .args(args)
         .current_dir(dir)

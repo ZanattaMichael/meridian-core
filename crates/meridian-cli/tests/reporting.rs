@@ -73,6 +73,7 @@ fn plugin_dirs() -> String {
 
 fn meridian(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(args)
         .current_dir(dir)
         .env("MERIDIAN_PLUGIN_DIR", plugin_dirs())
@@ -270,6 +271,7 @@ fn a_report_is_made_from_a_file_of_events_and_from_standard_input() {
 
     // The same events on standard input give the same report.
     let mut piped = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(["report", "--from", "-"])
         .current_dir(&dir)
         .stdin(std::process::Stdio::piped())

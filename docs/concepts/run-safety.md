@@ -203,6 +203,17 @@ remote backend (a Terraform `backend` block, a Pulumi backend), set in the
 document. A shared Meridian backend gives a team one lock, one history, and
 one answer to "what was applied last, and did it work".
 
+**Between the jobs of a pipeline.** A job's runner is gone when the job
+ends, so a pipeline that plans in one job and applies in the next must put
+the record where the second job can reach it: carried as an artifact between
+the jobs, which is enough while one pipeline owns the documents and runs one
+job at a time, or in a shared backend, which also holds the lock against a
+second pipeline or a laptop. A failed apply is then continued by running the
+job again with `apply --resume`, which finds the failed run in the record
+and goes on from the step that failed.
+[Running Meridian in a pipeline](../operations/running-in-a-pipeline.md#sharing-the-record-between-jobs)
+shows both for each engine.
+
 ## Putting a run back
 
 Sometimes the right move after a failure is not to fix forward but to go back

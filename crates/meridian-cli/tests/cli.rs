@@ -53,6 +53,7 @@ fn scratch(test: &str, workflow: &str) -> PathBuf {
 
 fn meridian(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(args)
         .current_dir(dir)
         .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())
@@ -131,6 +132,7 @@ fn plugins_rules_lists_a_plugins_own_refusal_rules() {
 /// `meridian ... | head -0` does.
 fn meridian_with_stdout_closed(dir: &Path, args: &[&str]) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(args)
         .current_dir(dir)
         .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())
@@ -336,6 +338,7 @@ fn validate_finds_a_dependency_cycle_without_loading_a_plugin() {
     let dir = scratch("validate-cycle", &cycle);
     // No plugin directory at all: the check is the core's own.
     let out = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(["validate", "site.yaml"])
         .current_dir(&dir)
         .env("MERIDIAN_PLUGIN_DIR", dir.join("no-plugins-here"))
