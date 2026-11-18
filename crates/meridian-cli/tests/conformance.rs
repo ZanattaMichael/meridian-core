@@ -413,6 +413,49 @@ const CASES: &[Case] = &[
         Same,
         "    - id: a\n      type: Package\n      params:\n        name: nginx\n",
     ),
+    // ---- native types ---------------------------------------------------
+    case(
+        "native types",
+        "an Ansible module in full (`ansible.builtin.lineinfile`)",
+        Varies,
+        "    - id: a\n      type: ansible.builtin.lineinfile\n      params:\n        path: /etc/motd\n        line: hi\n",
+    ),
+    case(
+        "native types",
+        "an Ansible module in full, with a state",
+        Varies,
+        "    - id: a\n      type: ansible.builtin.lineinfile\n      state: absent\n      params:\n        path: /etc/motd\n        line: hi\n",
+    ),
+    case(
+        "native types",
+        "an Ansible module in full, notified with `run`",
+        Varies,
+        "    - id: conf\n      type: file\n      params:\n        path: /etc/app.conf\n        content: \"x\\n\"\n      notifies:\n        - resource: a\n          action: run\n    - id: a\n      type: ansible.builtin.command\n      params:\n        cmd: /bin/true\n",
+    ),
+    case(
+        "native types",
+        "a bare module name (`lineinfile`)",
+        Same,
+        "    - id: a\n      type: lineinfile\n      params:\n        path: /etc/motd\n        line: hi\n",
+    ),
+    case(
+        "native types",
+        "the tool's own `file` under the prefix (`native/file`)",
+        Varies,
+        "    - id: a\n      type: native/file\n      params:\n        path: /etc/motd\n        source: puppet:///modules/motd/motd\n",
+    ),
+    case(
+        "native types",
+        "a Puppet module type (`mysql::db`)",
+        Varies,
+        "    - id: a\n      type: mysql::db\n      params:\n        user: app\n",
+    ),
+    case(
+        "native types",
+        "a Salt state function (`pkgrepo.managed`)",
+        Varies,
+        "    - id: a\n      type: pkgrepo.managed\n      params:\n        name: deb http://example.com stable main\n",
+    ),
     case(
         "types",
         "all six types in one document",
@@ -1009,8 +1052,11 @@ fn every_example_compiles_to_the_same_files_twice() {
 }
 
 /// A target's `category` is how the core pairs it with a kind of document, so
-/// every shipped target must declare one, and the shared dialect is exactly
-/// the six types on six configuration management targets.
+/// every shipped target must declare one, and the shared dialect is the six
+/// types on six configuration management targets. A target may also take
+/// its tool's own types beside them, as a pattern an editor can offer; a
+/// bare name beside the six would be a seventh shared type, which no target
+/// may add on its own.
 #[test]
 fn every_target_declares_its_segment_and_its_types() {
     for target in emitters() {
@@ -1039,11 +1085,24 @@ fn every_target_declares_its_segment_and_its_types() {
             Category::ConfigurationManagement,
             "{name}"
         );
+        let types = target.supported_resource_types();
+        let (own, shared): (Vec<&String>, Vec<&String>) = types
+            .iter()
+            .partition(|t| t.contains('<') || t.starts_with(meridian_sdk::NATIVE_PREFIX));
         assert_eq!(
-            target.supported_resource_types(),
+            shared,
             ["exec", "file", "group", "package", "service", "user"],
             "{name}"
         );
+        for pattern in own {
+            assert!(
+                target
+                    .resource_schemas()
+                    .iter()
+                    .any(|s| s.r#type == *pattern && s.open),
+                "{name}: {pattern} is declared as an open type for editors"
+            );
+        }
     }
 }
 

@@ -652,6 +652,69 @@ const SHARED_PARAMS: &[(&str, &str, ParamKind, &str)] = &[
     ("user", "uid", ParamKind::Integer, "The user's numeric id."),
 ];
 
+/// The names of the shared configuration management types, sorted.
+pub fn shared_type_names() -> Vec<&'static str> {
+    SHARED_TYPES.iter().map(|(name, _)| *name).collect()
+}
+
+/// Whether `name` is one of the shared configuration management types.
+pub fn is_shared_type(name: &str) -> bool {
+    SHARED_TYPES.iter().any(|(t, _)| *t == name)
+}
+
+/// What a configuration management target writes before a native type name
+/// that would otherwise be read as a shared type: `native/file` is the
+/// tool's own `file`, where `file` is the shared one.
+pub const NATIVE_PREFIX: &str = "native/";
+
+/// How a `type` on a configuration management target is read: one of the
+/// six shared types, the tool's own type, or the tool's own type under a
+/// name a shared type has taken.
+///
+/// A dotted or namespaced native name (`ansible.builtin.lineinfile`,
+/// `pkgrepo.managed`, `mysql::db`) never collides with a shared type, so it
+/// is written as the tool writes it. A bare native name that is also a
+/// shared type (Puppet's `file`, Chef's `package`) is reached as
+/// `native/<name>`; the bare word stays the shared type on every target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TypeName<'a> {
+    /// One of the shared types, which every configuration management target
+    /// maps itself.
+    Shared(&'a str),
+    /// The tool's own type, named as the tool names it.
+    Native(&'a str),
+    /// The tool's own type whose bare name is a shared type, written
+    /// `native/<name>`; the value is the bare name.
+    NativeNamedLikeShared(&'a str),
+}
+
+impl<'a> TypeName<'a> {
+    /// Reads a resource's `type`.
+    pub fn read(name: &'a str) -> Self {
+        if is_shared_type(name) {
+            return TypeName::Shared(name);
+        }
+        match name.strip_prefix(NATIVE_PREFIX) {
+            Some(bare) => TypeName::NativeNamedLikeShared(bare),
+            None => TypeName::Native(name),
+        }
+    }
+
+    /// The name the tool knows the type by: the bare name under a
+    /// `native/` prefix, otherwise the name as written.
+    pub fn tool_name(self) -> &'a str {
+        match self {
+            TypeName::Shared(name) | TypeName::Native(name) => name,
+            TypeName::NativeNamedLikeShared(bare) => bare,
+        }
+    }
+
+    /// Whether the type is the tool's own and not a shared one.
+    pub fn is_native(self) -> bool {
+        !matches!(self, TypeName::Shared(_))
+    }
+}
+
 /// Checks a resource of one of the shared configuration management types
 /// against [`SHARED_PARAMS`]: every param the table knows must hold a value
 /// of the table's kind. A resource of any other type, and a param the table
@@ -1013,5 +1076,33 @@ mod tests {
             assert_eq!(ParamKind::from_name(kind.as_str()), kind);
         }
         assert_eq!(ParamKind::from_name("tensor"), ParamKind::Any);
+    }
+
+    #[test]
+    fn a_type_name_is_shared_native_or_native_under_a_prefix() {
+        assert_eq!(TypeName::read("file"), TypeName::Shared("file"));
+        assert_eq!(
+            TypeName::read("ansible.builtin.lineinfile"),
+            TypeName::Native("ansible.builtin.lineinfile")
+        );
+        assert_eq!(TypeName::read("mysql::db"), TypeName::Native("mysql::db"));
+        assert_eq!(
+            TypeName::read("native/file"),
+            TypeName::NativeNamedLikeShared("file")
+        );
+        // The prefix is read whatever follows it; whether the tool has such
+        // a type is the target's to say.
+        assert_eq!(
+            TypeName::read("native/cron"),
+            TypeName::NativeNamedLikeShared("cron")
+        );
+        assert_eq!(TypeName::read("native/file").tool_name(), "file");
+        assert_eq!(TypeName::read("File"), TypeName::Native("File"));
+        assert!(!TypeName::read("exec").is_native());
+        assert!(TypeName::read("native/exec").is_native());
+        assert_eq!(
+            shared_type_names(),
+            ["exec", "file", "group", "package", "service", "user"]
+        );
     }
 }

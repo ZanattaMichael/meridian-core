@@ -37,7 +37,7 @@ compiled, with the reason. Each target's own page says how it does what it can.
 
 | Target | Category | Resource types | notifies | runtimeWhen | plan | apply | outputs | inputs | secrets | credentials | import | schemas |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| [ansible](../targets/ansible.md) | configuration-management | `exec`, `file`, `group`, `package`, `service`, `user` | native | yes | yes | yes | no | no | yes | yes | Ansible playbooks and task files | no |
+| [ansible](../targets/ansible.md) | configuration-management | `‹namespace›.‹collection›.‹module›`, `exec`, `file`, `group`, `package`, `service`, `user` | native | yes | yes | yes | no | no | yes | yes | Ansible playbooks and task files | yes |
 | [arm](../targets/arm.md) | infrastructure-as-code | `‹Namespace›/‹type›`, `deployment`, `parameter` | no | no | yes | yes | yes | yes | yes | no | no | no |
 | [bicep](../targets/bicep.md) | infrastructure-as-code | `‹Namespace›/‹type›@‹api-version›`, `deployment` | no | no | yes | yes | yes | no | yes | no | no | no |
 | [chef](../targets/chef.md) | configuration-management | `exec`, `file`, `group`, `package`, `service`, `user` | native | yes | yes | yes | no | no | yes | yes | no | no |

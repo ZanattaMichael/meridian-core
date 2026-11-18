@@ -19,9 +19,6 @@
 # TODO(meridian-import): not translated: site.yml:2: play "Odd": these play
 #   variables are lists, mappings or templates, and a document has no play
 #   variables to hold them: packages. A task that uses one is marked
-# TODO(meridian-import): not translated: site.yml:17: task "Template": no
-#   resource type of this target compiles to the module template, so the task
-#   was left out (the types are exec, file, group, package, service, user)
 # TODO(meridian-import): not translated: site.yml:32: task "Each": the task
 #   loops over something other than a list of plain values written in the
 #   playbook, so it was left out. Write one resource for each item
@@ -39,21 +36,38 @@ spec:
     host: webservers
   resources:
     # From site.yml:11
+    # TODO(meridian-import): changed: site.yml:11: task "Packages": the task
+    #   is the module ansible.builtin.apt itself, with its arguments as
+    #   written, and not a shared resource type: the package resource type has
+    #   no param for these arguments of apt: update_cache. The document
+    #   compiles for Ansible only
     # TODO(meridian-import): not translated: site.yml:11: task "Packages":
     #   this uses the play variable(s) packages in a way that could not be
     #   written in. A document has no play variables, so Ansible will find
     #   them undefined: write the value where it is used
-    # TODO(meridian-import): not translated: site.yml:11: task "Packages": the
-    #   package resource type has no param for these arguments of apt, so they
-    #   were left out: update_cache
     # TODO(meridian-import): not translated: site.yml:11: task "Packages": a
     #   resource cannot carry these task keywords, so they were left out:
     #   become, tags
     - id: packages
-      type: package
-      state: present
+      type: ansible.builtin.apt
       params:
         name: '{{ packages }}'
+        update_cache: true
+
+    # From site.yml:17
+    # TODO(meridian-import): changed: site.yml:17: task "Template": the task
+    #   is the module ansible.builtin.template itself, with its arguments as
+    #   written, and not a shared resource type: no shared resource type
+    #   compiles to the module template. The document compiles for Ansible
+    #   only
+    - id: template
+      type: ansible.builtin.template
+      params:
+        dest: /etc/app.conf
+        src: app.conf.j2
+      notifies:
+        - resource: enable_app
+          action: restart
 
     # From site.yml:22
     # TODO(meridian-import): changed: site.yml:22: task "Enable app": the task

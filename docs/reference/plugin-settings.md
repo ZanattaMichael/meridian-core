@@ -39,6 +39,8 @@ for each target by name.
 |---|---|---|---|
 | `program` | `MERIDIAN_ANSIBLE_PLAYBOOK` | `ansible-playbook` | The `ansible-playbook` program to run, when it is not on `PATH`. |
 | `args` | `MERIDIAN_ANSIBLE_ARGS` | none | Extra arguments for every run, split like a shell command line: how to connect, which user, which key. For example `--user deploy --private-key ~/.ssh/deploy`. |
+| `doc` | `MERIDIAN_ANSIBLE_DOC` | `ansible-doc` | The `ansible-doc` program `meridian schema sync` runs to describe the modules the documents use, when it is not on `PATH`. |
+| `galaxy` | `MERIDIAN_ANSIBLE_GALAXY` | `ansible-galaxy` | The `ansible-galaxy` program `meridian schema sync` runs to read the installed collections' versions, when it is not on `PATH`. |
 
 ## [arm](../targets/arm.md)
 

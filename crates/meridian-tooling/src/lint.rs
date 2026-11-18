@@ -114,6 +114,17 @@ pub const RULES: &[Rule] = &[
                       directory. Keep it to letters, digits, `.`, `_` and `-`.",
     },
     Rule {
+        code: "native-type",
+        severity: Severity::Info,
+        summary: "A resource uses the tool's own type on a target that shares types.",
+        explanation: "The six shared configuration management types compile for every \
+                      target that takes them, so a document written with them moves between \
+                      tools by changing `spec.target`. A type such as \
+                      `ansible.builtin.lineinfile` is one tool's own, so the document now \
+                      compiles for that target only. That is often what is wanted; the \
+                      rule says where the document stopped being portable.",
+    },
+    Rule {
         code: "unused-resource-set-host",
         severity: Severity::Info,
         summary: "`targetHost` gives fields its `from` does not read.",
@@ -558,6 +569,39 @@ impl Ctx<'_> {
     fn across_resources(&mut self) {
         let doc = &self.parsed.doc;
         let target = self.catalog.target(doc.target());
+
+        // The tool's own types on a target that shares the six: the
+        // document is written for one tool from here on.
+        let shares_types = target.is_some_and(|t| {
+            meridian_sdk::schema::shared_type_names()
+                .iter()
+                .all(|name| t.types.iter().any(|s| s.r#type == *name))
+        });
+        let mut reports = Vec::new();
+        if let (true, Some(t)) = (shares_types, target) {
+            for r in doc.resources() {
+                // A type the target does not know is the compiler's to
+                // refuse, not a native type.
+                if meridian_sdk::TypeName::read(&r.r#type).is_native()
+                    && !r.r#type.contains("${")
+                    && t.resource(&r.r#type).is_some()
+                {
+                    reports.push((
+                        self.at(r, "type"),
+                        format!(
+                            "type {:?} is {}'s own, so the document compiles for {} only and \
+                             no longer moves to another configuration management target",
+                            r.r#type,
+                            doc.target(),
+                            doc.target()
+                        ),
+                    ));
+                }
+            }
+        }
+        for (span, message) in reports {
+            self.report("native-type", span, message);
+        }
 
         // The same thing managed twice. What identifies a thing is the
         // first of these params the type has.

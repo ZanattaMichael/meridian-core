@@ -3,10 +3,10 @@ not translated: site.yml:2: play "Odd": the play applies the role(s) common, and
 not translated: site.yml:2: play "Odd": a document has nothing for these play keywords, so they were left out: become. Connection settings such as become and remote_user belong in the runner's MERIDIAN_ANSIBLE_ARGS
 note: site.yml:2: play "Odd": a document has no play variables, so the value of each of these was written in wherever a task uses it: port
 not translated: site.yml:2: play "Odd": these play variables are lists, mappings or templates, and a document has no play variables to hold them: packages. A task that uses one is marked
+changed [packages]: site.yml:11: task "Packages": the task is the module ansible.builtin.apt itself, with its arguments as written, and not a shared resource type: the package resource type has no param for these arguments of apt: update_cache. The document compiles for Ansible only
 not translated [packages]: site.yml:11: task "Packages": this uses the play variable(s) packages in a way that could not be written in. A document has no play variables, so Ansible will find them undefined: write the value where it is used
-not translated [packages]: site.yml:11: task "Packages": the package resource type has no param for these arguments of apt, so they were left out: update_cache
 not translated [packages]: site.yml:11: task "Packages": a resource cannot carry these task keywords, so they were left out: become, tags
-not translated: site.yml:17: task "Template": no resource type of this target compiles to the module template, so the task was left out (the types are exec, file, group, package, service, user)
+changed [template]: site.yml:17: task "Template": the task is the module ansible.builtin.template itself, with its arguments as written, and not a shared resource type: no shared resource type compiles to the module template. The document compiles for Ansible only
 changed [enable_app]: site.yml:22: task "Enable app": the task sets no state, only whether the service starts at boot, and a service resource always has one. It was given `running`, so applying the document starts the service
 not translated [open_the_port]: site.yml:26: task "Open the port": this uses the play variable(s) port in a way that could not be written in. A document has no play variables, so Ansible will find them undefined: write the value where it is used
 not translated: site.yml:32: task "Each": the task loops over something other than a list of plain values written in the playbook, so it was left out. Write one resource for each item

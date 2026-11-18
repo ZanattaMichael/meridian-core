@@ -5,7 +5,11 @@ six resource types. A resource written with them compiles for any of the six,
 within what each tool can do. OpenVox reads the language Puppet reads, so wherever
 this page says Puppet, the same holds for `openvox`.
 Anything outside these tables is refused, never dropped: a param a target does
-not take, a state it cannot express, an action it cannot perform.
+not take, a state it cannot express, an action it cannot perform. What the six
+do not cover is reached as the tool's own type beside them, written as the
+tool writes it (`ansible.builtin.lineinfile`); its params are then the tool's,
+and the document compiles for that one target. See
+[native types beside the six](dsl/configuration-management.md#native-types-beside-the-six).
 
 The kind of value each param takes is checked in one place, the same way on all
 six targets, before a plugin applies its own rules: text where a name is wanted

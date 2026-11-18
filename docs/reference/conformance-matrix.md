@@ -117,6 +117,18 @@ where the tools themselves differ; the cells say how, and the
 | a type in the wrong case (`Package`) | yes | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
 | all six types in one document | yes | ok, warns | ok | ok, warns | ok | ok | ok |
 
+## `native types`
+
+| Document | same | ansible | chef | cloud-init | openvox | puppet | salt |
+|---|---|---|---|---|---|---|---|
+| an Ansible module in full (`ansible.builtin.lineinfile`) | no | ok | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
+| an Ansible module in full, with a state | no | ok | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
+| an Ansible module in full, notified with `run` | no | ok, warns | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
+| a bare module name (`lineinfile`) | yes | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
+| the tool's own `file` under the prefix (`native/file`) | no | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
+| a Puppet module type (`mysql::db`) | no | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
+| a Salt state function (`pkgrepo.managed`) | no | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
+
 ## `dependsOn`
 
 | Document | same | ansible | chef | cloud-init | openvox | puppet | salt |

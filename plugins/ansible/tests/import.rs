@@ -103,9 +103,21 @@ fn what_a_document_cannot_say_is_reported_and_marked() {
 
     let document = &imported.documents[0];
     let ids: Vec<&str> = document.resources.iter().map(|r| r.id.as_str()).collect();
-    assert_eq!(ids, ["packages", "enable_app", "open_the_port"]);
+    assert_eq!(ids, ["packages", "template", "enable_app", "open_the_port"]);
+    // A task a shared type cannot carry whole is the module itself, with
+    // every argument, and the document says it is now written for Ansible.
+    let packages = &document.resources[0];
+    assert_eq!(packages.r#type, "ansible.builtin.apt");
+    assert_eq!(packages.state, "");
+    assert!(packages.params.contains_key("update_cache"));
+    let template = &document.resources[1];
+    assert_eq!(template.r#type, "ansible.builtin.template");
+    assert_eq!(template.params.keys().collect::<Vec<_>>(), ["dest", "src"]);
+    assert!(imported.notes.iter().any(|n| n.level == NoteLevel::Changed
+        && n.resource == "template"
+        && n.msg.contains("compiles for Ansible only")));
     // The handler that could be translated was, onto the service it acts on.
-    let port = &document.resources[2];
+    let port = &document.resources[3];
     assert_eq!(port.notifies.len(), 1);
     assert_eq!(port.notifies[0].resource, "enable_app");
     assert_eq!(port.notifies[0].action, "restart");
@@ -152,6 +164,41 @@ fn each_play_is_a_document_and_a_task_file_has_no_host() {
     // The document with no host says so, and still compiles.
     assert_eq!(trips[2].rendered.todos, 1);
     assert!(trips[2].rendered.text.contains("CHANGE-ME.invalid"));
+}
+
+#[test]
+fn a_module_without_a_known_full_name_is_left_out_and_a_full_name_is_kept() {
+    let source = import_text(
+        "names",
+        &[(
+            "site.yml",
+            "- name: Names\n  hosts: web01\n  tasks:\n    - name: Firewall\n      community.general.ufw:\n        rule: allow\n        port: '80'\n    - name: Legacy copy\n      ansible.legacy.lineinfile:\n        path: /etc/motd\n        line: hi\n    - name: From a role\n      my_custom_module:\n        thing: 1\n    - name: Raw\n      raw: uptime\n",
+        )],
+    );
+    let (imported, _) = round_trip(&AnsibleImporter, &Ansible, &source);
+    let document = &imported.documents[0];
+    let types: Vec<&str> = document
+        .resources
+        .iter()
+        .map(|r| r.r#type.as_str())
+        .collect();
+    assert_eq!(
+        types,
+        ["community.general.ufw", "ansible.builtin.lineinfile"]
+    );
+    let left_out: Vec<&str> = imported
+        .notes
+        .iter()
+        .filter(|n| n.level == NoteLevel::Untranslated)
+        .map(|n| n.msg.as_str())
+        .collect();
+    assert_eq!(left_out.len(), 2, "{left_out:?}");
+    assert!(
+        left_out[0].contains("namespace.collection.my_custom_module"),
+        "{}",
+        left_out[0]
+    );
+    assert!(left_out[1].contains("free-form"), "{}", left_out[1]);
 }
 
 #[test]

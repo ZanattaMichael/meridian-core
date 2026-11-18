@@ -35,7 +35,15 @@ const TARGETS: &[Target] = &[
     Target {
         name: "ansible",
         refused: &[],
-        resource_types: &["exec", "file", "group", "package", "service", "user"],
+        resource_types: &[
+            "<namespace>.<collection>.<module>",
+            "exec",
+            "file",
+            "group",
+            "package",
+            "service",
+            "user",
+        ],
         capabilities: Capabilities {
             native_notify: true,
             synthetic_notify: false,

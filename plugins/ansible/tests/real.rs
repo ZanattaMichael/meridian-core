@@ -24,8 +24,9 @@ use std::process::{Command, Stdio};
 use meridian_plugin_testkit::{graph_from_text, scratch, secret_in_param, secrets, KeptLog};
 use meridian_sdk::{
     Applied, Artifact, Change, ChangeAction, Data, Emitter, Plan, RunContext, RunError, Runner,
+    SchemaRequest, SchemaSource,
 };
-use meridian_target_ansible::{Ansible, AnsibleRunner};
+use meridian_target_ansible::{Ansible, AnsibleRunner, AnsibleSchemas};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
 
@@ -393,4 +394,145 @@ fn a_credential_names_the_user_in_the_inventory_and_its_key_reaches_ansible_priv
             );
         }
     }
+}
+
+/// A module named in full, beside the shared types: a line kept in a
+/// file, and a module that only reads.
+/// `create: true` is the module's own argument: the file does not exist
+/// yet, and without it lineinfile fails rather than creating it. No shared
+/// `file` writes the file beside it, since one would put its own content
+/// back on every run.
+fn with_modules(root: &Path, line: &str) -> Artifact {
+    let root = root.display();
+    compile(&format!(
+        "    - id: workers\n      type: ansible.builtin.lineinfile\n      state: present\n      params:\n        path: {root}/app.conf\n        regexp: '^workers'\n        line: \"{line}\"\n        create: true\n      notifies:\n        - resource: stamp\n          action: run\n    - id: stamp\n      type: ansible.builtin.copy\n      params:\n        dest: {root}/stamp\n        content: \"changed\\n\"\n    - id: looked\n      type: ansible.builtin.stat\n      params:\n        path: {root}/app.conf\n      dependsOn:\n        - resource: workers\n"
+    ))
+}
+
+#[ignore = "needs a real ansible-playbook; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_module_named_in_full_runs_with_its_own_arguments_and_is_run_again_when_notified() {
+    let Some(runner) = ansible() else { return };
+    let dir = scratch(TMP, "real-modules");
+    let first = with_modules(&dir, "workers = 4");
+
+    // The stamp is a task of its own too, so it is written once in its
+    // place, and once more as the handler the changed line notifies.
+    let preview = plan(&runner, &dir, &first);
+    assert!(!preview.unknown, "{preview:?}");
+    assert_eq!(
+        changes(&preview.changes),
+        [
+            ("workers", ChangeAction::Update),
+            ("stamp", ChangeAction::Update),
+            ("run stamp", ChangeAction::Update),
+        ]
+    );
+    // In the real run the stamp task writes the file in its place, so the
+    // handler, the same module run again because the line changed, finds
+    // it there and reports nothing; in the check run neither had happened.
+    let applied = apply(&runner, &dir, &first);
+    assert_eq!(
+        changes(&applied.changes),
+        [
+            ("workers", ChangeAction::Update),
+            ("stamp", ChangeAction::Update),
+        ]
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("app.conf")).unwrap(),
+        "workers = 4\n"
+    );
+    assert_eq!(fs::read_to_string(dir.join("stamp")).unwrap(), "changed\n");
+
+    // In sync, and a module that only reads reports no change.
+    let again = plan(&runner, &dir, &first);
+    assert!(again.changes.is_empty(), "{:?}", again.changes);
+
+    // The state argument is the module's own: the line is taken out.
+    let gone = compile(&format!(
+        "    - id: workers\n      type: ansible.builtin.lineinfile\n      state: absent\n      params:\n        path: {}/app.conf\n        regexp: '^workers'\n",
+        dir.display()
+    ));
+    let applied = apply(&runner, &dir, &gone);
+    assert_eq!(
+        changes(&applied.changes),
+        [("workers", ChangeAction::Update)]
+    );
+    assert_eq!(fs::read_to_string(dir.join("app.conf")).unwrap(), "");
+
+    // An argument the module does not take is Ansible's to refuse, when
+    // the play runs and not before.
+    let wrong = compile(&format!(
+        "    - id: workers\n      type: ansible.builtin.lineinfile\n      params:\n        path: {}/app.conf\n        no_such_argument: 1\n",
+        dir.display()
+    ));
+    let log = KeptLog::default();
+    let failed = runner
+        .apply(&context(&dir), &wrong, &log)
+        .expect_err("an unknown argument fails the task");
+    assert!(
+        failed.to_string().contains("failed task"),
+        "{failed}\n{}",
+        log.text().join("\n")
+    );
+}
+
+#[ignore = "needs a real ansible-doc; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn the_modules_schemas_are_exported_for_an_editor() {
+    let Some(_) = ansible() else { return };
+    let dir = scratch(TMP, "real-schemas");
+    let text = "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: site\nspec:\n  target: ansible\n  targetHost:\n    from: inline\n    host: localhost\n  resources:\n    - id: motd\n      type: file\n      params:\n        path: /etc/motd\n        content: hi\n    - id: line\n      type: ansible.builtin.lineinfile\n      params:\n        path: /etc/motd\n        line: hi\n    - id: nowhere\n      type: example.missing.module\n      params:\n        x: 1\n";
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_text("site.yaml", text, "ansible")],
+    );
+    let log = KeptLog::default();
+    let export = AnsibleSchemas::from_env()
+        .export(&request, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(export.tool, "ansible");
+    assert!(
+        export.tool_version.starts_with("2."),
+        "{:?}",
+        export.tool_version
+    );
+    assert_eq!(
+        export.pins.get("ansible.builtin"),
+        Some(&export.tool_version)
+    );
+    let line = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "ansible.builtin.lineinfile")
+        .unwrap_or_else(|| panic!("lineinfile is described: {:?}", export.notes));
+    assert!(!line.open);
+    assert!(line.find_param("path").is_some_and(|p| p.required));
+    assert!(line.find_param("line").is_some());
+    assert_eq!(
+        line.find_param("state").unwrap().values,
+        ["absent", "present"]
+    );
+    assert!(
+        line.source.starts_with("ansible.builtin 2."),
+        "{}",
+        line.source
+    );
+    // Every other module of ansible-core is listed by name, open.
+    let copy = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "ansible.builtin.copy")
+        .expect("copy is listed");
+    assert!(copy.open && copy.params.is_empty() && !copy.description.is_empty());
+    // The module that is not installed is a note, not a failure.
+    assert!(
+        export
+            .notes
+            .iter()
+            .any(|n| n.contains("example.missing.module")),
+        "{:?}",
+        export.notes
+    );
 }

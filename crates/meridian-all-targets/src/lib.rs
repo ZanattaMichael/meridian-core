@@ -67,13 +67,13 @@ macro_rules! target {
 
 /// Every shipped target, sorted by name.
 pub const ALL: &[Target] = &[
-    target!(
-        "ansible",
-        meridian_target_ansible,
-        Ansible,
-        AnsibleRunner,
-        AnsibleImporter
-    ),
+    Target {
+        name: "ansible",
+        emitter: || Box::new(meridian_target_ansible::Ansible),
+        runner: || Box::new(meridian_target_ansible::AnsibleRunner::from_env()),
+        importer: Some(|| Box::new(meridian_target_ansible::AnsibleImporter)),
+        schemas: Some(|| Box::new(meridian_target_ansible::AnsibleSchemas::from_env())),
+    },
     target!("arm", meridian_target_arm, Arm, ArmRunner),
     target!("bicep", meridian_target_bicep, Bicep, BicepRunner),
     target!("chef", meridian_target_chef, Chef, ChefRunner),
