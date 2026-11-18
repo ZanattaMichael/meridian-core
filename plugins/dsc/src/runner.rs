@@ -37,11 +37,20 @@ pub fn settings() -> Vec<Setting> {
 
 /// The line of PowerShell's output that carries the run's result.
 const RESULT_MARK: &str = "MERIDIAN-RESULT ";
+/// The line that carries the result of the `Test` an apply runs first, with a
+/// runner too old to say which resources had drifted.
+const TEST_MARK: &str = "MERIDIAN-TEST ";
+
+/// A private function of the runners whose `Set` results carry `Drifted`
+/// (DscPipelineRunner PR 100), asked for inside the module: its presence is
+/// how an apply knows one `Set` run is enough.
+const DRIFT_MARKER: &str = "Resolve-DscV3ResourcePath";
 
 /// Runs a compiled configuration with `Invoke-DscRunner`.
 ///
 /// A plan is the runner's `Test` mode: every resource is tested and none is
-/// set. An apply is a `Test` to learn what has drifted, then `Set`.
+/// set. An apply is one `Set`, which tests every resource itself; with a runner
+/// too old to report `Drifted`, a `Test` runs first in the same PowerShell.
 pub struct DscRunner {
     pub program: String,
     pub module: String,
@@ -54,6 +63,9 @@ struct Outcome {
     /// `OK`, `FAIL` or `SKIP`.
     status: String,
     message: String,
+    /// Whether the resource was out of its desired state before the run,
+    /// when the runner says so (DscPipelineRunner after its PR 100).
+    drifted: Option<bool>,
 }
 
 impl DscRunner {
@@ -76,6 +88,35 @@ impl DscRunner {
         write_artifact(&context.work_dir, artifact)
     }
 
+    /// The configuration's directory as the runner is given it. The runner
+    /// compiles in a second runspace with its own current directory, so the
+    /// configuration is named by its full path.
+    fn directory(context: &RunContext) -> String {
+        std::path::absolute(&context.work_dir)
+            .unwrap_or_else(|_| context.work_dir.clone())
+            .display()
+            .to_string()
+    }
+
+    /// One PowerShell over the work directory, running `script` after the
+    /// module is imported (as `$module`), and the lines it printed.
+    fn powershell(
+        &self,
+        context: &RunContext,
+        script: &str,
+        log: &dyn Log,
+    ) -> Result<meridian_sdk::tool::Finished, RunError> {
+        let script = format!(
+            "$ErrorActionPreference = 'Stop'; $module = @(Import-Module {module} -PassThru)[0]; {script}",
+            module = quote(&self.module),
+        );
+        Tool::new(&self.program)
+            .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"])
+            .arg(script)
+            .dir(&context.work_dir)
+            .run_ok("DscPipelineRunner could not run the configuration", log)
+    }
+
     /// One `Invoke-DscRunner` over the work directory.
     fn invoke(
         &self,
@@ -83,36 +124,70 @@ impl DscRunner {
         mode: &str,
         log: &dyn Log,
     ) -> Result<Vec<Outcome>, RunError> {
-        // The runner compiles in a second runspace with its own current
-        // directory, so the configuration is named by its full path.
-        let directory = std::path::absolute(&context.work_dir)
-            .unwrap_or_else(|_| context.work_dir.clone())
-            .display()
-            .to_string();
         let script = format!(
-            "$ErrorActionPreference = 'Stop'; Import-Module {module}; \
-             $run = Invoke-DscRunner -ConfigurationSourcePath {directory} -Mode {mode}; \
+            "$run = Invoke-DscRunner -ConfigurationSourcePath {directory} -Mode {mode}; \
              '{RESULT_MARK}' + ($run | ConvertTo-Json -Depth 8 -Compress)",
-            module = quote(&self.module),
-            directory = quote(&directory),
+            directory = quote(&Self::directory(context)),
         );
-        let finished = Tool::new(&self.program)
-            .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"])
-            .arg(script)
-            .dir(&context.work_dir)
-            .run_ok("DscPipelineRunner could not run the configuration", log)?;
-        let Some(json) = finished
-            .stdout
-            .lines()
-            .rev()
-            .find_map(|line| line.trim().strip_prefix(RESULT_MARK.trim_end()))
-        else {
+        let finished = self.powershell(context, &script, log)?;
+        let Some(json) = marked(&finished.stdout, RESULT_MARK) else {
             return Err(
                 finished.into_error("DscPipelineRunner finished without reporting a result")
             );
         };
-        read_result(json.trim())
+        read_result(json)
     }
+
+    /// An apply in one PowerShell. A runner whose results say which
+    /// resources had drifted runs one `Set`, which tests every resource
+    /// itself; an older one runs a `Test` first to find out, in the same
+    /// PowerShell, so the module is loaded once either way. Returns what had
+    /// drifted and the `Set`'s outcomes.
+    fn invoke_apply(
+        &self,
+        context: &RunContext,
+        log: &dyn Log,
+    ) -> Result<(Vec<Change>, Vec<Outcome>), RunError> {
+        let directory = quote(&Self::directory(context));
+        let script = format!(
+            "$tellsDrift = & $module {{ [bool](Get-Command -Name {DRIFT_MARKER} -ErrorAction Ignore) }}; \
+             if (-not $tellsDrift) {{ \
+             $test = Invoke-DscRunner -ConfigurationSourcePath {directory} -Mode Test; \
+             '{TEST_MARK}' + ($test | ConvertTo-Json -Depth 8 -Compress) }}; \
+             $run = Invoke-DscRunner -ConfigurationSourcePath {directory} -Mode Set; \
+             '{RESULT_MARK}' + ($run | ConvertTo-Json -Depth 8 -Compress)"
+        );
+        let finished = self.powershell(context, &script, log)?;
+        let Some(json) = marked(&finished.stdout, RESULT_MARK) else {
+            return Err(
+                finished.into_error("DscPipelineRunner finished without reporting a result")
+            );
+        };
+        let outcomes = read_result(json)?;
+        let drifted = match marked(&finished.stdout, TEST_MARK) {
+            Some(test) => drift(&read_result(test)?),
+            None => {
+                if let Some(unknown) = outcomes.iter().find(|o| o.drifted.is_none()) {
+                    return Err(RunError::new(format!(
+                        "DscPipelineRunner's Set result does not say whether {:?} had drifted, \
+                         and no Test was run first",
+                        unknown.resource
+                    )));
+                }
+                drifted_in_set(&outcomes)
+            }
+        };
+        Ok((drifted, outcomes))
+    }
+}
+
+/// The text after the last line that starts with `mark`.
+fn marked<'a>(stdout: &'a str, mark: &str) -> Option<&'a str> {
+    stdout
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().strip_prefix(mark.trim_end()))
+        .map(str::trim)
 }
 
 /// A PowerShell single-quoted string, in which only the quote is special.
@@ -167,6 +242,10 @@ fn read_result(json: &str) -> Result<Vec<Outcome>, RunError> {
                 r#type: text(result, "ResourceType"),
                 status: text(result, "Status"),
                 message: text(result, "ErrorMessage"),
+                drifted: match result.get("Drifted") {
+                    Some(Value::Bool(drifted)) => Some(*drifted),
+                    _ => None,
+                },
             });
         }
     }
@@ -187,6 +266,21 @@ fn drift(outcomes: &[Outcome]) -> Vec<Change> {
             } else {
                 format!("{}: {}", o.r#type, o.message)
             },
+        })
+        .collect()
+}
+
+/// What a `Set` run says had drifted, from a runner that reports `Drifted`:
+/// each resource that was not in its desired state, whether or not the Set
+/// then managed it (a failure is reported separately).
+fn drifted_in_set(outcomes: &[Outcome]) -> Vec<Change> {
+    outcomes
+        .iter()
+        .filter(|o| o.drifted == Some(true))
+        .map(|o| Change {
+            resource: o.resource.clone(),
+            action: ChangeAction::Update,
+            summary: o.r#type.clone(),
         })
         .collect()
 }
@@ -229,12 +323,8 @@ impl Runner for DscRunner {
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
         self.prepare(context, artifact)?;
-        // The runner's result does not say which resources a Set changed, so
-        // the ones that had drifted are found first.
-        log.out("testing every resource against its desired state");
-        let drifted = drift(&self.invoke(context, "Test", log)?);
         log.out("setting the resources that are not in their desired state");
-        let outcomes = self.invoke(context, "Set", log)?;
+        let (drifted, outcomes) = self.invoke_apply(context, log)?;
 
         let failed: Vec<&Outcome> = outcomes.iter().filter(|o| o.status == "FAIL").collect();
         let changes: Vec<Change> = drifted
