@@ -156,5 +156,12 @@ jobs:
         working-directory: fixtures/pipeline
         run: |
           test "${{ steps.apply.outcome }}" = failure
-          grep -q '"reason":"plan-differs"' .meridian-pr/apply.json
+          python3 - <<'EOF'
+          import json
+          result = json.load(open(".meridian-pr/apply.json"))
+          assert result["refused"] is None, result
+          reasons = [s.get("reason") for s in result["stages"]]
+          assert "plan-differs" in reasons, reasons
+          assert not any(s["status"] == "applied" for s in result["stages"]), result
+          EOF
           test ! -e .meridian/infrastructure/network/fake/current

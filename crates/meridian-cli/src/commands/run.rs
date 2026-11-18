@@ -407,6 +407,12 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
                 "run {} was stopped by its policy before anything was applied",
                 report.run_id
             );
+        } else if mode == Mode::Apply && how.from_plan.is_some() {
+            eprintln!(
+                "run {} failed. A saved plan is applied whole: take a new plan with \
+                 `meridian plan --out` and apply that",
+                report.run_id
+            );
         } else if mode == Mode::Apply && report.rollbacks.is_empty() {
             eprintln!(
                 "run {} failed. Once the cause is fixed, `meridian apply --resume {}{}` \
