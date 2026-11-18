@@ -21,6 +21,7 @@ have written and runs Salt on it.
 | Plan | Yes: Salt's dry run, `test=True`. Every state reports whether it would change, so a plan is never "unknown" |
 | Apply | Yes |
 | Outputs | No. Salt states produce no values for a later stage to read |
+| Editor schemas | Yes: `meridian schema sync` asks `salt-call` what each state function takes. See [Editor schemas](#editor-schemas) |
 | Compiles to | `states/<document>.sls` and `states/top.sls` |
 | Runs with | `salt-call --local` on the node itself, `salt-ssh` for another host |
 
@@ -50,6 +51,7 @@ Contents: [Requirements](#requirements) ·
 [Notifications](#notifications) ·
 [Runtime conditions](#runtime-conditions) ·
 [Running it](#running-it) ·
+[Editor schemas](#editor-schemas) ·
 [Using the files with a Salt master](#using-the-files-with-a-salt-master) ·
 [Warnings](#warnings) ·
 [What the plugin refuses](#what-the-plugin-refuses) ·
@@ -778,6 +780,26 @@ user deploy)`, and never a value. `ssh-agent` and `ssh-add` are run from `PATH`,
 `MERIDIAN_SSH_AGENT` and `MERIDIAN_SSH_ADD`.
 
 The handover is tested against stand-ins for `salt-ssh`, `ssh-agent` and `ssh-add` that keep what they are given (the roster and its mode, the environment, the key and the passphrase), and against the real `salt-ssh` in CI, which configures the machine the tests run on over SSH as a credential whose key is read into a secret and reaches `salt-ssh` only through the agent Meridian starts.
+
+## Editor schemas
+
+`meridian schema sync` asks `salt-call --local` what the state functions the
+documents use take, so an editor completes and checks a `file.symlink` or a
+`pkgrepo.managed`'s arguments as it does the six types' params
+([Tool schemas](../tooling/schema-sync.md)). Until a function is synced, the
+editor knows it by name only, as [State functions beside the six](#state-functions-beside-the-six)
+says.
+
+| | |
+|---|---|
+| Described in full | each state function the documents use: its arguments from `sys.state_argspec`, those without a default required (`name` never is, since it is the resource's id), each described from the function's docstring through `sys.state_doc` where the docstring documents it. The function's keyword arguments (`**kwargs`) are not listed, so every function stays open to arguments beside the ones it names. A function the installed Salt does not have (a custom state module not yet synced to the minion) is a note and not the end of the sync |
+| Listed by name | every other state function `sys.list_state_functions` knows: built in, and from the modules the minion's `file_roots` hold. Salt's own `file`, `pkg`, `service`, `user`, `group` and `cmd` modules are among them; a document reaches them by their dotted names, never under `native/` |
+| Pinned | Salt's version, from `salt-call --version` |
+
+Every call runs `salt-call --local --out=json` with the target's own
+settings (`MERIDIAN_SALT_CALL`, `MERIDIAN_SALT_ARGS`), so the minion
+configuration the runs use is the one the sync reads. Every function takes
+the `watch` action, which is what `notifies` sends it.
 
 ## Using the files with a Salt master
 

@@ -98,7 +98,13 @@ pub const ALL: &[Target] = &[
             ))
         }),
     },
-    target!("chef", meridian_target_chef, Chef, ChefRunner),
+    Target {
+        name: "chef",
+        emitter: || Box::new(meridian_target_chef::Chef),
+        runner: || Box::new(meridian_target_chef::ChefRunner::from_env()),
+        importer: None,
+        schemas: Some(|| Box::new(meridian_target_chef::ChefSchemas::from_env())),
+    },
     Target {
         name: "cloud-init",
         emitter: || Box::new(meridian_target_cloud_init::CloudInit),
@@ -158,7 +164,13 @@ pub const ALL: &[Target] = &[
             ))
         }),
     },
-    target!("openvox", meridian_target_openvox, OpenVox, OpenVoxRunner),
+    Target {
+        name: "openvox",
+        emitter: || Box::new(meridian_target_openvox::OpenVox),
+        runner: || Box::new(meridian_target_openvox::OpenVoxRunner::from_env()),
+        importer: None,
+        schemas: Some(|| Box::new(meridian_target_openvox::OpenVoxRunner::from_env().schemas())),
+    },
     target!("packer", meridian_target_packer, Packer, PackerRunner),
     target!("podman", meridian_target_podman, Podman, PodmanRunner),
     Target {
@@ -168,8 +180,20 @@ pub const ALL: &[Target] = &[
         importer: None,
         schemas: Some(|| Box::new(meridian_target_pulumi::PulumiSchemas::from_env())),
     },
-    target!("puppet", meridian_target_puppet, Puppet, PuppetRunner),
-    target!("salt", meridian_target_salt, Salt, SaltRunner),
+    Target {
+        name: "puppet",
+        emitter: || Box::new(meridian_target_puppet::Puppet),
+        runner: || Box::new(meridian_target_puppet::PuppetRunner::from_env()),
+        importer: None,
+        schemas: Some(|| Box::new(meridian_target_puppet::PuppetSchemas::from_env())),
+    },
+    Target {
+        name: "salt",
+        emitter: || Box::new(meridian_target_salt::Salt),
+        runner: || Box::new(meridian_target_salt::SaltRunner::from_env()),
+        importer: None,
+        schemas: Some(|| Box::new(meridian_target_salt::SaltSchemas::from_env())),
+    },
     Target {
         name: "terraform",
         emitter: || Box::new(meridian_target_terraform::Terraform),
