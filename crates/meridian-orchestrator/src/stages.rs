@@ -45,6 +45,13 @@ impl Stage<'_> {
         }
     }
 
+    pub(crate) fn settings(&self) -> &BTreeMap<String, meridian_ir::Value> {
+        match self {
+            Stage::Infrastructure(d) => &d.spec.settings,
+            Stage::ResourceSet(d) => &d.spec.settings,
+        }
+    }
+
     pub(crate) fn labels(&self) -> &BTreeMap<String, String> {
         match self {
             Stage::Infrastructure(d) => &d.metadata.labels,

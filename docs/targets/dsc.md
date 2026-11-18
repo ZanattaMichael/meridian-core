@@ -14,7 +14,8 @@ resources is a setting.
 
 | | |
 |---|---|
-| Resource types | DSC's own: `Module/Resource`, such as `PSDscResources/Service` or `Microsoft.Windows/Registry`, plus `runner` for how the configuration is run. The abstract types (`package`, `service`, ...) are not taken |
+| Resource types | DSC's own: `Module/Resource`, such as `PSDscResources/Service` or `Microsoft.Windows/Registry`. The abstract types (`package`, `service`, ...) are not taken |
+| Settings | `spec.settings`: `engine`, `target` and `credential`, [how the configuration is run](#how-the-configuration-is-run) |
 | `dependsOn` | Yes, as the runner's own `dependsOn` |
 | `notifies` | Native: the runner's `notify`. The action is `refresh`: when the notifier really changed, the notified resource's `Set` runs even if its `Test` says there is nothing to do |
 | `runtimeWhen` | Yes: a `preCondition` |
@@ -30,13 +31,49 @@ module a resource lives in, and whether it is a v2 or a v3 resource, is DSC's
 business: `Module/Resource` is the same shape for both, and only the engine can
 tell whether a type exists.
 
-One resource may have the type `runner`. It is not a DSC resource:
+### How the configuration is run
 
-| Param | Meaning |
+How the configuration is run is not a resource: it is said once, for the whole
+document, under [`spec.settings`](../reference/dsl/index.md#settings). Each
+value is text, and the keys are the runner's own `PipelineRunnerSettings`:
+
+| Setting | Meaning |
 |---|---|
 | `engine` | `DscV2`, `DscV3`, or `Auto` (the default: v3 when `dsc` is installed) |
 | `target` | `Local`, `WinRM` or `SSH`: how the runner reaches the document's host |
 | `credential` | the name of a credential the runner resolves itself. The secret never appears in the document |
+
+```yaml
+spec:
+  target: dsc
+  targetHost:
+    from: inline
+    host: web01.example.com
+  settings:
+    engine: DscV2
+    target: WinRM
+    credential: svcDeploy
+  resources:
+    - id: site_config
+      type: PSDesiredStateConfiguration/File
+      params:
+        DestinationPath: C:\inetpub\app\web.config
+        Ensure: Present
+```
+
+A value outside the choices is refused (`invalid-setting`), and a key not in
+the table is refused by Meridian before the plugin is asked:
+`the document sets spec.settings.transport, and target "dsc" takes only:
+credential, engine, target`. Interpolation works in a setting as it does in a
+param, so `target: "${{ var.transport }}"` is fine.
+
+Before `spec.settings` existed, the same three were the params of one resource
+of type `runner`. A document written that way still compiles, with a warning
+that names the keys to move, until the next `apiVersion` removes the type. Where
+the resource and `spec.settings` give the same key different values the
+document is refused (`conflicting-settings`): the settings are said once. The
+resource is not a DSC resource, so a `runtimeWhen` on it is refused too
+(`unsupported-runtime-condition`).
 
 ### The version of DSC
 
@@ -45,7 +82,7 @@ The plugin declares the versions `2` and `3`, and a document's
 
 | `targetVersion` | Engine |
 |---|---|
-| not set | the runner's `engine`, or `Auto` |
+| not set | `spec.settings.engine`, or `Auto` |
 | `"2"` (or `"2.x"`) | `DscV2` |
 | `"3"` (or `"3.x"`) | `DscV3` |
 
@@ -56,12 +93,13 @@ spec:
 ```
 
 Say it once. A document whose `targetVersion` means one engine and whose
-`runner` names another (including `Auto`) is refused with the rule
+`spec.settings.engine` names another (including `Auto`) is refused with the rule
 `conflicting-engine`; it is not resolved in favour of either. Any other version
 is refused by Meridian before the plugin is asked.
 
-When the document's host is another machine, `target` must be given. The runner
-cannot guess between WinRM and SSH, and Meridian will not guess for it.
+When the document's host is another machine, `spec.settings.target` must be
+given (`missing-param`). The runner cannot guess between WinRM and SSH, and
+Meridian will not guess for it.
 
 ## References
 
@@ -81,8 +119,8 @@ function language, evaluated just before the resource.
 runtimeWhen: "equals (nodeName) 'web'"
 ```
 
-A `runner` resource is settings, not something DSC applies, so a `runtimeWhen`
-on it is refused (`unsupported-runtime-condition`). Put the condition on the
+A condition guards a resource. How the configuration is run is a setting, so
+there is nothing a condition on it could mean; put the condition on the
 resources it should guard.
 
 ## Example
@@ -166,7 +204,7 @@ What is reported:
 | `if`, `foreach` and any other statement in the configuration | Not read, nor any resource declared inside it. The marker quotes the statement and its line | not translated |
 | `Node $AllNodes.NodeName`, or a list of names | No host is written and the document is marked: a document configures one host that it names | not translated |
 | A `DependsOn` that names no resource of the configuration | Left out | not translated |
-| A machine other than this one | The configuration does not say how it is reached, so the `runner` resource is given `target: WinRM`, which is how a PowerShell configuration is pushed. Change it to `SSH` if that is how the machine is managed | changed |
+| A machine other than this one | The configuration does not say how it is reached, so `spec.settings.target` is set to `WinRM`, which is how a PowerShell configuration is pushed. Change it to `SSH` if that is how the machine is managed | changed |
 | A resource whose module cannot be told, because several modules are imported or none | The type names the first candidate, and says so | changed |
 | What the script does outside the `Configuration` block, such as compiling and starting it | Not read: Meridian does both | note |
 
@@ -186,7 +224,7 @@ This is the target's own output read backwards: `dependsOn`, `notify` (as `notif
 the action `refresh`) and `preCondition` (as `runtimeWhen`) come back, the accessor
 `$((reference 'id').Path)` comes back as `${id.Path}`, and the escaping the compiler added
 is removed. The `target` each instance carries becomes the document's host and its
-`runner` resource. A property with any other PowerShell expression in it is marked.
+`spec.settings`. A property with any other PowerShell expression in it is marked.
 
 Importing what the target compiled gives a document that compiles to the same files, byte
 for byte, and a test holds it to that.

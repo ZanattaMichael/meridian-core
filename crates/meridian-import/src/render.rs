@@ -227,6 +227,18 @@ pub fn render(document: &ImportedDocument, notes: &[&ImportNote], source: &str) 
             ]),
         ));
     }
+    if !document.settings.is_empty() {
+        spec.push(pair(
+            "settings",
+            Yaml::Map(
+                document
+                    .settings
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value_node(value)))
+                    .collect(),
+            ),
+        ));
+    }
     let head = Yaml::Map(vec![
         pair("apiVersion", Yaml::str("meridian/v1")),
         pair("kind", Yaml::str(document.kind.as_str())),
@@ -343,6 +355,30 @@ mod tests {
             r#type: r#type.to_owned(),
             ..ImportedResource::default()
         }
+    }
+
+    #[test]
+    fn settings_are_written_under_spec_before_the_resources() {
+        let document = ImportedDocument {
+            kind: DocumentKind::ResourceSet,
+            name: "web".to_owned(),
+            target: "dsc".to_owned(),
+            host: "web01".to_owned(),
+            settings: BTreeMap::from([
+                ("target".to_owned(), Value::String("WinRM".to_owned())),
+                ("engine".to_owned(), Value::String("DscV2".to_owned())),
+            ]),
+            resources: vec![resource("iis", "PSDscResources/WindowsFeature")],
+            ..ImportedDocument::default()
+        };
+        let (text, todos) = render(&document, &[], "the test source");
+        assert_eq!(todos, 0);
+        assert!(
+            text.contains(
+                "  targetHost:\n    from: inline\n    host: web01\n  settings:\n    engine: DscV2\n    target: WinRM\n  resources:\n"
+            ),
+            "{text}"
+        );
     }
 
     #[test]

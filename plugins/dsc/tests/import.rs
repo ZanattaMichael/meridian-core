@@ -5,6 +5,7 @@
 
 #![allow(clippy::result_large_err)]
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use meridian_import::diff::{assert_same, Rules};
@@ -12,7 +13,7 @@ use meridian_import::yaml;
 use meridian_plugin_testkit::{
     assert_golden_text, import_source, import_text, notes_text, round_trip,
 };
-use meridian_sdk::{Importer, NoteLevel, Value};
+use meridian_sdk::{ImportNote, Importer, NoteLevel, Value};
 use meridian_target_dsc::{node_path, Dsc, DscImporter, DATUM_PATH};
 
 fn testdata() -> PathBuf {
@@ -49,14 +50,26 @@ fn a_powershell_configuration_comes_back_meaning_the_same() {
     assert_eq!(document.name, "webserver");
     assert_eq!(document.target_version, "2");
     assert_eq!(document.host, "web01.example.com");
-    // The one thing that had to be assumed is how the machine is reached.
-    let attention: Vec<&str> = imported
+    // The one thing that had to be assumed is how the machine is reached,
+    // which is a setting of the document and not of any resource.
+    let attention: Vec<&ImportNote> = imported
         .notes
         .iter()
         .filter(|n| n.level.needs_attention())
-        .map(|n| n.resource.as_str())
         .collect();
-    assert_eq!(attention, ["runner"]);
+    assert_eq!(attention.len(), 1, "{attention:?}");
+    assert_eq!(attention[0].resource, "");
+    assert!(
+        attention[0]
+            .msg
+            .contains("spec.settings.target was set to WinRM"),
+        "{}",
+        attention[0].msg
+    );
+    assert_eq!(
+        document.settings,
+        BTreeMap::from([("target".to_owned(), Value::from("WinRM"))])
+    );
 
     // The semantic diff, against the configuration written out by hand in
     // the runner's format.

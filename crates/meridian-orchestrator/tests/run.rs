@@ -705,6 +705,56 @@ fn a_target_version_reaches_the_plugin_or_the_document_is_refused() {
     );
 }
 
+#[test]
+fn settings_reach_the_plugin_or_the_document_is_refused() {
+    let with = |target: &str, settings: &str| {
+        PROVISION.replace(
+            "target: TARGET\n",
+            &format!("target: {target}\n  settings: {settings}\n"),
+        )
+    };
+
+    // Through a real plugin process: the fake reads `mode`.
+    let registry = registry();
+    let report = run(
+        &bundle(&with("fake", "{mode: fast}")),
+        &registry,
+        Mode::Compile,
+        &options("settings-ok"),
+        &mut Quiet,
+    );
+    assert_eq!(report.stages[0].outcome, Outcome::Compiled);
+    let files = &report.stages[0].artifact.as_ref().unwrap().files;
+    assert_eq!(files["settings.txt"], "{\"mode\":\"fast\"}\n");
+
+    // A key the plugin does not read is refused before it is asked.
+    assert_eq!(
+        failure(outcome_of(
+            &with("fake", "{mode: fast, speed: 9}"),
+            &registry,
+            "settings-no"
+        )),
+        "the document sets spec.settings.speed, and target \"fake\" takes only: mode"
+    );
+
+    // A target that declares no keys takes no settings, and says so.
+    let registry = in_process(&[]);
+    assert_eq!(
+        failure(outcome_of(
+            &with("iac", "{mode: fast}"),
+            &registry,
+            "settings-none"
+        )),
+        "the document sets spec.settings.mode, and target \"iac\" takes no settings; remove \
+         spec.settings, or use a plugin that takes them"
+    );
+    // And a document that sets none is unaffected.
+    assert_eq!(
+        outcome_of(&with("iac", "{}"), &registry, "settings-empty"),
+        Outcome::Compiled
+    );
+}
+
 const CONDITIONAL: &str = r#"apiVersion: meridian/v1
 kind: ResourceSet
 metadata:
