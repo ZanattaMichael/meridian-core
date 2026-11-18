@@ -27,74 +27,74 @@ The configuration management types have [their own matrix](conformance-matrix.md
 
 ## `network`
 
-| Document | same | terraform (aws) | terraform (azure) | opentofu (aws) | opentofu (azure) | cloudformation | bicep | arm |
-|---|---|---|---|---|---|---|---|---|
-| a cidr | yes | ok | ok | ok | ok | ok | ok | ok |
-| name and tags | yes | ok | ok | ok | ok | ok | ok | ok |
-| a location | no | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | ok | ok |
-| no cidr | yes | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` |
-| a param outside the vocabulary (`dns`) | yes | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` |
-| `cidr` is a list | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
-| a tag that is not text | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
-| state `absent` | yes | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` |
+| Document | same | terraform (aws) | terraform (azure) | opentofu (aws) | opentofu (azure) | pulumi (aws) | pulumi (azure) | cloudformation | bicep | arm |
+|---|---|---|---|---|---|---|---|---|---|---|
+| a cidr | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| name and tags | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| a location | no | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | ok | ok |
+| no cidr | yes | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` |
+| a param outside the vocabulary (`dns`) | yes | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` |
+| `cidr` is a list | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+| a tag that is not text | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+| state `absent` | yes | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` |
 
 ## `subnet`
 
-| Document | same | terraform (aws) | terraform (azure) | opentofu (aws) | opentofu (azure) | cloudformation | bicep | arm |
-|---|---|---|---|---|---|---|---|---|
-| in a network | yes | ok | ok | ok | ok | ok | ok | ok |
-| `public: true` | no | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | `unsupported-param` |
-| two public subnets in one network | no | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | `unsupported-param` |
-| a location (availability zone) | no | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | `unsupported-param` |
-| tags | no | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | `unsupported-param` |
-| `network` is a name, not a reference | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
-| `network` refers to nothing | yes | `invalid-reference` | `invalid-reference` | `invalid-reference` | `invalid-reference` | `invalid-reference` | `invalid-reference` | `invalid-reference` |
-| no network | yes | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` |
-| `public` is text | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+| Document | same | terraform (aws) | terraform (azure) | opentofu (aws) | opentofu (azure) | pulumi (aws) | pulumi (azure) | cloudformation | bicep | arm |
+|---|---|---|---|---|---|---|---|---|---|---|
+| in a network | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| `public: true` | no | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | `unsupported-param` |
+| two public subnets in one network | no | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | `unsupported-param` |
+| a location (availability zone) | no | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | `unsupported-param` |
+| tags | no | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | `unsupported-param` |
+| `network` is a name, not a reference | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+| `network` refers to nothing | yes | `invalid-reference` | `invalid-reference` | `invalid-reference` | `invalid-reference` | `invalid-reference` | `invalid-reference` | `invalid-reference` | `invalid-reference` | `invalid-reference` |
+| no network | yes | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` |
+| `public` is text | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
 
 ## `firewall`
 
-| Document | same | terraform (aws) | terraform (azure) | opentofu (aws) | opentofu (azure) | cloudformation | bicep | arm |
-|---|---|---|---|---|---|---|---|---|
-| inbound rules | yes | ok | ok | ok | ok | ok | ok | ok |
-| an outbound rule | yes | ok | ok | ok | ok | ok | ok | ok |
-| icmp and any protocol | yes | ok | ok | ok | ok | ok | ok | ok |
-| no rules | yes | ok | ok | ok | ok | ok | ok | ok |
-| a rule with no cidr | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
-| a port range backwards | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
-| a direction no cloud has (`both`) | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
-| an icmp rule with a port | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+| Document | same | terraform (aws) | terraform (azure) | opentofu (aws) | opentofu (azure) | pulumi (aws) | pulumi (azure) | cloudformation | bicep | arm |
+|---|---|---|---|---|---|---|---|---|---|---|
+| inbound rules | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| an outbound rule | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| icmp and any protocol | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| no rules | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| a rule with no cidr | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+| a port range backwards | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+| a direction no cloud has (`both`) | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+| an icmp rule with a port | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
 
 ## `address`
 
-| Document | same | terraform (aws) | terraform (azure) | opentofu (aws) | opentofu (azure) | cloudformation | bicep | arm |
-|---|---|---|---|---|---|---|---|---|
-| no params | yes | ok | ok | ok | ok | ok | ok | ok |
-| a name | no | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | ok | ok |
-| tags | yes | ok | ok | ok | ok | ok | ok | ok |
+| Document | same | terraform (aws) | terraform (azure) | opentofu (aws) | opentofu (azure) | pulumi (aws) | pulumi (azure) | cloudformation | bicep | arm |
+|---|---|---|---|---|---|---|---|---|---|---|
+| no params | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| a name | no | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | ok | ok |
+| tags | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 
 ## `vm`
 
-| Document | same | terraform (aws) | terraform (azure) | opentofu (aws) | opentofu (azure) | cloudformation | bicep | arm |
-|---|---|---|---|---|---|---|---|---|
-| size and image by name, with a key | yes | ok | ok | ok | ok | ok | ok | ok |
-| the cloud's own size and image as text | yes | ok | ok | ok | ok | ok | ok | ok |
-| an address and a firewall | yes | ok | ok | ok | ok | ok | ok | ok |
-| two firewalls | no | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | `unsupported-param` |
-| no ssh key | no | ok | `missing-param` | ok | `missing-param` | ok | `missing-param` | `missing-param` |
-| a user | no | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | ok | ok |
-| bigger than any size in the table | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
-| an image family the vocabulary lacks (`windows`) | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
-| a size with no memory | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
-| no subnet | yes | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` |
+| Document | same | terraform (aws) | terraform (azure) | opentofu (aws) | opentofu (azure) | pulumi (aws) | pulumi (azure) | cloudformation | bicep | arm |
+|---|---|---|---|---|---|---|---|---|---|---|
+| size and image by name, with a key | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| the cloud's own size and image as text | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| an address and a firewall | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| two firewalls | no | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | `unsupported-param` |
+| no ssh key | no | ok | `missing-param` | ok | `missing-param` | ok | `missing-param` | ok | `missing-param` | `missing-param` |
+| a user | no | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | ok | `unsupported-param` | ok | ok |
+| bigger than any size in the table | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+| an image family the vocabulary lacks (`windows`) | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+| a size with no memory | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+| no subnet | yes | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` |
 
 ## `reads`
 
-| Document | same | terraform (aws) | terraform (azure) | opentofu (aws) | opentofu (azure) | cloudformation | bicep | arm |
-|---|---|---|---|---|---|---|---|---|
-| `publicAddress` of a vm with an address | yes | ok | ok | ok | ok | ok | ok | ok |
-| `publicAddress` of a vm with no address | no | ok | `invalid-reference` | ok | `invalid-reference` | ok | `invalid-reference` | `invalid-reference` |
-| `privateAddress` and `id` of a vm | yes | ok | ok | ok | ok | ok | ok | ok |
-| `address` of an address | yes | ok | ok | ok | ok | ok | ok | ok |
-| an id taken by what a common type adds (`vm_nic`) | no | ok | `duplicate-resource` | ok | `duplicate-resource` | ok | `duplicate-resource` | `duplicate-resource` |
+| Document | same | terraform (aws) | terraform (azure) | opentofu (aws) | opentofu (azure) | pulumi (aws) | pulumi (azure) | cloudformation | bicep | arm |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `publicAddress` of a vm with an address | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| `publicAddress` of a vm with no address | no | ok | `invalid-reference` | ok | `invalid-reference` | ok | `invalid-reference` | ok | `invalid-reference` | `invalid-reference` |
+| `privateAddress` and `id` of a vm | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| `address` of an address | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| an id taken by what a common type adds (`vm_nic`) | no | ok | `duplicate-resource` | ok | `duplicate-resource` | ok | `duplicate-resource` | ok | `duplicate-resource` | `duplicate-resource` |
 

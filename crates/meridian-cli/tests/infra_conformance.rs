@@ -65,6 +65,19 @@ const COLUMNS: &[Column] = &[
         preamble: "",
     },
     Column {
+        title: "pulumi (aws)",
+        target: "pulumi",
+        settings: "  settings:\n    cloud: aws\n",
+        preamble: "",
+    },
+    Column {
+        title: "pulumi (azure)",
+        target: "pulumi",
+        settings:
+            "  settings:\n    cloud: azure\n    location: westeurope\n    resourceGroup: rg\n",
+        preamble: "",
+    },
+    Column {
         title: "cloudformation",
         target: "cloudformation",
         settings: "",
@@ -86,7 +99,14 @@ const COLUMNS: &[Column] = &[
 
 /// The targets that take the common types. A target added here must be
 /// given a column.
-const COMMON_TARGETS: &[&str] = &["arm", "bicep", "cloudformation", "opentofu", "terraform"];
+const COMMON_TARGETS: &[&str] = &[
+    "arm",
+    "bicep",
+    "cloudformation",
+    "opentofu",
+    "pulumi",
+    "terraform",
+];
 
 #[derive(Clone, Copy, PartialEq)]
 enum Agreement {

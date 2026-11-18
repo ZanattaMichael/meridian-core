@@ -8,7 +8,7 @@ they created, and can report facts about the result. This page is how the
 |---|---|
 | Category, as `meridian plugins` prints it | `infrastructure-as-code` |
 | Kind of document | `Infrastructure`. A `ResourceSet` is refused: these tools create things, and are not pointed at one machine |
-| `type` and `params` | the tool's own, passed through; or one of the [common infrastructure types](common-infrastructure-types.md) on `terraform`, `opentofu`, `cloudformation`, `bicep` and `arm` |
+| `type` and `params` | the tool's own, passed through; or one of the [common infrastructure types](common-infrastructure-types.md) on `terraform`, `opentofu`, `pulumi`, `cloudformation`, `bicep` and `arm` |
 | Outputs | yes |
 
 ## Targets

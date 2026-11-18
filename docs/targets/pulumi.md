@@ -18,6 +18,7 @@ with the `pulumi` command line. The plugin's category is **infrastructure as cod
 | References between resources, checked at compile time | Yes. `${id.property}`. |
 | `dependsOn` | Yes, between resources. Left out where a reference already implies the order. |
 | Outputs, handed to later stages | Yes. Secret outputs are marked sensitive and masked. |
+| The [common infrastructure types](#common-infrastructure-types) | Yes, on AWS (`aws`) and Azure (`azure-native`). |
 | Plan, apply and outputs | Yes: `pulumi preview`, `pulumi up`, `pulumi stack output`. |
 | `notifies` | **No.** Refused at compile time. See [Notifications](#notifications). |
 | `runtimeWhen` | **No.** Refused at compile time. |
@@ -209,6 +210,32 @@ with `name`:
 ```
 
 `name` also renames a plain value, when the name Pulumi should know differs from the id.
+
+## Common infrastructure types
+
+`network`, `subnet`, `firewall`, `address` and `vm` are Meridian's own types,
+and this target turns each into the `aws` or `azure-native` package's own
+([the common infrastructure types](../reference/dsl/common-infrastructure-types.md)
+has every param and mapping). They make the same resources the Terraform
+target makes on that cloud, with the same sizes, images, refusals and outputs.
+
+The cloud is `spec.settings.cloud`, or the one whose package the document
+already uses: a `config` named `aws:region` or `azure-native:location`, or a
+resource of either package. On Azure, `spec.settings.resourceGroup` is
+required and `spec.settings.location` is optional; a resource without a
+location goes to its resource group's.
+
+| Common type | AWS | Azure |
+|---|---|---|
+| `network` | `aws:ec2:Vpc` | `azure-native:network:VirtualNetwork` |
+| `subnet` | `aws:ec2:Subnet`; with `public: true`, an `aws:ec2:InternetGateway` per network, an `aws:ec2:RouteTable`, `aws:ec2:Route` and `aws:ec2:RouteTableAssociation` | `azure-native:network:Subnet` |
+| `firewall` | `aws:ec2:SecurityGroup`, an `aws:vpc:SecurityGroupIngressRule` or `...EgressRule` per rule, and an allow-all egress rule when no `out` rule is given | `azure-native:network:NetworkSecurityGroup`, the rules inside it |
+| `address` | `aws:ec2:Eip` | `azure-native:network:PublicIPAddress`, Standard and static |
+| `vm` | `aws:ec2:Instance`, an `aws:ec2:KeyPair`, an `invoke.aws:ec2:getAmi` lookup for an image by name, an `aws:ec2:EipAssociation` | `azure-native:compute:VirtualMachine` and an `azure-native:network:NetworkInterface` (`<id>_nic`) |
+
+Compare [`examples/common/web-pulumi-aws.yaml`](../../examples/common/web-pulumi-aws.yaml)
+and [`web-pulumi-azure.yaml`](../../examples/common/web-pulumi-azure.yaml) with
+the Terraform documents beside them.
 
 ## References
 

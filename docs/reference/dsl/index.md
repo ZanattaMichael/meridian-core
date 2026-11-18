@@ -43,7 +43,7 @@ flowchart TD
 | This page | every field in one place, with its rules |
 | [How it fits together](how-it-fits-together.md) | a document's path from file to running tool, step by step, with a worked example |
 | [Resources](resources.md) | `id`, `type`, `state`, `params` in depth |
-| [Common infrastructure types](common-infrastructure-types.md) | `network`, `subnet`, `firewall`, `address`, `vm`: written once, compiled to each cloud's own resources by Terraform, OpenTofu, CloudFormation, Bicep and ARM |
+| [Common infrastructure types](common-infrastructure-types.md) | `network`, `subnet`, `firewall`, `address`, `vm`: written once, compiled to each cloud's own resources by Terraform, OpenTofu, Pulumi, CloudFormation, Bicep and ARM |
 | [`dependsOn`](dependson.md) | order: how the sort works, cycles, what each tool makes of it |
 | [`notifies`](notifies.md) | reactions: native, synthetic, refused; the actions each target takes |
 | [Conditions](conditions.md) | `runtimeWhen` and `when` |

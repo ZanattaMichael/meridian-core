@@ -1,0 +1,6 @@
+{
+  "backend": "",
+  "project": "web-pulumi-aws",
+  "secretsProvider": "",
+  "stack": "dev"
+}

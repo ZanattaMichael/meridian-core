@@ -1,0 +1,129 @@
+name: web-pulumi-aws
+runtime: yaml
+description: Compiled by Meridian from the document web-pulumi-aws. Do not edit.
+config:
+  aws:region:
+    value: eu-west-1
+variables:
+  vm_image:
+    fn::invoke:
+      function: aws:ec2:getAmi
+      arguments:
+        filters:
+          - name: name
+            values:
+              - ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*
+          - name: architecture
+            values:
+              - x86_64
+        mostRecent: true
+        owners:
+          - "099720109477"
+resources:
+  net:
+    type: aws:ec2:Vpc
+    properties:
+      cidrBlock: 10.0.0.0/16
+      enableDnsHostnames: true
+      tags:
+        Name: net
+  net_gateway:
+    type: aws:ec2:InternetGateway
+    properties:
+      vpcId: ${net.id}
+  web:
+    type: aws:ec2:Subnet
+    properties:
+      cidrBlock: 10.0.1.0/24
+      mapPublicIpOnLaunch: true
+      tags:
+        Name: web
+      vpcId: ${net.id}
+  web_routes:
+    type: aws:ec2:RouteTable
+    properties:
+      tags:
+        Name: web
+      vpcId: ${net.id}
+  web_routes_internet:
+    type: aws:ec2:Route
+    properties:
+      destinationCidrBlock: 0.0.0.0/0
+      gatewayId: ${net_gateway.id}
+      routeTableId: ${web_routes.id}
+  web_routes_link:
+    type: aws:ec2:RouteTableAssociation
+    properties:
+      routeTableId: ${web_routes.id}
+      subnetId: ${web.id}
+  web_fw:
+    type: aws:ec2:SecurityGroup
+    properties:
+      name: web_fw
+      tags:
+        Name: web_fw
+      vpcId: ${net.id}
+  web_fw_in_0:
+    type: aws:vpc:SecurityGroupIngressRule
+    properties:
+      cidrIpv4: 203.0.113.0/24
+      fromPort: 22
+      ipProtocol: tcp
+      securityGroupId: ${web_fw.id}
+      toPort: 22
+  web_fw_in_1:
+    type: aws:vpc:SecurityGroupIngressRule
+    properties:
+      cidrIpv4: 0.0.0.0/0
+      fromPort: 80
+      ipProtocol: tcp
+      securityGroupId: ${web_fw.id}
+      toPort: 80
+  web_fw_in_2:
+    type: aws:vpc:SecurityGroupIngressRule
+    properties:
+      cidrIpv4: 0.0.0.0/0
+      fromPort: 443
+      ipProtocol: tcp
+      securityGroupId: ${web_fw.id}
+      toPort: 443
+  web_fw_out_all:
+    type: aws:vpc:SecurityGroupEgressRule
+    properties:
+      cidrIpv4: 0.0.0.0/0
+      ipProtocol: "-1"
+      securityGroupId: ${web_fw.id}
+  web_ip:
+    type: aws:ec2:Eip
+    properties:
+      domain: vpc
+      tags:
+        Name: web_ip
+  vm_key:
+    type: aws:ec2:KeyPair
+    properties:
+      keyName: vm
+      publicKey: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCy3ccG4bHhpvuPdv4+wFBzkP+U7qF4nTg+rghAkKjOLbSJa/yUPZ0EwpJaXm+rtItFerUJK41JH4bArOJJazkHMdWR6iXYQtu5BB/CZALQHiS0LYg5zUhKMxISCESlzNDWFBza28pPjfpj3gnmrPc8D1bAsnKSaHGOffZxtJ62q3Rq0ESwzN/9ahvaiBW707kT/9NC9GqMcSk1HS1Z7Wz6sJEiCC/qIfbS3TAjJ+SloXlTC8+FIdptsxJ3KgWczg4q6Z1aiv9agASdEXMJTo+sUNt7C6qNKY1W03VxFf0cj59Zh6YIo2/ZQ1NyyUOB3rO2U2pbVGLaTvEnF6GSc0TH admin@example.com
+  vm:
+    type: aws:ec2:Instance
+    properties:
+      ami: ${vm_image.id}
+      instanceType: t3.medium
+      keyName: ${vm_key.keyName}
+      subnetId: ${web.id}
+      tags:
+        Name: vm
+      vpcSecurityGroupIds:
+        - ${web_fw.id}
+  vm_address:
+    type: aws:ec2:EipAssociation
+    properties:
+      allocationId: ${web_ip.id}
+      instanceId: ${vm.id}
+  logs:
+    type: aws:s3:BucketV2
+    properties:
+      bucketPrefix: web-logs-
+outputs:
+  address: ${web_ip.publicIp}
+  private_address: ${vm.privateIp}
