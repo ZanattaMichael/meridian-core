@@ -29,9 +29,11 @@
 
 mod emit;
 mod runner;
+mod schemas;
 mod sort;
 mod transform;
 mod validate;
+mod zip;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -44,6 +46,7 @@ use meridian_yaml::Yaml;
 
 pub use emit::{STACK_PATH, TEMPLATE_PATH};
 pub use runner::CloudFormationRunner;
+pub use schemas::CloudFormationSchemas;
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "cloudformation";

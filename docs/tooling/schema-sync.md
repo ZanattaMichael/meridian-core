@@ -185,13 +185,35 @@ what its tool refuses.
 | `kubernetes` | `kubectl get --raw /openapi/v2` against the context and kubeconfig the `cluster` resource names | the `<apiVersion>/<Kind>` types the documents use, `$ref`s resolved, `status` marked computed | every other kind the server knows, built-in and custom alike | the server's version, and the context |
 | `pulumi` | `pulumi package get-schema <package>[@version]` for each package the documents use, the version from `resourceOptions.version` when one is given | the resource and `invoke.<function>` types the documents use: input properties, output-only properties as computed, `resourceOptions` and `invokeOptions` | every other resource and function of those packages | each package's version |
 | `ansible` | `ansible-doc -t module --json <module>` for each module the documents name in full, `ansible-doc -t module --list --json` for the rest, and `ansible-galaxy collection list --format json` for the collections' versions | the modules the documents use: every option with its type, whether it is required, its choices, its sub-options, and `no_log` options as sensitive | every other module `ansible-doc` finds, builtin and installed collections alike | ansible-core's version as `ansible.builtin`, and each installed collection's version |
+| `cloudformation` | nothing: it fetches the registry of resource provider schemas CloudFormation publishes for the stack's region (`schema.cloudformation.<region>.amazonaws.com/CloudformationSchema.zip`); `aws cloudformation describe-type` only for a type outside the public registry | the `Vendor::Service::Type` types the documents use: every property, the read-only ones as set by CloudFormation, the create-only ones marked as replacing the resource, the write-only ones as sensitive | every other type of the region's registry | the region, to the zip's SHA-256 |
+| `bicep`, `arm` | nothing: it fetches the Azure type definitions Bicep compiles against from [Azure/bicep-types-az](https://github.com/Azure/bicep-types-az), the index and the `types.json` of each provider and API version the documents use | the types the documents use, property by property, at the API version the type (Bicep) or the `apiVersion` param (ARM) names; ARM's `apiVersion` lists every version the index has | every other API version of a used type and the newest stable version of every other type (Bicep); every other type with its API versions (ARM) | the index and each `types.json`, to their SHA-256 |
+| `cloud-init` | `cloud-init --version` for the tag, then it fetches the cloud-config schema from the cloud-init repository at that tag (or `main`) | every module beside the six: its keys as params, or the one param `value` for a module whose value is a string or a list | nothing: every module is described | the cloud-init version or branch, and the schema's SHA-256 |
+| `docker` | `docker compose version` for the version, then it fetches the Compose Specification's `compose-spec.json` | `service`, `network`, `volume`, `config` and `secret`: every attribute with its kind, open to `x-` extensions | nothing: the five are the whole catalogue | the schema's SHA-256 and the installed Compose's version |
+| `helm` | `kubectl get --raw /openapi/v2` through the target's `kubectl` settings, as `kubernetes` | the `<apiVersion>/<Kind>` types the documents use | every other kind the server knows | the server's version |
 | `dsc` | `Get-DscResource -Module` in PowerShell for each module the documents use (the module's `[DscResource()]` classes, where that lists nothing, as on Linux), and `dsc resource list` and `dsc resource schema` when DSC v3 is installed | every resource of each PowerShell module, from its property types, mandatory flags and enum values; the DSC v3 resources the documents use, from their manifests' JSON Schema | every other DSC v3 resource | PowerShell's version, each module's version, each DSC v3 resource's version |
 
-The other targets do not export schemas yet; `meridian schema sync` says so
-and the editor goes on knowing their types by name or by shape, as before.
-The protocol is the same for every target, so a plugin that gains an
-exporter needs no change anywhere else; see
+`puppet`, `openvox`, `chef`, `salt`, `packer` and `podman` do not export
+schemas yet; `meridian schema sync` says so and the editor goes on knowing
+their types by name or by shape, as before. Packer and Podman have no
+machine-readable catalogue to read, so their plugins' hand-kept tables are
+what the editor has. The protocol is the same for every target, so a plugin
+that gains an exporter needs no change anywhere else; see
 [Writing a plugin](../contributing/writing-a-plugin.md#a-schema-source).
+
+### Sources that read a published file
+
+CloudFormation, Bicep, ARM, cloud-init and Docker run no tool: the vendor
+publishes the catalogue as a file, and the sync fetches it. Every such source
+keeps the same rules ([decision 0036](../decisions/0036-a-published-schema-file-is-fetched-over-https-pinned-by-hash-and-reused-offline.md)):
+
+- it fetches over HTTPS only;
+- it pins what it read by the file's SHA-256, so the lock tells one revision
+  of the file from another as it tells provider versions apart;
+- it keeps the file in its work directory with the server's `ETag`, asks the
+  server on the next sync whether the file changed, and downloads nothing
+  when it has not;
+- when the server cannot be reached, it uses the copy from the last sync
+  and says so in a note. The first sync with no copy fails for that target.
 
 A type a document writes in a form the tool does not use is matched by
 meaning where the tool has one: Pulumi's `random:index:RandomPet`,

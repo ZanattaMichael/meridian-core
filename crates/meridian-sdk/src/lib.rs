@@ -46,6 +46,7 @@
 pub mod agent;
 mod credential;
 pub mod expr;
+pub mod fetch;
 mod import;
 mod listen;
 pub mod rules;
@@ -72,6 +73,7 @@ pub use agent::{agent_for, AgentPrograms, SshAgent};
 pub use credential::{
     check_ssh_credential, credential_for_this_machine, Credential, HeldCredential, SshTakes,
 };
+pub use fetch::{fetch, Fetched};
 pub use import::{
     DocumentKind, ImportError, ImportFormat, ImportNote, ImportSource, Imported, ImportedDocument,
     ImportedNotify, ImportedOutput, ImportedResource, Importer, NoteLevel,

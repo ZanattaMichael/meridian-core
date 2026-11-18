@@ -242,6 +242,12 @@ pub(crate) fn native_module(r: &Resource) -> Result<Option<&str>, CompileError> 
     }
 }
 
+/// Whether `name` is one of the keys the six shared types write, which no
+/// module resource may write.
+pub(crate) fn is_shared_key(name: &str) -> bool {
+    SHARED_KEYS.iter().any(|(key, _)| *key == name)
+}
+
 /// Whether `name` is shaped like a cloud-config key.
 fn is_key(name: &str) -> bool {
     name.starts_with(|c: char| c.is_ascii_lowercase())

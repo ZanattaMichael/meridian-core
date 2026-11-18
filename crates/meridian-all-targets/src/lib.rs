@@ -74,28 +74,54 @@ pub const ALL: &[Target] = &[
         importer: Some(|| Box::new(meridian_target_ansible::AnsibleImporter)),
         schemas: Some(|| Box::new(meridian_target_ansible::AnsibleSchemas::from_env())),
     },
-    target!("arm", meridian_target_arm, Arm, ArmRunner),
-    target!("bicep", meridian_target_bicep, Bicep, BicepRunner),
+    Target {
+        name: "arm",
+        emitter: || Box::new(meridian_target_arm::Arm),
+        runner: || Box::new(meridian_target_arm::ArmRunner::from_env()),
+        importer: None,
+        // ARM reads the same Azure type definitions as Bicep, with the API
+        // version as a param.
+        schemas: Some(|| {
+            Box::new(meridian_target_bicep::AzureSchemas::new(
+                meridian_target_bicep::Dialect::Arm,
+            ))
+        }),
+    },
+    Target {
+        name: "bicep",
+        emitter: || Box::new(meridian_target_bicep::Bicep),
+        runner: || Box::new(meridian_target_bicep::BicepRunner::from_env()),
+        importer: None,
+        schemas: Some(|| {
+            Box::new(meridian_target_bicep::AzureSchemas::new(
+                meridian_target_bicep::Dialect::Bicep,
+            ))
+        }),
+    },
     target!("chef", meridian_target_chef, Chef, ChefRunner),
-    target!(
-        "cloud-init",
-        meridian_target_cloud_init,
-        CloudInit,
-        CloudInitRunner
-    ),
-    target!(
-        "cloudformation",
-        meridian_target_cloudformation,
-        CloudFormation,
-        CloudFormationRunner
-    ),
-    target!(
-        "docker",
-        meridian_target_docker,
-        Docker,
-        DockerRunner,
-        DockerImporter
-    ),
+    Target {
+        name: "cloud-init",
+        emitter: || Box::new(meridian_target_cloud_init::CloudInit),
+        runner: || Box::new(meridian_target_cloud_init::CloudInitRunner::from_env()),
+        importer: None,
+        schemas: Some(|| Box::new(meridian_target_cloud_init::CloudInitSchemas::from_env())),
+    },
+    Target {
+        name: "cloudformation",
+        emitter: || Box::new(meridian_target_cloudformation::CloudFormation),
+        runner: || Box::new(meridian_target_cloudformation::CloudFormationRunner::from_env()),
+        importer: None,
+        schemas: Some(|| {
+            Box::new(meridian_target_cloudformation::CloudFormationSchemas::from_env())
+        }),
+    },
+    Target {
+        name: "docker",
+        emitter: || Box::new(meridian_target_docker::Docker),
+        runner: || Box::new(meridian_target_docker::DockerRunner::from_env()),
+        importer: Some(|| Box::new(meridian_target_docker::DockerImporter)),
+        schemas: Some(|| Box::new(meridian_target_docker::ComposeSchemas::from_env())),
+    },
     Target {
         name: "dsc",
         emitter: || Box::new(meridian_target_dsc::Dsc),
@@ -103,7 +129,15 @@ pub const ALL: &[Target] = &[
         importer: Some(|| Box::new(meridian_target_dsc::DscImporter)),
         schemas: Some(|| Box::new(meridian_target_dsc::DscSchemas::from_env())),
     },
-    target!("helm", meridian_target_helm, Helm, HelmRunner),
+    Target {
+        name: "helm",
+        emitter: || Box::new(meridian_target_helm::Helm),
+        runner: || Box::new(meridian_target_helm::HelmRunner::from_env()),
+        importer: None,
+        // A chart's objects are described by the cluster, as for
+        // kubernetes, through this target's kubectl settings.
+        schemas: Some(|| Box::new(meridian_target_helm::HelmSchemas::from_env())),
+    },
     Target {
         name: "kubernetes",
         emitter: || Box::new(meridian_target_kubernetes::Kubernetes),

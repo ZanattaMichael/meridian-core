@@ -48,6 +48,7 @@ mod check;
 mod emit;
 mod import;
 mod runner;
+mod schemas;
 mod sort;
 mod transform;
 mod validate;
@@ -60,16 +61,18 @@ use meridian_sdk::{
     Resource, ResourceGraph, Value,
 };
 
+pub use check::known_keys;
 pub use emit::{COMPOSE_PATH, PROJECT_PATH};
 pub use import::DockerImporter;
 pub use runner::DockerRunner;
+pub use schemas::ComposeSchemas;
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "docker";
 
 /// The top-level sections of a Compose file, in the order they are written.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum Section {
+pub enum Section {
     Service,
     Network,
     Volume,
