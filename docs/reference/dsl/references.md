@@ -1,15 +1,12 @@
 # References
 
-A reference puts a value from one resource into another, or into an output.
+A reference puts a value from one resource into another, or into an output. It carries
+data; [`dependsOn`](dependson.md) carries order and [`notifies`](notifies.md) a reaction.
 
 ```yaml
 params:
   vpc_security_group_ids: ["${web_sg.id}"]
 ```
-
-It is the third way resources are tied together. [`dependsOn`](dependson.md)
-carries order, [`notifies`](notifies.md) carries a reaction, a reference carries
-**data**.
 
 ## Where a reference can appear
 
@@ -31,16 +28,12 @@ carries order, [`notifies`](notifies.md) carries a reaction, a reference carries
 | `$${` | a literal `${`. Use it for text the tool should see as written, such as a shell variable in a script |
 | `${upper(x.name)}`, `${a ? b : c}` | not a path: the tool's own expression language, on the targets that have one |
 
-Details that matter:
-
 - Spaces just inside the braces are ignored: `${ web.ip }` is `${web.ip}`.
 - Braces inside an expression balance, so `${merge({a = 1}, x)}` is one
   expression.
-- A `${` that is never closed is an error. No tool would read it the way you
-  meant.
-- The first name of a path is always the `id` of a resource in the **same
-  document**. A reference never crosses documents; to carry a value to another
-  document, declare an [output](outputs-and-hand-offs.md).
+- A `${` that is never closed is an error.
+- The first name is the `id` of a resource in the **same document**. Use an
+  [output](outputs-and-hand-offs.md) to cross documents.
 - A value that is only a reference keeps the type of what it reads, where the
   tool has types. Inside longer text it becomes text.
 
@@ -65,17 +58,14 @@ So two things are checked when the document is compiled, before anything runs:
    ref.yaml:7:7: terraform: resource "a" [invalid-reference]: param "ami": ${img.id} refers to "img", which is not a resource in this document
    ```
 
-2. **The tool can know that value at that point.** A param is fixed when the
-   tool's file is written; an output is read after the apply. Some tools can
-   therefore read less in a param than in an output:
+2. **The tool can know the value there.** Some tools read less in a param than in an
+   output:
 
    ```
    kubernetes: resource "a" [invalid-reference]: param "data": ${nosuch.x} refers to "nosuch", which is not an object in this document
    ```
 
-What comes after the first name, the attribute or path, is the tool's to
-judge. Meridian does not know every attribute of every Terraform type; if the
-attribute does not exist, the tool says so when it plans.
+The attribute after the first name is checked by the tool when it plans.
 
 ## What a reference becomes, by target
 
@@ -98,15 +88,12 @@ Each target's page has its own table under "References".
 
 ## References and order
 
-A reference usually implies an order: `web` cannot be created before the
-security group whose id it reads.
-
 - On tools that derive order from data (Terraform, CloudFormation, Bicep), the
   tool sees the reference and orders the two itself. The plugin does not also
   write a dependency.
 - On DSC, the resource that reads is ordered after the one it reads.
-- A reference does **not** add an edge to Meridian's own sort. If you need an
-  order the tool cannot see from the data, write [`dependsOn`](dependson.md).
+- A reference adds no edge to Meridian's sort. Use [`dependsOn`](dependson.md) for order the
+  tool cannot see.
 
 ```mermaid
 flowchart LR
@@ -116,15 +103,8 @@ flowchart LR
 
 ## Configuration management: the shared types
 
-`ansible`, `puppet`, `openvox`, `chef`, `salt` and `cloud-init` have nothing to
-read at
-apply time:
-a package or a file is only what the document says about it. So on these targets
-a reference is settled when the document is compiled, by the plugin, and the
-tool never sees it.
-
-`${id.param}` becomes the value the document gives that param on the resource
-`id`:
+On `ansible`, `puppet`, `openvox`, `chef`, `salt` and `cloud-init`, the plugin settles a
+reference at compile: `${id.param}` becomes that param's value on resource `id`:
 
 ```yaml
 - id: site_root
@@ -156,9 +136,7 @@ Every refusal is the rule `invalid-reference`, with the line:
 site.yaml:11:7: puppet: resource "index" [invalid-reference]: param "path": ${nowhere.path} refers to a resource "nowhere", which this document does not declare; for a literal ${ write $${
 ```
 
-Unlike DSC, a reference here does not order the two resources. The value is
-known before anything runs, so there is nothing to wait for. Use
-[`dependsOn`](dependson.md) when the order matters.
+It does not order the two resources; use [`dependsOn`](dependson.md).
 
 ## A worked example
 
@@ -197,8 +175,5 @@ What the plugin writes:
 | `${web_sg.id}` | `${aws_security_group.web_sg.id}` |
 | `http://${web.public_ip}:8080` | `http://${aws_instance.web.public_ip}:8080` |
 
-Terraform then orders `ubuntu` and `web_sg` before `web` by itself, and reports
-`url` after the apply.
-
-The full document is
-[`examples/terraform/web-vm.yaml`](../../../examples/terraform/web-vm.yaml).
+Terraform orders `ubuntu` and `web_sg` before `web` and reports `url` after apply. Full
+document: [`examples/terraform/web-vm.yaml`](../../../examples/terraform/web-vm.yaml).
