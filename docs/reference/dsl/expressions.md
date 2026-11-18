@@ -1,10 +1,10 @@
 # Expressions and functions
 
 Meridian has one expression language. Today it is what a
-[`when` condition](conditions.md) is written in; as the
-[language expansion](../../plans/language-expansion.md) lands, the same
-language, with the same functions and the same errors, is what every
-interpolation, variable and parameter default is written in.
+[`when` condition](conditions.md) is written in. As the
+[language expansion](../../plans/language-expansion.md) lands, every
+interpolation, variable and parameter default uses the same language, functions
+and errors.
 
 An expression is decided by Meridian's core, before a plugin is handed
 anything. That is why it means the same on every target: no tool ever sees one.

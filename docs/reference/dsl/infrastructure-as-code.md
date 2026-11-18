@@ -25,17 +25,15 @@ they created, and can report facts about the result. This page is how the
 
 ## Native passthrough
 
-A Terraform provider has thousands of resource types and Azure has every
-service. Meridian does not put a smaller vocabulary in front of them. A
+Meridian does not put a smaller vocabulary in front of these tools. A
 resource's `type` is the tool's own type, and its `params` are that type's
-arguments exactly as the tool's documentation gives them, in the tool's own
-spelling (`instance_type` for Terraform, `InstanceType` for CloudFormation).
+arguments in the tool's own spelling (`instance_type` for Terraform,
+`InstanceType` for CloudFormation).
 
-So a document in this flavour is written for one tool and does not move to
-another by changing `spec.target`. What it shares with every other Meridian
-document is everything around the resource: the document format, ids,
-`dependsOn`, references checked at compile time, outputs, and one way to plan
-and apply.
+A document in this flavour is written for one tool. Changing `spec.target`
+does not move it to another. It shares the rest with every Meridian document:
+the format, ids, `dependsOn`, compile-time reference checks, outputs, and one
+way to plan and apply.
 
 ```yaml
 apiVersion: meridian/v1
@@ -85,11 +83,11 @@ its params and says whether it is required.
 
 ## `state`
 
-Left out. These tools have one idea of state: what the document declares exists,
-and what it no longer declares is removed (or, on a Bicep resource group
-or ARM deployment, left alone; on Packer, nothing is ever removed, because a
-build only creates images). `state: absent` is refused on every target in the
-segment, with the instruction to remove the resource from the document.
+Left out. What the document declares exists. What it no longer declares is
+removed, except that a Bicep resource group or ARM deployment leaves it alone
+and Packer never removes anything (a build only creates images). `state:
+absent` is refused on every target in the segment; remove the resource from
+the document instead.
 
 ## References
 

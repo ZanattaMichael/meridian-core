@@ -19,9 +19,9 @@ host. This page is how the [Meridian language](index.md) is written for them.
 
 ## Two tools, one shape
 
-The two targets differ in what runs the containers, and the flavour is the same
-for both: a resource is one element, its `params` are that element's own fields
-in the tool's own spelling, and elements find each other by `id`.
+The two targets differ in what runs the containers. The flavour is the same:
+a resource is one element, its `params` are that element's fields in the tool's
+spelling, and elements find each other by `id`.
 
 | | `docker` | `podman` |
 |---|---|---|
@@ -129,8 +129,8 @@ environment of whoever runs it.
 Between two services, `dependsOn` becomes the tool's own `depends_on`. It waits
 for the other service to be healthy when that service declares a healthcheck,
 and to have started otherwise. Networks, volumes, configs and secrets are
-created before any service starts whatever the document says, so a dependency on
-one of those adds nothing, and the compile warns that it does.
+always created before any service starts, so a dependency on one adds nothing
+and the compile warns.
 
 ## What is checked at compile time
 

@@ -186,13 +186,14 @@ given `$${HOME}`, which is how Terraform writes a literal `${HOME}`.
 
 ### A tool's own expressions
 
-Some tools read more than `${` as an expression. Ansible renders every string
-in a task through Jinja, so `{{ ... }}` is live; in an ARM template a string
-that starts with `[` and ends with `]` is evaluated by Resource Manager. What
-the author writes in the document in that syntax is passed through, as each
-target's page says. What the data supplies is not: each plugin declares the
-openings its tool reads, and Meridian writes a placed value so the tool reads
-it as text, however the value got there.
+Some tools read more than `${` as an expression. Ansible renders every task
+string through Jinja, so `{{ ... }}` is live. Resource Manager evaluates an ARM
+string that starts with `[` and ends with `]`.
+
+- What the author writes in that syntax is passed through, as each target's
+  page says.
+- What data supplies is not. Each plugin declares the openings its tool reads,
+  and Meridian writes a placed value so the tool reads it as text.
 
 | The document says | The data says | Ansible is given | Ansible writes to the file |
 |---|---|---|---|

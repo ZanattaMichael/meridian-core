@@ -72,14 +72,14 @@ has:
 type.yaml:8:7: ansible: resource "a" [unsupported-resource-type]: unsupported resource type "cron" on this target (supported: exec, file, group, package, service, user)
 ```
 
-Targets that pass a tool's own types through (most of them) cannot know every
-type the tool has, so they check the type's *shape* and leave its existence to
-the tool: a Bicep type without its API version is refused at compile; a
-Terraform type that no provider has is refused by Terraform when it plans.
+Most targets pass the tool's own types through. They check a type's *shape*
+and leave its existence to the tool. A Bicep type without its API version is
+refused at compile. A Terraform type that no provider has is refused by
+Terraform when it plans.
 
 **Settings resources.** Most passthrough targets reserve one or two type names
-for a resource that is not a thing to create but says where and how the rest is
-deployed: `provider` and `backend` (Terraform), `stack` (CloudFormation), `provider`, `backend` and `encryption` (OpenTofu),
+for a resource that says where and how the rest is deployed, rather than a
+thing to create: `provider` and `backend` (Terraform), `stack` (CloudFormation), `provider`, `backend` and `encryption` (OpenTofu),
 `stack` and `config` (Pulumi), `deployment` and `parameter` (ARM), `variable`,
 `local` and `plugin` (Packer),
 `deployment` (Bicep), `project` (Docker), `cluster` (Kubernetes), `values`,

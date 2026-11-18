@@ -55,10 +55,13 @@ $ meridian validate examples/workflow/vm-then-web.yaml
 2 documents valid
 ```
 
-Validation is about the language only. No plugin is loaded, so nothing here
-knows what Terraform or Ansible can do. It answers: is this a well-formed
-Meridian document, do its internal links point somewhere, can its resources be
-put in an order at all, and do the documents given together fit together?
+Validation checks the language only. No plugin is loaded, so nothing here
+knows what Terraform or Ansible can do. It asks:
+
+- Is this a well-formed Meridian document?
+- Do its internal links point somewhere?
+- Can its resources be put in an order?
+- Do the documents given together fit together?
 
 Every problem in every file is reported in one pass, each with the file, line,
 column and field:

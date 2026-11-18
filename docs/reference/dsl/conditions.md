@@ -35,10 +35,9 @@ flowchart LR
   runtimeWhen: "ansible_facts['os_family'] == 'Debian'"
 ```
 
-Text. Meridian does not read it, check it, or translate it. It is copied into
-the construct the tool has for a last-moment check, so it must be valid in that
-tool's language, and it is the one part of a shared-dialect document that does
-not move between tools.
+Text in the tool's own language. Meridian copies it, unchecked, into the
+tool's apply-time check. It is the one part of a shared-dialect document that
+does not move between tools.
 
 | Target | It becomes | Written in | Example |
 |---|---|---|---|
@@ -81,9 +80,9 @@ does not carry the service task's `when:`.
   when: "data.env != 'prod'"
 ```
 
-`when` is decided by Meridian itself, before compiling, so that the compiled
-output is static: a resource is either in it or not, and what you review is what
-will run. No target ever sees the condition, so it works on every target.
+Meridian decides `when` before compiling. A resource is either in the output
+or not, so what you review is what runs. No target sees the condition, so it
+works on every target.
 
 ### The condition language
 

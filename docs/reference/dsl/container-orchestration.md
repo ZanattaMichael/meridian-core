@@ -139,9 +139,9 @@ the order of submission does not matter, as the cluster's own tooling expects.
 Synthetic, with one action: `restart`, aimed at a Deployment, StatefulSet or
 DaemonSet. A cluster does not restart pods because a ConfigMap or Secret they
 use changed. Meridian writes a checksum of the notifier into an annotation on
-the workload's pod template, `meridian.dev/restart-on-<name>`; when the content
-changes the template changes and the workload's own controller rolls its pods.
-The compile warns that this is how it works. Any other action, or any other kind
+the workload's pod template, `meridian.dev/restart-on-<name>`. When the content
+changes, the template changes and the workload's controller rolls its pods.
+The compile warns about this. Any other action, or any other kind
 of notified object, is refused.
 
 ## `runtimeWhen`
