@@ -3,8 +3,7 @@
 <img src="../branding/logos/meridian-packer.svg" width="72" alt="Meridian Packer plugin logo">
 
 Compiles an Infrastructure document into a [Packer](https://developer.hashicorp.com/packer)
-build template and runs it with `packer`. Use it to build machine images and container
-images: an AMI, an Azure or Google Cloud image, a VMware template, a Docker image.
+build template and runs it with `packer`, to build machine and container images.
 
 ## What it does and does not support
 
@@ -21,34 +20,15 @@ images: an AMI, an Azure or Google Cloud image, a VMware template, a Docker imag
 | Apply | Yes: `packer build`. Every apply builds a new image |
 | Outputs | Yes, read from the manifest every build ends by writing. See [Outputs](#outputs) |
 | Sensitive values | A `variable` can be `sensitive`. Outputs are image ids and are never sensitive |
-| Category | `infrastructure-as-code`. See [Why this category](#why-this-category) |
+| Category | `infrastructure-as-code`: it creates images declaratively and its outputs feed later stages |
 | Compiles to | `build.pkr.json`, plus `meridian-build.json` for Meridian's own use |
 | Needs | `packer` 1.7 or later on the machine running Meridian |
 | Binary | `meridian-target-packer` |
 | Tested against | The real `packer` 1.11 in CI, with the null builder: validate, build, outputs, a rejected template and a failed build. The cloud builders have not been run against a real account |
 
-## Contents
-
-- [What it does and does not support](#what-it-does-and-does-not-support)
-- [A first build](#a-first-build)
-- [How a document maps to a build](#how-a-document-maps-to-a-build)
-- [Resource types](#resource-types)
-- [References](#references)
-- [Resource types in detail](#resource-types-in-detail)
-- [Order](#order)
-- [Notifications](#notifications)
-- [Outputs](#outputs)
-- [Running a build](#running-a-build)
-- [Secrets](#secrets)
-- [What the plugin refuses](#what-the-plugin-refuses)
-- [Examples](#examples)
-- [Why this category](#why-this-category)
-- [Testing](#testing)
-
 ## A first build
 
-This document needs no cloud account and no Packer plugin. The null builder builds
-nothing, and every step runs on the machine running Packer.
+No cloud account or plugin needed; the null builder runs every step locally.
 
 ```yaml
 apiVersion: meridian/v1
@@ -94,35 +74,21 @@ hello (Infrastructure, target packer)
   output builder = "null"
 ```
 
-`meridian compile hello.yaml --out build/` writes the template without running anything,
-so you can read exactly what Packer is given.
+`meridian compile hello.yaml --out build/` writes the template without running it.
 
 ## How a document maps to a build
 
-**One document is one Packer build.** The build is named after the document
-(`metadata.name`) and builds every source the document declares. For a second build, write
-a second document.
+**One document is one build**, named after `metadata.name`, building every source. After
+the prefix, `type` is Packer's type and `params` are its arguments.
 
-The plugin does not hide Packer's vocabulary behind a smaller one. After the prefix
-that says what part of a build a resource is, its `type` is Packer's type and its
-`params` are that type's arguments, as Packer's documentation lists them.
+Meridian adds:
 
-What Meridian adds:
+- **Order** from `dependsOn` for provisioners and post-processor sequences.
+- **References by id** (`${region}`), checked at compile.
+- **Outputs**, recorded per source.
+- **Compile-time checks** against your lines.
 
-- **Order from the graph.** Provisioners run in the order `dependsOn` gives them, and
-  post-processors that depend on one another become a sequence.
-- **References by id.** `${region}` refers to the variable with the id `region`. The
-  plugin writes Packer's own address for it and refuses a reference to something the
-  document does not declare.
-- **Outputs.** Packer has none. The plugin records what each source produced and reports
-  the values the document asks for, so a later stage can use the id of the image.
-- **A check before anything runs.** A document that Packer could not run the way it is
-  written is refused at compile time, with the line of the document that is wrong.
-
-The template is written in Packer's JSON syntax, not HCL. In HCL a nested block and a
-map-valued argument are written differently, and only a Packer plugin's schema says which
-one a param is. In the JSON syntax Packer decides that itself, so a document compiles
-correctly without Meridian knowing any plugin's schema.
+The template is Packer JSON, so blocks and maps need no plugin schema.
 
 ## Resource types
 
@@ -137,18 +103,14 @@ correctly without Meridian knowing any plugin's schema.
 | `local` | an entry of `locals` | Takes one param, `value`. |
 | `plugin` | an entry of `required_plugins` | Takes `source` and `version`. The id is the plugin's name. `packer init` installs it. |
 
-A resource's id is the block's name, so it must start with a letter or underscore and hold
-only letters, digits, underscores and hyphens.
+Ids start with a letter or underscore and hold letters, digits, `_` and `-`.
 
-Arguments Packer accepts on every provisioner and post-processor, such as `only`, `except`,
-`override`, `pause_before`, `max_retries`, `timeout` and `keep_input_artifact`, are params
-like any other. In `only` and `except` a source can be named by its id alone: the plugin
-writes `amazon-ebs.ubuntu` for `ubuntu`.
+Common arguments (`only`, `except`, `override`, `pause_before`, `max_retries`, `timeout`,
+`keep_input_artifact`) are params. In `only` and `except` a source id becomes
+`amazon-ebs.ubuntu`.
 
-`state` must be `present` or left out, since a build only creates images. `notifies` and
-`runtimeWhen` are refused: see [Notifications](#notifications) and
-[What the plugin refuses](#what-the-plugin-refuses). Each type's params are in
-[Resource types in detail](#resource-types-in-detail).
+`state` must be `present` or absent. `notifies` and `runtimeWhen` are
+[refused](#what-the-plugin-refuses).
 
 ## References
 
@@ -163,28 +125,17 @@ writes `amazon-ebs.ubuntu` for `ubuntu`.
 | `${formatdate("YYYYMMDD", timestamp())}` | unchanged | anything that is not a plain path is Packer's expression language |
 | `$${HOME}` | `$${HOME}` (a literal `${HOME}`) | the escape for a literal `${`, in every Meridian document |
 
-Two things follow from this:
+- An unknown path such as `${regoin}` is refused.
+- Write `$${HOME}` for a shell `${HOME}`. `$HOME`, `$(date)` and `{{ .Vars }}` pass through.
 
-- A plain path that names nothing, such as `${regoin}`, is refused at compile time. Without
-  the check, the mistake would surface as a Packer error about a file you did not write.
-- A shell script that uses `${HOME}` must write `$${HOME}`, because `${` starts a
-  reference. `$HOME` and `$(date)` need no escape. Packer's older `{{ .Vars }}` templates
-  are plain text to Meridian and pass through untouched.
-
-A source, a provisioner, a post-processor and a plugin requirement have nothing to read
-inside a param. Inside a provisioner, Packer's own `${source.name}` and `${build.ID}`
-describe the source being built.
+Sources, provisioners, post-processors and plugins cannot be read. In a provisioner,
+`${source.name}` and `${build.ID}` are Packer's.
 
 ## Resource types in detail
 
-Every resource takes the fields every Meridian resource takes: `id`, `type`, `params`,
-`dependsOn` and `state` (which must be `present` or left out). What
-`params` holds depends on the type.
-
 ### `source.<builder>`
 
-What to build from, and where. `<builder>` is any Packer builder: `amazon-ebs`,
-`azure-arm`, `googlecompute`, `docker`, `vsphere-iso`, `qemu`, `null`, `file` and so on.
+Any Packer builder: `amazon-ebs`, `azure-arm`, `googlecompute`, `docker`, `qemu`, `null`.
 
 | | |
 |---|---|
@@ -194,14 +145,11 @@ What to build from, and where. `<builder>` is any Packer builder: `amazon-ebs`,
 | Readable | Nothing inside a param. In outputs: `id`, `artifact_id`, `builder_type`, `build_time`, `files`, `packer_run_uuid` |
 | Dependencies | A source cannot depend on another source: Packer builds them at the same time |
 
-A document with several sources builds them all in parallel, and every provisioner and
-post-processor runs for each one unless its `only` or `except` says otherwise.
+Sources build in parallel; steps run for each unless `only` or `except` say otherwise.
 
 ### `provisioner.<type>`
 
-A step run on the machine being built, or on the machine running Packer for `shell-local`.
-`<type>` is any Packer provisioner: `shell`, `file`, `powershell`, `ansible`,
-`ansible-local`, `breakpoint`, `shell-local`, `windows-restart` and so on.
+Any Packer provisioner: `shell`, `file`, `powershell`, `ansible`, `shell-local`.
 
 | | |
 |---|---|
@@ -212,8 +160,7 @@ A step run on the machine being built, or on the machine running Packer for `she
 
 ### `post-processor.<type>`
 
-A step run on what was built. `<type>` is any Packer post-processor: `docker-tag`,
-`docker-push`, `compress`, `checksum`, `manifest`, `shell-local`, `vagrant` and so on.
+Any Packer post-processor: `docker-tag`, `docker-push`, `compress`, `checksum`.
 
 | | |
 |---|---|
@@ -223,19 +170,15 @@ A step run on what was built. `<type>` is any Packer post-processor: `docker-tag
 
 ### `error-cleanup-provisioner.<type>`
 
-A provisioner that runs only when the build has failed, before Packer tears the machine
-down. Its params are a provisioner's. A document has at most one, and nothing can depend
-on it.
+Runs only on failure. At most one; nothing can depend on it.
 
 ### `data.<type>`
 
-A lookup done before the build starts. `<type>` is any Packer data source: `amazon-ami`,
-`amazon-secretsmanager`, `http`, `null` and so on. Params are the data source's own
-arguments. `${id.attribute}` reads what it found.
+Any Packer data source (`amazon-ami`, `http`). `${id.attribute}` reads it.
 
 ### `variable`
 
-An input to the build. The id is the variable's name.
+The id is the variable's name.
 
 | Param | Meaning |
 |---|---|
@@ -244,37 +187,30 @@ An input to the build. The id is the variable's name.
 | `description` | Shown by Packer when it asks about the variable |
 | `sensitive` | `true` keeps the value out of Packer's output |
 
-Any other argument of Packer's `variable` block is passed through as written.
-
-`${id}` reads it. It is set by an input of the same name from an earlier stage, or by
-`PKR_VAR_<id>` in the environment.
+Other `variable` arguments pass through. `${id}` reads it; it is set by a same-named input
+from an earlier stage or `PKR_VAR_<id>`.
 
 ### `local`
 
-A named value computed once. It takes exactly one param, `value`, which can be text, a
-number, a list or a map, and can hold references and Packer expressions. `${id}` reads it.
+One param, `value`, which may hold references and Packer expressions. `${id}` reads it.
 
 ### `plugin`
 
-A Packer plugin the build needs. The id is the plugin's name.
+The id is the plugin's name.
 
 | Param | Meaning |
 |---|---|
 | `source` | Where the plugin comes from, such as `github.com/hashicorp/amazon`. Required |
 | `version` | A version constraint, such as `>= 1.3.0`. Required |
 
-`packer init` installs it the first time the document is planned or applied. The builders
-`null` and `file`, and the provisioners and post-processors that ship inside Packer, need
-no plugin.
+`packer init` installs it on first plan or apply. Built-in types need none.
 
 ## Order
 
-A Packer build has a fixed shape: install plugins, read variables, look up data, start
-every source, run the provisioners, post-process the result. `dependsOn` works inside that
-shape.
+A build's shape is fixed: plugins, variables, data, sources, provisioners,
+post-processors.
 
-**Provisioners** run in dependency order. Where no dependency decides, they run in the
-order they are written.
+**Provisioners** run in dependency order, then written order.
 
 ```yaml
 - id: configure
@@ -288,9 +224,7 @@ order they are written.
   params: {inline: ["sudo apt-get install -y nginx"]}
 ```
 
-**Post-processors** that depend on one another form a sequence, in which each takes the
-artifact of the one before it. A post-processor with no such dependency starts a sequence
-of its own and works on what the build itself produced.
+**Post-processors** that depend on each other form a sequence; others start their own.
 
 ```yaml
 - id: tag
@@ -318,23 +252,13 @@ compiles to
 ]
 ```
 
-The last sequence is the plugin's own: see [Outputs](#outputs).
-
-A dependency that only restates the shape, such as a provisioner depending on a source, is
-accepted and changes nothing. One that contradicts it is refused, because writing the
-template anyway would run the steps in an order the document ruled out.
+The last sequence is the plugin's ([Outputs](#outputs)). A dependency restating the shape
+changes nothing; one contradicting it is refused.
 
 ## Notifications
 
-`notifies` is refused on this target, whatever the action. A notify means "when this
-really changes, do that to the other", and a build has no such moment: every provisioner
-runs exactly once, in order, on a machine that did not exist before the build and is
-discarded after it. There is nothing to compare with, so nothing can be said to have
-changed.
-
-What a notify would be used for elsewhere is simply the next step here. To restart a
-service after writing its configuration, add a provisioner that depends on the one that
-writes the file:
+Refused: every provisioner runs once on a fresh machine. Use a dependent provisioner
+instead:
 
 ```yaml
 - id: nginx_conf
@@ -350,9 +274,8 @@ writes the file:
 
 ## Outputs
 
-Every build the plugin compiles ends with Packer's built-in `manifest` post-processor,
-which records what each source produced in `meridian-manifest.json` in the work directory.
-A document's outputs read from it, as `${<source id>.<attribute>}`:
+Every build ends with a `manifest` post-processor writing `meridian-manifest.json`. Outputs
+read `${<source id>.<attribute>}`:
 
 | Attribute | Value |
 | --- | --- |
@@ -371,15 +294,8 @@ outputs:
     value: web built from ${ubuntu.artifact_id}
 ```
 
-An output that is nothing but one reference keeps the type of what it reads, so
-`${ubuntu.build_time}` is a number. Anything else is text.
-
-Outputs always describe the last build. The manifest keeps earlier runs too, and the
-plugin ignores them. `meridian` reads the outputs back without building again whenever a
-later stage needs them.
-
-An output can only read what a build produced, so a reference to a variable, a local or a
-data source in an output is refused.
+A single reference keeps its type; anything else is text. Outputs describe the last build
+and are read back without rebuilding. Variables, locals and data sources cannot be outputs.
 
 ## Running a build
 
@@ -389,38 +305,26 @@ data source in an output is refused.
 | `meridian plan` | `packer init .`, `packer validate .` | nothing is built; plugins the template requires are installed |
 | `meridian apply` | `packer init .`, `packer validate .`, `packer build -color=false .` | every source is built |
 
-Packer has no plan of its own. It does not need one to be honest: a build never changes an
-existing image, it always makes a new one. So a plan lists one creation per source, after
-Packer itself has checked the template. A plan is therefore never "in sync", and applying
-twice builds two images.
+A build always makes new images, so a plan lists one creation per source after
+`packer validate`. It is never "in sync"; applying twice builds twice.
 
-Packer runs in the document's work directory, which Meridian keeps under its state
-directory (`.meridian/` in the directory `meridian` is run from, or `--state-dir`). A
-relative path in a param, such as the `source` of a `provisioner.file`, is relative to
-that work directory and not to the document, so use an absolute path.
+Packer runs in the work directory under `--state-dir`, so use absolute paths in params.
 
-**Variables.** Values handed over from an earlier stage reach Packer as `PKR_VAR_<name>`,
-so a `variable` with the same id receives them. Packer ignores a value it has no variable
-for. Variables can also be set the usual way, with `PKR_VAR_<name>` in the environment
-Meridian runs in.
+**Variables** from earlier stages arrive as `PKR_VAR_<name>`.
 
-**Credentials.** The plugin passes its environment through to Packer. Sign in the way the
-builder expects, for example `AWS_PROFILE` or `ARM_CLIENT_ID`. A value a step needs that
-must not be written into the template is a [secret](#secrets).
+**Credentials** come from the environment (`AWS_PROFILE`, `ARM_CLIENT_ID`). Use a
+[secret](#secrets) for values that must stay out of the template.
 
-**A different `packer`.** Set `MERIDIAN_PACKER` to the program to run when it is not
-`packer` on `PATH`. `MERIDIAN_PACKER_ARGS` adds arguments to `packer validate` and
-`packer build`, split like a shell command line (quotes hold a word together): `-only=amazon-ebs.web`, `-parallel-builds=1`.
-Both can also be written in the project's `meridian.yaml` under `spec.settings.packer`
-as `program` and `args`; see the [plugin settings reference](../reference/plugin-settings.md#packer).
+**Settings.** `MERIDIAN_PACKER` names the program; `MERIDIAN_PACKER_ARGS` adds arguments to
+`validate` and `build` (`-only=amazon-ebs.web`). Or `program` and `args` under
+`spec.settings.packer` ([reference](../reference/plugin-settings.md#packer)).
 
-When Packer fails, Meridian reports which step failed, the command that was run, the exit
-status and the end of what Packer printed.
+A failure reports the step, command, exit status and Packer's output tail.
 
 ## Secrets
 
-A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a resource's params
-reaches Packer as an input variable read from a private file, and through nothing else.
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) reaches Packer only as a
+variable from a private file.
 
 ```yaml
 spec:
@@ -441,38 +345,20 @@ spec:
           - printf '%s' "${token}" | docker login --password-stdin -u ci registry.example.com
 ```
 
-**What the compile writes.** The param becomes `${var.meridian_secret_<name>}`, and the
-template declares that variable with `type = string` and `sensitive = true`, so Packer
-prints `<sensitive>` wherever the value would appear in its output. The compiled template
-holds the variable's name and never its value, so it can be reviewed and kept.
+The param becomes `${var.meridian_secret_<name>}`, declared `sensitive = true`.
 
-**How the value reaches the tool.** When a stage runs, the runner writes every secret into
-one variables file, `secrets.pkrvars.json`, in a directory only the user can enter (mode
-`0700`, the file `0600`, on a memory filesystem where the system has one), and passes it as
-`-var-file=<path>` to `packer validate` and `packer build`. `packer init` has no use for
-it and is not given it. The file is overwritten and removed when the build ends. The
-command line names only the file's path, and Packer's environment holds nothing of the
-value. Packer runs a step that uses the value like any other step: a `shell-local`
-step's commands go into a script in Packer's temporary directory for the length of the
-step.
+The runner writes `secrets.pkrvars.json` (mode `0600`, in a `0700` directory, in memory
+where possible), passed as `-var-file=<path>` to `validate` and `build`, and removed after.
+A `shell-local` step's commands sit in Packer's temporary directory during the step.
 
-**What is refused.** A secret in the declaration of a `variable` or a `plugin` is refused
-at compile, rule `unsupported-secret-place`: a declaration is written into the template
-as it stands. Put the secret in a `local`, a provisioner, a post-processor or a source,
-which are compiled to a reference.
+A secret in a `variable` or `plugin` is refused (`unsupported-secret-place`).
 
-The handover is tested two ways:
-
-- against a stand-in `packer` that records the variables file, its mode, its arguments
-  and its environment (`plugins/packer/tests/run.rs`)
-- against the real `packer` in CI (`plugins/packer/tests/packer.rs`): a step writes the
-  value to a file, and the value is not in Packer's output or any other file the plugin
-  wrote
+Tested against a stand-in (`plugins/packer/tests/run.rs`) and real `packer` in CI
+(`plugins/packer/tests/packer.rs`).
 
 ## What the plugin refuses
 
-Meridian never compiles a document into something that quietly does less than it says.
-Each refusal names the resource, the rule and the line of the document.
+Each refusal names the resource, rule and line.
 
 | Rule | When |
 | --- | --- |
@@ -489,8 +375,8 @@ Each refusal names the resource, the rule and the line of the document.
 
 ## Examples
 
-Complete documents are in [`examples/packer/`](../../examples/packer/), and what each
-compiles to is in [`plugins/packer/testdata/`](../../plugins/packer/testdata/).
+Documents in [`examples/packer/`](../../examples/packer/), compiled output in
+[`plugins/packer/testdata/`](../../plugins/packer/testdata/).
 
 | Example | Shows |
 | --- | --- |
@@ -576,27 +462,17 @@ and after `meridian apply`:
     only: [ubuntu]           # written to Packer as amazon-ebs.ubuntu
 ```
 
-## Why this category
-
-Packer is declared **infrastructure as code**, the closest of the four categories: it creates
-images declaratively, its output (an image id) feeds the stages that create machines, and it
-needs the `Infrastructure` kind's outputs. It moves if an image-building category is added.
-
 ## Testing
 
 ```console
 $ cargo test -p meridian-target-packer
 ```
 
-runs the unit tests, the compile tests with their golden files, the runner tests against a
-stand-in for `packer`, and the tests that drive the real plugin binary across the process
-boundary. None of them needs Packer.
+runs unit, golden-file, stand-in runner and binary tests. None needs Packer.
 
 ```console
 $ cargo test -p meridian-target-packer --test packer -- --ignored
 ```
 
-runs the tests that need the real `packer`: its syntax check over every example, and a
-whole build, a rejected template and a failing build with the null builder. The `packer`
-workflow runs them on every pull request that touches the plugin. After changing what the
-plugin emits, record the golden files again with `UPDATE_GOLDEN=1`.
+runs the real-`packer` tests (validate every example; null-builder builds), as the `packer`
+workflow does. Re-record golden files with `UPDATE_GOLDEN=1`.
