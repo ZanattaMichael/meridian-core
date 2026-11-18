@@ -19,19 +19,17 @@ Add the Markdown file under `docs/`. That is all.
 
 - **Navigation.** There is no table of contents to edit. The pipeline reads the
   directory tree, and each page's first `#` heading becomes its name in the sidebar.
-- **Targets.** A page at `docs/targets/<name>.md` is listed under the category its
-  plugin declares, which the pipeline reads from the generated
-  [capability matrix](../reference/capability-matrix.md).
-- **Logos.** If `docs/branding/logos/meridian-<name>.svg` exists, it is shown at the top
-  of that target's published page and in the plugin map on the home page. The logo
-  family is described in [Meridian branding](../branding/README.md).
-- **Links.** Write ordinary relative links, as they work on GitHub. A link to a file
-  outside `docs/`, such as an example under `examples/`, is published as a link to that
-  file on GitHub.
-- **Diagrams.** Write a fenced `mermaid` block. GitHub, the Wiki and the site all draw
-  it. The diagram below is one. For a picture that explains a whole subject, draw it in
-  [`tools/wiki/graphics.py`](#the-graphics) instead, so it shares the look and the
-  motion of the others.
+- **Targets.** `docs/targets/<name>.md` is listed under its plugin's category, read
+  from the generated [capability matrix](../reference/capability-matrix.md).
+- **Logos.** If `docs/branding/logos/meridian-<name>.svg` exists, it appears at the top
+  of the target's published page and in the home page's plugin map. See
+  [Meridian branding](../branding/README.md).
+- **Links.** Use ordinary relative links, as on GitHub. Links to files outside
+  `docs/`, such as `examples/`, are published as links to the file on GitHub.
+- **Diagrams.** Use a fenced `mermaid` block; GitHub, the Wiki and the site all render
+  it (the diagram below is one). For a picture explaining a whole subject, draw it in
+  [`tools/wiki/graphics.py`](#the-graphics) instead, to match the others' look and
+  motion.
 
 ## The pipeline
 
@@ -58,9 +56,9 @@ flowchart TD
 | `publish-site` | `main` | Deploys the built site to GitHub Pages |
 | `publish-wiki` | `main` | Replaces the contents of the Wiki with the generated pages |
 
-A pull request never publishes anything. It proves that the site still builds and that
-no link in it is broken, and its run keeps the built site as an artifact named
-`github-pages`, which can be downloaded and opened to preview the change.
+A pull request never publishes. It proves the site builds with no broken links, and
+keeps the built site as an artifact named `github-pages` that you can download to
+preview the change.
 
 ### Link checks
 
@@ -101,23 +99,20 @@ There are three kinds, and all of them are drawn by a script rather than kept by
 
 - **The banner and the core mark** are kept in
   [`docs/branding/`](../branding/README.md), one banner for light and one for dark
-  colour schemes. The animated copies beside them (`*-animated.svg`) are written by
-  `tools/wiki/graphics.py` from the still ones: a point of light travels along each of
-  the four meridians. `docs/index.md` and the repository README show the animated
-  banner, so it is the same on GitHub, the site and the Wiki, and the site's top bar
-  shows the animated mark.
-- **The plugin map** is drawn by `build.py` each time, not kept as a file, so it is never
-  out of date. It shows one document going through the core to every plugin, in a
-  column for each category. Its columns and its plugins come from the capability
-  matrix and `docs/targets/`, and each tile uses the plugin's own logo. A plugin that
-  has no logo yet gets a lettered tile.
+  colour schemes. `tools/wiki/graphics.py` writes the animated copies
+  (`*-animated.svg`) from the still ones: a point of light travels along each of the
+  four meridians. `docs/index.md` and the README show the animated banner, so it
+  matches on GitHub, the site and the Wiki; the site's top bar shows the animated mark.
+- **The plugin map** is drawn by `build.py` on every build, so it is never stale. It
+  shows one document going through the core to every plugin, one column per category,
+  taken from the capability matrix and `docs/targets/`. Each tile uses the plugin's
+  logo; a plugin without one gets a lettered tile.
 - **The explanatory pictures** under [`docs/graphics/`](../graphics/) (the
   architecture, the path of a document, kinds and categories, the two stages, a
   secret's path, a run, modules) are drawn by
   [`tools/wiki/graphics.py`](../../tools/wiki/graphics.py) and committed, so GitHub
-  shows them in the Markdown too. The workflow runs the script with `--check` and
-  fails when a file on disk differs from what the script draws, so a change to a
-  picture is a change to the script:
+  shows them too. The workflow runs the script with `--check` and fails if a file
+  differs from what the script draws, so change a picture by changing the script:
 
   ```
   python3 tools/wiki/graphics.py          # draw every file
@@ -131,11 +126,11 @@ There are three kinds, and all of them are drawn by a script rather than kept by
 
 #### Motion
 
-Every graphic shares one motion: a point of light travelling along the lines that join
-things, the way the banner's meridians leave the single point that stands for the DSL.
-It is CSS inside each SVG (`stroke-dasharray` on a copy of the line with
-`pathLength="100"`, moved by `stroke-dashoffset`), so it plays wherever the file is
-shown as an image, including a README on GitHub, and needs no script on the page.
+Every graphic shares one motion: a point of light travelling along connecting lines,
+like the banner's meridians leaving the single point that stands for the DSL. It is CSS
+inside each SVG (`stroke-dasharray` on a copy of the line with `pathLength="100"`,
+moved by `stroke-dashoffset`), so it plays wherever the file is shown as an image,
+including a GitHub README, with no page script.
 
 The site itself moves too, and every part of it is in two files:
 [`tools/wiki/theme/meridian.css`](../../tools/wiki/theme/meridian.css) and
@@ -149,18 +144,15 @@ The site itself moves too, and every part of it is in two files:
 | Each block of a page rises in as it scrolls into view, and each section heading draws its own short line when it arrives | `meridian.js` adds `meridian-reveal` to the blocks and an observer marks each `is-visible`; the classes are added only when the observer exists, so nothing is ever left hidden | |
 | Each page rises in as it opens; the line under its title drifts through the four colours; links underline themselves from the left; sidebar entries slide under the pointer; the graphics and the mark lift when hovered; table rows ease | `meridian.css` | |
 
-A reader who has asked their system for less motion
-(`prefers-reduced-motion: reduce`) gets the same site, still: the sky without its
-travelling light, no reveals, no parallax. The stylesheet keeps its motion inside a
-`prefers-reduced-motion: no-preference` media query, the script checks the same
-setting before it starts an observer or listens to the pointer, and each SVG under
-`docs/graphics/` hides its travelling light under the matching `reduce` query. Keep
-that rule when adding motion anywhere.
+Readers who ask for less motion (`prefers-reduced-motion: reduce`) get a still site:
+no travelling light, reveals or parallax. The stylesheet keeps motion inside a
+`prefers-reduced-motion: no-preference` query, the script checks the same setting
+before starting an observer or pointer listener, and each SVG under `docs/graphics/`
+hides its light under the matching `reduce` query. Keep this rule for any new motion.
 
-To change the sky, change `sky()` in `meridian.js`: the two poles, the shares that
-place the nine lines, which four carry light, and where the glows sit are the short
-lists at its top. The sky is drawn by the page, not kept as a file, so it is the same
-on every page and in every theme.
+To change the sky, edit `sky()` in `meridian.js`. The short lists at its top set the
+two poles, the positions of the nine lines, which four carry light, and where the
+glows sit. The page draws the sky, so it is the same on every page and theme.
 
 The site's look is `meridian.css` on top of mdBook's stock themes, and its settings are
 [`tools/wiki/book.toml`](../../tools/wiki/book.toml).
@@ -204,10 +196,13 @@ feature, since anything typed into the Wiki is replaced on the next run.
 
 ## Changing the address
 
-The site's address appears in `tools/wiki/book.toml` (`site-url`,
-`git-repository-url`, `edit-url-template`), in the `--site-url` argument in the
-workflow, in the table at the top of this page, in `README.md`, `CONTRIBUTING.md`
-and `docs/index.md`, and in the `WIKI_SITE_URL` setting `build.py` reads (which
-otherwise derives the github.io address from the repository's name) for the links
-the Wiki pages carry to the site. The Wiki's addresses follow the repository's name
-automatically.
+The site address appears in:
+
+- `tools/wiki/book.toml` (`site-url`, `git-repository-url`, `edit-url-template`);
+- the workflow's `--site-url` argument;
+- the table at the top of this page;
+- `README.md`, `CONTRIBUTING.md` and `docs/index.md`;
+- the `WIKI_SITE_URL` setting `build.py` reads for the Wiki's links to the site
+  (otherwise derived from the repository name).
+
+The Wiki's own addresses follow the repository name automatically.

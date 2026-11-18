@@ -1,10 +1,9 @@
 # Releasing Meridian
 
-This is the maintainer's guide to a release: what the pipeline builds, what
-it checks, what has to be switched on before anything is published, and the
-steps to cut a release. The policy behind version numbers is in the
-[release and versioning plan](../plans/release-and-versioning.md); this page
-is the mechanics.
+The maintainer's guide to a release: what the pipeline builds and checks, what
+must be enabled before publishing, and the steps to cut one. Version policy is
+in the [release and versioning plan](../plans/release-and-versioning.md); this
+page is the mechanics.
 
 Everything is in one workflow, [`.github/workflows/release.yml`](../../.github/workflows/release.yml),
 with its scripts in [`tools/release/`](../../tools/release) and its packaging
@@ -60,11 +59,11 @@ a build cache.
 
 ## How the plugins are signed
 
-Each `build` job makes a new Ed25519 key pair, compiles the public key into
-that job's `meridian` (through `MERIDIAN_RELEASE_PUBLIC_KEY`), signs the
-plugins with the secret key, and deletes the secret key before the job ends.
-The key never leaves the runner and is never stored, so there is no signing
-secret to configure, rotate or leak. Each platform's archive has its own key.
+Each `build` job creates a new Ed25519 key pair, compiles the public key into
+its `meridian` (via `MERIDIAN_RELEASE_PUBLIC_KEY`), signs the plugins, and
+deletes the secret key before the job ends. The key never leaves the runner and
+is never stored, so there is no signing secret to configure, rotate or leak.
+Each platform's archive has its own key.
 
 What that gives a user, and how they trust a plugin from elsewhere, is in
 [Plugin signatures](../reference/plugin-signatures.md).
@@ -100,11 +99,11 @@ Nothing has to be set for rehearsals. For a release:
 | Restrict the environment to tags (recommended) | the same page, Deployment branches and tags | allow the tag pattern `v*` only |
 | Make the image public | after the first release: your profile, Packages, `meridian`, Package settings | change visibility to Public, and connect the package to this repository. A package pushed by a workflow starts private |
 
-**No secrets are needed.** The workflow uses the run's own `GITHUB_TOKEN` to
-create the release and push the image, and Sigstore's keyless signing, which
-uses the run's identity token in place of a key. The `publish` job asks for the
-four permissions it needs (`contents`, `packages`, `id-token`, `attestations`:
-write) itself; every other job is read-only.
+**No secrets are needed.** The workflow uses the run's `GITHUB_TOKEN` to create
+the release and push the image, and Sigstore keyless signing, which uses the
+run's identity token instead of a key. The `publish` job requests the four
+write permissions it needs (`contents`, `packages`, `id-token`,
+`attestations`); every other job is read-only.
 
 Attestations work as they are on a public repository. On a private repository
 they need a GitHub Enterprise Cloud plan.
@@ -178,19 +177,18 @@ release.
 ## Known limits
 
 - **macOS notarisation.** The macOS binaries are not signed with an Apple
-  Developer ID or notarised. Installed with the script, Homebrew or `curl`
-  they run. Downloaded with a browser, Gatekeeper will block them until the
-  quarantine flag is removed. Fixing that needs an Apple Developer account and
-  its certificate as secrets.
+  Developer ID or notarised. They run when installed with the script, Homebrew
+  or `curl`. Downloaded in a browser, Gatekeeper blocks them until the
+  quarantine flag is removed. Fixing this needs an Apple Developer account and
+  certificate as secrets.
 - **Windows code signing.** The Windows binaries are not Authenticode-signed,
   so SmartScreen may warn about an archive downloaded with a browser. Fixing
   that needs a code-signing certificate.
-- **Actions are pinned by tag,** such as `actions/checkout@v4`, as in the
-  repository's other workflows. Pinning the release workflow's actions by
-  commit would remove the trust placed in those tags.
+- **Actions are pinned by tag** (such as `actions/checkout@v4`), as in the other
+  workflows. Pinning by commit would remove the trust placed in those tags.
 - **One key per platform.** Plugins and `meridian` must come from the same
-  archive. Shipping a plugin on its own schedule, as the versioning plan
-  intends, will need a longer-lived signing identity than a per-build key.
+  archive. Shipping plugins on their own schedule, as the versioning plan
+  intends, needs a longer-lived signing identity than a per-build key.
 
 ## Running the pieces by hand
 
