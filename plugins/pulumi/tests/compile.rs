@@ -501,7 +501,7 @@ fn a_secret_in_a_param_is_a_secret_configuration_value_the_runner_sets_from_stdi
     let program = &emitted.artifact.files["Pulumi.yaml"];
     assert!(
         program.contains(
-            "config:\n  meridian_secret_db_password:\n    secret: true\n    type: String\n"
+            "config:\n  meridian_secret_db_password:\n    secret: true\n    type: string\n"
         ),
         "{program}"
     );

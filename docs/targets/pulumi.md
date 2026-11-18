@@ -415,7 +415,7 @@ program declares the value under `config`:
 config:
   meridian_secret_db_password:
     secret: true
-    type: String
+    type: string
 ```
 
 The compiled program holds the key and never the value. Pulumi treats everything made

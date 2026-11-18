@@ -143,7 +143,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Program, CompileError> 
             name: key,
             token: String::new(),
             body: BTreeMap::from([
-                ("type".to_owned(), Value::from("String")),
+                ("type".to_owned(), Value::from("string")),
                 ("secret".to_owned(), Value::Bool(true)),
             ]),
             options: BTreeMap::new(),
