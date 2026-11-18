@@ -1,7 +1,7 @@
 # The containerization flavour
 
-Containerization tools run containers, and what they need around them, on one
-host. This page is how the [Meridian language](index.md) is written for them.
+How the [Meridian language](index.md) is written for tools that run containers on one
+host.
 
 | | |
 |---|---|
@@ -19,9 +19,8 @@ host. This page is how the [Meridian language](index.md) is written for them.
 
 ## Two tools, one shape
 
-The two targets differ in what runs the containers. The flavour is the same:
-a resource is one element, its `params` are that element's fields in the tool's
-spelling, and elements find each other by `id`.
+A resource is one element, `params` are its fields in the tool's spelling, and elements
+find each other by `id`.
 
 | | `docker` | `podman` |
 |---|---|---|
@@ -32,20 +31,12 @@ spelling, and elements find each other by `id`.
 | `notifies` | `restart`, native or synthetic | `restart`, native: systemd's `PartOf=` |
 | Another machine | the `project` resource, or a ResourceSet's `targetHost` | a ResourceSet's `targetHost`, over `ssh` |
 
-The rest of this page uses Docker for its examples. Podman's own page has the
-same sections for Quadlet.
+Examples use Docker; see Podman's page for Quadlet.
 
 ## A document is a project
 
-A document in this flavour is one project: a set of containers with their
-networks, volumes and configuration, brought up and taken down together. The
-document's name is the project's name unless the settings resource gives
-another.
-
-A resource's `type` is the kind of element and its `params` are that element's
-fields, exactly as the tool's own format documents them. The resource's `id` is
-the element's name in the compiled file, so it is also how containers find each
-other.
+A document is one project. Its name is the project name unless the settings resource
+gives another. A resource's `id` is the element's name in the compiled file.
 
 ```yaml
 apiVersion: meridian/v1
@@ -82,14 +73,12 @@ spec:
       value: ${app.port.8080}
 ```
 
-This document is
 [`examples/flavours/containerization.yaml`](../../../examples/flavours/containerization.yaml).
-A longer one: [`examples/docker/web.yaml`](../../../examples/docker/web.yaml).
+Longer: [`examples/docker/web.yaml`](../../../examples/docker/web.yaml).
 
 ## The settings resource
 
-One optional resource of type `project` says where and how the project runs. It
-is not part of the compiled file.
+An optional `project` resource says where and how the project runs.
 
 | Param | Meaning |
 |---|---|
@@ -104,14 +93,11 @@ A ResourceSet's `targetHost` also selects the daemon, over SSH.
 
 ## `state`
 
-Left out. Bringing a project up removes what the document no longer declares, so
-`state: absent` is refused with the instruction to remove the resource.
+Left out. Undeclared elements are removed; `state: absent` is refused.
 
 ## References
 
-Inside `params`, `${id}` is the name of another element of the document, and
-nothing more can be read there: nothing else is known until the project is up.
-The reference is checked when the document is compiled.
+In `params`, `${id}` is another element's name, and nothing more.
 
 In an output, a reference reads the running project:
 
@@ -120,23 +106,18 @@ In an output, a reference reads the running project:
 | `${app.port.8080}` | the host port the service's port 8080 is published on |
 | `${db.State.Status}` | that path in the inspection of the service's container |
 
-A `$` written in a param is escaped in the compiled file, so the tool does not
-take it for a variable of its own. Values belong in the document, not in the
-environment of whoever runs it.
+A `$` in a param is escaped, so the tool does not read it as a variable.
 
 ## Order
 
-Between two services, `dependsOn` becomes the tool's own `depends_on`. It waits
-for the other service to be healthy when that service declares a healthcheck,
-and to have started otherwise. Networks, volumes, configs and secrets are
-always created before any service starts, so a dependency on one adds nothing
-and the compile warns.
+Between services, `dependsOn` becomes `depends_on`: wait for healthy if the other has a
+healthcheck, otherwise for started. A dependency on a network, volume, config or secret
+adds nothing and warns.
 
 ## What is checked at compile time
 
-The compile refuses an attribute Compose does not know, a network, volume,
-config or secret that a service uses and the document does not declare, and
-services that depend on each other in a circle.
+Refused: an attribute Compose does not know, an undeclared network, volume, config or
+secret, and dependency cycles.
 
 ## `notifies`
 
@@ -149,21 +130,17 @@ One action, `restart`, aimed at a service.
 
 ## `runtimeWhen`
 
-Refused. There is nothing to check a condition against while a project comes up.
+Refused.
 
 ## Plan and apply
 
-On `docker`, `meridian plan` compares Compose's own configuration hash of each
-service with the hash recorded on the running containers, and reports what would
-be created, replaced, updated and deleted. It is uncertain for a service that is
-built from source. `meridian apply` brings the project up, removes services the
-document no longer declares, waits for the services by default, and then reads
-the outputs. On `podman` the plan is an exact comparison of unit files. The
-exact commands are on each target's page.
+On `docker`, `plan` compares each service's Compose configuration hash with the running
+containers' (uncertain for services built from source). `apply` brings the project up,
+removes undeclared services, waits, and reads outputs. On `podman`, `plan` compares unit
+files.
 
 ## How this differs from container orchestration
 
-A containerization document describes one host and one project, and the tool
-does the work itself, in order, while Meridian waits. A
-[container orchestration](container-orchestration.md) document hands objects to
-a cluster, which converges them on its own schedule.
+Here the tool brings one project up on one host while Meridian waits. In
+[container orchestration](container-orchestration.md), a cluster converges objects on its
+own schedule.
