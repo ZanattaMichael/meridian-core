@@ -138,6 +138,11 @@ async fn serve_async(plugin: Plugin) -> Result<(), ServeError> {
         emitter: Arc::clone(&plugin.emitter),
         operations,
         accepts_inputs: plugin.runner.as_ref().is_some_and(|r| r.accepts_inputs()),
+        settings: plugin
+            .runner
+            .as_ref()
+            .map(|r| r.settings())
+            .unwrap_or_default(),
         importer: plugin.importer.clone(),
         exports_schemas: plugin.schemas.is_some(),
         protocol,
@@ -206,6 +211,8 @@ struct EmitterHandler {
     emitter: Arc<dyn Emitter + Send + Sync>,
     operations: Operations,
     accepts_inputs: bool,
+    /// What the runner can be configured with, for the host to list.
+    settings: Vec<crate::Setting>,
     /// Kept only to describe it: importing is served by its own handler.
     importer: Option<Arc<dyn Importer>>,
     /// Whether a schema source is served, likewise by its own handler.
@@ -246,6 +253,7 @@ impl EmitterService for EmitterHandler {
                     .unwrap_or_default(),
             ),
             exports_schemas: self.exports_schemas,
+            settings: wire::settings_to_wire(self.settings.clone()),
         }))
     }
 

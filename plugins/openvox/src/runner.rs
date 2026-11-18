@@ -15,6 +15,7 @@ use meridian_sdk::{
     decode_value, Applied, Artifact, Log, NoLog, Operations, Plan, RunContext, RunError, Runner,
     Value,
 };
+use meridian_sdk::{settings, Setting};
 use meridian_target_puppet::{PuppetRunner, Transport};
 
 /// Names OpenVox's `puppet` program, when it is not where it is looked for.
@@ -23,10 +24,47 @@ pub const OPENVOX_VARIABLE: &str = "MERIDIAN_OPENVOX";
 pub const OPENBOLT_VARIABLE: &str = "MERIDIAN_OPENBOLT";
 /// `local` or `bolt`, to override the choice made from the host.
 pub const TRANSPORT_VARIABLE: &str = "MERIDIAN_OPENVOX_TRANSPORT";
-/// Extra arguments for every run, split on whitespace.
+/// Extra arguments for every run, split like a shell command line.
 pub const ARGS_VARIABLE: &str = "MERIDIAN_OPENVOX_ARGS";
 /// `warn`, `strict` or `off`: what to do when the tool is not OpenVox.
 pub const VERIFY_VARIABLE: &str = "MERIDIAN_OPENVOX_VERIFY";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "openvox",
+            OPENVOX_VARIABLE,
+            "",
+            "OpenVox's `puppet` program, when it is not on `PATH` or in the places the OpenVox packages install it.",
+        ),
+        Setting::new(
+            "openbolt",
+            OPENBOLT_VARIABLE,
+            "",
+            "OpenBolt's `bolt` program, when it is not on `PATH` or in the places the OpenBolt packages install it.",
+        ),
+        Setting::new(
+            "transport",
+            TRANSPORT_VARIABLE,
+            "",
+            "`local` or `bolt`, to override the choice made from the host: `local` applies on this machine, `bolt` reaches the host with OpenBolt.",
+        ),
+        Setting::new(
+            "args",
+            ARGS_VARIABLE,
+            "",
+            "Extra arguments for every run, split like a shell command line.",
+        ),
+        Setting::new(
+            "verify",
+            VERIFY_VARIABLE,
+            "warn",
+            "`warn`, `strict` or `off`: what to do when the tool turns out not to be OpenVox. `warn` says so and runs it, `strict` refuses, `off` does not ask.",
+        ),
+    ]
+}
 
 /// Where the OpenVox and OpenBolt packages install their commands. The
 /// packages do not put these on the `PATH` of a non-login shell, which is the
@@ -80,10 +118,6 @@ enum Implementation {
     OpenVox,
     /// Anything else, with what the fact read; empty when there was none.
     Other(String),
-}
-
-fn variable(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|v| !v.trim().is_empty())
 }
 
 /// The program to run for `name`: the bare name when it is on `path`, so the
@@ -153,16 +187,15 @@ impl OpenVoxRunner {
     pub fn from_env() -> Self {
         let path = std::env::var_os("PATH");
         let fallbacks: Vec<&Path> = PACKAGE_BIN.iter().map(Path::new).collect();
-        let program = |variable_name: &str, name: &str| {
-            variable(variable_name)
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
+        let program = |setting_name: &str, name: &str| {
+            settings::optional(setting(setting_name))
                 .unwrap_or_else(|| find_program(name, path.as_deref(), &fallbacks))
         };
-        let mut runner = OpenVoxRunner::new(
-            program(OPENVOX_VARIABLE, "puppet"),
-            program(OPENBOLT_VARIABLE, "bolt"),
-        );
-        runner.tool.transport = match variable(TRANSPORT_VARIABLE)
-            .unwrap_or_default()
+        let mut runner =
+            OpenVoxRunner::new(program("openvox", "puppet"), program("openbolt", "bolt"));
+        runner.tool.transport = match settings::text(setting("transport"))
             .to_ascii_lowercase()
             .as_str()
         {
@@ -170,12 +203,8 @@ impl OpenVoxRunner {
             "bolt" => Some(Transport::Bolt),
             _ => None,
         };
-        runner.tool.extra_args = variable(ARGS_VARIABLE)
-            .map(|v| v.split_whitespace().map(str::to_owned).collect())
-            .unwrap_or_default();
-        runner.verify = variable(VERIFY_VARIABLE)
-            .map(|v| Verify::parse(&v))
-            .unwrap_or_default();
+        runner.tool.extra_args = settings::args(setting("args"));
+        runner.verify = Verify::parse(&settings::text(setting("verify")));
         runner
     }
 
@@ -252,6 +281,10 @@ impl OpenVoxRunner {
 }
 
 impl Runner for OpenVoxRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         self.tool.operations()
     }

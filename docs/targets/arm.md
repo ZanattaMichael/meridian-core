@@ -315,8 +315,13 @@ untested against Azure.
 | Variable | Meaning |
 |---|---|
 | `MERIDIAN_AZ` | The program to run, when it is not `az` on `PATH` |
-| `MERIDIAN_AZ_ARGS` | Extra arguments for every call, split on spaces, such as `--only-show-errors` |
-| `MERIDIAN_AZ_PARAMETERS` | Values for the template's parameters, split on spaces |
+| `MERIDIAN_AZ_ARGS` | Extra arguments for every call, split like a shell command line (quotes hold a word together), such as `--only-show-errors` |
+| `MERIDIAN_AZ_PARAMETERS` | Values for the template's parameters, split like a shell command line (quotes hold a word together) |
+
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.arm`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#arm).
 
 ### Giving parameters their values
 

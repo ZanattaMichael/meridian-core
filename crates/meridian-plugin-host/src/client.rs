@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::Ordering;
@@ -66,6 +67,12 @@ pub struct StartOptions {
     pub args: Vec<String>,
     /// The plugin's whole environment, replacing the host's. `None` inherits.
     pub env: Option<Vec<(String, String)>>,
+    /// The project's settings for each target, from `spec.settings` in its
+    /// `meridian.yaml`: target name, then setting name to value. A plugin
+    /// is handed its own target's map in
+    /// [`meridian_sdk::settings::PROJECT_SETTINGS_ENV`] when it starts,
+    /// and refused if the map names a setting it does not declare.
+    pub settings: BTreeMap<String, BTreeMap<String, String>>,
     /// How long to wait for the handshake line and the first reply.
     pub handshake_timeout: Duration,
     /// Whether, and against which keys, the binary's signature is checked
@@ -78,6 +85,7 @@ impl Default for StartOptions {
         StartOptions {
             args: Vec::new(),
             env: None,
+            settings: BTreeMap::new(),
             handshake_timeout: HANDSHAKE_TIMEOUT,
             verification: Verification::off(),
         }
@@ -226,9 +234,36 @@ impl Client {
             accepts_inputs: reply.accepts_inputs,
             import_formats: wire::import_formats_from_wire(reply.import_formats),
             exports_schemas: reply.exports_schemas,
+            settings: wire::settings_from_wire(reply.settings),
             path: path.to_owned(),
             signature,
         };
+        // A project setting the plugin does not declare would be read by
+        // nothing, so saying so now beats a run that quietly ignores it.
+        if let Some(project) =
+            crate::registry::target_of(path).and_then(|t| options.settings.get(t))
+        {
+            let unknown: Vec<&str> = project
+                .keys()
+                .filter(|name| !info.settings.iter().any(|s| s.name == **name))
+                .map(String::as_str)
+                .collect();
+            if !unknown.is_empty() {
+                let declared: Vec<&str> = info.settings.iter().map(|s| s.name.as_str()).collect();
+                let cause = format!(
+                    "meridian.yaml sets {} for target {:?} under spec.settings, which the plugin \
+                     does not declare; it declares {}",
+                    unknown.join(", "),
+                    info.name,
+                    if declared.is_empty() {
+                        "no settings".to_owned()
+                    } else {
+                        declared.join(", ")
+                    }
+                );
+                return Err(process.fail(path, "the plugin was not started", cause));
+            }
+        }
         Ok(Client {
             info,
             runtime,
@@ -881,6 +916,16 @@ impl Process {
             .stderr(Stdio::piped());
         if let Some(env) = &options.env {
             command.env_clear().envs(env.iter().map(|(k, v)| (k, v)));
+        }
+        // The project's settings for this target. The plugin reads them
+        // after its environment variables, so the shell still wins.
+        if let Some(project) =
+            crate::registry::target_of(path).and_then(|t| options.settings.get(t))
+        {
+            command.env(
+                meridian_sdk::settings::PROJECT_SETTINGS_ENV,
+                meridian_sdk::settings::encode_project(project),
+            );
         }
         // The offer the plugin picks its protocol version from. Set after
         // any replacement environment, so a caller cannot drop it by accident.

@@ -231,6 +231,11 @@ reported in notes.
 | `MERIDIAN_PWSH` | the PowerShell to run, when it is not `pwsh` on `PATH` |
 | `MERIDIAN_DSC_MODULE` | the module to import: a name PowerShell can find, or the path of its manifest. `Dsc.PipelineRunner` by default |
 
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.dsc`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#dsc).
+
 In `Test` mode the runner records both drift and a resource that could not be
 tested as a failure, so a plan lists either as a change, with the runner's
 message.

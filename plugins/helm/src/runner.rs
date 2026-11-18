@@ -13,18 +13,50 @@ use std::fs;
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, Log, NoLog, Operations, Output, Plan, RunContext,
-    RunError, Runner, Value,
+    RunError, Runner, Value, Written,
 };
+use meridian_sdk::{settings, Setting};
 use meridian_yaml::Yaml;
 
 use crate::emit::RENDERED_FILE;
+use crate::secret_token;
+
+/// Helm given the run's secrets, when it has any: the chart's `values.yaml`
+/// with each token replaced by its value, put together in protected memory
+/// and read by Helm on standard input as one more values file, which
+/// overrides the one in the chart key by key. Nothing on disk holds a
+/// value; what Helm keeps in the release is the cluster's.
+fn with_values(
+    tool: Tool,
+    context: &RunContext,
+    artifact: &Artifact,
+    chart_dir: &str,
+) -> Result<Tool, RunError> {
+    if context.secrets.is_empty() {
+        return Ok(tool);
+    }
+    let values = artifact
+        .files
+        .get(&format!("{chart_dir}/values.yaml"))
+        .map(String::as_str)
+        .unwrap_or("");
+    let filled = context
+        .secrets
+        .filled_text(values, secret_token, Written::JsonString)
+        .map_err(|e| {
+            RunError::new(format!(
+                "the secrets could not be put into the values for helm: {e}"
+            ))
+        })?;
+    Ok(tool.args(["--values", "-"]).stdin_secret(filled))
+}
 use crate::manifest::{self, Key};
 use crate::path::{self, Step};
 use crate::{template, CHART_DIR, KUSTOMIZE_DIR, RELEASE_PATH};
 
 /// Names the program to run, when it is not `helm` on `PATH`.
 pub const HELM_VARIABLE: &str = "MERIDIAN_HELM";
-/// Extra arguments for every `helm` call, split on whitespace:
+/// Extra arguments for every `helm` call, split like a shell command line:
 /// `--kube-context prod`.
 pub const HELM_ARGS_VARIABLE: &str = "MERIDIAN_HELM_ARGS";
 /// The command that builds an overlay, when it is not `kustomize build`:
@@ -32,9 +64,46 @@ pub const HELM_ARGS_VARIABLE: &str = "MERIDIAN_HELM_ARGS";
 pub const KUSTOMIZE_VARIABLE: &str = "MERIDIAN_KUSTOMIZE";
 /// Names the program that reads outputs, when it is not `kubectl` on `PATH`.
 pub const KUBECTL_VARIABLE: &str = "MERIDIAN_KUBECTL";
-/// Extra arguments for every `kubectl` call, split on whitespace:
+/// Extra arguments for every `kubectl` call, split like a shell command line:
 /// `--context prod`.
 pub const KUBECTL_ARGS_VARIABLE: &str = "MERIDIAN_KUBECTL_ARGS";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "helm",
+            HELM_VARIABLE,
+            "helm",
+            "The `helm` program to run, when it is not on `PATH`.",
+        ),
+        Setting::new(
+            "helm-args",
+            HELM_ARGS_VARIABLE,
+            "",
+            "Extra arguments for every `helm` call, split like a shell command line: `--kube-context prod`.",
+        ),
+        Setting::new(
+            "kustomize",
+            KUSTOMIZE_VARIABLE,
+            "kustomize build",
+            "The command that builds an overlay, when it is not `kustomize build`: `kubectl kustomize` uses the copy built into kubectl.",
+        ),
+        Setting::new(
+            "kubectl",
+            KUBECTL_VARIABLE,
+            "kubectl",
+            "The `kubectl` program that reads outputs, when it is not on `PATH`. Shared with the kubernetes target.",
+        ),
+        Setting::new(
+            "kubectl-args",
+            KUBECTL_ARGS_VARIABLE,
+            "",
+            "Extra arguments for every `kubectl` call, split like a shell command line: `--context prod`. Shared with the kubernetes target.",
+        ),
+    ]
+}
 
 /// The directory of the work directory that holds the patched objects as a
 /// chart of their own, when the document has an overlay.
@@ -203,31 +272,17 @@ impl Preview {
     }
 }
 
-fn split(variable: &str) -> Vec<String> {
-    std::env::var(variable)
-        .map(|v| v.split_whitespace().map(str::to_owned).collect())
-        .unwrap_or_default()
-}
-
 impl HelmRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
-        let program = |variable: &str, default: &str| {
-            std::env::var(variable)
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or_else(|| default.to_owned())
-        };
-        let mut kustomize = split(KUSTOMIZE_VARIABLE);
-        if kustomize.is_empty() {
-            kustomize = vec!["kustomize".to_owned(), "build".to_owned()];
-        }
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         HelmRunner {
-            helm: program(HELM_VARIABLE, "helm"),
-            helm_args: split(HELM_ARGS_VARIABLE),
-            kustomize,
-            kubectl: program(KUBECTL_VARIABLE, "kubectl"),
-            kubectl_args: split(KUBECTL_ARGS_VARIABLE),
+            helm: settings::text(setting("helm")),
+            helm_args: settings::args(setting("helm-args")),
+            kustomize: settings::args(setting("kustomize")),
+            kubectl: settings::text(setting("kubectl")),
+            kubectl_args: settings::args(setting("kubectl-args")),
         }
     }
 
@@ -271,8 +326,8 @@ impl HelmRunner {
         write_artifact(&context.work_dir, artifact)?;
 
         log.out(&format!("release {}: rendering the chart", release.name));
-        let templated = self
-            .helm(context, &release, &["template", &release.name, CHART_DIR])
+        let template = self.helm(context, &release, &["template", &release.name, CHART_DIR]);
+        let templated = with_values(template, context, artifact, CHART_DIR)?
             .capture_stdout()
             .run_ok("helm could not render the chart", log)?
             .stdout;
@@ -502,6 +557,10 @@ impl HelmRunner {
 }
 
 impl Runner for HelmRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations::ALL
     }
@@ -572,6 +631,7 @@ impl Runner for HelmRunner {
             if !release.timeout.is_empty() {
                 upgrade = upgrade.args(["--timeout", &release.timeout]);
             }
+            let upgrade = with_values(upgrade, context, artifact, CHART_DIR)?;
             upgrade.run_ok(
                 "helm could not install the release; `helm status` and `helm history` say what \
                  state it was left in",

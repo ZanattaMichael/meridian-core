@@ -866,3 +866,75 @@ fn a_plugin_that_takes_no_secrets_takes_no_credential_either() {
     assert!(!client.info().capabilities.credentials);
     client.close().unwrap();
 }
+
+/// The project's settings reach the plugin through its environment, under
+/// the setting's short name, and an environment variable still wins. A
+/// setting the plugin does not declare stops it from starting, with the
+/// names it does declare.
+#[test]
+fn project_settings_reach_the_plugin_and_an_unknown_one_is_refused() {
+    let project = |pairs: &[(&str, &str)]| {
+        let mut settings = BTreeMap::new();
+        settings.insert(
+            "fake".to_owned(),
+            pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect::<BTreeMap<String, String>>(),
+        );
+        settings
+    };
+    let apply_and_read = |client: &Client, test: &str| {
+        let context = context(test);
+        client
+            .apply(&context, &artifact(&[("a.txt", "x")]), &mut |_| {})
+            .expect("the fake applies");
+        fs::read_to_string(context.work_dir.join("greeting.txt")).unwrap()
+    };
+
+    let client = start();
+    assert!(client.info().settings.iter().any(|s| s.name == "greeting"));
+    assert_eq!(apply_and_read(&client, "settings-default"), "hello");
+
+    let client = Client::start(
+        &fake(),
+        &StartOptions {
+            settings: project(&[("greeting", "good day")]),
+            ..StartOptions::default()
+        },
+    )
+    .expect("a declared setting starts the plugin");
+    assert_eq!(apply_and_read(&client, "settings-project"), "good day");
+
+    let mut env: Vec<(String, String)> = std::env::vars().collect();
+    env.push(("FAKE_GREETING".to_owned(), "from the shell".to_owned()));
+    let client = Client::start(
+        &fake(),
+        &StartOptions {
+            env: Some(env),
+            settings: project(&[("greeting", "good day")]),
+            ..StartOptions::default()
+        },
+    )
+    .expect("the plugin starts");
+    assert_eq!(
+        apply_and_read(&client, "settings-env-wins"),
+        "from the shell"
+    );
+
+    let refused = Client::start(
+        &fake(),
+        &StartOptions {
+            settings: project(&[("greeting", "x"), ("colour", "blue")]),
+            ..StartOptions::default()
+        },
+    )
+    .expect_err("an undeclared setting is refused");
+    let text = refused.to_string();
+    assert!(text.contains("the plugin was not started"), "{text}");
+    assert!(
+        text.contains("meridian.yaml sets colour for target \"fake\" under spec.settings"),
+        "{text}"
+    );
+    assert!(text.contains("it declares greeting"), "{text}");
+}

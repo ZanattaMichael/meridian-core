@@ -78,6 +78,9 @@ pub struct Info {
     /// Whether the target can ask its installed tool for the schemas of the
     /// tool's own resource types, for `meridian schema sync`.
     pub exports_schemas: bool,
+    /// What an operator can configure about the target's runner, as the
+    /// plugin declares it; empty when it declares none.
+    pub settings: Vec<meridian_sdk::Setting>,
     /// The binary the plugin was loaded from; empty for an in-process emitter.
     pub path: String,
     /// What checking the binary's signature found, before it was started.

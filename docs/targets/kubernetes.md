@@ -63,6 +63,87 @@ for an output that has no value yet, two minutes by default
 (`MERIDIAN_KUBECTL_OUTPUT_WAIT`, in seconds). An output that never arrives is an
 error, not an empty value. Anything read from a Secret is reported as sensitive.
 
+## Secrets
+
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in the document goes in
+one place: a value of a `v1/Secret`'s `stringData`. The cluster stores it as a Secret and a
+workload reads it from there, by name, the way Kubernetes means it to.
+
+```yaml
+spec:
+  target: kubernetes
+  secrets:
+    - name: db_password
+      from: env
+      key: APP_DB_PASSWORD
+  resources:
+    - id: db_login
+      type: v1/Secret
+      params:
+        stringData:
+          username: app
+          password: ${{ secret.db_password }}
+
+    - id: db
+      type: apps/v1/Deployment
+      params:
+        spec:
+          template:
+            spec:
+              containers:
+                - name: db
+                  image: postgres:16
+                  env:
+                    - name: POSTGRES_PASSWORD
+                      valueFrom:
+                        secretKeyRef: {name: ${db_login}, key: password}
+```
+
+**What the compile writes.** The value is a token, `"${meridian_secret_db_password}"`,
+inside the quotes of a string. The compiled `manifests.yaml` holds the token and never the
+value, so a review of it sees exactly where the secret goes.
+
+```yaml
+stringData:
+  password: "${meridian_secret_db_password}"
+  username: app
+```
+
+**How the value reaches the tool.** A document with no secret is applied from the file,
+`kubectl apply --filename manifests.yaml`, as before. One with a secret is applied from
+standard input, `kubectl apply --filename -`: the runner fills each token in with its
+value, escaped as a JSON string, on the way into `kubectl`, and the filled text is in
+protected memory only. The plan's server-side dry run reads the same input. The command
+line names no file and no value, and `kubectl`'s environment holds nothing of it.
+
+**What the cluster keeps.** A Secret is stored in etcd base64-encoded, and encrypted at
+rest only when the cluster is configured for it. Anyone who may `get secrets` in the
+namespace reads it. An output that reads a Secret's `data` is marked sensitive and
+masked wherever Meridian shows it.
+
+**What the plan says.** A Secret written with `stringData` is planned as an update on
+every run after the first, whether or not its values changed. The cluster stores
+`stringData` as `data` and keeps no `stringData`, so the manifest's `stringData` is a
+patch every time `kubectl apply` compares the two. That is kubectl's behaviour for any
+Secret written this way, with or without Meridian; a document whose plan has to be in sync
+can write a Secret's other fields in `data`, base64-encoded, but a secret's value cannot go
+there, so a Secret that holds one is always reported as an update.
+
+**What is refused.** A secret anywhere else is refused at compile, rule
+`unsupported-secret-place`: in the `cluster` resource it would be on `kubectl`'s command
+line; in any other object it would be written into the object for every reader to see;
+in a Secret's `data` the document would have to base64-encode it itself, which turns a
+secret into text; and inside a `stringData` value, such as `postgres://app:${{
+secret.db_password }}@db/app`, because a value is one string, so the secret has to be the
+whole value. Text that reads as a token, `${meridian_secret_`, is refused too, rule
+`reserved-text`, so a document cannot make the runner fill a value in where the document
+wrote the token itself.
+
+The handover is tested against a stand-in `kubectl` that keeps what it reads
+(`plugins/kubernetes/tests/run.rs`) and against a real `kubectl` and a kind cluster in CI
+(`plugins/kubernetes/tests/real.rs`): the value is in the Secret the cluster holds, in no
+file the plugin wrote, and in nothing the plan or apply prints.
+
 ## Notifications
 
 Kubernetes does not restart pods when a ConfigMap or Secret they use changes.
@@ -173,11 +254,16 @@ installed, is reported in a note.
 
 | | |
 |---|---|
-| Plan | `kubectl apply --dry-run=server --filename manifests.yaml` |
-| Apply | `kubectl apply --filename manifests.yaml`, then each output with `kubectl get ... --output jsonpath=...` |
+| Plan | `kubectl apply --dry-run=server --filename manifests.yaml`; with a [secret](#secrets) in the document, `--filename -` with the filled manifests on standard input |
+| Apply | `kubectl apply --filename manifests.yaml`, or `--filename -` the same way, then each output with `kubectl get ... --output jsonpath=...` |
 | `MERIDIAN_KUBECTL` | the program to run, when it is not `kubectl` on `PATH` |
-| `MERIDIAN_KUBECTL_ARGS` | arguments added to every call |
+| `MERIDIAN_KUBECTL_ARGS` | arguments added to every call, split like a shell command line (quotes hold a word together): `--context prod` |
 | `MERIDIAN_KUBECTL_OUTPUT_WAIT` | seconds an apply waits for an output that has no value yet |
+
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.kubernetes`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#kubernetes).
 
 One limit of the plan: nothing is stored in a dry run, so objects that go in a
 namespace the same document creates cannot be previewed until the namespace

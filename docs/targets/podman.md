@@ -193,12 +193,68 @@ networks, images and builds get no `[Install]`: they start when a unit that uses
 ### Secrets
 
 A value under `Environment` is written into the unit file, which other users of the host
-may be able to read. Keep real secrets out of the document: create them with
-`podman secret create` and name them with Quadlet's `Secret` key.
+may be able to read. A [declared secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool)
+there is not: it becomes a Podman secret the container reads into the variable, and the
+unit file names it and nothing more.
+
+```yaml
+spec:
+  target: podman
+  secrets:
+    - name: db_password
+      from: env
+      key: APP_DB_PASSWORD
+  resources:
+    - id: db
+      type: container
+      params:
+        Image: docker.io/library/postgres:16
+        Environment:
+          POSTGRES_DB: app
+          POSTGRES_PASSWORD: ${{ secret.db_password }}
+```
+
+**What the compile writes.** The variable leaves `Environment` and becomes a `Secret`
+line that names the Podman secret and the variable to read it into:
+
+```ini
+[Container]
+Image=docker.io/library/postgres:16
+Environment=POSTGRES_DB=app
+Secret=meridian_secret_db_password,type=env,target=POSTGRES_PASSWORD
+```
+
+**How the value reaches Podman.** An apply, after it has surveyed the host and before it
+writes or starts any unit, creates each secret in Podman on the host with
+`podman secret create meridian_secret_<name> -`, reading the value from the script's own
+standard input, the same channel every other step of an apply uses: over `ssh` for a
+remote host, as the unit's user for user units and with `sudo` for system units. A secret
+that already exists is replaced first (`podman secret rm`), so the value is current every
+apply. The value is on no command line and in no environment, and in no file Meridian
+writes; a plan creates nothing and reads nothing. The log says which secrets were created
+and never what they hold.
+
+**What Podman keeps.** Podman stores the secret with its default driver, `file`, which
+writes it under the user's Podman directory base64-encoded and unencrypted, readable by
+that user alone. Secrets created for a system unit belong to root. A changed value takes
+effect when the container next starts: a changed `Secret` line restarts the unit, a changed
+value alone does not, so restart the service or notify it from a resource that changes.
+
+**What is refused.** A secret anywhere but a container's `Environment` is refused at
+compile, rule `unsupported-secret-place`: a unit file is written onto the host as it
+stands. A secret inside a value, such as `postgres://app:${{ secret.db_password }}@db/app`,
+is refused too: a variable's value is one string, so the secret has to be the whole value.
+Write a secret for another kind of unit, or a secret Podman already holds, with Quadlet's
+own `Secret` key and create it yourself:
 
 ```yaml
         Secret: db-password,type=env,target=POSTGRES_PASSWORD
 ```
+
+The handover is tested against a stand-in `podman` that keeps what it was given on
+standard input (`plugins/podman/tests/run.rs`) and against the real Podman in CI
+(`plugins/podman/tests/real.rs`): the value reaches the container's environment, and is in
+no unit file, no argument, and nothing the plan or apply prints.
 
 ### Literal values and systemd's expansions
 
@@ -475,6 +531,11 @@ The runner is configured through the environment of the `meridian` command.
 | `MERIDIAN_PODMAN_QUADLET` | found automatically | Quadlet's generator on the host, when it is not where distributions install it. |
 | `MERIDIAN_PODMAN_UNIT_DIR` | by scope | The directory unit files are installed in. |
 
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.podman`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#podman).
+
 `MERIDIAN_PODMAN_SCOPE` set to anything but `user` or `system` fails every run with a
 message saying so, instead of quietly using the default. `journalctl` and `sudo` are run by
 those names from the host's `PATH`.
@@ -514,6 +575,7 @@ prints with it.
 | `duplicate-service` | two resources would run as the same service |
 | `unsupported-action` | a `notifies` action is not `restart` |
 | `unknown-dependency` | an edge names a resource the document does not declare |
+| `unsupported-secret-place` | a [secret](#secrets) is anywhere but the whole value of a container's `Environment` variable |
 
 One thing is a warning and not a refusal: a capitalised key that is not in
 [Known keys](#known-keys).

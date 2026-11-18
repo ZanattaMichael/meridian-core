@@ -153,6 +153,24 @@ pub struct FakeRunner {
     pub accepts_inputs: bool,
 }
 
+/// The one setting the fake runner declares: a greeting the tool writes to
+/// the work directory when it applies, so a host test can see which value
+/// reached it. Read through `meridian_sdk::settings`, so the project's
+/// `meridian.yaml` counts as it does for a real plugin.
+pub fn settings() -> Vec<meridian_sdk::Setting> {
+    vec![meridian_sdk::Setting::new(
+        "greeting",
+        "FAKE_GREETING",
+        "hello",
+        "What the tool writes to greeting.txt when it applies.",
+    )]
+}
+
+/// The greeting as the environment and the project configure it.
+pub fn greeting() -> String {
+    meridian_sdk::settings::text(&settings()[0])
+}
+
 /// Hands the run's secrets to the tool the way a real plugin would, in a
 /// file only the user can read, and records in the work directory what was
 /// handed over and how, never a value. The file lives as long as the
@@ -364,6 +382,10 @@ impl Runner for FakeRunner {
         self.operations
     }
 
+    fn settings(&self) -> Vec<meridian_sdk::Setting> {
+        settings()
+    }
+
     fn accepts_inputs(&self) -> bool {
         self.accepts_inputs
     }
@@ -403,6 +425,10 @@ impl Runner for FakeRunner {
         let mut state = read_state(&context.work_dir)?;
         let _secrets = hand_over_secrets(context, log)?;
         let _credential = hand_over_credential(context, log)?;
+        // The one setting, written where a host test can read which value
+        // reached the tool.
+        fs::write(context.work_dir.join("greeting.txt"), greeting())
+            .map_err(|e| RunError::new(format!("writing the greeting: {e}")))?;
         // Tools echo their variables more often than anyone would like. This
         // one does it on purpose, so a host's masking has something to catch.
         if !context.inputs.is_empty() {

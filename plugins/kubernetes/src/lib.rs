@@ -49,8 +49,8 @@ mod validate;
 use std::collections::BTreeMap;
 
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, Value,
+    holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph, SecretName, Value,
 };
 
 pub use emit::{CLUSTER_PATH, MANIFESTS_PATH};
@@ -138,6 +138,97 @@ pub(crate) struct Manifests {
     pub cluster: Cluster,
     pub objects: Vec<Object>,
     pub outputs: Vec<(String, Vec<OutputPart>)>,
+    /// The name of each secret a `stringData` value stands for, so the
+    /// manifest can carry the token the runner fills in.
+    pub secrets: Vec<SecretName>,
+}
+
+/// What a secret's value is written as in the manifests: a token inside a
+/// JSON string, which the runner replaces with the value on the way to
+/// `kubectl`'s standard input. The file on disk never holds the value.
+pub fn secret_token(name: &str) -> String {
+    format!("${{meridian_secret_{name}}}")
+}
+
+/// The one place a secret may be: a value of a `v1/Secret`'s `stringData`,
+/// which the cluster stores as a Secret and a workload reads from there.
+/// Anywhere else it would be written into an object every reader of that
+/// object can see, or onto `kubectl`'s command line.
+fn refuse_secrets_outside_string_data(graph: &ResourceGraph) -> Result<(), CompileError> {
+    for r in &graph.resources {
+        for (key, value) in &r.params {
+            if !holds_secret(value) {
+                continue;
+            }
+            let place = format!("param {key:?} of {:?}", r.r#type);
+            let msg = if r.r#type == "cluster" {
+                format!(
+                    "{place} holds a secret, and the cluster settings are the command line \
+                     kubectl is given, where a secret cannot go"
+                )
+            } else if r.r#type != "v1/Secret" {
+                format!(
+                    "{place} holds a secret, and it would be written into the object for every \
+                     reader of it to see. A secret goes in the stringData of a v1/Secret, which \
+                     the workload reads by name"
+                )
+            } else if key == "data" {
+                format!(
+                    "{place} holds a secret; data is base64 the document writes itself, so put \
+                     the secret in stringData, which Kubernetes encodes"
+                )
+            } else if key != "stringData" {
+                format!(
+                    "{place} holds a secret, and only a value of stringData can; everything else \
+                     is written into the object as it is"
+                )
+            } else {
+                match value {
+                    Value::Map(entries)
+                        if entries
+                            .values()
+                            .all(|v| matches!(v, Value::Secret(_)) || !holds_secret(v)) =>
+                    {
+                        continue
+                    }
+                    _ => format!(
+                        "{place} holds a secret inside a value; a stringData value is a whole \
+                         string, so each secret is a value of its own"
+                    ),
+                }
+            };
+            return Err(refuse(r, "unsupported-secret-place", msg));
+        }
+    }
+    Ok(())
+}
+
+/// Text the document writes that would read as a secret's token is refused,
+/// so the runner cannot be made to fill a value in where the document put
+/// the token itself.
+fn refuse_token_text(graph: &ResourceGraph) -> Result<(), CompileError> {
+    fn has_token(value: &Value) -> bool {
+        match value {
+            Value::String(s) => s.contains("${meridian_secret_"),
+            Value::List(items) => items.iter().any(has_token),
+            Value::Map(map) => map.values().any(has_token),
+            _ => false,
+        }
+    }
+    for r in &graph.resources {
+        if let Some((key, _)) = r.params.iter().find(|(_, v)| has_token(v)) {
+            return Err(refuse(
+                r,
+                "reserved-text",
+                format!(
+                    "param {key:?} holds the text \"${{meridian_secret_\", which is how this \
+                     target writes a secret's place in a manifest; write the secret as \
+                     ${{{{ secret.<name> }}}} or choose other text"
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// A refusal of one resource, stamped with this target.
@@ -177,7 +268,7 @@ impl Emitter for Kubernetes {
             native_notify: false,
             synthetic_notify: true,
             runtime_condition: false,
-            secrets: false,
+            secrets: true,
             credentials: false,
         }
     }
@@ -187,7 +278,10 @@ impl Emitter for Kubernetes {
     }
 
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        refuse_secrets_outside_string_data(graph)?;
+        refuse_token_text(graph)?;
         let mut manifests = transform::transform(graph)?;
+        manifests.secrets = graph.secrets.clone();
         let warnings = sort::apply_ordering(graph, &mut manifests)?;
         validate::validate(&manifests)?;
         Ok(Emitted {

@@ -17,8 +17,13 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use meridian_plugin_host::{Client, StartOptions};
-use meridian_plugin_testkit::{graph_from_text, plugin_binary, scratch};
-use meridian_sdk::{Artifact, ChangeAction, Data, LogLine, Plan, RunContext, Value};
+use meridian_plugin_testkit::{
+    graph_from_text, plugin_binary, scratch, secret_at, secrets, KeptLog,
+};
+use meridian_sdk::{
+    Artifact, ChangeAction, Data, Emitter, LogLine, Plan, RunContext, Runner, Value,
+};
+use meridian_target_docker::{Docker, DockerRunner};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
 
@@ -372,4 +377,117 @@ fn a_file_only_compose_can_fault_is_refused_by_compose_itself() {
     );
     assert!(message.contains("ports"), "{message}");
     assert!(containers(&project).is_empty());
+}
+
+/// Unlike anything Compose or the plugin prints, with everything a dotenv
+/// value has to escape, so that finding it is finding a leak and reading it
+/// back whole proves the escaping.
+const SECRET: &str = "zzq-Vt9 \"not\" a\\real $tok'en 4kLm";
+
+/// What a container prints for a command, trimmed.
+fn in_container(container: &str, command: &[&str]) -> String {
+    let output = Command::new("docker")
+        .args(["exec", container])
+        .args(command)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "docker exec failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[ignore = "needs a real Docker; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_secret_reaches_a_service_by_interpolation_and_as_a_compose_secret_and_no_file_holds_it() {
+    if !docker_is_available() {
+        return;
+    }
+    let project = "meridian-real-secrets";
+    let _tear_down = TearDown {
+        project: project.to_owned(),
+    };
+    drop(TearDown {
+        project: project.to_owned(),
+    });
+    let dir = scratch(TMP, "real-secrets");
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: real\nspec:\n  target: docker\n  resources:\n    - id: deployment\n      type: project\n      params:\n        name: {project}\n        wait: false\n    - id: probe\n      type: service\n      params:\n        image: busybox:stable\n        command: [sleep, \"3600\"]\n        stop_grace_period: 1s\n        environment:\n          TOKEN: placeholder\n        secrets: [token_file]\n    - id: token_file\n      type: secret\n      params:\n        value: placeholder\n"
+    );
+    let mut graph = graph_from_text("real.yaml", &text, "docker");
+    let slot = secret_at(&mut graph, "probe", &["environment", "TOKEN"], "token");
+    let tag = secret_at(&mut graph, "token_file", &["value"], "token");
+    let _ = tag;
+    graph.secrets.truncate(1);
+    // Both places are the one secret `token`.
+    let value = meridian_sdk::Value::Secret(slot);
+    graph
+        .resources
+        .iter_mut()
+        .find(|r| r.id == "token_file")
+        .unwrap()
+        .params
+        .insert("value".to_owned(), value);
+    let artifact = Docker.emit(&graph, &Data::new()).unwrap().artifact;
+    let compose = &artifact.files["compose.yaml"];
+    assert!(
+        compose.contains("TOKEN: ${meridian_secret_token}"),
+        "{compose}"
+    );
+    assert!(
+        compose.contains("environment: meridian_secret_token"),
+        "{compose}"
+    );
+    assert!(!compose.contains(SECRET));
+
+    let mut context = RunContext {
+        document: "real".into(),
+        work_dir: dir.join("work"),
+        ..RunContext::default()
+    };
+    context.secrets = secrets(&[(slot, "token", SECRET)]);
+    let log = KeptLog::default();
+    let runner = DockerRunner::from_env();
+    let plan = runner
+        .plan(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert!(!plan.changes.is_empty());
+    runner
+        .apply(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+
+    // The container was given the value both ways, exactly.
+    let container = format!("{project}-probe-1");
+    // Fixed messages, so that a failure never prints the value.
+    assert!(
+        in_container(&container, &["sh", "-c", "printf '%s' \"$TOKEN\""]) == SECRET,
+        "the service's environment does not hold the value Compose was handed"
+    );
+    assert!(
+        in_container(&container, &["cat", "/run/secrets/token_file"]) == SECRET,
+        "the service's secret file does not hold the value Compose was handed"
+    );
+    // Nothing printed holds it, and no file in the work directory does.
+    assert!(
+        !log.text().iter().any(|l| l.contains(SECRET)),
+        "the secret reached the log:\n{}",
+        log.text().join("\n")
+    );
+    for entry in std::fs::read_dir(dir.join("work")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() {
+            assert!(
+                !std::fs::read_to_string(&path).unwrap().contains(SECRET),
+                "{} holds the secret in the open",
+                path.display()
+            );
+        }
+    }
+    // Applied again with the same value, the project is in step.
+    let plan = runner
+        .plan(&context, &artifact, &KeptLog::default())
+        .unwrap();
+    assert!(plan.changes.is_empty(), "{:?}", plan.changes);
 }

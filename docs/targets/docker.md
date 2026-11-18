@@ -305,13 +305,13 @@ host the daemon runs on; a relative `file` is
 ### `secret`
 
 Accepted params: `driver`, `driver_opts`, `environment`, `external`, `file`,
-`labels`, `name`, `template_driver`.
+`labels`, `name`, `template_driver`, and Meridian's own `value`.
 
 ```yaml
 - id: db_password
   type: secret
   params:
-    environment: DB_PASSWORD     # read from the environment meridian runs in
+    value: ${{ secret.db_password }}   # a declared secret, handed over privately
 
 - id: tls_key
   type: secret
@@ -319,8 +319,10 @@ Accepted params: `driver`, `driver_opts`, `environment`, `external`, `file`,
     file: /etc/ssl/private/site.key
 ```
 
-A secret's value never appears in the document or the compiled file, only where
-Compose should read it from.
+`value` is not a Compose field: it takes one of the document's
+[declared secrets](#secrets) and nothing else, and compiles to the `environment`
+Compose reads the content from. A secret's value never appears in the document
+or the compiled file, only where Compose should read it from.
 
 ## The project
 
@@ -360,6 +362,85 @@ Rules:
 - The document's name is used as the project name when `name` is not set. If
   it is not a valid Compose project name, such as `Web Shop`, the compile is
   refused (`invalid-name`) and says to set `name`.
+
+## Secrets
+
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a service's params,
+or as a `secret` element's `value`, reaches Compose through a private environment file
+that exists for the length of the stage, and through nothing else.
+
+```yaml
+spec:
+  target: docker
+  secrets:
+    - name: db_password
+      from: env
+      key: APP_DB_PASSWORD
+  resources:
+    - id: db
+      type: service
+      params:
+        image: postgres:16
+        environment:
+          POSTGRES_PASSWORD: ${{ secret.db_password }}
+        secrets: [db_password_file]
+
+    - id: db_password_file
+      type: secret
+      params:
+        value: ${{ secret.db_password }}
+```
+
+**What the compile writes.** In a service, the param becomes Compose's own interpolation of
+a variable, `${meridian_secret_db_password}`, which Compose fills in when it reads the file.
+A `secret` element whose `value` is a secret becomes `environment:
+meridian_secret_db_password`, so Compose reads the content from the same variable and
+mounts it under `/run/secrets/<name>`. The compiled `compose.yaml` holds the variable's
+name and never its value, and `docker compose config` prints the file with the values
+filled in, so Meridian never prints that output.
+
+```yaml
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: ${meridian_secret_db_password}
+    secrets:
+      - db_password_file
+secrets:
+  db_password_file:
+    environment: meridian_secret_db_password
+```
+
+**How the value reaches the tool.** When a stage runs, the runner writes a file
+`secrets.env` only the user can read (mode `0600`), in a private directory and in memory
+where the system allows, with one line `meridian_secret_<name>="<value>"` per secret,
+quoted the way Compose's dotenv reader expects: `"`, `\` and line breaks escaped, and `$`
+doubled so Compose does not interpolate inside the value. Every `docker compose` call of
+the stage, plan and apply alike, is given `--env-file <path>`, and the file is removed when
+the stage is over. The command line names the file and nothing more, and the daemon's and
+the tool's environment hold nothing of the value.
+
+Compose's own `secrets` are the way a container reads a value without it being in the
+container's environment: the engine mounts the content as a file, and `docker inspect`
+shows the mount and not the content. A value interpolated into `environment:` is in the
+container's configuration, where `docker inspect` and anyone who can read the daemon's
+socket can see it. Prefer the `secret` element for a value the image can read from a file
+(`POSTGRES_PASSWORD_FILE`, `*_FILE` variables are common).
+
+**What is refused.** A secret in the `project` resource is refused at compile, rule
+`unsupported-secret-place`: the project's settings are the command line `docker` is given.
+A `secret` element whose `value` is not a declared secret is refused, rule `invalid-param`:
+a literal there would be written into the file. Text that reads as a variable's reference,
+`${meridian_secret_`, is written as Compose text (`$$`) like any other dollar sign, so a
+document cannot make Compose fill a value in where the document wrote the reference
+itself.
+
+The handover is tested against a stand-in `docker` that keeps the file and the environment
+it was given (`plugins/docker/tests/run.rs`), and against the real Compose in CI
+(`plugins/docker/tests/real.rs`): the value reaches a service's environment and its
+`/run/secrets` file, is in nothing the plan or apply prints, and in no file the plugin
+wrote.
 
 ## Fields every resource has
 
@@ -726,7 +807,12 @@ delete its data too.
 | Variable | Meaning |
 |---|---|
 | `MERIDIAN_DOCKER` | the program to run, when it is not `docker` on `PATH` |
-| `MERIDIAN_DOCKER_ARGS` | arguments added to `docker compose up`, separated by spaces: `--pull always`, `--force-recreate` |
+| `MERIDIAN_DOCKER_ARGS` | arguments added to `docker compose up`, split like a shell command line (quotes hold a word together): `--pull always`, `--force-recreate` |
+
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.docker`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#docker).
 
 Docker's own variables, such as `DOCKER_HOST` and `DOCKER_CONFIG`, apply as
 they do to any `docker` command when the project names no host or context.

@@ -168,3 +168,52 @@ fn a_file_beside_the_secret_file_is_as_private_and_goes_with_it() {
     assert!(!config.exists());
     assert!(!dir.exists());
 }
+
+#[test]
+fn a_shell_word_and_a_dotenv_value_are_escaped_for_what_reads_them() {
+    let tricky = secret("it's $5 \"q\"\\\n\tend");
+    let file = SecretFile::create(
+        "both",
+        &[
+            Part::Text("printf '%s' '"),
+            Part::ShellSingleQuoted(&tricky),
+            Part::Text("'\nX=\""),
+            Part::DotenvString(&tricky),
+            Part::Text("\"\n"),
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(file.path()).unwrap(),
+        "printf '%s' 'it'\\''s $5 \"q\"\\\n\tend'\nX=\"it's $$5 \\\"q\\\"\\\\\\n\\tend\"\n"
+    );
+}
+
+#[test]
+fn a_value_put_together_from_parts_holds_exactly_their_text() {
+    let password = secret("p4ss\"w0rd");
+    let whole = SecretValue::from_parts(&[
+        Part::Text("{\"password\":\""),
+        Part::JsonString(&password),
+        Part::Text("\"}\n"),
+    ])
+    .unwrap();
+    whole.expose(|bytes| assert_eq!(bytes, b"{\"password\":\"p4ss\\\"w0rd\"}\n"));
+    let nothing = SecretValue::from_parts(&[]).unwrap();
+    assert!(nothing.is_empty());
+}
+
+#[test]
+fn a_secret_that_is_not_text_cannot_be_escaped() {
+    let bytes = SecretValue::from_reader(&[0xffu8, 0xfe][..], 16).unwrap();
+    assert!(SecretValue::from_parts(&[Part::ShellSingleQuoted(&bytes)]).is_err());
+    assert!(SecretValue::from_parts(&[Part::DotenvString(&bytes)]).is_err());
+    assert!(SecretValue::from_parts(&[Part::JsonString(&bytes)]).is_err());
+    // As bytes it is fine.
+    assert_eq!(
+        SecretValue::from_parts(&[Part::Secret(&bytes)])
+            .unwrap()
+            .len(),
+        2
+    );
+}
