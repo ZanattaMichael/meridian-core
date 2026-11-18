@@ -407,3 +407,64 @@ fn a_secret_reaches_chef_as_a_node_attribute_and_is_in_nothing_chef_prints_or_th
         .unwrap();
     assert!(again.changes.is_empty(), "{:?}", again.changes);
 }
+
+#[ignore = "needs a real Chef or Cinc client; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn the_resources_schemas_are_exported_for_an_editor() {
+    use meridian_sdk::{SchemaRequest, SchemaSource};
+    use meridian_target_chef::ChefSchemas;
+
+    let Some(_) = chef() else { return };
+    let dir = scratch(TMP, "real-schemas");
+    let text = "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: site\nspec:\n  target: chef\n  targetHost:\n    from: inline\n    host: localhost\n  resources:\n    - id: motd\n      type: file\n      params:\n        path: /etc/motd\n        content: hi\n    - id: repo\n      type: apt_repository\n      params:\n        uri: https://example.com/apt\n    - id: nowhere\n      type: example_cookbook_resource\n      params:\n        x: 1\n";
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_text("site.yaml", text, "chef")],
+    );
+    let log = KeptLog::default();
+    let export = ChefSchemas::from_env()
+        .export(&request, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(export.tool, "chef");
+    assert!(
+        export
+            .tool_version
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit()),
+        "{:?}",
+        export.tool_version
+    );
+    assert_eq!(export.pins.get("chef"), Some(&export.tool_version));
+    let repo = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "apt_repository")
+        .unwrap_or_else(|| panic!("apt_repository is described: {:?}", export.notes));
+    assert!(!repo.open, "{repo:?}");
+    assert!(repo.find_param("uri").is_some(), "{repo:?}");
+    assert!(
+        repo.actions.contains(&"add".to_owned()),
+        "{:?}",
+        repo.actions
+    );
+    assert!(!repo.actions.contains(&"nothing".to_owned()));
+    assert!(repo.source.starts_with("chef "), "{}", repo.source);
+    // The shared names are only ever under `native/`; the rest by name, open.
+    assert!(export.schemas.iter().all(|s| s.r#type != "file"));
+    let package = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "native/package")
+        .expect("package is listed under native/");
+    assert!(package.open && package.params.is_empty());
+    assert!(export.schemas.iter().any(|s| s.r#type == "cron" && s.open));
+    assert!(
+        export
+            .notes
+            .iter()
+            .any(|n| n.contains("example_cookbook_resource")),
+        "{:?}",
+        export.notes
+    );
+}

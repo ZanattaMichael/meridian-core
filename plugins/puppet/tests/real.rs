@@ -303,3 +303,59 @@ fn a_secret_reaches_puppet_through_hiera_and_is_in_nothing_puppet_prints_or_the_
         .unwrap();
     assert!(plan.in_sync(), "{:?}", plan.changes);
 }
+
+#[ignore = "needs a real puppet; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn the_types_schemas_are_exported_for_an_editor() {
+    use meridian_sdk::{SchemaRequest, SchemaSource};
+    use meridian_target_puppet::PuppetSchemas;
+
+    let Some(puppet) = puppet() else { return };
+    let dir = scratch(TMP, "real-schemas");
+    let text = "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: site\nspec:\n  target: puppet\n  targetHost:\n    from: inline\n    host: localhost\n  resources:\n    - id: motd\n      type: file\n      params:\n        path: /etc/motd\n        content: hi\n    - id: run\n      type: native/exec\n      params:\n        command: /bin/true\n    - id: nowhere\n      type: example_defined_type\n      params:\n        x: 1\n";
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_text("site.yaml", text, "puppet")],
+    );
+    let log = KeptLog::default();
+    let export = PuppetSchemas::new(&puppet, isolated(&dir), "puppet")
+        .export(&request, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(export.tool, "puppet");
+    assert!(
+        export
+            .tool_version
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit()),
+        "{:?}",
+        export.tool_version
+    );
+    assert_eq!(export.pins.get("puppet"), Some(&export.tool_version));
+    let exec = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "native/exec")
+        .unwrap_or_else(|| panic!("exec is described: {:?}", export.notes));
+    assert!(!exec.open, "{exec:?}");
+    assert!(exec.find_param("command").is_some(), "{exec:?}");
+    assert_eq!(exec.actions, ["refresh"]);
+    assert!(exec.source.starts_with("puppet "), "{}", exec.source);
+    // The six shared types are only ever under `native/`, and every other
+    // core type is listed by name, open.
+    assert!(export.schemas.iter().all(|s| s.r#type != "file"));
+    let notify = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "notify")
+        .expect("notify is listed");
+    assert!(notify.open && notify.params.is_empty() && !notify.description.is_empty());
+    assert!(
+        export
+            .notes
+            .iter()
+            .any(|n| n.contains("example_defined_type")),
+        "{:?}",
+        export.notes
+    );
+}

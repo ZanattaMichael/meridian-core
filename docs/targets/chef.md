@@ -21,6 +21,7 @@ and runs Chef on it.
 | Plan | On this machine, yes: `--why-run`. For another machine, no: `chef-run` has no dry run, so the plan is reported as unknown |
 | Apply | Yes |
 | Outputs | No. A recipe produces no values for a later stage to read |
+| Editor schemas | Yes: `meridian schema sync` asks `chef-resource-inspector` what each resource takes. See [Editor schemas](#editor-schemas) |
 | Compiles to | `cookbooks/meridian_<name>/metadata.rb` and `recipes/default.rb` |
 | Runs with | `chef-client --local-mode` on the node itself, `chef-run` for another host |
 
@@ -48,6 +49,7 @@ Contents: [Requirements](#requirements) ·
 [Running](#running) ·
 [Settings](#settings) ·
 [Secrets](#secrets) ·
+[Editor schemas](#editor-schemas) ·
 [What is refused](#what-is-refused) ·
 [Troubleshooting](#troubleshooting) ·
 [How it is tested](#how-it-is-tested)
@@ -330,6 +332,7 @@ changes made before it.
 | `MERIDIAN_CHEF_RUN` | the program to run for another machine, when it is not `chef-run` on `PATH` |
 | `MERIDIAN_CHEF_TRANSPORT` | `local` or `remote`, to override the choice made from the host |
 | `MERIDIAN_CHEF_ARGS` | arguments added to every run, split like a shell command line (quotes hold a word together): `--chef-license accept`, or `chef-run`'s `--user deploy --identity-file ~/.ssh/deploy` |
+| `MERIDIAN_CHEF_INSPECTOR` | the resource inspector `meridian schema sync` runs, when it is not `chef-resource-inspector` on `PATH`; `cinc-resource-inspector` is tried when that does not run. See [Editor schemas](#editor-schemas) |
 | `MERIDIAN_SSH_AGENT` | the `ssh-agent` program, when it is not on `PATH`; started for a credential's key, see [Credentials](#credentials) |
 | `MERIDIAN_SSH_ADD` | the `ssh-add` program, when it is not on `PATH` |
 
@@ -454,6 +457,26 @@ user deploy)`, and never a value. `ssh-agent` and `ssh-add` are run from `PATH`,
 `MERIDIAN_SSH_AGENT` and `MERIDIAN_SSH_ADD`.
 
 The handover is tested against stand-ins for `chef-run`, `ssh-agent` and `ssh-add` that keep what they are given: `chef-run` sees `--user deploy` and the socket, `ssh-add` the key and the passphrase, and the key is in nothing printed or left behind. The real `chef-run` is not driven in CI.
+
+## Editor schemas
+
+`meridian schema sync` asks `chef-resource-inspector` what the Chef resources
+the documents use take, so an editor completes and checks a `template` or a
+`native/package`'s properties as it does the six types' params
+([Tool schemas](../tooling/schema-sync.md)). Until a resource is synced, the
+editor knows it by name only, as [Chef resources beside the six](#chef-resources-beside-the-six)
+says.
+
+| | |
+|---|---|
+| Described in full | each Chef resource the documents use, under the name the document writes (`template`, or `native/package` for one of the six names): every property with its kind from the Ruby types the inspector lists (`String` as text, `Integer`, `true`/`false` as a flag, `Array`, `Hash`; anything else as any value), whether it is required, its `equal_to` values, the resource's description, and its actions beside `nothing`, which is what `notifies` can name. Read from the inspector's one JSON document, which comes with the Chef or Cinc client (`cinc-resource-inspector` is tried when `chef-resource-inspector` does not run). A custom resource from a cookbook is not in it, so it is a note and not the end of the sync |
+| Listed by name | every other resource the inspector knows, with its description; the six shared names under `native/` |
+| Pinned | the client's version, from `chef-client --version` |
+
+A property the inspector marks required for some actions only is marked
+required, since those are the actions a notify names. A sensitive property
+is Chef's `sensitive true` on the resource, not a property, so none is
+marked.
 
 ## What is refused
 

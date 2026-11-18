@@ -21,6 +21,7 @@ person would have written and runs Puppet on it.
 | Plan | Yes: `--noop`, with `--detailed-exitcodes`. Every resource reports whether it would change |
 | Apply | Yes |
 | Outputs | No. A manifest produces no values for a later stage to read |
+| Editor schemas | Yes: `meridian schema sync` asks `puppet describe` what each type takes. See [Editor schemas](#editor-schemas) |
 | Compiles to | `manifests/init.pp` and `site.pp` |
 | Runs with | `puppet apply` on the node itself, `bolt apply` for another host |
 
@@ -50,6 +51,7 @@ Contents: [Requirements](#requirements) ·
 [Running](#running) ·
 [Settings](#settings) ·
 [Secrets](#secrets) ·
+[Editor schemas](#editor-schemas) ·
 [What is refused](#what-is-refused) ·
 [Troubleshooting](#troubleshooting) ·
 [How it is tested](#how-it-is-tested)
@@ -471,6 +473,25 @@ user deploy)`, and never a value. `ssh-agent` and `ssh-add` are run from `PATH`,
 `MERIDIAN_SSH_AGENT` and `MERIDIAN_SSH_ADD`.
 
 The handover is tested against stand-ins for `bolt`, `ssh-agent` and `ssh-add` that keep what they are given (the inventory and its mode, the environment, the key and the passphrase). The real `bolt` is not driven in CI.
+
+## Editor schemas
+
+`meridian schema sync` asks `puppet describe` what the Puppet types the
+documents use take, so an editor completes and checks a `cron` or a
+`native/file`'s params as it does the six types'
+([Tool schemas](../tooling/schema-sync.md)). Until a type is synced, the
+editor knows it by name only, as [Puppet types beside the six](#puppet-types-beside-the-six)
+says.
+
+| | |
+|---|---|
+| Described in full | each Puppet type the documents use, under the name the document writes (`cron`, or `native/file` for one of the six names): every parameter and property with its description, the values it lists (`Valid values are ...`) as the param's values. The `Providers` and `Features` sections end the attributes: a provider's own attributes are not listed, and Puppet refuses one the type lacks at apply time. Read from `puppet describe <type>`, one run a type, with the target's own settings (`MERIDIAN_PUPPET`, `MERIDIAN_PUPPET_ARGS`). A defined type from a module (`mysql::db`) has no description `describe` can read, so it is a note and not the end of the sync |
+| Listed by name | every other type `puppet describe --list` knows, with its short description; the six shared names under `native/`, since the bare words are the shared types |
+| Pinned | Puppet's version, from `puppet --version` |
+
+A param's kind is text unless `describe` lists its values, because Puppet's
+descriptions do not type their parameters. Every type takes the `refresh`
+action, which is what `notifies` sends it.
 
 ## What is refused
 
