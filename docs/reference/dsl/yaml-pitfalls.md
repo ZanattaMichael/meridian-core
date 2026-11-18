@@ -54,11 +54,10 @@ rule: `true` and `false`, in any capitalisation, are booleans, and nothing
 else is. `enabled: yes` is the text `yes`, and on a resource type whose
 schema wants a boolean that is refused with a message saying to write `true`.
 
-The same holds for [data files](index.md#giving-the-data) given with
-`--data`. The one place Meridian reads YAML 1.1 on purpose is
-[`meridian import`](../cli.md#import), because Ansible and Kubernetes
-files were written for readers that do; there `enabled: yes` means `true`,
-as it did to the tool.
+The same holds for `--data` [data files](index.md#giving-the-data). Meridian
+reads YAML 1.1 deliberately only in [`meridian import`](../cli.md#import), because
+Ansible and Kubernetes files were written for YAML 1.1 readers; there
+`enabled: yes` means `true`, as it did to the tool.
 
 ## Numbers that lose their spelling
 
@@ -68,20 +67,18 @@ Where the value was a version, an image tag, a build number or an id, that
 is the wrong value, and it reaches the tool that way.
 
 Meridian cannot know which numbers were meant as text, so the
-[`lossy-number`](../lint.md#lossy-number) lint points at every plain number
-whose canonical spelling differs from what was typed, and `meridian lint --fix`
-(or the editor's quick fix) quotes it. A number whose spelling is its own,
-such as `42`, `-3` or `1.5`, is never reported, and neither is a param the
-target declares as a number.
+[`lossy-number`](../lint.md#lossy-number) lint flags every plain number whose
+canonical form differs from what was typed, and `meridian lint --fix` (or the
+editor quick fix) quotes it. Numbers like `42`, `-3` or `1.5`, and params the
+target declares as numbers, are never reported.
 
 ## Octal, and a leading zero
 
-A plain scalar with a leading zero and octal digits, such as `0644`, is read
-as octal, because that is how a file mode is written and how the first
-Meridian targets read it. The integer is 420 and the leading zero is gone.
-Quote a mode: `mode: "0644"`. The `unquoted-mode` lint carries the fix, and
-on the six configuration management types the unquoted form is also a
-compile error (`invalid-param`), so it never reaches a tool.
+A plain scalar with a leading zero and octal digits, such as `0644`, is read as
+octal (as file modes are written, and as the first targets read it): the
+integer 420, leading zero gone. Quote modes: `mode: "0644"`. The `unquoted-mode`
+lint has the fix, and on the six configuration management types the unquoted
+form is also a compile error (`invalid-param`), so it never reaches a tool.
 
 `08` and `09` are not octal. Older YAML libraries read them as the floats 8
 and 9; Meridian reads them as text, since no number can have been meant.
@@ -89,10 +86,9 @@ and 9; Meridian reads them as text, since no number can have been meant.
 ## Dates and times
 
 A plain `2026-11-18` stays the text `2026-11-18`. Some YAML libraries turn it
-into a timestamp and write it back as `2026-11-18T00:00:00Z`, which is how a
-date in a tag or a label changes shape between the document and the tool.
-Meridian never does; the text the author wrote is what the tool gets.
-`11:00` is text as well: nothing is read in base 60.
+into a timestamp and write `2026-11-18T00:00:00Z`, so a date in a tag or label
+changes shape on the way to the tool. Meridian never does; the tool gets what
+the author wrote. `11:00` is text too: nothing is read as base 60.
 
 ## Tags
 
@@ -105,17 +101,15 @@ which is worse than a refusal.
 
 ## Indentation, tabs and duplicate keys
 
-Indentation is meaning in block YAML, and a line indented one level too far
-or too little is often still valid and means something else. Meridian's
-reply is the one every tool has: an unknown field is an error at every
-level except inside `params` and `metadata.labels`, so `dependsOn` indented
-into `params` is reported as a param the target does not take, with its
-line, and never silently kept. A tab in the indentation is an error, and so
-is a key that appears twice in one mapping.
+Indentation is meaning in block YAML, and a line indented one level off is often
+still valid but means something else. Meridian treats unknown fields as errors
+at every level except inside `params` and `metadata.labels`, so `dependsOn`
+indented into `params` is reported (with its line) as a param the target does
+not take, never silently kept. Tabs in indentation and duplicate keys in a
+mapping are errors.
 
-`meridian fmt` writes a document in one layout, two spaces a level, with
-the language's own field order, and refuses to change anything that would
-alter a value or lose a comment.
+`meridian fmt` writes one layout (two spaces per level, the language's field
+order) and refuses any change that would alter a value or lose a comment.
 
 ## Templating
 
@@ -134,10 +128,10 @@ the structure of the document.
 A document may be written in block style, in YAML's flow style (`{a: 1}`,
 `[1, 2]`), as [KYAML](https://kubernetes.io/docs/reference/encodings/kyaml/)
 (a `---` header, one flow mapping, every string double-quoted, a trailing
-comma after every entry) or as JSON; Meridian decides which from the content,
-not the file name, and reads all of them with the same parser to the same
-document. Tests pin that a KYAML document and its block-style twin parse the
-same, and that `kubectl get -o kyaml` output imports the same as `-o yaml`.
+comma after every entry) or JSON. Meridian detects the form from content, not
+file name, and parses all of them to the same document. Tests check that a KYAML
+document and its block-style twin parse identically, and that
+`kubectl get -o kyaml` output imports the same as `-o yaml`.
 
 `meridian fmt` normalises block layout only. A document written as one flow
 mapping, as KYAML is, has no block layout to normalise and is left exactly as
@@ -155,12 +149,11 @@ would be one more thing to document for no gain.
 
 ## What Meridian writes
 
-Every target that writes YAML (Ansible, Salt, cloud-init, Kubernetes, Helm,
-Docker Compose, CloudFormation, Pulumi, DSC) writes it through one writer,
-in block style, with the same rules as the reference library the first
-targets were written against. A string that a YAML 1.1 reader would take for
-something else is quoted: `"no"`, `"yes"`, `"0644"`, `"08"`, `"1.10"`,
+Every YAML-writing target (Ansible, Salt, cloud-init, Kubernetes, Helm, Docker
+Compose, CloudFormation, Pulumi, DSC) uses one writer, in block style, following
+the reference library the first targets were built against. Strings a YAML 1.1
+reader would misread are quoted: `"no"`, `"yes"`, `"0644"`, `"08"`, `"1.10"`,
 `"11:00"`, `"2026-11-18"`, `"12"`, `"null"`, and the keys `"no"` and `"on"`.
-A number is written plainly and a multi-line string as a `|` literal block.
-Mapping keys are written in a fixed order for each file, so the same document
-always gives the same bytes.
+Numbers are written plainly and multi-line strings as `|` blocks. Mapping keys
+follow a fixed order per file, so the same document always gives the same
+bytes.

@@ -66,8 +66,8 @@ before the apply and an output is read after it:
 
 **Strictness.**
 
-- An output the tool has no value for after an apply is an error, not an empty
-  value. A ResourceSet is never pointed at an empty host.
+- An output with no value after an apply is an error, not an empty value. A
+  ResourceSet never gets an empty host.
 - Some values take time to exist (a load balancer's address). The Kubernetes
   target waits for them, for a limited time.
 - A value the tool marks sensitive is shown as `(sensitive)` wherever Meridian
@@ -131,15 +131,14 @@ targetHost:
 | a ResourceSet has a `targetHost` at all | `compile` | `document "web" declares no targetHost` |
 | the host is a name and nothing a tool reads as more | `validate` for a host written inline; `compile` for one an interpolation places; `apply` for one read from an output | `"-oProxyCommand=..." starts with "-", which a tool would read as an option and not as a host` |
 
-The last rule is what keeps the host a host. It goes to `ssh`, Bolt,
-`chef-run` and `salt-ssh` as an argument, where a leading `-` is an option;
-into an Ansible inventory as a line, where a space starts a host variable; and
-into a Puppet `site.pp` as a string, where a quote ends it. Whitespace, control
-characters, quotes and other punctuation are refused wherever the host came
-from, and an output that is not a name fails the stage that needs it before
-its plugin is called. The plugins that run a tool against the host check it
-once more, and the ones that write it into a file refuse one that reaches
-them any other way (rule `invalid-host`).
+The last rule keeps a host a host. It goes to `ssh`, Bolt, `chef-run` and
+`salt-ssh` as an argument (where a leading `-` is an option), into an Ansible
+inventory line (where a space starts a host variable), and into a Puppet
+`site.pp` string (where a quote ends it). Whitespace, control characters,
+quotes and other punctuation are refused wherever the host came from, and an
+output that is not a name fails the stage before its plugin is called. Plugins
+that run a tool against the host check again, and those that write it to a
+file refuse one that arrives another way (rule `invalid-host`).
 
 Both documents must be given to the same command. The link is by name, within
 one workflow, and nowhere else.
@@ -235,10 +234,10 @@ change, and the run applies the other document first.
 
 ### How the value arrives
 
-The value goes to the document's tool, under the import's name. Meridian never
-splices it into the document or the compiled files, so a secret imported into
-a Terraform document is not written into `main.tf.json`: it arrives where
-Terraform's own variables arrive.
+The value goes to the document's tool under the import's name. Meridian never
+splices it into the document or compiled files, so a secret imported into a
+Terraform document is not written into `main.tf.json`; it arrives as a
+Terraform variable.
 
 | Target | The import `user_data` arrives as | The document declares |
 |---|---|---|
@@ -277,26 +276,26 @@ flowchart LR
     W["as written:<br/>machine, network, bootstrap"] --> O["as run:<br/>network, bootstrap, machine"]
 ```
 
-- A document the run leaves out, with a [selector](index.md#labels-and-selectors),
-  is waited on by nothing. A file imported from it is compiled for the
-  purpose and nothing of it is applied; an output imported from it is read
-  from what its last apply left behind.
-- Documents that wait on each other cannot be ordered. The usual way to write
-  one is a machine created with a bootstrap document's user-data, where the
-  bootstrap document's `targetHost` is that machine's address. Give the
-  bootstrap document an `inline` host: cloud-init runs on the machine itself
-  and does not need to reach it.
+- Nothing waits on a document excluded by a
+  [selector](index.md#labels-and-selectors). A file imported from it is compiled
+  for the purpose but nothing is applied; an output imported from it is read
+  from its last apply.
+- Documents that wait on each other cannot be ordered. The common case: a
+  machine created with a bootstrap document's user-data, where that bootstrap
+  document's `targetHost` is the machine's address. Give the bootstrap document
+  an `inline` host instead: cloud-init runs on the machine itself and does not
+  need to reach it.
 
 ### Secrets
 
 - `sensitive: true` masks the value in everything Meridian prints, including
-  what the tool prints, in the form the tool usually prints it.
+  tool output, in the form the tool usually prints it.
 - An output its tool marks sensitive stays sensitive when it is imported,
   without `sensitive: true`.
 - A value is never recorded. The [run's record](../state.md) names the steps
   and never holds an import's value.
-- Mark the tool's own variable sensitive too (`sensitive: true` on a
-  Terraform `variable`), so that the tool keeps it out of its plan.
+- Mark the tool's own variable sensitive too (`sensitive: true` on a Terraform
+  `variable`), so the tool keeps it out of its plan.
 
 ### Rules
 
@@ -357,9 +356,9 @@ site (ResourceSet, target ansible)
 
 ## What cannot be expressed yet
 
-- An import reaches a tool's variable, on the targets that have variables. It
-  cannot be written straight into a param with `${...}`, and a
-  configuration-management target such as Ansible cannot import at all yet.
+- An import reaches a tool variable, on targets that have variables. It cannot
+  go straight into a param with `${...}`, and configuration management targets
+  such as Ansible cannot import yet.
   Reading another document's output inside any value is part of the
   [language expansion](../../plans/language-expansion.md).
 - A ResourceSet compiles to files, and those can be imported; it has no

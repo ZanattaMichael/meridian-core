@@ -30,10 +30,9 @@ beside the six; see [native types beside the six](#native-types-beside-the-six).
 ## The shared dialect: six types
 
 `ansible`, `puppet`, `openvox`, `chef`, `salt` and `cloud-init` take the same six
-resource types. A
-resource written with them compiles for any of them, so changing `spec.target` is
-all it takes to move a document from one tool to another, within what each tool
-can do. This is the one place where the language is "write once".
+resource types. A resource using them compiles for any of these targets, so
+changing `spec.target` moves a document between tools, within each tool's
+limits. This is where the language is truly "write once".
 
 | `type` | Manages | `state` | Required params |
 |---|---|---|---|
@@ -92,10 +91,9 @@ and it compiles for all three tools. A longer one for each tool is under
 [`examples/puppet/`](../../../examples/puppet) and
 [`examples/chef/`](../../../examples/chef).
 
-Anything outside the six types and their params is refused when the document is
-compiled: an unknown type, a param the type does not have, a state the tool
-cannot express. Nothing is dropped. The one way past the six is the tool's own
-types, below.
+Anything outside the six types and their params is refused at compile time: an
+unknown type, an unsupported param, an inexpressible state. Nothing is dropped.
+The only way beyond the six is the tool's own types, below.
 
 In this dialect a reference is settled when the document is compiled:
 `${id.param}` becomes the value the document gives that param on the resource
@@ -104,27 +102,24 @@ In this dialect a reference is settled when the document is compiled:
 
 ### cloud-init: the same types, once, at first boot
 
-`cloud-init` takes the six types, but it is not pointed at a running machine. It
-compiles a ResourceSet into the user-data a new machine applies by itself the
-first time it boots. So it accepts only what a first boot can do: nothing can be
-removed or tracked later (`absent` and `latest` are refused), the order is the
-fixed order of cloud-init's own boot stages (a dependency that points backwards
-through them is refused), and it adds a few params of its own, such as a user's
-`ssh_authorized_keys`. Use it for what must be true before any other tool can
-reach the machine. [Its page](../../targets/cloud-init.md) has the detail, and
+`cloud-init` takes the six types but does not target a running machine. It
+compiles a ResourceSet into user-data that a new machine applies on first boot.
+So it accepts only what a first boot can do: nothing can be removed or tracked
+later (`absent` and `latest` are refused), order follows cloud-init's fixed boot
+stages (a dependency pointing backwards through them is refused), and it adds a
+few params, such as a user's `ssh_authorized_keys`. Use it for what must be true
+before any other tool can reach the machine. [Its page](../../targets/cloud-init.md) has the detail, and
 [the resource types reference](../resource-types.md) marks every difference.
 
 ## Native types beside the six
 
-A tool does more than the six types say, and a document is allowed to reach
-it. On a target of the shared dialect, a `type` that is not one of the six is
-the tool's own type, written as the tool writes it, and its `params` are the
-tool's own arguments, passed through unchanged, exactly as on the
-[infrastructure as code targets](infrastructure-as-code.md). Nothing is
-checked against a list in Meridian: an argument the tool does not take is the
-tool's to refuse when it runs, until the tool's schema is synced
-([tool schemas](../../tooling/schema-sync.md)) and the editor and `meridian
-lint` report it in place.
+A tool does more than the six types cover, and a document may use it. On these
+targets, a `type` that is not one of the six is the tool's own type, spelled as
+the tool spells it, with `params` passed through unchanged, as on the
+[infrastructure as code targets](infrastructure-as-code.md). Meridian checks
+nothing against a list: the tool refuses unknown arguments when it runs, unless
+the tool's schema is synced ([tool schemas](../../tooling/schema-sync.md)), in
+which case the editor and `meridian lint` flag them in place.
 
 | Target | The native `type` is | Example | `state` | When notified |
 |---|---|---|---|---|
@@ -141,17 +136,17 @@ Three rules hold the two apart:
   name can never be a shared type, so it is the tool's.
 - **A native type whose bare name a shared type has taken is written
   `native/<name>`**: `native/file` is the tool's own `file`, with every
-  attribute the shared type does not take. The prefix is accepted only for
-  the six names, and only where the tool has a bare type of that name; a
-  target whose types are always written in full refuses it and says what to
-  write instead (`ansible.builtin.file` on Ansible).
-- **A native type is placed as the tool places it.** `dependsOn`, `notifies` and
-  `runtimeWhen` on one are read as on any resource where the tool can honour
-  them; where it cannot (nothing can be ordered around a cloud-config module,
-  Puppet has no apply-time condition), the target page says what is refused.
-- **A native type makes the document single-target.** The `native-type`
-  lint rule ([reference](../lint.md#native-type)) marks each such resource,
-  so a document that was meant to move between tools shows where it stopped.
+  attribute the shared type does not take. The prefix is accepted only for the
+  six names, and only where the tool has a bare type of that name; a target
+  whose types are always fully qualified refuses it and says what to write
+  (`ansible.builtin.file` on Ansible).
+- **A native type is placed as the tool places it.** `dependsOn`, `notifies`
+  and `runtimeWhen` work as on any resource where the tool can honour them;
+  where it cannot (nothing orders around a cloud-config module; Puppet has no
+  apply-time condition), the target page says what is refused.
+- **A native type makes the document single-target.** The `native-type` lint
+  rule ([reference](../lint.md#native-type)) marks each one, so a document
+  meant to be portable shows where it stopped being so.
 
 ```yaml
 resources:
@@ -220,8 +215,8 @@ mechanism for reacting to a change, so a notify is **native** there: an Ansible
 handler, Puppet's and OpenVox's `notify`, Chef's `notifies`, Salt's `watch` and
 `onchanges`, the DSC runner's `notify`.
 `cloud-init` has none and runs once, so its notify is **synthetic**: the action
-becomes a command that runs once after every other command, unconditionally, and
-the compile warns.
+becomes a command that runs once, unconditionally, after every other command,
+with a compile warning.
 
 | Target | Actions accepted |
 |---|---|

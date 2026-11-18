@@ -138,11 +138,10 @@ spec:
 in. It is `meridian/v` and a whole number, and `meridian/v1` is the only
 version so far.
 
-The number changes only when a document that compiles today would stop
-compiling or would mean something else. New fields, new kinds of document and
-new resource types are added inside the current version, so a document never
-needs its `apiVersion` touched to keep working, and you never need to raise it
-to use something new.
+The number changes only when a document that compiles today would stop compiling
+or change meaning. New fields, document kinds and resource types are added
+within the current version, so you never need to touch `apiVersion` to keep a
+document working or to use something new.
 
 A build reads each version it knows in one of three ways:
 
@@ -179,10 +178,9 @@ Which kind goes with which segment:
 | Containerization | yes | yes: the project runs on the daemon of the host the document names |
 | Configuration management | refused | yes |
 
-Meridian enforces this pairing. Every plugin declares the segment it belongs to
-(`meridian plugins` shows it as the plugin's category), and a document of a kind
-that segment does not take is refused when it is compiled, before the plugin
-sees it:
+Meridian enforces this pairing. Every plugin declares its segment (shown as its
+category by `meridian plugins`), and a document of the wrong kind is refused at
+compile time, before the plugin sees it:
 
 ```
 this is a ResourceSet document, and its target is an infrastructure-as-code
@@ -243,12 +241,11 @@ Requirements separated by commas must all hold, and so must the requirements of
 every `-l` given. Rules:
 
 - A document that is not selected does not run, and is not reported.
-- It is still loaded and checked, and it can still be referred to. A selected
-  ResourceSet whose `targetHost` names an unselected Infrastructure document
-  finds its host from that document's last apply, and is deferred if there has
-  not been one.
-- A selector that selects nothing is an error, `no document's labels match the
-  selector tier=cache`, not a run that did nothing and reported success.
+- It is still loaded, checked and referable. A selected ResourceSet whose
+  `targetHost` names an unselected Infrastructure document takes its host from
+  that document's last apply, or is deferred if there was none.
+- A selector matching nothing is an error (`no document's labels match the
+  selector tier=cache`), not a silent successful no-op.
 - A malformed selector (`=web`, an empty requirement) is an error.
 - `validate` takes no selector: it always checks every document.
 
@@ -312,12 +309,12 @@ them on its `versions:` line. The rules:
   declares `3.1` does not take `3`.
 - A version the plugin does not compile for is refused:
   `the document asks for targetVersion "4", and target "dsc" compiles for: 2, 3`.
-- A plugin that declares no versions cannot honour the field, so a document
-  that sets it is refused: `target "terraform" does not say which versions of
-  its tool it compiles for, so the request cannot be honoured; remove
-  targetVersion`. Accepting a version nothing checks would be a silent loss.
-- The version is handed to the plugin, which may compile differently for it.
-  What it changes is on the target's page.
+- A plugin that declares no versions cannot honour the field, so setting it is
+  refused: `target "terraform" does not say which versions of its tool it
+  compiles for, so the request cannot be honoured; remove targetVersion`.
+  Accepting an unchecked version would be a silent loss.
+- The version is passed to the plugin, which may compile differently for it;
+  the target's page says how.
 - A document with no `targetVersion` is compiled the plugin's default way.
 
 Which targets declare versions today:
@@ -348,18 +345,16 @@ hold interpolation.
 
 The rules:
 
-- A plugin declares the keys it reads, and `meridian plugins` lists them on
-  its `settings:` line. A document that sets any other key is refused before
-  the plugin is asked: `the document sets spec.settings.transport, and target
-  "dsc" takes only: credential, engine, target`. A plugin that declares no keys
-  takes no settings, so a document that sets any is refused the same way,
-  which is also what happens with a plugin built before `settings` existed.
-  Dropping a setting nothing reads would be a silent loss.
-- The values are the plugin's to check. What each accepts is on the target's
-  page, with the rule it refuses under.
-- A setting is not a resource: it has no `id`, no `when` of its own, and takes
-  no `dependsOn` or `notifies`. `spec.when` skips the whole document, settings
-  included.
+- A plugin declares the keys it reads; `meridian plugins` lists them on its
+  `settings:` line. Any other key is refused before the plugin is asked:
+  `the document sets spec.settings.transport, and target "dsc" takes only:
+  credential, engine, target`. A plugin that declares none (including one built
+  before `settings` existed) refuses any setting. Dropping an unread setting
+  would be a silent loss.
+- The plugin checks the values; the target's page lists what each accepts and
+  the rule it refuses under.
+- A setting is not a resource: no `id`, no `when`, no `dependsOn` or
+  `notifies`. `spec.when` skips the whole document, settings included.
 
 Which targets take settings today:
 
@@ -502,15 +497,14 @@ the sort that `dependsOn` drives. In depth: [`notifies`](notifies.md).
 Rules:
 
 - The resource must exist in the document, and cannot be the notifier itself.
-- `on` names the event that fires the notify. There is one: `changed`, the
-  notifier really changed. Every tool's mechanism (an Ansible handler, a Puppet
-  refresh, a Chef notification) fires on a change and on nothing else, so any
-  other value is refused when the document is validated: `unknown event
-  "always" (expected "changed", ...)`. Write `on: changed` to say it out loud,
-  or leave it out.
-- A target accepts only the actions its tool can really perform. `reload` aimed
-  at a service is refused on Puppet, which can only restart on refresh; it is
-  not turned into a restart.
+- `on` names the event that fires the notify. There is one: `changed` (the
+  notifier actually changed). Every tool's mechanism (Ansible handler, Puppet
+  refresh, Chef notification) fires only on change, so any other value is
+  refused at validation: `unknown event "always" (expected "changed", ...)`.
+  Write `on: changed` explicitly or leave it out.
+- A target accepts only actions its tool can actually perform. `reload` on a
+  service is refused on Puppet, which can only restart on refresh; it is not
+  turned into a restart.
 - A target with no way to react to a change refuses every notify.
 
 The actions by segment are on each flavour's page, and the
@@ -574,12 +568,11 @@ Rules:
   an optional key with `data.x ?? false`.
 - Nothing is converted silently. Comparing or adding text and a number is an
   error that names both types.
-- `facts.*` is refused: Meridian does not gather facts from a node yet, so a
-  condition cannot depend on the node. To decide on the node while applying,
-  use `runtimeWhen` on a target that supports it.
-- The condition's syntax, its names and its functions are checked by
-  `meridian validate`. Its answer needs the data, so it is decided by
-  `compile`, `plan` and `apply`.
+- `facts.*` is refused: Meridian does not gather node facts yet, so a condition
+  cannot depend on the node. To decide on the node at apply time, use
+  `runtimeWhen` on a target that supports it.
+- `meridian validate` checks a condition's syntax, names and functions. Its
+  value needs the data, so `compile`, `plan` and `apply` decide it.
 - A condition is decided before the target's plugin is involved, so it means
   the same on every target.
 
@@ -628,8 +621,8 @@ Two more consequences of removing a resource:
 - An output, or a `${...}` reference, that reads a removed resource is refused
   by the target as a reference to a resource that is not there.
 - If every resource is removed, the document compiles to nothing, and applying
-  it tells the tool that nothing should exist. On a tool that deletes what is no
-  longer declared, that is a deletion.
+  it tells the tool nothing should exist. On a tool that deletes undeclared
+  resources, that is a deletion.
 
 ## References
 
@@ -655,23 +648,20 @@ Rules:
   A reference to a resource that is not there is a compile error with the line.
 - A `${` that is never closed is an error. Braces inside an expression balance,
   so `${merge({a = 1}, x)}` is one expression.
-- What can be read from a resource is the tool's decision: a Terraform
-  attribute, a CloudFormation `GetAtt` attribute, the name of a Kubernetes
-  object. Some targets allow less inside `params` than in an output, because a
-  param is fixed when the document is compiled and an output is read after the
-  apply.
-- A reference usually implies an order. Where the tool derives the order from
-  the reference itself, the target does not write the dependency a second time.
+- The tool decides what can be read from a resource: a Terraform attribute, a
+  CloudFormation `GetAtt` attribute, a Kubernetes object's name. Some targets
+  allow less in `params` than in an output, because params are fixed at compile
+  time and outputs are read after the apply.
+- A reference usually implies order. Where the tool derives order from the
+  reference, the target does not repeat the dependency.
 - A reference never crosses documents. To carry a value from one document to
   the next, declare an [output](#outputs).
 
-The configuration management targets that use the shared resource types
-(`ansible`, `puppet`, `chef`, `salt`, `cloud-init`) have nothing to read at
-apply time,
-so there a reference is settled when the document is compiled: `${id.param}`
-becomes the value the document gives that param on the resource `id`. A bare
-`${id}`, a deeper path, a param the resource does not set, or anything that is
-not a path is refused.
+The configuration management targets using the shared types (`ansible`,
+`puppet`, `chef`, `salt`, `cloud-init`) have nothing to read at apply time, so
+references are settled at compile time: `${id.param}` becomes that param's value
+on resource `id`. A bare `${id}`, a deeper path, an unset param, or anything
+that is not a path is refused.
 
 In depth, with what each target rewrites a reference into:
 [references](references.md).
@@ -763,10 +753,9 @@ meridian apply machine.yaml web.yaml
 
 - Every Infrastructure document runs before any ResourceSet, whatever order the
   files are given in. Within a kind, documents run in the order given.
-- A document runs after every document it needs: the one its `targetHost` comes
-  from, and every one it [imports](#imports) from. That is the only thing that
-  moves a document from the order above, and it can put a ResourceSet before an
-  Infrastructure document.
+- A document runs after every document it needs: its `targetHost` source and
+  every document it [imports](#imports) from. Only this changes the order above,
+  and it can put a ResourceSet before an Infrastructure document.
 - Documents that wait on each other cannot be ordered, and are refused by
   `validate`.
 - Two documents of the same kind cannot share a name. An Infrastructure document

@@ -25,17 +25,17 @@ spec:
     credential: deploy
 ```
 
-The user is plain text and goes where the tool reads it: here, into the
-inventory as `ansible_user=deploy`. The key is a secret: it is never written
-in the document, never in a compiled file, and reaches `ansible-playbook` in
-a file only the user can read, for the length of the run.
+The user is plain text, written where the tool reads it: here, the inventory's
+`ansible_user=deploy`. The key is a secret: never in the document or a compiled
+file, it reaches `ansible-playbook` in a user-only file for the length of the
+run.
 
-> **Where a credential can be used today.** A credential is used by
-> `targetHost.credential`, by a target that
-> [takes one](#what-each-target-does): today `ansible`, and the test target.
-> Every credential type is declared and checked, so a document can name the
-> identities it will use before every use of them is built: endpoints, a
-> target's settings, secret stores and notification sinks are in
+> **Where a credential can be used today.** Through `targetHost.credential`, on
+> targets that [take one](#what-each-target-does): `ansible`, `chef`,
+> `openvox`, `podman`, `puppet` and `salt`, plus the test target. Every
+> credential type can already be declared and checked, so a document can name
+> its identities before every use is built. Endpoints, target settings, secret
+> stores and notification sinks are in
 > [the plan](../../plans/language-expansion.md#12-credentials).
 
 ## Contents
@@ -92,9 +92,9 @@ later. Every type is declared and checked today; where each can be used is in
 | `kubeconfig` | `server`, `context`, `ca` | `kubeconfig`, `token` | | `kubeconfig`, or `server` and `token` | cluster endpoints |
 | `registry` | `server`, `user` | `password` | | `password` | daemon endpoints, image pulls, module registries |
 
-A `certificate` field is plain in an `ssh` or a `certificate` credential (a
-path to, or the text of, a public certificate) and secret in an `azure` one
-(the certificate holds the key). The table says which.
+A `certificate` field is plain in `ssh` and `certificate` credentials (a path to,
+or the text of, a public certificate) and secret in `azure` (where it holds the
+key). The table shows which.
 
 Three of the types, `registry`, `token` and `usernamePassword`, can also be
 declared outside a run, in a project's manifest, for a module registry: see
@@ -131,14 +131,13 @@ fetched:
 - **Anything but the one secret**: a secret joined with text, two secrets, a
   value from data or a variable. `password is one declared secret, read as it
   is: ${{ secret.<name> }} and nothing more, so that the whole of it is
-  protected`. A password that has to be made from parts is a secret of its
-  own: make it with `exec`, or store it whole.
+  protected`. A password built from parts must be its own secret: build it with
+  `exec`, or store it whole.
 
-Once the document is resolved, the field *is* the secret: the same
-[rules](secrets.md#where-a-secret-cannot-be-used) hold as for a secret
-anywhere else. It is never in a compiled file, a plan, a log, an event or the
-run record, and it is fetched only by `plan`, `apply` and `rollback`, at the
-stage's turn.
+Once resolved, the field *is* the secret, under the same
+[rules](secrets.md#where-a-secret-cannot-be-used) as any secret. It never appears
+in a compiled file, plan, log, event or run record, and is fetched only by
+`plan`, `apply` and `rollback`, at the stage's turn.
 
 An `optional` secret that no place has makes the credential incomplete at that
 moment: `spec.credentials[0].password: password reads a secret, and the
@@ -153,12 +152,12 @@ inventory, so:
 
 - It may be [interpolated](interpolation.md) from data and variables, like
   any other text: `user: ${{ data.deploy_user }}`.
-- A secret cannot be placed in it. `spec.credentials[0].user: a secret cannot
-  be used here`, when the document is checked; a value that only becomes a
-  secret once resolved is refused then, as `user is not secret: it reaches
-  the tool in the open, so a secret cannot be placed in it`.
-- It is not checked beyond being text. A target checks what it can write: the
-  Ansible plugin refuses a user name it cannot put on an inventory line.
+- A secret cannot go in it: `spec.credentials[0].user: a secret cannot be used
+  here` at check time; a value that only becomes secret once resolved is
+  refused then, as `user is not secret: it reaches the tool in the open, so a
+  secret cannot be placed in it`.
+- It is checked only as text. Targets check what they can write: the Ansible
+  plugin refuses a user name it cannot put on an inventory line.
 
 A flag is `true` or `false`, and is `false` when left out. `agent: yes` is
 refused: `agent is true or false`.
@@ -178,11 +177,10 @@ credentials:
     user: ops
 ```
 
-Whether an ambient credential would be found is something
-[`meridian secret check`](../cli.md#secret-check) looks for, where the tool
-would look (the environment, the login files, the machine's identity
-endpoint), without reading a value; in a pipeline that is the job's identity,
-checked before anything runs
+[`meridian secret check`](../cli.md#secret-check) reports whether an ambient
+credential would be found, looking where the tool would (environment, login
+files, the machine's identity endpoint) without reading a value. In a pipeline
+this checks the job's identity before anything runs
 ([running in a pipeline](../../operations/running-in-a-pipeline.md#checking-the-jobs-identity-first)).
 
 An ambient credential needs no secret field and need not be complete: the tool
@@ -201,8 +199,8 @@ targetHost:
   credential: deploy
 ```
 
-- It is a name, written as it is: not interpolated, so that which identity
-  reaches which host can be read off the document.
+- It is a literal name, not interpolated, so you can read from the document
+  which identity reaches which host.
 - The credential must be declared in the same document's `spec.credentials`.
 - A host takes an `ssh` or a `usernamePassword` credential. Any other type is
   refused: `spec.targetHost.credential: a host takes an ssh or
@@ -234,11 +232,10 @@ spec.targetHost names the credential "deploy", and target "dsc" does not take on
 | `fake`, the test target | `credential.txt`: the name, type, user and the names of the secret fields | one JSON file only the user can read, and a record of the delivery that names the fields and never a value | nothing |
 | any other target (`cloud-init`, `dsc`, and the infrastructure and containers targets but `podman`) | the document is refused, as above | | |
 
-On every target but `ansible` the compiled artifact holds nothing of the
-credential, not even the user: the tool is handed the identity at run time,
-so the same artifact can be applied as another identity, and a file nobody
-expected to be sensitive names no account. Each target's page has a
-`Credentials` section with the details.
+On every target except `ansible`, the compiled artifact holds nothing of the
+credential, not even the user: the identity is passed at run time, so the same
+artifact can be applied as another identity, and no unexpected file names an
+account. Each target page has a `Credentials` section with details.
 
 A credential is delivered the way the tool takes it, so what the tool keeps
 is the tool's own: Ansible keeps nothing, and a tool that caches a login is
@@ -250,15 +247,13 @@ A credential's secret fields follow the same route as any
 [secret handed to a tool](secrets.md#handing-a-secret-to-a-tool), with the
 same three promises:
 
-- **The value is in no file Meridian keeps.** Not in the compiled artifact,
-  not in the state directory, not in the plan, not in an event, not in the
-  run record. The record of a run names the credential, as `deploy`, and
-  nothing of it.
-- **Never on the command line, never in the environment.** The command line
-  names a private file's path and nothing more. A key for a host over SSH is
-  not even in a file: it goes into an SSH agent Meridian starts for the
-  stage, through `ssh-add`'s standard input, and the tool is told only the
-  agent's socket in `SSH_AUTH_SOCK`. See
+- **The value is in no file Meridian keeps**: not the compiled artifact, state
+  directory, plan, events or run record. The run record names the credential
+  (`deploy`) and nothing more.
+- **Never on the command line or in the environment.** The command line names
+  only a private file's path. An SSH host key is not even in a file: it goes
+  into an SSH agent Meridian starts for the stage, via `ssh-add`'s stdin, and
+  the tool gets only the agent socket in `SSH_AUTH_SOCK`. See
   [0028](../../decisions/0028-a-key-reaches-a-host-through-an-agent-meridian-starts.md).
 - **For the length of the stage.** The values are fetched at the stage's turn
   and wiped when it ends. A rollback fetches them again at its own turn.
