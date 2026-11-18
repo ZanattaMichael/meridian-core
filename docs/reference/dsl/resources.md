@@ -55,7 +55,7 @@ target's segment:
 
 | Segment | `type` is | Reference |
 |---|---|---|
-| Configuration management, shared dialect (`ansible`, `puppet`, `openvox`, `chef`, `salt`, `cloud-init`) | one of six words: `package`, `file`, `service`, `user`, `group`, `exec` | [flavour](configuration-management.md), [types](../resource-types.md) |
+| Configuration management, shared dialect (`ansible`, `puppet`, `openvox`, `chef`, `salt`, `cloud-init`) | one of six words: `package`, `file`, `service`, `user`, `group`, `exec`; or the tool's own type beside them, such as `ansible.builtin.lineinfile` | [flavour](configuration-management.md), [types](../resource-types.md), [native types](configuration-management.md#native-types-beside-the-six) |
 | Configuration management, DSC | `Module/Resource` | [flavour](configuration-management.md#the-native-dialect-dsc) |
 | Infrastructure as code | the tool's own type: `aws_instance`, `AWS::EC2::Instance`, `Microsoft.Network/publicIPAddresses@2023-09-01` | [flavour](infrastructure-as-code.md) |
 | Containerization | an element of the project: `service`, `network`, `volume`, `config`, `secret` | [flavour](containerization.md) |
@@ -142,6 +142,7 @@ params:
 | Flavour | How strictly params are checked at compile |
 |---|---|
 | The six shared types | completely. Every param is known; one the type does not take on that target is refused, never dropped |
+| A tool's own type on a shared-dialect target | lightly, as on a passthrough target: the params are the tool's, and the tool is the judge |
 | Passthrough targets | lightly. The names and values are the tool's own, so the tool is the judge. The target checks what it must understand to write the file: references, the settings resource, and the few params it treats specially |
 
 ```

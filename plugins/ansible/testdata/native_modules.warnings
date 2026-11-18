@@ -1,0 +1,1 @@
+ansible: resources "nginx_pkg", "facts", "nginx_svc", "reindex" are independent but will run in sequence; this target flattens the dependency graph and cannot express parallelism

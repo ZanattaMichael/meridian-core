@@ -1,0 +1,44 @@
+# A web server configured with Ansible, reaching past the six shared types.
+#
+# `package` and `service` are the abstract types every configuration
+# management target takes. `ansible.builtin.lineinfile` and
+# `ansible.builtin.setup` are Ansible's own modules, named in full: their
+# params are the module's arguments, passed through as written. From the
+# first module on, the document compiles for Ansible only, and
+# `meridian lint` says so (rule native-type).
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: web_modules
+spec:
+  target: ansible
+  targetHost:
+    from: inline
+    host: web01.example.com
+  resources:
+    - id: facts
+      type: ansible.builtin.setup
+    - id: nginx_pkg
+      type: package
+      params:
+        name: nginx
+    - id: worker_count
+      type: ansible.builtin.lineinfile
+      state: present
+      params:
+        path: /etc/nginx/nginx.conf
+        regexp: "^worker_processes"
+        line: worker_processes 4;
+      dependsOn:
+        - resource: nginx_pkg
+      notifies:
+        - resource: nginx_svc
+          action: reload
+    - id: nginx_svc
+      type: service
+      state: running
+      params:
+        name: nginx
+        enabled: true
+      dependsOn:
+        - resource: nginx_pkg

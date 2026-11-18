@@ -12,9 +12,9 @@ on it.
 | | |
 |---|---|
 | Category | Configuration management |
-| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)) |
+| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)), and any module by its full name, such as `ansible.builtin.lineinfile` ([modules beside the six](#modules-beside-the-six)) |
 | `dependsOn` | Yes, as task order. A play runs top to bottom, so independent resources still run in sequence; a warning says which |
-| `notifies` | Native: handlers. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec. The action is kept: a reload stays a reload |
+| `notifies` | Native: handlers. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec or on a module. The action is kept: a reload stays a reload |
 | `runtimeWhen` | Yes: a task's `when:`, as an Ansible expression |
 | Secrets | Yes: by an extra-vars file only the user can read, with `no_log` on the task |
 | Credentials | Yes: an `ssh` or `usernamePassword` credential for the host, the user in the inventory and the key or password by a private file. See [Reaching the host as a credential](#reaching-the-host-as-a-credential) |
@@ -23,16 +23,19 @@ on it.
 | Apply | Yes |
 | Outputs | No. A play produces no values for a later stage to read |
 | Import | Yes: playbooks and task files. See [Importing](#importing) |
+| Editor schemas | Yes: `meridian schema sync` asks `ansible-doc` what each module takes. See [Editor schemas](#editor-schemas) |
 | Compiles to | `playbook.yml` and `inventory.ini` |
 | Runs with | `ansible-playbook`, over whatever connection Ansible is configured for |
 
 What it does not do:
 
-- **No roles, no collections, no vault.** A play is one list of tasks built
-  from `ansible.builtin` modules. What the document says is all the play says.
-- **No resource types beyond the six.** There is no passthrough to arbitrary
-  modules; a `template`, `lineinfile` or `git` task has no resource type.
-  Anything else is refused at compile time.
+- **No roles, no vault.** A play is one list of tasks, each a module call.
+  What the document says is all the play says. A module from an installed
+  collection is called by its full name; the collection itself is not
+  installed by Meridian.
+- **No short module names.** A module is written in full,
+  `ansible.builtin.lineinfile`, never `lineinfile`. The six shared types are
+  the only bare words.
 - **No inventory beyond the host.** `inventory.ini` holds the document's one
   host. Groups, host variables and connection settings go through
   [`MERIDIAN_ANSIBLE_ARGS`](#settings) or Ansible's own configuration.
@@ -43,11 +46,13 @@ What it does not do:
 Contents: [Requirements](#requirements) ·
 [A first document](#a-first-document) ·
 [Resource types](#resource-types) ·
+[Modules beside the six](#modules-beside-the-six) ·
 [Ordering and notifications](#ordering-and-notifications) ·
 [What a compile writes](#what-a-compile-writes) ·
 [Importing](#importing) ·
 [Running](#running) ·
 [Settings](#settings) ·
+[Editor schemas](#editor-schemas) ·
 [What is refused](#what-is-refused) ·
 [Troubleshooting](#troubleshooting) ·
 [How it is tested](#how-it-is-tested)
@@ -179,6 +184,68 @@ Notes on how they map:
 - A `mode` is written as Ansible reads it: quote it in the document
   (`"0644"`), or the YAML reads it as a number and the compile refuses it.
 
+## Modules beside the six
+
+Any module Ansible can find is a resource type, written by its fully
+qualified collection name: `ansible.builtin.lineinfile`,
+`ansible.builtin.template`, `community.general.ufw`. The module's arguments
+are the resource's `params`, passed through to the task exactly as written;
+Meridian checks nothing against a list of what the module takes. An argument
+the module does not have, or a module that is not installed, is Ansible's to
+refuse when the play runs, as a provider's type is Terraform's, until the
+module's schema is [synced](#editor-schemas) and the editor reports it in
+place.
+
+```yaml
+resources:
+  - id: worker_count
+    type: ansible.builtin.lineinfile
+    state: present
+    params:
+      path: /etc/nginx/nginx.conf
+      regexp: "^worker_processes"
+      line: worker_processes 4;
+    notifies:
+      - resource: nginx_svc
+        action: reload
+  - id: facts
+    type: ansible.builtin.setup
+```
+
+compiles to
+
+```yaml
+    - name: worker_count
+      ansible.builtin.lineinfile:
+        line: worker_processes 4;
+        path: /etc/nginx/nginx.conf
+        regexp: ^worker_processes
+        state: present
+      notify:
+        - reload nginx_svc
+    - name: facts
+      ansible.builtin.setup: {}
+```
+
+| | |
+|---|---|
+| `type` | `namespace.collection.module`: three lower-case words joined by dots, as Ansible requires of a collection name. A bare `lineinfile`, a wrong case, or `native/file` is refused with the full name to write |
+| `params` | the module's arguments, as written. A module that takes none, such as `ansible.builtin.setup`, is written with none |
+| `state` | written as the module's `state` argument, whatever words the module gives it. Writing both `state:` and `params.state` is refused (`param-conflicts-with-state`) |
+| `notifies` to a module | action `run`: the handler is the same task, run again when a notifier changed. Any other action is refused (`unsupported-action`), because what a state means is the module's own business |
+| `notifies` from a module | as from any resource |
+| `runtimeWhen` | the task's `when:`, as for the six |
+| Secrets | as for the six: the variable the runner hands over, and `no_log` on the task |
+| References | `${id.param}` is settled from the document, as for the six |
+
+[`examples/ansible/native-modules.yaml`](../../examples/ansible/native-modules.yaml)
+is a whole document of both kinds. A document that names a module compiles
+for Ansible only, since no other target knows the module. The [`native-type`](../reference/lint.md#native-type)
+lint rule marks each such resource. The six shared types stay the portable
+way to say what they can say; a module is for everything else. The split, and
+why `native/file` is refused here, is
+[decision 0030](../decisions/0030-native-types-beside-the-six-and-a-prefix-for-colliding-names.md).
+
 ## Ordering and notifications
 
 `dependsOn` becomes the order of the tasks. Ansible runs a play top to bottom,
@@ -195,6 +262,7 @@ task that notifies them changed something:
 |---|---|---|
 | `service` | `restart`, `reload`, `start`, `stop` | `ansible.builtin.service` with `state: restarted`, `reloaded`, `started` or `stopped` |
 | `exec` | `run` | runs the command again |
+| a module named in full | `run` | runs the module's task again, as written |
 | anything else | none | refused: `unsupported-action` |
 
 `runtimeWhen` is copied into the task's `when:` as written, so it is an
@@ -251,7 +319,10 @@ are recognised; for another name say `--from ansible`.
 
 A playbook says far more than the six resource types do, so this importer reports more
 than any other. What it carries over is real and exact; what it does not is listed, not
-approximated. In particular it never turns a task it does not understand into an `exec`.
+approximated. A task that one of the six carries whole becomes that type, so the document
+still moves to other tools; a task the six cannot carry whole becomes the module itself,
+by its full name, with every argument as written, and the document says it is now written
+for Ansible. It never turns a task it does not understand into an `exec`.
 
 | In the playbook | In the document |
 |---|---|
@@ -264,6 +335,7 @@ approximated. In particular it never turns a task it does not understand into an
 | `copy` with `content` | `file` with `content` |
 | `user`, `group` | `user`, `group`. A comma-separated `groups` becomes a list |
 | `command`, `shell` | `exec`, with `shell: true` for `shell`. `chdir`, `creates` and `removes` are carried, from the module's arguments or from `args` |
+| Any other module (`template`, `lineinfile`, `git`, `debug`, a collection's own), and one of the above with an argument its resource type has no param for, such as `apt` with `update_cache` | the module itself, as `ansible.builtin.<name>` for a module of ansible-core's own or the full name the playbook wrote, with its arguments as written, `state` included. Marked as changed: the document compiles for Ansible only |
 | A task's `name` | the resource's id, as lower-case words joined by underscores. A task with no name is named after what it does, such as `package_nginx` |
 | `when` | `runtimeWhen`, unchanged. A list of conditions, and the `when` of an enclosing block, are joined with `and` |
 | `notify`, where the handler restarts, reloads, starts or stops a service that a task of the play also manages | `notifies` on that service resource, with the action `restart`, `reload`, `start` or `stop`. A handler is found by its name or by what it `listen`s for |
@@ -281,15 +353,16 @@ What is reported:
 
 | In the playbook | What happens | Level |
 |---|---|---|
-| A task whose module has no resource type: `template`, `lineinfile`, `git`, `debug`, any other | Left out, with the module named | not translated |
-| `copy` with `src`, and `file` with `state: link`, `hard` or `touch` | Left out. A document carries a file's content, not a path on the machine Ansible runs on | not translated |
+| A task whose module has no resource type, or whose arguments its resource type cannot all carry | Imported as the module itself, with every argument. The document compiles for Ansible only | changed |
+| A module named without its collection that is not one of ansible-core's own, such as one a role brings | Left out: its full name is not known. Write it as `namespace.collection.<name>` and import again | not translated |
+| `raw` or `script` with free-form arguments | Left out: only `exec` carries free-form text. Write the arguments as a mapping | not translated |
+| `copy` with `src`, and `file` with `state: link`, `hard` or `touch` | Imported as `ansible.builtin.copy` or `ansible.builtin.file` itself, with the `src` or the state as written | changed |
 | `roles`, `include_tasks`, `import_tasks`, `include_role`, `import_role`, `import_playbook` | Left out, naming what was brought in. Import that file as well | not translated |
-| An argument the resource type has no param for, such as `update_cache` | The resource is imported without it, and the argument is named | not translated |
 | A task keyword a resource cannot carry: `become`, `register`, `tags`, `environment`, `ignore_errors`, `changed_when`, `delegate_to` and the rest | The resource is imported without it, and the keyword is named | not translated |
 | A play keyword: `become`, `remote_user`, `vars_files`, `serial`, `environment` and the rest | Left out. Connection settings belong in `MERIDIAN_ANSIBLE_ARGS` | not translated |
 | A `loop` over a variable or an expression | The task is left out | not translated |
 | A play variable that is a list, a mapping or a template, and any play variable used inside an expression such as `{{ port | int + 1 }}` or in a `when` | The resource that uses it is marked: Ansible will find the variable undefined | not translated |
-| A `notify` whose handler is not a service action, acts on a service no task manages, or does not exist | The notification is left out, saying which | not translated |
+| A `notify` whose handler is not a service action, acts on a service no task manages, or does not exist | The notification is left out, saying which. A handler that calls another module is not turned into a resource notified with `run` | not translated |
 | A block's `rescue` and `always` | Left out | not translated |
 | `hosts` that is a pattern: `all`, `web:&prod`, `web*`, a list | No host is written, and the document is marked. A document configures one host | not translated |
 | `hosts` that is one bare word, such as `webservers` | Taken as a host name, and marked in case it is an inventory group | changed |
@@ -336,6 +409,8 @@ failed task, `4` is a host that could not be reached.
 |---|---|
 | `MERIDIAN_ANSIBLE_PLAYBOOK` | the program to run, when `ansible-playbook` is not on `PATH` |
 | `MERIDIAN_ANSIBLE_ARGS` | arguments added to every run, split like a shell command line (quotes hold a word together): `--user deploy --private-key ~/.ssh/deploy`, or `--connection local` for this machine |
+| `MERIDIAN_ANSIBLE_DOC` | the `ansible-doc` program `meridian schema sync` runs, when it is not on `PATH` |
+| `MERIDIAN_ANSIBLE_GALAXY` | the `ansible-galaxy` program `meridian schema sync` runs for the collections' versions, when it is not on `PATH` |
 
 Every setting can also be written in the project's `meridian.yaml` under
 `spec.settings.ansible`, by its short name; the environment variable still wins.
@@ -386,6 +461,23 @@ plan names it: `on web01.internal as deploy (ssh, user deploy)`.
 there and a credential in the document would both reach the command line;
 name the identity in one place.
 
+## Editor schemas
+
+`meridian schema sync` asks `ansible-doc` what the modules the documents
+name take, so an editor completes and checks `ansible.builtin.lineinfile`'s
+arguments as it does the six types' params
+([Tool schemas](../tooling/schema-sync.md)).
+
+| | |
+|---|---|
+| Described in full | each module the documents name: every option with its type (`str`, `path`, `bool`, `int`, `float`, `list`, `dict`; `raw` and `json` as anything), whether it is required, its choices, its sub-options, and a `no_log` option as sensitive. Read from `ansible-doc -t module --json <module>`, one run a module, so a module that is not installed is a note and not the end of the sync |
+| Listed by name | every other module `ansible-doc --list` finds, with its short description: ansible-core's own and every installed collection's |
+| Pinned | ansible-core's version as `ansible.builtin`, and each installed collection's version from `ansible-galaxy collection list`. A collection installed under several paths is pinned at its newest version |
+
+An option's aliases are not listed: a document writes the option's own name,
+which is what the play holds. The `state` option is listed as a param; a
+document may write it as the resource's `state` instead.
+
 ## What is refused
 
 Every refusal names the resource, the line and the rule. The rules this
@@ -393,12 +485,13 @@ target can raise, and what to do:
 
 | Rule | Meaning | What to do |
 |---|---|---|
-| `unsupported-resource-type` | a type outside the six, or in the wrong case (`Package`) | use one of the six; there is no passthrough |
-| `unsupported-param` | a param this type does not take on Ansible, including `package.version` | drop it |
+| `unsupported-resource-type` | a type that is neither one of the six nor a module's full name: a bare `lineinfile`, `native/file`, the wrong case (`Package`) | use one of the six, or write the module in full: `ansible.builtin.lineinfile` |
+| `unsupported-param` | a param one of the six does not take on Ansible, including `package.version` | drop it, or use the module itself |
+| `param-conflicts-with-state` | a module given both `state:` and `params.state` | write one of them |
 | `missing-param` | no `name`, `path` or `command` | add it |
 | `empty-param` | a required param that is empty text | give it a value |
 | `unsupported-state` | a state this type does not have, or any state on an `exec` | see the table under [Resource types](#resource-types) |
-| `unsupported-action` | a notify action the type does not take: anything on a package, file, user or group | notify a service or an exec |
+| `unsupported-action` | a notify action the type does not take: anything on a package, file, user or group; anything but `run` on a module | notify a service or an exec, or run the module again |
 | `unknown-notify-target` | a notify names a resource the document does not declare | fix the id |
 | `ordering-violated` | the order the core handed over puts a resource before its dependency | a core bug; report it |
 | `duplicate-resource` | two resources with the same id | rename one |
@@ -418,7 +511,8 @@ target can raise, and what to do:
 |---|---|---|
 | `could not run ansible-playbook: it is not installed, or not on the PATH` | the plugin runs `ansible-playbook` on the machine running Meridian | `pip install ansible-core`, or set `MERIDIAN_ANSIBLE_PLAYBOOK` |
 | `ansible-playbook could not reach the host` (status `4`) | SSH, the user or the key is not what Ansible needs | name a [credential](#reaching-the-host-as-a-credential) for the host, put the connection settings in `MERIDIAN_ANSIBLE_ARGS`, or use `--connection local` for this machine |
-| the plan is unknown | a task was skipped in check mode: an exec with no `creates` or `removes`, or a condition only the host can answer | give the exec a `creates`, or read the apply's report |
+| the plan is unknown | a task was skipped in check mode: an exec with no `creates` or `removes`, a condition only the host can answer, or a module that does not support check mode | give the exec a `creates`, or read the apply's report |
+| `ansible-playbook reported a failed task` on a module named in full, with "Unsupported parameters" or "couldn't resolve module" | the module's arguments are passed through as written, and Ansible is the judge of them | fix the argument, or install the collection; `meridian schema sync` lets the editor report it before the run |
 | `ansible-playbook reported a failed task` (status `2`) | a task failed on the host; the ones before it were applied | read the output above the message; `apply --resume` continues after the fix |
 | a handler did not run | handlers run only when a task that notifies them changed | expected; change the notifier, or declare the state you want on the service |
 | a warning that resources are independent but run in sequence | a play is one sequence | expected; it says what the target cannot express |
@@ -427,7 +521,9 @@ target can raise, and what to do:
 
 - **Golden files** under `plugins/ansible/testdata/` record what every fixture
   compiles to, byte for byte, the warnings it raises, and what each refusal
-  says.
+  says; `native_modules` is the play of modules named in full.
+- **Schema tests** (`plugins/ansible/src/schemas.rs`) read saved `ansible-doc`
+  output: options, sub-options, choices, secrets.
 - **The conformance tests** compile the same documents for every shared-type
   target and generate the [conformance matrix](../reference/conformance-matrix.md),
   which fails when this target starts accepting or refusing something new.
@@ -443,9 +539,12 @@ target can raise, and what to do:
   notifier changed, a `runtimeWhen` answered by the host's facts, a command
   check mode cannot preview, a failed task, a secret that reaches the
   play through the extra-vars file and is in nothing Ansible prints, check
-  mode with diff included, and a credential whose user is read from the
+  mode with diff included, a credential whose user is read from the
   inventory and whose key is named on the command line and is in nothing
-  Ansible prints or the plugin writes. They are marked `#[ignore]`
+  Ansible prints or the plugin writes, a `lineinfile` module named in full
+  that keeps a line, is run again when notified, takes its state out again
+  and fails on an argument it does not have, and the modules' schemas read
+  from `ansible-doc`. They are marked `#[ignore]`
   and run with
   `MERIDIAN_TEST_REAL_ANSIBLE=1 cargo test -p meridian-target-ansible --test real -- --ignored`.
   Reaching another machine over SSH, and the package, service, user and group

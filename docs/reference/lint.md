@@ -16,6 +16,7 @@ that is allowed and likely to hurt later.
 | [`unguarded-exec`](#unguarded-exec) | info | | an `exec` that runs on every apply |
 | [`unreferenceable-id`](#unreferenceable-id) | warning | | a resource id that cannot be used in a `${...}` reference |
 | [`unsafe-document-name`](#unsafe-document-name) | warning | | a `metadata.name` with characters that do not belong in a file name |
+| [`native-type`](#native-type) | info | | a resource using the tool's own type on a target that shares the six types |
 | [`unused-resource-set-host`](#unused-resource-set-host) | info | | `targetHost` fields its `from` does not read |
 
 Any rule can be silenced where a finding is deliberate, with a
@@ -211,6 +212,31 @@ metadata:
 The name becomes a directory under `--out` and under the state directory. Keep
 it to letters, digits, `.`, `_` and `-`. `meridian validate` refuses such a
 name outright; the lint points at it in the editor first.
+
+## `native-type`
+
+**Info.** A resource uses the tool's own type on a target that shares the
+six configuration management types.
+
+```yaml
+- id: workers
+  type: ansible.builtin.lineinfile
+  params:
+    path: /etc/nginx/nginx.conf
+    regexp: "^worker_processes"
+    line: worker_processes 4;
+```
+
+The six shared types (`package`, `file`, `service`, `user`, `group`, `exec`)
+compile for every target that takes them, so a document written with them
+moves between tools by changing `spec.target`. A type such as
+`ansible.builtin.lineinfile`, `mysql::db`, `pkgrepo.managed` or
+`native/file` is one tool's own
+([native types beside the six](dsl/configuration-management.md#native-types-beside-the-six)),
+so from this resource on the document compiles for that target only. That is
+often exactly what is wanted; the rule says where the document stopped being
+portable. Silence it with `# meridian-lint: disable=native-type` where that is
+deliberate.
 
 ## `unused-resource-set-host`
 

@@ -16,6 +16,11 @@ pub const PROGRAM_VARIABLE: &str = "MERIDIAN_ANSIBLE_PLAYBOOK";
 /// connect, which user, which key. For example `--user deploy --private-key
 /// ~/.ssh/deploy`.
 pub const ARGS_VARIABLE: &str = "MERIDIAN_ANSIBLE_ARGS";
+/// The `ansible-doc` program `meridian schema sync` asks about modules.
+pub const DOC_VARIABLE: &str = "MERIDIAN_ANSIBLE_DOC";
+/// The `ansible-galaxy` program `meridian schema sync` asks for the
+/// installed collections' versions.
+pub const GALAXY_VARIABLE: &str = "MERIDIAN_ANSIBLE_GALAXY";
 
 /// What an operator can configure about this runner, in the order the
 /// settings are documented.
@@ -32,6 +37,18 @@ pub fn settings() -> Vec<Setting> {
             ARGS_VARIABLE,
             "",
             "Extra arguments for every run, split like a shell command line: how to connect, which user, which key. For example `--user deploy --private-key ~/.ssh/deploy`.",
+        ),
+        Setting::new(
+            "doc",
+            DOC_VARIABLE,
+            "ansible-doc",
+            "The `ansible-doc` program `meridian schema sync` runs to describe the modules the documents use, when it is not on `PATH`.",
+        ),
+        Setting::new(
+            "galaxy",
+            GALAXY_VARIABLE,
+            "ansible-galaxy",
+            "The `ansible-galaxy` program `meridian schema sync` runs to read the installed collections' versions, when it is not on `PATH`.",
         ),
     ]
 }

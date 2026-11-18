@@ -494,7 +494,15 @@ fn lsp_serves_an_editor_over_standard_io_with_a_real_plugin() {
         .collect();
     assert_eq!(
         labels,
-        ["exec", "file", "group", "package", "service", "user"]
+        [
+            "<namespace>.<collection>.<module>",
+            "exec",
+            "file",
+            "group",
+            "package",
+            "service",
+            "user"
+        ]
     );
 
     client.send(json!({ "jsonrpc": "2.0", "id": 3, "method": "shutdown", "params": null }));
