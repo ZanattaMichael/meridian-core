@@ -8,6 +8,7 @@ pub(crate) mod rules;
 pub(crate) mod run;
 pub(crate) mod secrets;
 pub(crate) mod signing;
+pub(crate) mod testing;
 
 pub(crate) use documents::*;
 pub(crate) use modules::*;
@@ -16,3 +17,4 @@ pub(crate) use rules::*;
 pub(crate) use run::*;
 pub(crate) use secrets::*;
 pub(crate) use signing::*;
+pub(crate) use testing::*;

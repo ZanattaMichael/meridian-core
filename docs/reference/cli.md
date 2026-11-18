@@ -512,6 +512,33 @@ terminal it is the line typed. An empty value stores nothing. A secret that
 names no writable place, or one that is not declared, is refused and the
 value is not read. It takes `--state-dir` as `secret check` does.
 
+### `test`
+
+Runs [`Test` documents](testing.md): for each case, compiles the documents the
+test names with the case's data, or plans them from a scratch state when the
+case says `run: plan`, and checks what came out against the case's
+expectations and assertions. Nothing is applied and no record is kept.
+
+```
+$ meridian test
+tests/site.test.yaml (site)
+  ok    dev compiles nginx and the message (compile, 1 document)
+  FAIL  production says so (compile, 1 document)
+        - assert contains(stages.web.files['playbook.yml'], 'welcome to prod'): false
+  ok    a site with no web tier compiles nothing (compile, 1 document)
+3 cases: 2 passed, 1 failed
+```
+
+With no files, every `*.test.yaml` under `tests/` in the current directory is
+run. `--case TEXT` runs only the cases whose name holds the text. `--junit
+FILE` also writes the results as JUnit XML, which a pipeline engine shows as
+tests. Every case of every file runs; the command exits `1` when any case
+failed or could not run, when a test file does not read, or when nothing was
+run. Each case plans in its own directory under `tests/` in `--state-dir`,
+emptied first, so no test touches the project's state. The plugins are found
+as for every other command. [The reference](testing.md) has every field of a
+test and what an assertion can read.
+
 ### `fmt`
 
 Rewrites documents in the one standard layout: two-space indentation, the
@@ -776,7 +803,7 @@ No version is deprecated today.
 | Status | When |
 |---|---|
 | `0` | everything asked for succeeded. For `plan` without `--detailed-exitcode`, whether or not an apply would change anything; for `drift`, nothing drifted; for `import`, the documents were written, whatever was reported about them |
-| `1` | an error: a document was invalid or did not compile; a tool failed; a policy denied a change or could not be asked; a stage could not be rolled back; the run was refused because the state is locked or there was nothing to resume or roll back; a [sink](reporting.md#sinks) marked `required` failed; a run was stopped by `--stage-timeout`; `fmt --check` found a file that is not formatted; `lint` found an error, or a warning with `--strict`; `migrate --check` found a file that would change; `import` could not read the source, no plugin imports it, or, with `--strict`, something was changed or not translated; `module verify`, `signing verify`, `secret check` or `rules check` found something wrong |
+| `1` | an error: a document was invalid or did not compile; a tool failed; a policy denied a change or could not be asked; a stage could not be rolled back; the run was refused because the state is locked or there was nothing to resume or roll back; a [sink](reporting.md#sinks) marked `required` failed; a run was stopped by `--stage-timeout`; `fmt --check` found a file that is not formatted; `lint` found an error, or a warning with `--strict`; `migrate --check` found a file that would change; `import` could not read the source, no plugin imports it, or, with `--strict`, something was changed or not translated; `module verify`, `signing verify`, `secret check` or `rules check` found something wrong; `test` had a case that failed or could not run, or ran none |
 | `2` | `drift`: a stage has drifted. `plan --detailed-exitcode`: an apply would do something. Any command: a mistake in the command line itself |
 | `130` | the run was [stopped with Ctrl-C](../concepts/run-safety.md#stopping-a-run), as a shell reports a command ended that way |
 

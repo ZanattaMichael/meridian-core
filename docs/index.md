@@ -58,6 +58,7 @@ byte. The reasons, the layout and the order of work are in
 
 | Operating | |
 |---|---|
+| [Testing documents and modules](reference/testing.md) | `meridian test`: a `Test` document of cases that compile or plan your documents with given data and check the outcome, the files, the rule of a refusal and the changes; JUnit for the pipeline |
 | [Running Meridian in a pipeline](operations/running-in-a-pipeline.md) | one job per engine: a tested GitHub Actions workflow and reviewed snippets for Azure Pipelines, GitLab CI, Buildkite, Jenkins, Argo Workflows, Tekton and Octopus; what the engine owns and what Meridian owns; annotations and job summaries; checking the job's identity first; sharing the record between jobs |
 
 | Concepts | |
@@ -80,6 +81,7 @@ byte. The reasons, the layout and the order of work are in
 | [A run](concepts/run-safety.md) | the lock, the policy check, the record, the run-state, and what happens when a stage fails |
 | [Modules](reference/modules.md) | the manifest, the sources, the lockfile, and what every run verifies |
 | [Inside a pipeline engine](operations/running-in-a-pipeline.md) | the engine's band above Meridian's: the job runs `meridian apply`, and the events come back as annotations and a summary |
+| [A test](reference/testing.md) | a Test document's cases, each compiled or planned in a scratch directory, and the checks over what came out |
 
 Each picture is drawn by [`tools/wiki/graphics.py`](https://github.com/ZanattaMichael/meridian-core/blob/main/tools/wiki/graphics.py)
 and checked against the file in every build, so none can fall behind the script that describes it.
@@ -111,6 +113,7 @@ and checked against the file in every build, so none can fall behind the script 
 | The language item by item | [resources](reference/dsl/resources.md), [`dependsOn`](reference/dsl/dependson.md), [`notifies`](reference/dsl/notifies.md), [conditions](reference/dsl/conditions.md), [references](reference/dsl/references.md), [outputs and hand-offs](reference/dsl/outputs-and-hand-offs.md) |
 | The language by segment | how `type`, `state`, `params`, references and notifies are written for [configuration management](reference/dsl/configuration-management.md), [infrastructure as code](reference/dsl/infrastructure-as-code.md), [containerization](reference/dsl/containerization.md) and [container orchestration](reference/dsl/container-orchestration.md) |
 | [Configuration management resource types](reference/resource-types.md) | `package`, `file`, `service`, `user`, `group`, `exec`, and how each target differs |
+| [Testing documents and modules](reference/testing.md) | `meridian test`: the `Test` document, its cases, expectations and assertions, what `stages` holds, tests in a module, JUnit output |
 | [Modules](reference/modules.md) | packaging configuration to share it: the manifest, sources (path, git, registry), versions, the lockfile, integrity, the `meridian module` commands |
 | [Capability matrix](reference/capability-matrix.md) | generated from the plugins |
 | [Plugin settings](reference/plugin-settings.md) | every setting of every target's runner, how a value is found, how argument lists are split; generated from the plugins |

@@ -1237,6 +1237,7 @@ dependencies = [
  "meridian-sdk",
  "meridian-secret",
  "meridian-target-fake",
+ "meridian-test",
  "meridian-tooling",
  "meridian-value",
  "meridian-yaml",
@@ -1649,6 +1650,18 @@ dependencies = [
  "meridian-plugin-host",
  "meridian-plugin-testkit",
  "meridian-sdk",
+]
+
+[[package]]
+name = "meridian-test"
+version = "0.1.0"
+dependencies = [
+ "meridian-expr",
+ "meridian-ir",
+ "meridian-orchestrator",
+ "meridian-plugin-host",
+ "meridian-sdk",
+ "meridian-value",
 ]
 
 [[package]]

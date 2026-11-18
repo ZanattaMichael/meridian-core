@@ -1,0 +1,18 @@
+[package]
+name = "meridian-test"
+description = "meridian test: Test documents that compile or plan a project's documents with given data and check what came out"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+meridian-expr = { path = "../meridian-expr" }
+meridian-ir = { path = "../meridian-ir" }
+meridian-orchestrator = { path = "../meridian-orchestrator" }
+meridian-plugin-host = { path = "../meridian-plugin-host" }
+meridian-sdk = { path = "../meridian-sdk" }
+meridian-value = { path = "../meridian-value" }
+
+[lints]
+workspace = true

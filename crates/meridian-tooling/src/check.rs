@@ -136,14 +136,16 @@ pub fn is_meridian(text: &str) -> bool {
     let versioned = text
         .lines()
         .any(|line| value_of(line, "apiVersion").is_some_and(|v| v.starts_with("meridian/")));
-    // A module's manifest (`kind: Module`) carries the same apiVersion and
-    // is read by `meridian module`, not compiled as a document.
-    let manifest = text.lines().any(|line| {
+    // A module's manifest (`kind: Module`) and a test (`kind: Test`) carry
+    // the same apiVersion and are read by `meridian module` and `meridian
+    // test`, not compiled as documents.
+    let other_kind = text.lines().any(|line| {
         !line.starts_with([' ', '\t'])
-            && value_of(line, "kind")
-                .is_some_and(|v| v.trim_end_matches(['"', '\'']).trim() == "Module")
+            && value_of(line, "kind").is_some_and(|v| {
+                matches!(v.trim_end_matches(['"', '\'']).trim(), "Module" | "Test")
+            })
     });
-    versioned && !manifest
+    versioned && !other_kind
 }
 
 impl Parsed {
