@@ -225,6 +225,33 @@ pub(crate) enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// Move a document to another target: rewrite spec.target and, when the
+    /// new tool imports, write `adopt:` for each resource the old tool
+    /// manages. Writes a new file and runs no tool but the old one's read
+    Retarget {
+        /// The file to move; YAML, left as it is
+        file: PathBuf,
+        /// The target to move to
+        #[arg(long, value_name = "TARGET")]
+        to: String,
+        /// Where to write the moved file. Defaults to FILE with the target
+        /// before its extension, as in site.opentofu.yaml
+        #[arg(short, long, value_name = "FILE")]
+        out: Option<PathBuf>,
+        /// Write no `adopt:` lines, and so read nothing from the old tool
+        #[arg(long)]
+        no_adopt: bool,
+        /// Where the old tool's working files are kept, and fetched modules
+        #[arg(
+            long,
+            value_name = "DIR",
+            env = "MERIDIAN_STATE_DIR",
+            default_value = ".meridian"
+        )]
+        state_dir: PathBuf,
+        #[command(flatten)]
+        plugins: PluginDirs,
+    },
     /// Show every version this build carries: core, language, SDK and
     /// plugin protocol
     Version,
@@ -312,6 +339,7 @@ impl Command {
                 command: RulesCommand::Check { .. },
             } => "rules check".to_owned(),
             Command::Migrate { .. } => "migrate".to_owned(),
+            Command::Retarget { .. } => "retarget".to_owned(),
             Command::Version => "version".to_owned(),
             Command::Secret {
                 command: SecretCommand::Check { .. },

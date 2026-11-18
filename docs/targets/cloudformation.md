@@ -2,11 +2,8 @@
 
 <img src="../branding/logos/meridian-cloudformation.svg" width="72" alt="Meridian CloudFormation plugin logo">
 
-Compiles an Infrastructure document into an AWS CloudFormation template and
-deploys it as a stack with the `aws` command line. CloudFormation still does
-the work: Meridian writes the template a person would have written, and every
-plan and apply goes through a change set, so what is applied is what was
-previewed.
+Compiles an Infrastructure document into a CloudFormation template, deployed as a stack
+with `aws` through a change set, so what is applied is what was previewed.
 
 ## What it does and does not support
 
@@ -27,31 +24,14 @@ previewed.
 | Compiles to | `template.yaml` and `stack.json` |
 | Runs with | `aws cloudformation` |
 
-What it does not do:
+Not supported:
 
-- **No template parameters, mappings or conditions.** Values come from the
-  document, through Meridian's own `--data`, `--set` and data layers, and are
-  written into the template settled. The compiled template takes no
-  parameters.
-- **No nested stacks or StackSets.** A document is one stack in one region.
-- **No per-type checking at compile time.** The compile checks the shape of
-  the document; CloudFormation checks the properties when the change set is
-  created, and a template it rejects fails the plan with its reason.
-- **It does not delete a stack.** An empty document is refused; delete a stack
-  with `aws cloudformation delete-stack` yourself.
-
-Contents: [Requirements](#requirements) ·
-[A first document](#a-first-document) ·
-[Resources and the stack](#resources-and-the-stack) ·
-[References](#references) ·
-[Ordering](#ordering) ·
-[What a compile writes](#what-a-compile-writes) ·
-[Editor schemas](#editor-schemas) ·
-[Running](#running) ·
-[Settings](#settings) ·
-[What is refused](#what-is-refused) ·
-[Troubleshooting](#troubleshooting) ·
-[How it is tested](#how-it-is-tested)
+- **Template parameters, mappings and conditions.** Values are settled from `--data`,
+  `--set` and data layers.
+- **Nested stacks and StackSets.** One stack, one region.
+- **Per-type checks at compile.** CloudFormation checks properties when the change set is
+  created.
+- **Deleting a stack.** Use `aws cloudformation delete-stack`.
 
 ## Requirements
 
@@ -63,9 +43,8 @@ Contents: [Requirements](#requirements) ·
 
 ## A first document
 
-[`examples/cloudformation/web-vm.yaml`](../../examples/cloudformation/web-vm.yaml)
-deploys a virtual machine with a fixed public address, a security group and
-an instance role. The part that shows what is particular to CloudFormation:
+[`examples/cloudformation/web-vm.yaml`](../../examples/cloudformation/web-vm.yaml) deploys
+a VM with an address, a security group and an instance role:
 
 ```yaml
 apiVersion: meridian/v1
@@ -157,18 +136,13 @@ Outputs:
 
 ## Resources and the stack
 
-A resource's `type` is the CloudFormation resource type and its `params` are
-that type's properties, exactly as AWS documents them, in AWS's own case.
-Meridian does not know the types: it writes what the document says and lets
-CloudFormation check it.
+`type` is the CloudFormation type; `params` are its properties, in AWS's case.
+CloudFormation checks them.
 
-A few keys are resource attributes and not properties. Written among the
-params, they are placed beside `Properties` in the template:
-`DeletionPolicy`, `UpdateReplacePolicy`, `CreationPolicy`, `UpdatePolicy`,
-`Condition` and `Metadata`.
+`DeletionPolicy`, `UpdateReplacePolicy`, `CreationPolicy`, `UpdatePolicy`, `Condition` and
+`Metadata` are placed beside `Properties`.
 
-One resource may have the type `stack`. It is not part of the template. It
-holds how the stack is deployed:
+An optional `stack` resource sets how the stack is deployed:
 
 | Param | Meaning | Default |
 |---|---|---|
@@ -176,13 +150,10 @@ holds how the stack is deployed:
 | `region` | the region to deploy to | the `aws` command's own default |
 | `capabilities` | the capabilities the deployment acknowledges: `CAPABILITY_IAM`, `CAPABILITY_NAMED_IAM`, `CAPABILITY_AUTO_EXPAND` | none |
 
-A second `stack` resource is refused (`duplicate-resource`), and a `stack` may
-not take part in `dependsOn` (`unsupported-dependency`).
+A second is refused (`duplicate-resource`), as is `dependsOn` on it
+(`unsupported-dependency`).
 
-Logical ids hold only letters and digits, so a resource id such as `web_vm`
-is written `WebVm` in the template, and an output `web_vm_ip` is `WebVmIp`.
-Two ids that become the same logical id are refused. Everything Meridian
-reports uses the id you wrote.
+Ids become logical ids: `web_vm` is `WebVm`. Collisions are refused. Reports use your ids.
 
 ## References
 
@@ -194,12 +165,8 @@ reports uses the id you wrote.
 | `${AWS::Region}`, `${AWS::StackName}` and the other pseudo parameters | passed through inside `Fn::Sub` |
 | `$${` | a literal `${` |
 
-Anything else between `${` and `}` is refused (`invalid-reference`): a
-reference must name a resource of the document, optionally with one
-attribute, or be a pseudo parameter. Values from `--data`, `--set` and data
-layers are settled before the template is written and never become
-references
-([values from data are literal](../reference/dsl/interpolation.md#a-tools-own-expressions)).
+Anything else in `${}` is refused (`invalid-reference`). Values from data never become
+references ([see](../reference/dsl/interpolation.md#a-tools-own-expressions)).
 
 ## Common infrastructure types
 
@@ -225,11 +192,8 @@ with [`web-aws.yaml`](../../examples/common/web-aws.yaml).
 
 ## Ordering
 
-A `Ref` or `Fn::GetAtt` already orders two resources, so a `dependsOn` that
-a reference implies is left out of the template. Only an order nothing in the
-properties says becomes `DependsOn`, as in the example above. The resources
-are written in the order Meridian decided, which CloudFormation does not
-need but a reader does.
+A `dependsOn` a `Ref` or `Fn::GetAtt` implies is left out; others become `DependsOn`.
+Resources are written in Meridian's order.
 
 ## What a compile writes
 
@@ -238,25 +202,16 @@ template.yaml
 stack.json
 ```
 
-`template.yaml` is the CloudFormation template: `Resources`, with the
-properties' keys sorted, and, when the document has outputs, `Outputs`. It is an ordinary template, so you can
-deploy it with the console or a pipeline of your own. `stack.json` holds what
-the runner needs and the template does not say: the stack's name, region and
-capabilities, and the map from logical ids back to the ids you wrote, so a
-change set's rows are reported by your names.
+`template.yaml` holds `Resources` (keys sorted) and `Outputs`. `stack.json` holds the
+stack's name, region, capabilities and the map back to your ids.
 
 ## Editor schemas
 
-`meridian schema sync` reads the registry of resource types CloudFormation
-publishes for a region, so an editor completes and checks `AWS::S3::Bucket`'s
-properties as it does a plugin's own types
-([Tool schemas](../tooling/schema-sync.md)). The registry is one zip per
-region of resource provider schemas, the JSON Schema CloudFormation itself
-validates a template against, at
-`https://schema.cloudformation.<region>.amazonaws.com/CloudformationSchema.zip`.
-No account and no `aws` command is needed to read it. The region is the
-`stack` resource's `region`, else `--region` in `MERIDIAN_AWS_ARGS`, else
-`AWS_REGION` or `AWS_DEFAULT_REGION`, else `us-east-1`.
+`meridian schema sync` reads the region's schema zip,
+`https://schema.cloudformation.<region>.amazonaws.com/CloudformationSchema.zip`, with no
+account ([Tool schemas](../tooling/schema-sync.md)). Region: the `stack` resource's, then
+`--region` in `MERIDIAN_AWS_ARGS`, then `AWS_REGION` or `AWS_DEFAULT_REGION`, then
+`us-east-1`.
 
 | | |
 |---|---|
@@ -264,18 +219,12 @@ No account and no `aws` command is needed to read it. The region is the
 | Listed by name | every other type of the region's registry, with the first paragraph of its description |
 | Pinned | the region, to the SHA-256 of the zip it was read from |
 
-A type that is not in the public registry, a private or third-party type
-the account activated, is asked of `aws cloudformation describe-type`, which
-needs the command and credentials; a type neither has is a note. The zip is
-kept in the work directory and fetched again only when the registry says it
-changed; when the registry cannot be reached, the last copy is used and the
-sync says so. The source is tested against the real registry in the
-`cloudformation` workflow.
+Private and third-party types use `aws cloudformation describe-type` (needs credentials).
+The zip is cached; offline, the cache is used with a note.
 
 ## Running
 
-Both plan and apply go through a change set, so what is applied is what was
-previewed. A change set's name is `meridian-<time>`.
+Both use a change set named `meridian-<time>`.
 
 | | |
 |---|---|
@@ -284,24 +233,17 @@ previewed. A change set's name is `meridian-<time>`.
 | Saved plan | `meridian plan --out` keeps the change set instead of discarding it and records its name; `meridian apply --plan` executes that change set, so what is applied is what the reviewer read. The change set's values stay with CloudFormation; the plan file holds only its name ([a saved plan](../operations/pull-requests.md)) |
 | Outputs later | `describe-stacks` |
 
-Changes are read from the change set's description, resource by resource,
-with the action CloudFormation says: `Add` is a create, `Remove` a delete,
-and `Modify` an update, or a replace when CloudFormation says the resource
-will be replaced. Each is reported under the id you wrote. A change set CloudFormation marks `FAILED` because the
-template holds no changes is a plan of nothing to do; one it marks `FAILED`
-for any other reason fails the stage with CloudFormation's own words, and is
-deleted.
+`Add` is a create, `Remove` a delete, `Modify` an update or replace, reported by id. A
+`FAILED` change set with no changes is nothing to do; any other `FAILED` fails the stage and
+is deleted.
 
-A template CloudFormation rejects fails the plan when the change set is
-created, with the reason, and leaves no stack behind. A deployment that fails
-part way is rolled back by CloudFormation itself; the stage fails and says
-to read the stack's events for which resource failed.
+A rejected template fails the plan and leaves no stack. A failed deployment is rolled back
+by CloudFormation; read the stack's events.
 
 ## Secrets
 
-A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a resource's
-params reaches CloudFormation as a template parameter marked `NoEcho`, whose value
-is read from a private file, and through nothing else.
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) becomes a `NoEcho`
+parameter read from a private file.
 
 ```yaml
 spec:
@@ -319,9 +261,7 @@ spec:
         Value: ${{ secret.db_password }}
 ```
 
-**What the compile writes.** The param becomes `Ref: MeridianSecretDbPassword`, or
-`${MeridianSecretDbPassword}` inside an `Fn::Sub` when the secret sits in longer
-text, and the template declares the parameter:
+The param becomes `Ref: MeridianSecretDbPassword` (or `Fn::Sub` in longer text):
 
 ```yaml
 Parameters:
@@ -330,38 +270,19 @@ Parameters:
     NoEcho: true
 ```
 
-A parameter's name is letters and digits only, so the secret's name is spelled the
-way a resource id is spelled as a logical id: `db_password` is
-`MeridianSecretDbPassword`. Two secrets, or a secret and a resource, that come down to
-the same name are refused (`invalid-name`) rather than merged. The compiled template
-holds the parameter's name and never its value.
+Name collisions are refused (`invalid-name`).
 
-**How the value reaches the tool.** When a stage runs, the runner writes every secret
-into one parameters file, `[{"ParameterKey": ..., "ParameterValue": ...}]`, in a
-directory only the user can enter (mode `0700`, the file `0600`, on a memory
-filesystem where the system has one), and passes it as `--parameters file://<path>`
-to `create-change-set`. The file is overwritten and removed as soon as the change set
-exists. Executing the change set names nothing more: the change set carries the
-values, as every change set carries its parameters, and CloudFormation shows `****`
-for a `NoEcho` parameter wherever it describes the stack or the change set. The
-command line names the file's path and nothing more, and `aws`'s environment holds
-nothing of the value.
+The runner writes a parameters file (mode `0600`, in a `0700` directory, in memory where
+possible), passed as `--parameters file://<path>` to `create-change-set` and removed once
+the change set exists. CloudFormation shows `****` for it.
 
-**What CloudFormation keeps.** The stack keeps the parameter's value, masked in every
-description, as it keeps every parameter. A resource property given the value is kept
-by the service that owns the resource, the way that service keeps it: a
-`AWS::SSM::Parameter` of type `String` is readable by anyone who can read parameters.
-Choose a type or a resource that protects what it holds.
+The stack keeps the value masked. A property keeps it as its service does: an SSM
+`String` parameter is readable. Choose a type that protects it.
 
-**What is refused.** A secret in the `stack` resource's settings is refused at compile,
-rule `unsupported-secret-place`: the settings are the command line `aws` is given.
+A secret in `stack` settings is refused (`unsupported-secret-place`).
 
-The handover is tested against a stand-in `aws` that keeps a copy of the parameters
-file, its mode, its arguments and its environment
-(`plugins/cloudformation/tests/run.rs`), and against the real `aws` and LocalStack in
-CI (`plugins/cloudformation/tests/real.rs`), where the value reaches a Systems Manager
-parameter and is in nothing the plugin printed or wrote and not in the stack's
-description.
+Tested against a stand-in `aws` (`plugins/cloudformation/tests/run.rs`) and LocalStack in CI
+(`plugins/cloudformation/tests/real.rs`).
 
 ## Settings
 
@@ -370,18 +291,14 @@ description.
 | `MERIDIAN_AWS` | the program to run, when it is not `aws` on `PATH` |
 | `MERIDIAN_AWS_ARGS` | arguments added to every call, split like a shell command line (quotes hold a word together): `--profile prod`, or `--endpoint-url http://localhost:4566` for an emulator |
 
-Every setting can also be written in the project's `meridian.yaml` under
-`spec.settings.cloudformation`, by its short name; the environment variable still wins.
-The names, defaults and the splitting rule for argument lists are in the
-[plugin settings reference](../reference/plugin-settings.md#cloudformation).
-
-Credentials, and the default region when the `stack` resource names none,
-are the `aws` command's own.
+Settings can also go in `meridian.yaml` under `spec.settings.cloudformation`; the
+environment wins. See the
+[plugin settings reference](../reference/plugin-settings.md#cloudformation). Credentials
+and the default region are `aws`'s own.
 
 ## What is refused
 
-Every refusal names the resource, the line and the rule. The rules this
-target can raise, and what to do:
+Each names the resource, line and rule:
 
 | Rule | Meaning | What to do |
 |---|---|---|
@@ -413,22 +330,10 @@ target can raise, and what to do:
 
 ## How it is tested
 
-- **Golden files** under `plugins/cloudformation/testdata/` record what the
-  example compiles to, `template.yaml` and `stack.json`, byte for byte, and
-  what each refusal says.
-- **Run tests** (`plugins/cloudformation/tests/run.rs`) drive the runner
-  against a stand-in for `aws`: the exact calls in order, a new stack and an
-  existing one, a failed change set, the one that holds no changes, and the
-  outputs read back.
-- **Real-tool tests** (`plugins/cloudformation/tests/real.rs`, workflow
-  `cloudformation.yml`) run the real `aws` command against
-  [LocalStack](https://github.com/localstack/localstack), an emulator of AWS:
-  a stack is previewed, created, read back, changed and trimmed, and a
-  template CloudFormation rejects fails the plan and leaves no stack. They are
-  marked `#[ignore]` and run with
-  `MERIDIAN_TEST_REAL_CLOUDFORMATION=1 cargo test -p meridian-target-cloudformation --test real -- --ignored`,
-  with `MERIDIAN_AWS_ARGS` pointing at the emulator. They have not been run
-  against a real AWS account.
-  [Real-tool tests](../contributing/real-tool-tests.md#cloudformation) says
-  what the emulator proves, what it cannot, and how to run the same tests
-  against an account.
+- **Golden files** in `plugins/cloudformation/testdata/`, refusals included.
+- **Run tests** (`plugins/cloudformation/tests/run.rs`) against a stand-in `aws`.
+- **Real-tool tests** (`plugins/cloudformation/tests/real.rs`, `cloudformation.yml`) run
+  `aws` against [LocalStack](https://github.com/localstack/localstack), with
+  `MERIDIAN_TEST_REAL_CLOUDFORMATION=1 cargo test -p meridian-target-cloudformation --test real -- --ignored`
+  and `MERIDIAN_AWS_ARGS` pointing at it. Not yet run against real AWS; see
+  [Real-tool tests](../contributing/real-tool-tests.md#cloudformation).

@@ -205,6 +205,16 @@ fn a_document_is_planned_applied_read_back_and_changed() {
         .unwrap_or_else(|e| panic!("{}", explain("reading outputs", &e, &[])));
     assert_eq!(output(&read, "release"), &Value::String("web-v1".into()));
 
+    // What it manages is reported by resource id, for `meridian retarget`.
+    let found = client
+        .identifiers(&context)
+        .unwrap_or_else(|e| panic!("{}", explain("reading identifiers", &e, &[])));
+    assert_eq!(
+        found.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["config", "release", "service"]
+    );
+    assert!(found.values().all(|id| !id.is_empty()), "{found:?}");
+
     // Nothing has changed, so a second plan is empty.
     let (again, _) = plan_ok("the second plan", &client, &context, &artifact);
     assert!(again.changes.is_empty(), "{:?}", again.changes);

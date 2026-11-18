@@ -1,20 +1,15 @@
 # Policy checks
 
-A policy answers one question before a change is made: may it be? `meridian
-plan` and `meridian apply` can ask a policy about every stage, and an apply
-asks before it applies the first one.
+`meridian plan` and `meridian apply` can ask a policy whether each stage may change.
 
 ```sh
 meridian plan  site.yaml --policy policies/
 meridian apply site.yaml --policy policies/
 ```
 
-The policies shipped with Meridian are written in
-[Rego](https://www.openpolicyagent.org/docs/latest/policy-language/) and read
-by Open Policy Agent. Another policy language needs only
-[an engine program](#writing-an-engine). The idea is explained in
-[running safely](../concepts/run-safety.md#asking-a-policy-first); this page
-is the reference.
+Policies are [Rego](https://www.openpolicyagent.org/docs/latest/policy-language/) via Open
+Policy Agent, or any language with [an engine](#writing-an-engine). See also
+[running safely](../concepts/run-safety.md#asking-a-policy-first).
 
 ## Options
 
@@ -23,14 +18,8 @@ is the reference.
 | `--policy PATH` | | no policy | `plan` and `apply`: a policy file or directory. May be repeated; every one is handed to the engine |
 | `--policy-engine NAME` | `MERIDIAN_POLICY_ENGINE` | `opa` | the engine: the program `meridian-policy-<NAME>` in a [plugin directory](cli.md#options) |
 
-With no `--policy`, no policy is asked and nothing here applies. `--policy`
-on `compile`, `drift` or `rollback` is an error, so that a command that asks
-no policy cannot be mistaken for one that did. A rollback is deliberately not
-asked: it puts back what was applied before, and a policy written since must
-not be able to hold a failed change in place.
-
-A policy path that does not exist, or an engine that is not installed, is
-refused before the run starts.
+`--policy` on `compile`, `drift` or `rollback` is an error; rollbacks are never checked. A
+missing policy path or engine is refused before the run.
 
 ## When a policy is asked
 
@@ -48,33 +37,16 @@ flowchart TB
     DO --> APPLY
 ```
 
-- **`apply`** makes a first pass over every stage before it applies any of
-  them. Each stage that can be compiled is compiled, previewed by its tool
-  when the tool can preview, and put to the policy. If any stage is denied,
-  the run fails with nothing applied, and the stages that were not denied are
-  reported as not run.
-- A stage **cannot be asked about in the first pass** when it waits on an
-  output of a stage that has not been applied yet (a ResourceSet whose host
-  is the address of a machine this run creates), or when its tool cannot
-  preview it yet. It is asked about at its turn, just before its own apply.
-  If it is denied then, the stages before it have been applied: the run stops
-  as it does for any failed stage, and `--on-failure rollback` puts them
-  back.
-- A document that reads [secrets](dsl/secrets.md) is not asked about in the
-  first pass either. A secret is fetched once, at the turn of the stage that
-  reads it, and the document cannot be decided without it. The policy is
-  asked at that turn, before the stage's apply.
-- A document its own `spec.when` leaves out is not a stage of the run, so it
-  is not asked about.
-- A stage a [resumed run](../concepts/run-safety.md#picking-up-where-a-run-stopped)
-  leaves alone is not asked about: nothing is done to it.
-- **`plan`** asks about every stage and shows every denial. A denied stage
-  is reported as failed and the command exits `1`, so a pipeline can refuse a
-  merge on it. Unlike a tool's failure, a denial does not stop the plan: the
-  stages after it are still planned and asked about.
+- **`apply`** checks every stage (compiled and previewed) before applying any. Any denial
+  fails the run with nothing applied.
+- Stages waiting on an unapplied output, whose tool cannot preview, or that read
+  [secrets](dsl/secrets.md) are checked just before their own apply. A denial then stops
+  the run as a failed stage would.
+- Stages excluded by `spec.when` or skipped by a
+  [resume](../concepts/run-safety.md#picking-up-where-a-run-stopped) are not checked.
+- **`plan`** checks every stage, reports denials as failed, keeps going, and exits `1`.
 
-Each stage is asked about once, and separately. An engine never sees two
-stages at a time.
+Each stage is asked once, on its own.
 
 ## What a policy says
 
@@ -103,15 +75,12 @@ run 2026-11-17T09-14-03Z-0cc7 was stopped by its policy before anything was appl
 
 ### Failing closed
 
-A policy that could not be asked has not said yes. Each of these is a denial,
-and says what went wrong:
+These are denials:
 
-- the engine cannot be started, or exits with anything but `0`;
-- the engine's answer is not the JSON object described
-  [below](#the-engine-protocol);
-- with the OPA engine: `opa` is not installed, a policy does not parse, or
-  the policies define nothing in the package `meridian`. That last one is
-  far more often a misnamed package than a wish to allow everything.
+- the engine cannot start or exits non-zero;
+- its answer is not the [expected JSON](#the-engine-protocol);
+- with OPA: `opa` is missing, a policy does not parse, or package `meridian` defines
+  nothing.
 
 ## The input
 
@@ -161,33 +130,21 @@ For each stage the policy is given one JSON document. In Rego it is `input`.
 | `plan.changes[].summary` | the tool's own one-line description; may be empty |
 | `plan.unknown` | `true` when the tool could not say everything it would change |
 
-The shape is part of Meridian's interface. Fields are added; none is renamed
-or removed.
+Fields are added, never renamed or removed.
 
-Two things to keep in mind when writing a rule:
-
-- `plan` is `null` for a target that only compiles or cannot preview. A rule
-  over `input.plan.changes` then simply does not fire. To refuse changes that
-  could not be previewed, say so: `input.plan == null` or `input.plan.unknown`.
-- The plan is the tool's preview at the time of asking. In an apply's first
-  pass that is before any stage of this run has been applied.
+- `plan` is `null` when the target cannot preview; test `input.plan == null` or
+  `input.plan.unknown` to refuse those.
+- In an apply's first pass, the plan predates every stage of the run.
 
 ## Secrets
 
-The input holds what the document holds, so it can hold a secret: a param, a
-line of a compiled file.
+The input can hold secrets.
 
-- It is handed to the engine on its standard input and nowhere else.
-  Meridian never writes it to disk, and the OPA engine passes it to `opa` on
-  standard input too.
-- It is not recorded. Neither are the engine's messages, because a message
-  can quote the input. The [run's record](state.md#events) keeps that a
-  policy was asked, whether it allowed the stage, and how many denials and
-  warnings there were.
-- Messages are shown on the terminal, with every value a tool marked
-  sensitive replaced by `(sensitive)`. A value Meridian does not know to be
-  sensitive is shown as the policy wrote it, so prefer naming a resource to
-  quoting its params.
+- It goes to the engine on stdin only, never to disk.
+- Neither it nor the messages are recorded; the [record](state.md#events) keeps the decision
+  and counts.
+- Messages show on the terminal with sensitive values masked. Name resources rather than
+  quoting params.
 
 ## Events
 
@@ -205,14 +162,9 @@ meridian events --type 'policy.*'
 
 ## The OPA engine
 
-`meridian-policy-opa` ships with Meridian. It needs
-[Open Policy Agent](https://www.openpolicyagent.org/docs/latest/#running-opa)
-1.0 or later as `opa` on the `PATH`, or the program named in `MERIDIAN_OPA`.
-
-It reads `deny` and `warn` from the package `meridian`, the convention
-[Conftest](https://www.conftest.dev/) uses. Each is a set of messages; a
-message may be a string, or an object with the string under `msg`. Anything
-else the package defines is ignored, so helper rules are free.
+`meridian-policy-opa` needs [OPA](https://www.openpolicyagent.org/docs/latest/#running-opa)
+1.0+ as `opa` on `PATH` or in `MERIDIAN_OPA`. It reads `deny` and `warn` (strings or
+`{msg}` objects) from package `meridian`, as [Conftest](https://www.conftest.dev/) does.
 
 ```rego
 package meridian
@@ -234,24 +186,18 @@ warn contains msg if {
 }
 ```
 
-The whole example, with two more rules, is in
-[`examples/policy`](https://github.com/ZanattaMichael/meridian-core/tree/main/examples/policy).
-
-Every `--policy` path is given to `opa eval` as `--data`, so a directory is
-loaded whole, and JSON or YAML files in it are available to the rules as
-`data`. What the engine runs is:
+Full example: [`examples/policy`](https://github.com/ZanattaMichael/meridian-core/tree/main/examples/policy).
+Each `--policy` path is passed as `--data` (JSON and YAML become `data`). The engine runs:
 
 ```sh
 opa eval --format json --stdin-input --data <path>... data.meridian
 ```
 
-To try a policy without Meridian, save an input like the one above and run
-that command with `--input input.json` in place of `--stdin-input`.
+To test without Meridian, use `--input input.json` instead of `--stdin-input`.
 
 ## The engine protocol
 
-An engine is a program named `meridian-policy-<name>`, found where plugins
-are found. For each stage Meridian starts it once.
+An engine is a program `meridian-policy-<name>` on the plugin path, run once per stage.
 
 ```mermaid
 sequenceDiagram
@@ -275,8 +221,7 @@ sequenceDiagram
 
 ### Writing an engine
 
-An engine needs no library. This one, a shell script, denies every stage on a
-Friday:
+This shell engine denies every stage on a Friday:
 
 ```sh
 #!/bin/sh
@@ -293,14 +238,10 @@ fi
 meridian apply site.yaml --policy . --policy-engine friday
 ```
 
-An engine must not write the input anywhere, and should fail (exit non-zero)
-on anything it does not understand.
+Never write the input anywhere; exit non-zero on anything unexpected.
 
 ## What this does not do yet
 
-- A policy is asked about one stage at a time, so it cannot compare two
-  stages of a run.
-- There is no way to mark a denial as overridden for one run. Change the
-  policy, or run without it.
-- The engine is started once per stage. For a workflow with very many
-  stages and a large policy set, that is `opa` started once per stage.
+- One stage at a time; no cross-stage rules.
+- No per-run override of a denial.
+- One engine process per stage.

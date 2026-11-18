@@ -1,22 +1,13 @@
 # Reports and sinks
 
-What a run tells people and other systems, and how to get it where you need
-it. This page covers what works today. What is planned, an OpenTelemetry
-sink among it, is in [the reporting plan](../plans/reporting.md). The
-optional server that collects runs has [its own page](report-server.md).
-
-**Supported:** a live stream of events; report files in JSON, JUnit XML,
-Markdown and HTML, written by the run or afterwards; sinks that are sent the
-events as they happen; a [report server](report-server.md) fed by a sink.
-**Not supported yet:** SARIF (a policy result is reported as counts); sinks configured in a document (they are named
-on the command line); `notification.*` events; a built-in HTTP client, so the
-webhook and server sinks shipped as examples need `curl`.
+Live events, report files (JSON, JUnit XML, Markdown, HTML), sinks, and a
+[report server](report-server.md). Not yet: SARIF, sinks in documents, `notification.*`
+events, a built-in HTTP client (the example sinks use `curl`). Plans:
+[reporting plan](../plans/reporting.md).
 
 ## How it fits together
 
-A run says everything it does as [events](state.md#events). Reporting is
-three ways of reading that one stream, and nothing else is ever read: not
-your documents, not the compiled files, not what a tool printed.
+All reporting reads only the run's [events](state.md#events).
 
 ```mermaid
 flowchart LR
@@ -43,12 +34,8 @@ flowchart LR
 
 ### No value is ever in a report
 
-An event names things: a step, a resource id, an output. It never holds a
-value from a document or a tool, sensitive or not, and a failure is a fixed
-word such as `tool-failed`, never the tool's own message, because a tool can
-quote a secret in one. Reports and sinks are made from events and nothing
-else, so there is nothing to mask and nothing to leak. The tool's own
-output is on the terminal of the run, masked, and nowhere else.
+Events hold names and fixed failure words (`tool-failed`), never values or tool messages.
+Tool output appears only on the terminal, masked.
 
 ## `--report`
 
@@ -59,14 +46,9 @@ meridian apply site.yaml \
     --report html=out/meridian.html
 ```
 
-`--report FORMAT=FILE` may be given more than once, on `compile`, `plan`,
-`apply`, `drift` and `rollback`. The files are written when the run ends,
-whether it succeeded or failed; the directory is made if it is not there. A
-format that does not exist is refused before anything runs. A report that
-cannot be written is a warning, not a failed run: the tools did their work.
-
-A run that was refused before it started, because the state is locked for
-example, has no events and writes no report.
+`--report FORMAT=FILE` (repeatable) on `compile`, `plan`, `apply`, `drift` and `rollback`
+writes when the run ends, pass or fail. Unknown formats are refused up front; a write
+failure is a warning. A run refused before starting writes no report.
 
 ## `meridian report`
 
@@ -75,22 +57,16 @@ meridian report [RUN] [--format FORMAT] [--out FILE]
 meridian report --from FILE [--format FORMAT] [--out FILE]
 ```
 
-Writes a report of a recorded run, the last one when no run is named, to
-standard output or to `--out`. The format is `markdown` unless `--format`
-says otherwise. It reads the same [state](state.md) the run wrote, so
-`--state-dir`, `--backend` and `--backend-config` apply.
-
-`--from` reads events from a file instead, one JSON object per line as
-`--events json` and `meridian events` write them; `-` reads standard input.
-The machine that reports need not be the machine that ran:
+Reports a recorded run (default: the last) to stdout or `--out`, as `markdown` unless
+`--format` is given. Reads the [state](state.md) (`--state-dir`, `--backend`). `--from FILE`
+(or `-`) reads JSON-lines events instead, so it can run on another machine:
 
 ```
 meridian apply site.yaml --events json > events.jsonl
 meridian report --from events.jsonl --format html --out meridian.html
 ```
 
-A report made from the record also says who ran it and where, which the
-events alone do not.
+A report from the record also names who ran it and where.
 
 ## The formats
 
@@ -116,14 +92,12 @@ events alone do not.
 - **ResourceSet web** failed: the tool reported a failure
 ```
 
-Each step's resources and output names follow in a collapsed section. In
-GitHub Actions, `--report markdown="$GITHUB_STEP_SUMMARY"` puts it on the
-job's page.
+Resources and output names are in collapsed sections. In GitHub Actions use
+`--report markdown="$GITHUB_STEP_SUMMARY"`.
 
 ### `junit`
 
-A run is a test suite and a step is a test case, named by its kind and name,
-with its target as the class: `meridian.ansible`, `ResourceSet web`.
+A run is a suite; a step is a case named by kind and name, class `meridian.<target>`.
 
 | The step | Is reported as |
 |---|---|
@@ -134,20 +108,17 @@ with its target as the class: `meridian.ansible`, `ResourceSet web`.
 | skipped, deferred, or not run because an earlier step failed | `<skipped>` |
 | never finished, because the run died | `<error type="unfinished">` |
 
-The resources a step changed, and the names of its outputs, are its
-`<system-out>`. The run's id, mode, status and command are `<properties>`.
+Changed resources and output names are `<system-out>`; run id, mode, status and command
+are `<properties>`.
 
 ### `html`
 
-One page with no scripts and nothing fetched from anywhere, so it opens from
-a build's artifacts or an email. It follows the reader's light or dark
-setting.
+One self-contained page, no scripts, light or dark.
 
 ### `json`
 
-One document. Its shape is named in `schema`; fields are added without
-changing the name, and the name changes if one is removed or changes
-meaning.
+One document, versioned by `schema`; the name changes only if a field is removed or
+changes meaning.
 
 | Field | Holds |
 |---|---|
@@ -169,8 +140,7 @@ meaning.
 
 ## Sinks
 
-A sink is a program that is sent the run's events as they happen and
-forwards them somewhere else.
+A sink is a program sent the run's events as they happen.
 
 ```
 meridian apply site.yaml \
@@ -192,16 +162,12 @@ Two settings are Meridian's own, for every sink:
 | `on` | the [event types](state.md#events) the sink is sent, separated by commas. `step.*` takes a family and `*` everything, which is the default |
 | `required` | `true`: the run fails, with exit status 1, when the sink fails. By default a failed sink is a warning and the run's result stands, because a chat outage must not stop a deployment |
 
-Every other setting is the sink's own and reaches its program as an
-environment variable. A setting that is a credential is better set as that
-variable directly than typed as an option: `MERIDIAN_NOTIFY_SECRET=...`
-reaches every sink of the run, and stays out of your shell history. Settings
-are never written to the run's record.
+Other settings reach the program as environment variables. Set credentials directly in
+the environment (`MERIDIAN_NOTIFY_SECRET=...`). Settings are never recorded.
 
 ### The `command` sink
 
-Runs the program its `program` setting names. It is the quickest way to try
-something:
+Runs the program in its `program` setting:
 
 ```
 meridian apply site.yaml --sink command \
@@ -211,8 +177,7 @@ meridian apply site.yaml --sink command \
 
 ### Sinks shipped as examples
 
-[`examples/sinks`](../../examples/sinks) holds three, all short shell
-scripts meant to be read and copied.
+[`examples/sinks`](../../examples/sinks) has three shell scripts:
 
 | Sink | Settings | Does |
 |---|---|---|
@@ -238,16 +203,13 @@ sequenceDiagram
     Note over O,P: still running after --sink-timeout: stopped, and reported as failed
 ```
 
-- Each sink has its own queue. A sink too slow to keep up misses events
-  rather than slowing a step; how many is reported as a warning.
-- A sink that cannot be started is an error before anything runs.
-- What a sink printed on its standard error is shown, its last line, when it
-  fails.
+- A sink that falls behind drops events, with a warning.
+- A sink that cannot start is an error before the run.
+- A failed sink shows its last stderr line.
 
 ### Writing a sink
 
-A sink is any executable named `meridian-notify-<name>` in a plugin
-directory. Contract, version 1:
+An executable `meridian-notify-<name>` on the plugin path. Contract, version 1:
 
 | | |
 |---|---|
@@ -258,15 +220,12 @@ directory. Contract, version 1:
 | Standard error | for a person; the last line is shown if the sink fails |
 | Exit status | `0` when everything it was sent was delivered; anything else is a failure |
 
-A sink should refuse a protocol version it does not know, read to the end of
-its input, and finish soon after. It is started once per run, so it can keep
-a connection open, batch, or build one summary from the whole run. The
-smallest complete one is
-[`meridian-notify-file`](../../examples/sinks/meridian-notify-file).
+Refuse unknown versions, read to end of input, then exit. One process per run. Smallest
+example: [`meridian-notify-file`](../../examples/sinks/meridian-notify-file).
 
 ## In CI
 
-GitHub Actions, with test results, a job summary and the page kept:
+GitHub Actions:
 
 ```yaml
 - name: Apply
@@ -283,11 +242,10 @@ GitHub Actions, with test results, a job summary and the page kept:
     path: out/
 ```
 
-A scheduled drift check that fails the job, and says which steps drifted:
+Scheduled drift check:
 
 ```
 meridian drift site.yaml --report junit=drift.xml
 ```
 
-`drift` exits `2` when something drifted, and each drifted step is a failed
-test case.
+`drift` exits `2` on drift; each drifted step is a failed test case.

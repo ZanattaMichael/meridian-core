@@ -211,6 +211,17 @@ fn an_encrypted_state_is_planned_applied_and_read_back() {
         Value::String("web-ci".into())
     );
 
+    // What it manages is reported by resource id, for `meridian retarget`,
+    // read through the encrypted state.
+    let found = client
+        .identifiers(&context)
+        .unwrap_or_else(|e| panic!("{}", explain("reading identifiers", &e, &[])));
+    assert_eq!(
+        found.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["release", "smoke_test"]
+    );
+    assert!(found.values().all(|id| !id.is_empty()), "{found:?}");
+
     // Nothing has changed, so a second plan is empty.
     let again = plan_ok("the second plan", &client, &context, &artifact);
     assert!(again.changes.is_empty(), "{:?}", again.changes);

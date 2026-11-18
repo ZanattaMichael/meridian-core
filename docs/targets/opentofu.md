@@ -25,10 +25,8 @@ with `tofu`.
 
 ## A first document
 
-Every resource's `type` is the OpenTofu type, and its `params` are that type's
-arguments exactly as the provider documents them. Meridian does not put a smaller
-vocabulary in front of OpenTofu's. What it adds is the wiring: `${id.attribute}`
-refers to another resource of the same document by its `id`.
+`type` is the OpenTofu type and `params` its arguments, as the provider documents them.
+`${id.attribute}` refers to another resource by `id`.
 
 ```yaml
 apiVersion: meridian/v1
@@ -69,10 +67,9 @@ meridian apply web-vm.yaml                 # applies exactly the plan it showed
 
 Two complete documents are in [`examples/opentofu/`](../../examples/opentofu):
 
-- [`web-vm.yaml`](../../examples/opentofu/web-vm.yaml) is a virtual machine on AWS with a
-  fixed address, a variable and a local value.
-- [`encrypted-state.yaml`](../../examples/opentofu/encrypted-state.yaml) encrypts its state
-  and plan. It uses only resources built into OpenTofu, so it runs without a cloud account.
+- [`web-vm.yaml`](../../examples/opentofu/web-vm.yaml): an AWS VM with a variable and a local.
+- [`encrypted-state.yaml`](../../examples/opentofu/encrypted-state.yaml): encrypted state and
+  plan, no cloud account needed.
 
 ## Resource types
 
@@ -88,14 +85,11 @@ Two complete documents are in [`examples/opentofu/`](../../examples/opentofu):
 | `backend` | the `backend` block; the `id` is the backend type, such as `s3` | not referable |
 | `encryption` | the `encryption` block | not referable |
 
-Meta-arguments such as `count`, `for_each`, `provider`, `lifecycle` and `provisioner` are
-params like any other, and are written through unchanged.
+Meta-arguments (`count`, `for_each`, `provider`, `lifecycle`, `provisioner`) are params.
 
 ### Resources and data sources
 
-A managed resource's `type` is the provider's type name and its `params` are that type's
-arguments and nested blocks, written as the provider's documentation names them. A data
-source is the same with `data.` in front of the type.
+A data source is a resource with `data.` before the type.
 
 ```yaml
     - id: ubuntu
@@ -117,20 +111,13 @@ source is the same with `data.` in front of the type.
           create_before_destroy: true
 ```
 
-A nested block is a map, and a repeated nested block is a list of maps, as `filter` is
-above. OpenTofu decides from the provider's schema whether a param is an argument or a
-block, so the document does not have to say.
-
-The only field of a resource besides `id`, `type` and `params` that this target accepts
-is `state: present`, which is also the default. `state: absent` is refused: remove the
-resource from the document and OpenTofu destroys it.
+A nested block is a map; a repeated one is a list of maps. `state` must be `present`; to
+destroy, remove the resource.
 
 ### Ephemeral resources
 
-`ephemeral.<type>` becomes an `ephemeral` block (OpenTofu 1.11 or later). OpenTofu opens
-an ephemeral resource during a plan or an apply and closes it afterwards, and never
-writes its values to the state or the plan. Use one for a secret that is only needed
-while OpenTofu runs, and pass its values to a provider's write-only arguments:
+`ephemeral.<type>` becomes an `ephemeral` block (OpenTofu 1.11+), never written to state or
+plan. Pass its values to write-only arguments:
 
 ```yaml
     - id: db_password
@@ -146,13 +133,12 @@ while OpenTofu runs, and pass its values to a provider's write-only arguments:
         password_wo_version: 1
 ```
 
-An ephemeral resource never appears among a plan's changes.
+It never appears in a plan's changes.
 
 ### Modules
 
-`module` becomes a `module` block. `source` is required; `version`, `providers`, `count`,
-`for_each` and `depends_on` are OpenTofu's own, and every other param is an input of the
-module. `${id.<output>}` reads one of the module's outputs.
+`source` is required; `version`, `providers`, `count`, `for_each` and `depends_on` are
+OpenTofu's; other params are inputs. `${id.<output>}` reads an output.
 
 ```yaml
     - id: network
@@ -170,9 +156,8 @@ module. `${id.<output>}` reads one of the module's outputs.
 
 ### Backends
 
-`backend` becomes the `backend` block, which says where the state is stored. The `id` is
-the backend type and the params are that backend's settings. A document may declare one.
-Without one, OpenTofu keeps `terraform.tfstate` in the work directory.
+The `id` is the backend type; params are its settings. At most one; without it, state is
+in the work directory.
 
 ```yaml
     - id: s3
@@ -185,10 +170,8 @@ Without one, OpenTofu keeps `terraform.tfstate` in the work directory.
 
 ### Providers
 
-A provider's `id` is its local name, and its params are the provider's configuration.
-`source` and `version` are moved to `required_providers`; leave them out for a provider
-OpenTofu can find by its name alone. To configure one provider twice, give both the same
-`name` and all but one an `alias`:
+The `id` is the local name. `source` and `version` go to `required_providers`. For two
+configurations, share `name` and give all but one an `alias`:
 
 ```yaml
     - id: east
@@ -204,8 +187,8 @@ OpenTofu can find by its name alone. To configure one provider twice, give both 
 
 ### Variables and local values
 
-A `variable` is an input. Its params are OpenTofu's: `type`, `default`, `description`,
-`sensitive`, `nullable`, `validation`. A `local` has one param, `value`.
+`variable` params: `type`, `default`, `description`, `sensitive`, `nullable`, `validation`.
+A `local` has one param, `value`.
 
 ```yaml
     - id: region
@@ -223,13 +206,8 @@ A `variable` is an input. Its params are OpenTofu's: `type`, `default`, `descrip
         value: web-${region}
 ```
 
-A variable gets its value from `TF_VAR_<id>` in the environment `meridian` runs in, the
-same way it would with `tofu` itself. A value the document
-[imports](../reference/dsl/outputs-and-hand-offs.md#imports) from another document of the
-workflow arrives the same way, under the import's name, so the import and the variable
-share a name. A string is passed as
-it is; a number, a boolean, a list or a map is passed as JSON, which OpenTofu parses for a
-variable of that type.
+Values come from `TF_VAR_<id>`. An [import](../reference/dsl/outputs-and-hand-offs.md#imports)
+arrives the same way under its name. Non-strings are passed as JSON.
 
 ## Common infrastructure types
 
@@ -255,8 +233,7 @@ has a column for each cloud on each tool.
 | `${region}` where `region` is a `variable` | `${var.region}` |
 | `${name_prefix}` where `name_prefix` is a `local` | `${local.name_prefix}` |
 
-The same names are found inside a larger expression, so OpenTofu's functions and operators
-can be used on them directly:
+Names inside larger expressions are rewritten too:
 
 ```yaml
         ami: ${upper(ubuntu.id)}
@@ -264,25 +241,16 @@ can be used on them directly:
         tags: ${merge(tags, {Role = "database"})}
 ```
 
-A name is left alone where it does not stand for a value: a function being called, an
-attribute after a dot, a key of an object, a name bound by `for`, and the text of a quoted
-string. A `${…}` template inside a quoted string is an expression again, so
-`${[for zone in ["a", "b"] : "${region}${zone}"]}` works as it reads. Expressions that start with one of OpenTofu's own namespaces (`var`,
-`local`, `data`, `module`, `path`, `terraform`, `tofu`, `each`, `count`, `self`,
-`ephemeral`, `key_provider`, `method`) are handed over as written, so anything OpenTofu
-can express remains available. A resource may not use one of those names as its `id`.
+Function names, attributes after a dot, object keys, `for` names and quoted text are left
+alone; `${…}` inside quotes is an expression again. OpenTofu namespaces (`var`, `local`,
+`data`, `module`, `path`, `terraform`, `tofu`, `each`, `count`, `self`, `ephemeral`,
+`key_provider`, `method`) pass through and cannot be ids.
 
-A reference to an `id` the document does not declare is refused at compile time, with the
-file and line of the resource that made it, instead of surfacing later as an OpenTofu
-error on the machine that runs the plan.
-
-To write a literal `${`, escape it as `$${`.
+Unknown ids are refused at compile. `$${` is a literal `${`.
 
 ## Ordering
 
-OpenTofu orders resources from the references between them, so a reference is all the
-ordering most documents need. `dependsOn` becomes `depends_on` only when no reference
-already implies it:
+`dependsOn` becomes `depends_on` only where no reference implies it:
 
 ```yaml
     - id: web_ip
@@ -300,16 +268,12 @@ already implies it:
         - resource: web_ip     # written as depends_on
 ```
 
-Resources, data sources, ephemeral resources and modules can be depended on. Providers,
-backends, variables, local values and the encryption block cannot: OpenTofu works those
-out before or alongside everything else, and the compile says so.
+Providers, backends, variables, locals and `encryption` cannot be depended on.
 
 ## Notifications
 
-OpenTofu has no handler to run when something changes. The nearest it has is
-`replace_triggered_by`, which destroys and recreates the notified resource. The plugin
-declares this as a synthetic notify, accepts only `action: replace`, and warns about every
-use, because a replacement can lose data:
+A synthetic notify via `replace_triggered_by`, which recreates the resource. Only
+`action: replace`, always with a warning:
 
 ```yaml
     - id: config
@@ -325,13 +289,11 @@ use, because a replacement can lose data:
 opentofu: service: is destroyed and created again whenever "config" changes; OpenTofu has no gentler way to react to a change (replace_triggered_by)
 ```
 
-A `lifecycle` the document already gives the notified resource, such as
-`create_before_destroy`, is kept.
+An existing `lifecycle` is kept.
 
 ## State and plan encryption
 
-OpenTofu can encrypt its state and plan files. An `encryption` resource compiles to the
-`encryption` block, and a document may have one.
+An `encryption` resource (at most one) compiles to the `encryption` block.
 
 ```yaml
     - id: state_passphrase
@@ -364,10 +326,9 @@ TF_VAR_state_passphrase='correct-horse-battery-staple' \
   meridian apply examples/opentofu/encrypted-state.yaml
 ```
 
-The params are OpenTofu's: `key_provider` and `method` are maps of a type to a name to
-its settings, and `state`, `plan` and `remote_state_data_sources` each name the method
-that protects them. `fallback` and `enforced` are supported, as is the `unencrypted`
-method OpenTofu provides for moving an existing state into or out of encryption.
+`key_provider` and `method` map type to name to settings; `state`, `plan` and
+`remote_state_data_sources` name their method. `fallback`, `enforced` and `unencrypted`
+are supported.
 
 | Param | Shape | Settings |
 |---|---|---|
@@ -376,12 +337,8 @@ method OpenTofu provides for moving an existing state into or out of encryption.
 | `state`, `plan` | a map | `method` (required), `enforced` (true or false), `fallback: {method: …}` |
 | `remote_state_data_sources` | a map | `default`, and `remote_state_data_source: <name>:`, each with the same settings as `state` |
 
-A `method` is always one fixed reference, `${method.<type>.<name>}`. OpenTofu chooses the
-method before it evaluates anything, so an expression cannot choose it; `keys` and a key
-provider's own settings may be computed.
-
-The block is checked when the document is compiled, so these mistakes are caught before
-anything runs:
+A `method` is a fixed `${method.<type>.<name>}`; `keys` and key provider settings may be
+computed. Refused at compile:
 
 | Rule | Refused when |
 |---|---|
@@ -390,39 +347,24 @@ anything runs:
 | `invalid-param` | an argument is not part of an encryption block; a `method` is an expression, or it or `keys` is not written as a reference; `enforced` is not true or false |
 | `duplicate-resource` | the document declares two encryption blocks |
 
-And these are compiled, with a warning:
+Warned:
 
-- **A passphrase written in the document.** It would also be in `main.tofu.json`, beside
-  the state it protects. Use a sensitive `variable`, as above.
-- **An encrypted state with an unencrypted plan.** A saved plan holds a copy of the
-  state, and Meridian saves one in the work directory on every run.
-- **A method or key provider that nothing uses.** It is almost always a misspelling of
-  the one that was meant.
+- **A literal passphrase**; use a sensitive `variable`.
+- **Encrypted state with an unencrypted plan**; the saved plan holds the state.
+- **An unused method or key provider**, usually a typo.
 
-The passphrase for `pbkdf2` must be at least 16 characters; OpenTofu enforces that when it
-runs.
+`pbkdf2` passphrases need 16+ characters.
 
 ## Outputs
 
-Each entry of `outputs` becomes an `output` block, and its value is reported under the same
-name after an apply, which is how a later stage learns the address of the machine this one
-creates.
-
-An output that reads a `variable` marked `sensitive: true` is itself written with
-`sensitive = true`. OpenTofu refuses to plan an output that could reveal a secret unless
-the output says so, and Meridian masks a sensitive output wherever it is shown.
+Each output becomes an `output` block, reported after apply. One reading a sensitive
+variable is `sensitive = true` and masked.
 
 ## Editor schemas
 
-`meridian schema sync` asks OpenTofu for the providers' schemas, exactly as
-the [Terraform target](terraform.md#editor-schemas) does with `terraform`:
-the plugin writes a configuration requiring the providers the documents use
-into its work directory, runs `tofu init -backend=false` and reads `tofu
-providers schema -json`. The types the documents use are described in full,
-including `ephemeral.<type>` resources; the rest of each provider is listed
-by name; each provider's version is pinned from `.terraform.lock.hcl`. The
-cache records the tool as `opentofu`, so a project that uses both targets
-keeps one cache for each. See [Tool schemas](../tooling/schema-sync.md).
+As on [Terraform](terraform.md#editor-schemas), with `tofu init -backend=false` and
+`tofu providers schema -json`, `ephemeral.<type>` included. The cache is kept apart as
+`opentofu`. See [Tool schemas](../tooling/schema-sync.md).
 
 ## What running does
 
@@ -433,26 +375,18 @@ keeps one cache for each. See [Tool schemas](../tooling/schema-sync.md).
 | Apply | the plan steps, then `tofu apply -input=false meridian.tfplan`, then `tofu output -json` |
 | Outputs | `tofu output -json` |
 
-An apply always applies the plan it has just shown, so nothing changes that was not
-reported. The work directory is `<state-dir>/infrastructure/<document>/opentofu`
-(`.meridian` by default). OpenTofu keeps `.terraform`, the lock file and, unless the
-document declares a `backend`, its state file there, so keep that directory between runs.
+An apply applies the plan it just showed. Keep the work directory,
+`<state-dir>/infrastructure/<document>/opentofu`: it holds `.terraform`, the lock file and,
+without a `backend`, the state.
 
-Changes are reported as create, update, delete or replace against the resource's `id`. A
-resource inside a module, or one of several instances made with `count` or `for_each`,
-keeps OpenTofu's full address.
+Changes are reported by `id`; module resources and `count`/`for_each` instances keep their
+full address.
 
-A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a resource's
-params is compiled as `${var.meridian_secret_<name>}`, with the variable declared
-`sensitive`. When the stage runs, the values are written into a variables file only the
-user can read, held in memory where the system allows, and passed to `tofu plan` as
-`-var-file=<path>`; the file is removed once the plan is saved, and the saved plan, which
-holds every variable's value, is overwritten and removed as soon as it has been applied
-or shown. For the same reason a [saved plan](../operations/pull-requests.md)
-(`meridian plan --out`) keeps no OpenTofu plan file for such a stage, and the apply plans
-again for it. The value is never on the command line and never in OpenTofu's environment. A
-document that hands OpenTofu a secret should [encrypt its state](#state-and-plan-encryption),
-since a resource's arguments are written there whichever variable they came from.
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) compiles to
+`${var.meridian_secret_<name>}`, declared `sensitive`. The value goes in a private variables
+file passed as `-var-file`, removed after planning; the plan file is removed after use. A
+[saved plan](../operations/pull-requests.md) keeps no plan file for such a stage, so apply
+plans again. [Encrypt the state](#state-and-plan-encryption), which holds the arguments.
 
 | Environment variable | Effect |
 |---|---|
@@ -461,10 +395,8 @@ since a resource's arguments are written there whichever variable they came from
 | `TF_VAR_<name>` | The value of the variable `<name>` |
 | Anything else OpenTofu reads | Passed through, such as `AWS_PROFILE`, `TF_CLI_ARGS` or `TF_ENCRYPTION` |
 
-Every setting can also be written in the project's `meridian.yaml` under
-`spec.settings.opentofu`, by its short name; the environment variable still wins.
-The names, defaults and the splitting rule for argument lists are in the
-[plugin settings reference](../reference/plugin-settings.md#opentofu).
+Settings can also go in `meridian.yaml` under `spec.settings.opentofu`; the environment
+wins. See the [plugin settings reference](../reference/plugin-settings.md#opentofu).
 
 ## Adopting what exists
 
@@ -497,10 +429,15 @@ thing into its state on the next apply instead of creating it:
   `adopt: "${{ data.bucket }}"`.
 - Import blocks need OpenTofu 1.6 or later, its first release.
 
+### Moving to another tool
+
+The plugin reports what it manages, read from `tofu show -json`: each
+managed resource's `id`, by resource id. [`meridian retarget`](../operations/retargeting.md)
+uses it to write `adopt:` when a document moves to another tool.
+
 ## What the target does not do
 
-Meridian never degrades silently. Where OpenTofu has no equivalent, the compile fails and
-says why.
+Refused at compile:
 
 | Rule | Refused when |
 |---|---|
@@ -517,16 +454,11 @@ says why.
 | `duplicate-resource`, `duplicate-output` | the same thing is declared twice |
 | `missing-param` | a `module` has no `source`, or a `local` has no `value` |
 
-The compile needs no provider schema, because the configuration is written in OpenTofu's
-JSON syntax, where OpenTofu itself decides whether a param is an argument or a nested
-block. The cost is that a misspelled argument is only found by `tofu plan`, which has the
-schema. That failure is reported with OpenTofu's own message.
+The output is JSON, so no schema is needed; a misspelled argument is found by `tofu plan`.
 
 ## OpenTofu or Terraform?
 
-The two tools read the same language, and a document that uses none of OpenTofu's own
-features compiles to the same blocks for either target. Choose `target: opentofu` when you
-run `tofu`, and especially when you want what only OpenTofu has:
+Without OpenTofu-only features, both targets compile the same blocks. OpenTofu-only:
 
 | | `opentofu` | `terraform` |
 |---|---|---|
@@ -537,26 +469,16 @@ run `tofu`, and especially when you want what only OpenTofu has:
 | Document names inside functions and operators | rewritten | handed over as written |
 | Sensitive outputs | marked automatically | not marked |
 
-To move a document from Terraform to OpenTofu, change `target: terraform` to
-`target: opentofu`. Each target has its own work directory, so copy the existing state
-file (`terraform.tfstate`) from `.meridian/infrastructure/<document>/terraform` to
-`.meridian/infrastructure/<document>/opentofu` first, or declare a `backend` so both read
-the same remote state. Follow OpenTofu's own migration guide for the version you are
-moving from.
+To switch, change `target` and copy `terraform.tfstate` from
+`.meridian/infrastructure/<document>/terraform` to `.../opentofu`, or use a shared
+`backend`. Follow OpenTofu's migration guide.
 
 ## Importing
 
-`meridian import --from opentofu DIR` reads a directory's `*.tf`, `*.tofu`, `*.tf.json`
-and `*.tofu.json` files and writes one Infrastructure document. The language is
-Terraform's, so everything on [the Terraform page](terraform.md#importing) holds here:
-the same mapping, the same renaming of names that collide, the same things reported. A
-`*.tofu` file replaces the `*.tf` file of the same name, as it does for `tofu`.
-[Importing existing configuration](../operations/importing.md) is the guide.
-
-`--from opentofu` is needed for `*.tf` files, which Terraform reads too. A directory that
-holds only `*.tofu` files is OpenTofu's without being told.
-
-What OpenTofu has and Terraform does not is imported as well:
+`meridian import --from opentofu DIR` reads `*.tf`, `*.tofu`, `*.tf.json` and `*.tofu.json`
+into one document, as [on Terraform](terraform.md#importing)
+([guide](../operations/importing.md)). A `*.tofu` file replaces the same-named `*.tf`.
+Only-`*.tofu` directories need no `--from`. Also imported:
 
 | In the configuration | In the document |
 |---|---|
@@ -564,18 +486,13 @@ What OpenTofu has and Terraform does not is imported as well:
 | `ephemeral "random_password" "db"` | type `ephemeral.random_password` |
 | `key_provider.pbkdf2.main`, `method.aes_gcm.main` inside the encryption block | kept as written: they name parts of the same block, not resources |
 
-A passphrase written in the configuration is carried into the document as it is, and the
-compile-time checks under [State and plan encryption](#state-and-plan-encryption) then
-apply to it. Take it from a variable instead.
-
-The round-trip tests are in
-[`plugins/opentofu/tests/import.rs`](../../plugins/opentofu/tests/import.rs): the
-Terraform page's `web-vm` configuration compiled for OpenTofu, and a configuration with
-state encryption.
+A literal passphrase is imported as is and then [warned about](#state-and-plan-encryption).
+Round-trip tests:
+[`plugins/opentofu/tests/import.rs`](../../plugins/opentofu/tests/import.rs).
 
 ## Testing
 
-The plugin's tests are in [`plugins/opentofu/tests`](../../plugins/opentofu/tests):
+In [`plugins/opentofu/tests`](../../plugins/opentofu/tests):
 
 | Tests | What they prove | Needs |
 |---|---|---|
@@ -592,5 +509,4 @@ MERIDIAN_TEST_REAL_TOFU=tofu cargo test -p meridian-target-opentofu --test real
 UPDATE_GOLDEN=1 cargo test -p meridian-target-opentofu    # re-record the golden files
 ```
 
-The `opentofu` workflow installs OpenTofu and runs the real tests on every pull request
-that touches the plugin.
+The `opentofu` workflow runs the real tests.

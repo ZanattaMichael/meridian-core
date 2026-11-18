@@ -1,7 +1,6 @@
 # Other editors
 
-Any editor with a Language Server Protocol client can use
-[`meridian lsp`](language-server.md). The recipe is always the same:
+Any LSP client can use [`meridian lsp`](language-server.md):
 
 - the command is `meridian lsp`;
 - attach it to YAML files (the server ignores the ones that are not Meridian
@@ -9,13 +8,9 @@ Any editor with a Language Server Protocol client can use
 - optionally pass `pluginDirs`, `lint` and `sortFields` as
   [initialization options](language-server.md#options).
 
-The configurations below follow each editor's documentation. Only the VS Code
-extension is built and tested in this repository's CI; if one of these needs
-a correction, please open an issue.
-
-For editors with no language server client, use the
-[JSON Schema](json-schema.md), and run [`meridian lint`](linter.md) and
-[`meridian fmt`](formatter.md) from the command line or a pre-commit hook.
+Only the VS Code extension is tested in CI. Without an LSP client, use the
+[JSON Schema](json-schema.md), [`meridian lint`](linter.md) and
+[`meridian fmt`](formatter.md).
 
 ## Neovim
 
@@ -35,7 +30,7 @@ vim.lsp.config('meridian', {
 vim.lsp.enable('meridian')
 ```
 
-It runs beside `yamlls` if you use that too.
+It runs beside `yamlls`.
 
 ## Helix
 
@@ -68,12 +63,11 @@ Then `M-x eglot` in a Meridian document.
 
 ## Zed, Sublime Text, Kate and others
 
-Each has a setting that maps a language to a server command. Give it
-`meridian lsp` for YAML.
+Map YAML to `meridian lsp`.
 
 ## Pre-commit
 
-To check documents before each commit, with [pre-commit](https://pre-commit.com/):
+With [pre-commit](https://pre-commit.com/):
 
 ```yaml
 repos:
@@ -91,5 +85,4 @@ repos:
         files: \.(ya?ml)$
 ```
 
-Both commands take the files pre-commit passes, and both pass over a YAML file
-that is not a Meridian document.
+Non-Meridian YAML files are skipped.
