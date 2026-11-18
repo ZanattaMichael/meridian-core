@@ -570,6 +570,8 @@ fn a_cloud_credential_leaves_nothing_in_the_program_and_a_role_is_refused() {
         err.msg
     );
 }
+
+#[test]
 fn adopt_becomes_the_import_option() {
     let text = program(
         "  resources:\n    - id: logs\n      type: aws:s3/bucket:Bucket\n      adopt: example-logs\n      params:\n        bucket: example-logs\n        resourceOptions: {protect: true}\n",
