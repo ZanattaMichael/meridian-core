@@ -1,10 +1,19 @@
 # Tool schemas: completion for a tool's own types
 
 ```
-meridian schema sync   <paths>... [--target TARGET] [--data FILE] [--set KEY=VALUE] [--state-dir DIR] [--check] [--no-lock]
+meridian schema sync   <paths>... [--target TARGET] [--data FILE] [--set KEY=VALUE] [--state-dir DIR]
+                                  [--check | --locked] [--no-lock] [--all-types]
+                                  [--prefer bundles|tool] [--schema-signatures POLICY]
+meridian schema update <paths>... [the same options, less --check and --locked]
 meridian schema status [--state-dir DIR] [--json]
 meridian schema clean  [TARGET]... [--state-dir DIR]
 ```
+
+A project can also take these schemas ready-made, as signed **schema
+bundles** from an OCI registry, with no tool installed at all; `pack`,
+`sign`, `push` and `fetch` make and move them. That is described in
+[Schema bundles](schema-bundles.md); this page is about the schemas
+themselves and about asking the tools.
 
 A target plugin declares the resource types Meridian itself defines, so the
 [editor tools](index.md) complete and check `package`, `file` or `service` on
@@ -49,7 +58,15 @@ the network; nothing an editor does ever will.
 | `--data FILE`, `--set KEY=VALUE` | values for `when` conditions, as for `compile`; without them every resource is included |
 | `--state-dir DIR` | where the cache lives (default `.meridian`, or `MERIDIAN_STATE_DIR`) |
 | `--check` | change nothing; fail if any target's cache is missing or is not what `meridian.lock` records. For CI |
+| `--locked` | use only what `meridian.lock` pins: the [schema bundles](schema-bundles.md#the-lock-file) it names, by digest, or for a target synced from its tool, the tool and pins it records (a tool that answers from other versions fails the target). Nothing new is chosen. For CI |
 | `--no-lock` | cache the schemas but do not record them in `meridian.lock` |
+| `--all-types` | describe every type of the providers, packages or cluster the documents use, not only the types they write: the tool is asked a second time for all of them. For building a [schema bundle](schema-bundles.md#making-and-publishing-a-bundle); the cache can be large |
+| `--prefer bundles\|tool` | where to take a target's schemas from first (default `bundles`, or `MERIDIAN_SCHEMA_PREFER`). With `bundles`, a project whose `meridian.yaml` names [schema registries](schema-bundles.md#naming-the-registries-specschemas), or whose lock pins bundles, gets them from there and asks the tool only for a target no bundle set describes. Without a registry named, both mean the tool |
+| `--schema-signatures off\|warn\|require` | how strict to be about a bundle's signature; defaults to `spec.schemas.signatures`, else `off` |
+
+`meridian schema update` takes the same paths and options and chooses the
+schema bundles again, the newest that describe what the documents use,
+moving the lock to them; a target synced from its tool is synced again.
 
 A target whose plugin does not export schemas is reported and skipped. A
 tool that cannot be run is an error for that target, and the sync goes on
@@ -128,6 +145,14 @@ reported as differing from the lock until it is synced again. `meridian
 module install` leaves the `schemas` section alone, and a sync leaves the
 `modules` section alone.
 
+A cache made from [schema bundles](schema-bundles.md#the-lock-file) is
+recorded the same way, with a `bundles` list giving each bundle's reference
+and digest. Such a cache holds no sync time, so it is the same bytes on
+every machine and a colleague's `--locked` sync reproduces the committed
+hash exactly. A cache the tool wrote holds the time of the sync, so its
+hash is reproduced only by the same file: on another machine, `--locked`
+holds the tool to the recorded versions instead.
+
 ## Status and clean
 
 ```console
@@ -137,11 +162,18 @@ kubernetes: recorded in meridian.lock but not on disk; run `meridian schema sync
 pulumi: not synced
 ```
 
+A cache made from bundles says so instead of a sync time:
+
+```console
+$ meridian schema status
+terraform: 1503 resource types from terraform 1.13.1; registry.terraform.io/hashicorp/aws 5.60.0, fetched from the schema bundle terraform/hashicorp-aws:5.60.0: current
+```
+
 The states are `current`, `not recorded in meridian.lock` (cached with
 `--no-lock`, or before the lock was committed), `recorded in meridian.lock
 but not on disk` and `differs from what meridian.lock records`. `--json`
 prints one object per target, with the cache and the lock entry side by
-side.
+side; each carries `bundles`, empty for a cache the tool wrote.
 
 `meridian schema clean` removes every target's cache and its record in the
 lock; `meridian schema clean terraform` removes one target's.
@@ -232,7 +264,10 @@ fails the build before a document that relies on it does:
 
 It changes nothing and runs no tool. To refresh the cache in CI instead, run
 `meridian schema sync .` on a machine that has the tools and the network
-they need, and commit the lock file it writes. The first-party plugins'
+they need, and commit the lock file it writes. A project that takes its
+schemas from [bundles](schema-bundles.md#in-ci) runs `meridian schema sync
+--locked .` in CI instead, which needs no tool at all and fetches exactly
+what the lock pins. The first-party plugins'
 exporters are tested against the real tools in the same workflows as their
 runners; see [Real-tool tests](../contributing/real-tool-tests.md).
 
@@ -244,7 +279,8 @@ runners; see [Real-tool tests](../contributing/real-tool-tests.md).
   resource is included.
 - The sync describes the tool as installed on the machine it runs on. A
   colleague with another provider version gets a cache that differs from
-  the lock, and is told so.
+  the lock, and is told so. [Schema bundles](schema-bundles.md) are the way
+  to give every machine the same schemas without the tools.
 - Meridian's own types on a target (`module`, `variable`, `provider`,
   `cluster`, `stack`) and its `spec.settings` keys are the plugin's to
   describe, and are not in the cache.

@@ -27,6 +27,40 @@ use crate::{Error, Kind};
 pub const ARTIFACT_TYPE: &str = "application/vnd.meridian.module.v1";
 /// The media type of the one layer that holds the module.
 pub const LAYER_MEDIA_TYPE: &str = "application/vnd.meridian.module.layer.v1.tar+gzip";
+
+/// What a Meridian artifact in a registry is: the manifest's artifact type,
+/// the media type of the one layer that holds it, and the noun messages use.
+/// A manifest is read only as the kind it was asked for, so a module is
+/// never taken for a schema bundle or the other way round.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ArtifactKind {
+    pub artifact_type: &'static str,
+    pub layer_media_type: &'static str,
+    pub noun: &'static str,
+}
+
+/// A module: a gzipped tar of its files.
+pub const MODULE_ARTIFACT: ArtifactKind = ArtifactKind {
+    artifact_type: ARTIFACT_TYPE,
+    layer_media_type: LAYER_MEDIA_TYPE,
+    noun: "module",
+};
+
+/// A schema bundle: one target's resource type schemas at one set of pins,
+/// as a gzipped tar of an index and one file per type.
+pub const SCHEMA_BUNDLE_ARTIFACT: ArtifactKind = ArtifactKind {
+    artifact_type: "application/vnd.meridian.schema-bundle.v1",
+    layer_media_type: "application/vnd.meridian.schema-bundle.layer.v1.tar+gzip",
+    noun: "schema bundle",
+};
+
+/// The index of a schema registry: one JSON file listing every bundle the
+/// registry holds, with its pins, its types and its digest.
+pub const SCHEMA_INDEX_ARTIFACT: ArtifactKind = ArtifactKind {
+    artifact_type: "application/vnd.meridian.schema-index.v1",
+    layer_media_type: "application/vnd.meridian.schema-index.layer.v1+json",
+    noun: "schema index",
+};
 const MANIFEST_MEDIA_TYPE: &str = "application/vnd.oci.image.manifest.v1+json";
 
 /// A manifest is a few hundred bytes; this is generous.
@@ -504,8 +538,8 @@ impl<'a> Repository<'a> {
     }
 
     /// Fetches the manifest at a tag or digest. Returns the manifest's own
-    /// digest and the digest of the layer that holds the module.
-    fn manifest(&self, reference: &str) -> Result<(String, String), Error> {
+    /// digest and the digest of the layer that holds the artifact.
+    fn manifest(&self, reference: &str, kind: ArtifactKind) -> Result<(String, String), Error> {
         let what = format!("the manifest {reference}");
         let url = format!("{}/v2/{}/manifests/{reference}", self.base, self.path);
         let response = self.get(&url, MANIFEST_MEDIA_TYPE)?;
@@ -540,14 +574,16 @@ impl<'a> Repository<'a> {
                 .unwrap_or_default()
                 .to_owned()
         };
-        let Some(layer) = layers.iter().find(|l| media(l) == LAYER_MEDIA_TYPE) else {
+        let Some(layer) = layers.iter().find(|l| media(l) == kind.layer_media_type) else {
             let found: Vec<String> = layers.iter().map(media).collect();
             return Err(Error::new(
                 Kind::Registry,
                 format!(
-                    "{reference} of {} is not a Meridian module: it has no layer of type \
-                 {LAYER_MEDIA_TYPE} (found: {})",
+                    "{reference} of {} is not a Meridian {}: it has no layer of type {} \
+                 (found: {})",
                     self.name,
+                    kind.noun,
+                    kind.layer_media_type,
                     if found.is_empty() {
                         "no layers".to_owned()
                     } else {
@@ -689,59 +725,138 @@ pub fn push(
     description: &str,
     archive: &[u8],
 ) -> Result<Pushed, Error> {
-    let repo = Repository::open(repository, insecure, login)?;
-    repo.writing.set(true);
     // A tag cannot hold `+`.
     let tag = version.to_string().replace('+', "_");
-
-    // Written by hand, key by key, so the same module always gives the same
-    // manifest and therefore the same digest.
-    let mut annotations = format!(
-        "{{\"org.opencontainers.image.title\":{},\"org.opencontainers.image.version\":{}",
-        json_string(name),
-        json_string(&version.to_string())
-    );
+    let version_text = version.to_string();
+    let mut annotations = vec![
+        ("org.opencontainers.image.title", name),
+        ("org.opencontainers.image.version", version_text.as_str()),
+    ];
     if !description.is_empty() {
-        annotations.push_str(&format!(
-            ",\"org.opencontainers.image.description\":{}",
-            json_string(description)
+        annotations.push(("org.opencontainers.image.description", description));
+    }
+    publish(
+        repository,
+        insecure,
+        login,
+        &Artifact {
+            kind: MODULE_ARTIFACT,
+            tag: &tag,
+            annotations: &annotations,
+            layer: archive,
+            replace: false,
+        },
+        &|found| {
+            format!(
+                "{name} {version} is already published in {repository} with different content \
+                 ({found}); a version is published once. Release a new version instead"
+            )
+        },
+    )
+}
+
+/// One artifact to publish with [`push_artifact`].
+pub struct Artifact<'a> {
+    pub kind: ArtifactKind,
+    /// The tag to publish under.
+    pub tag: &'a str,
+    /// Written into the manifest in this order.
+    pub annotations: &'a [(&'a str, &'a str)],
+    /// The bytes of the one layer.
+    pub layer: &'a [u8],
+    /// Whether a tag that already holds other content is moved to this
+    /// one. Only an index, which is a pointer to other artifacts, is
+    /// published this way; a version is published once.
+    pub replace: bool,
+}
+
+/// Whether `tag` is a tag the distribution specification allows.
+pub fn valid_tag(tag: &str) -> bool {
+    let bytes = tag.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 128
+        && (bytes[0].is_ascii_alphanumeric() || bytes[0] == b'_')
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
+}
+
+/// Publishes one artifact: an OCI manifest with an empty configuration and
+/// one layer. The manifest is written by hand, key by key, so the same
+/// artifact always gives the same manifest and therefore the same digest.
+pub fn push_artifact(
+    repository: &str,
+    insecure: bool,
+    login: Option<&Credential>,
+    artifact: &Artifact<'_>,
+) -> Result<Pushed, Error> {
+    publish(repository, insecure, login, artifact, &|found| {
+        format!(
+            "{repository}:{} is already published with different content ({found}); a {} \
+             version is published once",
+            artifact.tag, artifact.kind.noun
+        )
+    })
+}
+
+fn publish(
+    repository: &str,
+    insecure: bool,
+    login: Option<&Credential>,
+    artifact: &Artifact<'_>,
+    published_once: &dyn Fn(&str) -> String,
+) -> Result<Pushed, Error> {
+    let tag = artifact.tag;
+    if !valid_tag(tag) {
+        return Err(Error::new(
+            Kind::Registry,
+            format!(
+                "{tag:?} cannot be a registry tag: use letters, digits, `.`, `_` and `-`, \
+                 starting with a letter, a digit or `_`, at most 128 of them"
+            ),
         ));
+    }
+    let repo = Repository::open(repository, insecure, login)?;
+    repo.writing.set(true);
+    let kind = artifact.kind;
+    let mut annotations = String::from("{");
+    for (i, (key, value)) in artifact.annotations.iter().enumerate() {
+        if i > 0 {
+            annotations.push(',');
+        }
+        annotations.push_str(&format!("{}:{}", json_string(key), json_string(value)));
     }
     annotations.push('}');
     let manifest = format!(
-        "{{\"schemaVersion\":2,\"mediaType\":\"{MANIFEST_MEDIA_TYPE}\",\"artifactType\":\"{ARTIFACT_TYPE}\",\
+        "{{\"schemaVersion\":2,\"mediaType\":\"{MANIFEST_MEDIA_TYPE}\",\"artifactType\":\"{}\",\
          \"config\":{{\"mediaType\":\"{EMPTY_CONFIG_MEDIA_TYPE}\",\"digest\":\"sha256:{}\",\"size\":{}}},\
-         \"layers\":[{{\"mediaType\":\"{LAYER_MEDIA_TYPE}\",\"digest\":\"sha256:{}\",\"size\":{}}}],\
+         \"layers\":[{{\"mediaType\":\"{}\",\"digest\":\"sha256:{}\",\"size\":{}}}],\
          \"annotations\":{annotations}}}",
+        kind.artifact_type,
         sha256_hex(EMPTY_CONFIG),
         EMPTY_CONFIG.len(),
-        sha256_hex(archive),
-        archive.len()
+        kind.layer_media_type,
+        sha256_hex(artifact.layer),
+        artifact.layer.len()
     );
     let digest = format!("sha256:{}", sha256_hex(manifest.as_bytes()));
 
-    match repo.existing(&tag)? {
+    match repo.existing(tag)? {
         Some(found) if found == digest => {
             return Ok(Pushed {
-                tag,
+                tag: tag.to_owned(),
                 digest,
                 already_published: true,
             })
         }
-        Some(found) => {
-            return Err(Error::new(
-                Kind::Registry,
-                format!(
-                    "{name} {version} is already published in {repository} with different content \
-                 ({found}); a version is published once. Release a new version instead"
-                ),
-            ))
+        Some(found) if !artifact.replace => {
+            return Err(Error::new(Kind::Registry, published_once(&found)))
         }
-        None => {}
+        _ => {}
     }
 
     repo.upload(EMPTY_CONFIG)?;
-    repo.upload(archive)?;
+    repo.upload(artifact.layer)?;
     let url = format!("{}/v2/{}/manifests/{tag}", repo.base, repo.path);
     let put = Call::Put {
         content_type: MANIFEST_MEDIA_TYPE,
@@ -750,10 +865,39 @@ pub fn push(
     let response = repo.request(&url, &put)?;
     repo.check(&response, &format!("the manifest {tag}"))?;
     Ok(Pushed {
-        tag,
+        tag: tag.to_owned(),
         digest,
         already_published: false,
     })
+}
+
+/// Fetches the one layer of the artifact at `reference` (a tag or a
+/// manifest digest), checked against the digests it was asked for by.
+/// Returns the manifest's digest and the layer's bytes. A reference the
+/// repository does not hold is `Ok(None)`.
+pub fn pull_artifact(
+    repository: &str,
+    insecure: bool,
+    login: Option<&Credential>,
+    kind: ArtifactKind,
+    reference: &str,
+) -> Result<Option<(String, Vec<u8>)>, Error> {
+    let repo = Repository::open(repository, insecure, login)?;
+    if !reference.starts_with("sha256:") && repo.existing(reference)?.is_none() {
+        return Ok(None);
+    }
+    let (digest, layer) = repo.manifest(reference, kind)?;
+    let bytes = repo.blob(&layer)?;
+    Ok(Some((digest, bytes)))
+}
+
+/// Every tag a repository holds.
+pub fn list_tags(
+    repository: &str,
+    insecure: bool,
+    login: Option<&Credential>,
+) -> Result<Vec<String>, Error> {
+    Repository::open(repository, insecure, login)?.tags()
 }
 
 /// The versions a repository offers: its tags that are SemVer versions,
@@ -787,7 +931,7 @@ pub(crate) fn fetch(
     dest: &Path,
 ) -> Result<String, Error> {
     let repo = Repository::open(repository, insecure, login)?;
-    let (digest, layer) = repo.manifest(reference)?;
+    let (digest, layer) = repo.manifest(reference, MODULE_ARTIFACT)?;
     let archive = repo.blob(&layer)?;
     unpack(&archive, dest)?;
     Ok(digest)

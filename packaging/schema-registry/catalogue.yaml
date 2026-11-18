@@ -1,0 +1,93 @@
+# What the weekly workflow builds and publishes: one entry per schema
+# bundle, each at exactly one version. Nothing here floats: the `bump` job
+# opens a pull request that moves a version, with what changed in its
+# description, and the bundles are built from what was merged.
+#
+# Each entry:
+#   target   the Meridian target the schemas are for
+#   name     the bundle's name within the target
+#   version  the exact upstream version (or a date, where the vendor has none)
+#   upstream where `bump` looks for a newer version
+#   seed     a document under seeds/ that makes `meridian schema sync` read
+#            this upstream at this version; @VERSION@ and @NAME@ are
+#            replaced before the sync
+#   prefix   the types that belong in the bundle, by the start of their name
+
+# The core that builds the bundles. Set ref to a release tag once one ships
+# `meridian schema pack`; until then a commit of main.
+meridian:
+  repository: ZanattaMichael/meridian-core
+  ref: main
+
+# Where the bundles go, and the index that lists them.
+registry: ghcr.io/zanattamichael/meridian-schemas
+
+bundles:
+  - target: terraform
+    name: hashicorp-aws
+    version: 5.60.0
+    upstream: { kind: terraform-registry, provider: hashicorp/aws }
+    seed: seeds/terraform.yaml
+    prefix: [aws_, data.aws_, ephemeral.aws_]
+  - target: terraform
+    name: hashicorp-azurerm
+    version: 4.8.0
+    upstream: { kind: terraform-registry, provider: hashicorp/azurerm }
+    seed: seeds/terraform.yaml
+    prefix: [azurerm_, data.azurerm_, ephemeral.azurerm_]
+  - target: terraform
+    name: hashicorp-google
+    version: 6.10.0
+    upstream: { kind: terraform-registry, provider: hashicorp/google }
+    seed: seeds/terraform.yaml
+    prefix: [google_, data.google_, ephemeral.google_]
+
+  - target: pulumi
+    name: aws
+    version: 6.45.0
+    upstream: { kind: github-release, repository: pulumi/pulumi-aws }
+    seed: seeds/pulumi.yaml
+    prefix: ["aws:"]
+  - target: pulumi
+    name: azure-native
+    version: 2.70.0
+    upstream: { kind: github-release, repository: pulumi/pulumi-azure-native }
+    seed: seeds/pulumi.yaml
+    prefix: ["azure-native:"]
+  - target: pulumi
+    name: gcp
+    version: 8.5.0
+    upstream: { kind: github-release, repository: pulumi/pulumi-gcp }
+    seed: seeds/pulumi.yaml
+    prefix: ["gcp:"]
+
+  - target: kubernetes
+    name: core
+    version: "1.31.0"
+    upstream: { kind: kind-node, repository: kubernetes-sigs/kind }
+    seed: seeds/kubernetes.yaml
+
+  - target: cloudformation
+    name: us-east-1
+    version: 2026-11-16
+    upstream: { kind: date }
+    seed: seeds/cloudformation.yaml
+
+  - target: bicep
+    name: az
+    version: 2026-11-16
+    upstream: { kind: date }
+    seed: seeds/bicep.yaml
+
+  - target: ansible
+    name: ansible.builtin
+    version: 2.17.6
+    upstream: { kind: pypi, package: ansible-core }
+    seed: seeds/ansible-builtin.yaml
+    prefix: [ansible.builtin.]
+  - target: ansible
+    name: community.general
+    version: 9.5.0
+    upstream: { kind: galaxy, collection: community.general }
+    seed: seeds/ansible-collection.yaml
+    prefix: [community.general.]

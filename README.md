@@ -124,6 +124,7 @@ meridian fmt .                              # one standard layout; never changes
 meridian lint --strict .                    # every error in a project, plus probable mistakes
 meridian schema -o meridian.schema.json     # a JSON Schema, for editors that only know YAML
 meridian schema sync .                      # cache each tool's own types, for completion and checking
+meridian schema sync --locked .             # the same, from signed schema bundles the lock pins: no tool needed
 meridian lsp                                # the language server, started by your editor
 meridian mcp                                # the MCP server, started by an AI client
 ```
@@ -133,7 +134,8 @@ meridian mcp                                # the MCP server, started by an AI c
 The language server gives completion, hover documentation, errors as you type, go to
 definition, rename, formatting and quick fixes, with resource types and params read from
 the plugins you have installed, and a tool's own types (`aws_instance`, `apps/v1/Deployment`)
-read once from the tool by `meridian schema sync` and cached in the project. There is a [Visual Studio Code extension](docs/tooling/vscode.md)
+read once from the tool by `meridian schema sync` and cached in the project, or taken ready-made from
+signed [schema bundles](docs/tooling/schema-bundles.md) in an OCI registry. There is a [Visual Studio Code extension](docs/tooling/vscode.md)
 in [`editors/vscode`](editors/vscode), and recipes for [other editors](docs/tooling/other-editors.md).
 Start at [Tools for writing Meridian documents](docs/tooling/index.md).
 

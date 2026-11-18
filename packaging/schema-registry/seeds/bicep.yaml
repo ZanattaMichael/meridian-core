@@ -1,0 +1,12 @@
+# The bicep-types-az index as published on the day being built.
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: seed
+spec:
+  target: bicep
+  resources:
+    - id: seed
+      type: Microsoft.Network/virtualNetworks@2024-05-01
+      params:
+        name: seed

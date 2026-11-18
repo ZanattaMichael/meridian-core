@@ -117,6 +117,7 @@ spec:
 | `spec.modules` | no | The modules this one needs. See [requiring a module](#requiring-a-module) |
 | `spec.credentials` | no | Logins for registries, each naming where its password comes from. See [registry logins](#registry-logins) |
 | `spec.settings` | no | How each target's runner is configured for this project, by target and then by setting name. See [plugin settings](#plugin-settings) |
+| `spec.schemas` | no | Where `meridian schema sync` fetches signed schema bundles from, and how strict to be about their signatures. See [schema registries](#schema-registries) |
 
 A field that is not in this table is an error, not something silently ignored.
 Write versions and requirements in quotes when they could be read as a number:
@@ -359,6 +360,36 @@ Only the project's own manifest is read for settings: a fetched module's
 is read from the current directory, and a `meridian.yaml` that does not read
 stops the command, because a project whose settings were ignored would run its
 tools wrongly.
+
+## Schema registries
+
+`spec.schemas` names the registries whose signed [schema
+bundles](../tooling/schema-bundles.md) give the editor a tool's own types
+without the tool:
+
+```yaml
+spec:
+  schemas:
+    registry: ghcr.io/zanattamichael/meridian-schemas
+    signatures: require
+    registries:
+      - registry: registry.example.com/platform/schemas
+        credential: internal
+      - registry: file://vendor/schemas
+```
+
+| Field | Value |
+|---|---|
+| `registry` | An OCI repository prefix with no scheme and no tag (`oci://` may be written), or `file://DIR`, relative to the project when not absolute. Looked in first |
+| `credential` | A credential from `spec.credentials` to log in with, as for an `oci` module; not for a `file://` registry |
+| `insecure` | `true` talks plain HTTP. For a registry on a trusted network only |
+| `signatures` | `off`, `warn` or `require`; `--schema-signatures` on the command line wins over it, and without either it is `off` |
+| `registries` | More registries, each with `registry`, `credential` and `insecure`, looked in after `registry`, in order. A registry may be named once |
+
+`credential` or `insecure` without a `registry` beside them is an error, as
+is any other field. The bundles a sync chose are recorded in the lockfile's
+`schemas` section, each by reference and digest; see [Schema bundles: the
+lock file](../tooling/schema-bundles.md#the-lock-file).
 
 ## Version requirements
 
