@@ -234,6 +234,28 @@ impl Settings<'_> {
         out
     }
 
+    /// Creates the run's secrets in Podman on the host, one `podman secret
+    /// create` each, reading the value from the shell's own `printf`: a
+    /// builtin, so the value is on no process's command line, and in the
+    /// script alone, which the host reads on standard input. Each `value`
+    /// is the text that stands for the value in the script; the runner
+    /// fills it in protected memory before the script is sent. A secret
+    /// that exists is removed first, so a changed value replaces it, which
+    /// works on every Podman that has secrets.
+    pub fn secrets(&self, names: &[(String, String)]) -> String {
+        let mut out = self.preamble();
+        for (name, value) in names {
+            out.push_str(&format!(
+                "run \"$podman\" secret rm {name} >/dev/null 2>&1 || true\n\
+                 printf '%s' '{value}' | run \"$podman\" secret create {name} - >/dev/null || exit 76\n\
+                 echo \"{MARK}secret {name}\"\n",
+                name = quote(name),
+            ));
+        }
+        out.push_str("exit 0\n");
+        out
+    }
+
     /// Reads values from Podman, one `podman <noun> inspect` each.
     pub fn inspect(&self, wanted: &[(String, String, String)]) -> String {
         let mut out = self.preamble();

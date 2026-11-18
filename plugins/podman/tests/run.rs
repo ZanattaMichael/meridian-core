@@ -4,8 +4,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use meridian_plugin_testkit::{artifact, graph_from_text, scratch, stand_in, KeptLog};
-use meridian_sdk::{Artifact, Data, Emitter, RunContext, Runner, Value};
+use meridian_plugin_testkit::{
+    artifact, graph_from_text, scratch, secret_at, secrets, stand_in, KeptLog,
+};
+use meridian_sdk::{Artifact, Data, Emitter, RunContext, Runner, SecretRef, Value};
 use meridian_target_podman::{Podman, PodmanRunner, Scope, META_PATH};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -111,6 +113,8 @@ case "$1" in
   volume)
     if [ -e "{d}/no-volume" ]; then echo "Error: no such volume $5" >&2; exit 125; fi
     echo "/var/lib/volumes/$5/_data" ;;
+  secret)
+    if [ "$2" = create ]; then cat > "{d}/secret-$3"; fi ;;
 esac"#
         ),
     );
@@ -684,5 +688,86 @@ fn a_setting_that_cannot_be_understood_fails_every_run() {
         err.msg.starts_with("MERIDIAN_PODMAN_SCOPE is \"root\""),
         "{}",
         err.msg
+    );
+}
+
+/// Unlike anything else the tests write, with what a shell word escapes.
+const SECRET: &str = "hunter2 \"q\" $5 it's \\";
+
+#[test]
+fn secrets_are_created_in_podman_from_the_scripts_own_input_before_the_units_start() {
+    let dir = scratch(TMP, "secrets");
+    let log = KeptLog::default();
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: shop\nspec:\n  target: podman\n  resources:\n{DATA}{WEB}        Environment:\n          PASSWORD: placeholder\n"
+    );
+    let mut graph = graph_from_text("shop.yaml", &text, "podman");
+    let slot = secret_at(
+        &mut graph,
+        "web",
+        &["Environment", "PASSWORD"],
+        "db_password",
+    );
+    let artifact = Podman.emit(&graph, &Data::new()).unwrap().artifact;
+    let mut context = context(&dir);
+    context.secrets = secrets(&[(slot, "db_password", SECRET)]);
+
+    let applied = host(&dir).apply(&context, &artifact, &log).unwrap();
+    assert_eq!(applied.changes.len(), 2);
+    // The secret was removed and created anew, from the shell's printf.
+    let podman = lines(dir.join("podman.calls"));
+    assert!(
+        podman.contains(&"secret rm meridian_secret_db_password".to_owned()),
+        "{podman:?}"
+    );
+    assert!(
+        podman.contains(&"secret create meridian_secret_db_password -".to_owned()),
+        "{podman:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("secret-meridian_secret_db_password")).unwrap(),
+        SECRET,
+        "podman read the value exactly, with nothing added"
+    );
+    // The unit names the secret and holds no value.
+    let unit = fs::read_to_string(dir.join("units").join("web.container")).unwrap();
+    assert!(
+        unit.contains("Secret=meridian_secret_db_password,type=env,target=PASSWORD\n"),
+        "{unit}"
+    );
+    assert!(!unit.contains("hunter2"), "{unit}");
+    assert_eq!(
+        log.text()[0],
+        "creating meridian_secret_db_password in podman on this machine"
+    );
+    assert!(
+        !log.text().join("\n").contains("hunter2"),
+        "{:?}",
+        log.text()
+    );
+    assert!(!podman.join("\n").contains("hunter2"));
+    assert_eq!(
+        systemctl(&dir),
+        [
+            "--user daemon-reload",
+            "--user start data-volume.service web.service"
+        ]
+    );
+}
+
+#[test]
+fn a_plan_creates_no_secret() {
+    let dir = scratch(TMP, "secrets-plan");
+    let mut context = context(&dir);
+    context.secrets = secrets(&[(SecretRef::new(1), "db_password", SECRET)]);
+    host(&dir)
+        .plan(&context, &shop(), &KeptLog::default())
+        .unwrap();
+    assert!(
+        !lines(dir.join("podman.calls"))
+            .iter()
+            .any(|c| c.starts_with("secret")),
+        "{:?}",
+        lines(dir.join("podman.calls"))
     );
 }

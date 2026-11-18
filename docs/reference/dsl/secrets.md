@@ -280,7 +280,11 @@ spec:
 | `bicep` | `meridian_secret_db_password`, a parameter declared `@secure()`, which the compiler makes a `securestring` | a Resource Manager parameters file only the user can read, passed as `--parameters @<path>` to `what-if` and `create`, and removed when the stage ends |
 | `arm` | `[parameters('meridian_secret_db_password')]`, a parameter declared `securestring` | the same parameters file, passed the same way |
 | `pulumi` | `${meridian_secret_db_password}`, a configuration value declared `secret: true`, so Pulumi encrypts it in its state and prints `[secret]` in its place | `pulumi config set --secret <key>` with the value on standard input, before the preview; `pulumi config rm <key>` when the stage is over, so the settings file names no secret between runs |
-| any other target (`cloud-init`, `dsc`, the containers) | the stage stops, and says which targets take a secret | |
+| `kubernetes` | `"${meridian_secret_db_password}"`, a token inside the quotes of a string, as a value of a `v1/Secret`'s `stringData` and nowhere else: anywhere else the value would be written into an object for every reader to see | `kubectl apply --filename -`, for the plan's dry run and the apply alike, with the manifests on standard input and each token filled in as a JSON string on the way; the file on disk holds the token |
+| `helm` | the same token in `chart/values.yaml`, read by a template with `${values.<path>}`; a secret in an object or a setting is refused, and so is one in the values of a document with a Kustomize overlay, whose rendered manifests are written to a file | `--values -` on `helm template` and `helm upgrade --install`, with the values on standard input and each token filled in the same way |
+| `docker` | `${meridian_secret_db_password}`, Compose's own interpolation of a variable, in a service; a `secret` element's `value` becomes `environment: meridian_secret_db_password`, so Compose mounts the content under `/run/secrets` | an environment file only the user can read, one quoted `meridian_secret_<name>="..."` line per secret, given to every `docker compose` call of the stage as `--env-file <path>` and removed when the stage ends |
+| `podman` | `Secret=meridian_secret_db_password,type=env,target=PASSWORD` in the container's unit, in place of the `Environment` variable that held it; a secret anywhere else in a unit is refused, since the unit file is written onto the host | an apply creates the secret in Podman on the host, `podman secret create <name> -`, reading the value from the apply script's own standard input before any unit is written, and replaces one that exists; a plan creates nothing |
+| any other target (`cloud-init`, `dsc`) | the stage stops, and says which targets take a secret | |
 
 Only a bare secret is handed over under its own name. A value made from a
 secret and anything else is a secret of its own, since the whole of it is
@@ -295,20 +299,29 @@ Three things hold wherever a secret is handed over:
   that holds it is the tool's private file, which exists for the length of the
   run.
 - **Never on the command line, never in the environment.** The command line
-  names the file's path and nothing more, and the tool's environment holds
-  nothing of the value.
+  names the file's path and nothing more, or nothing at all when the tool
+  reads standard input, and the tool's environment holds nothing of the
+  value.
 - **The tool's own state is the tool's own.** A tool that keeps what it was
   given keeps it the way it always has: Terraform writes a resource's
   arguments into its state file, whichever variable they came from; Pulumi
   encrypts them with the stack's secrets provider, which with no passphrase
   chosen protects nothing; CloudFormation keeps a `NoEcho` parameter masked;
-  Azure keeps a secure parameter out of the deployment's record. A document
+  Azure keeps a secure parameter out of the deployment's record; a cluster
+  stores a Secret base64-encoded for anyone who may read Secrets in its
+  namespace, and Helm keeps a release's values the same way; Podman's default
+  driver keeps a secret base64-encoded in the user's own directory. A document
   that hands Terraform a secret should declare a `backend` that protects its
   state, and one that hands Pulumi a secret should name a `secretsProvider`.
 - **A setting is not a param.** The resource that holds a tool's own settings
-  (`stack`, `deployment`, a `variable` or `config` declaration) is compiled
-  into the command line or written as it stands, so a secret there is refused
-  at compile (`unsupported-secret-place`).
+  (`stack`, `deployment`, `project`, `cluster`, `release`, a `variable` or
+  `config` declaration) is compiled into the command line or written as it
+  stands, so a secret there is refused at compile (`unsupported-secret-place`).
+- **A token is Meridian's.** Where a target writes a secret's place as text
+  the runner fills in (`${meridian_secret_<name>}` on `kubernetes` and
+  `helm`), a document that writes that text itself is refused at compile
+  (`reserved-text`), so nothing can make the runner put a value where the
+  document asked for it.
 
 `compile` writes the same reference, so what it produces is what `plan` and
 `apply` hand the tool, and a review of the compiled files sees exactly where
@@ -317,7 +330,7 @@ secret's name instead, as `password=(secret db_password)`, and `plan` and
 `apply` stop at the stage:
 
 ```
-resource "app_env": params.content holds a secret, and target "cloud-init" does not take one: it has no private channel to hand a secret to its tool, so the value would be written into a file or dropped. A secret can still decide a when for it; targets that do: ansible, arm, bicep, chef, cloudformation, openvox, opentofu, packer, pulumi, puppet, salt, terraform
+resource "app_env": params.content holds a secret, and target "cloud-init" does not take one: it has no private channel to hand a secret to its tool, so the value would be written into a file or dropped. A secret can still decide a when for it; targets that do: ansible, arm, bicep, chef, cloudformation, docker, helm, kubernetes, openvox, opentofu, packer, podman, pulumi, puppet, salt, terraform
 ```
 
 A rollback hands the tool the document's secrets again, fetched at the
@@ -442,12 +455,17 @@ a command's arguments.
 | The kernel keyring holds the key and this session may not read it | `plan`, `apply` | `secret "x" (from: keyring): the kernel keyring holds the key ..., and this session may not read it: the key is readable only by a possessor, and this session's keyring does not link the user keyring. Let the owner read it with: keyctl setperm ... 0x3f3f0000, or store it with meridian secret set` |
 | `secret set` on a secret with no writable place | `secret set` | `"deploy_token" names no place meridian can write. It is looked for in the environment variable DEPLOY_TOKEN, then in the file token.txt. meridian writes the kernel keyring (from: keyring) and the Secret Service (from: secret-service); every other place is written with its own tool` |
 | A secret that is not base64 is given to `base64Decode` | `plan`, `apply` | `base64Decode(...): the secret is not base64` |
-| A secret in `params` of a target that takes none | `plan`, `apply` | `resource "conf": params.content holds a secret, and target "cloud-init" does not take one: it has no private channel to hand a secret to its tool, so the value would be written into a file or dropped. A secret can still decide a when for it; targets that do: ansible, arm, bicep, chef, cloudformation, openvox, opentofu, packer, pulumi, puppet, salt, terraform` |
+| A secret in `params` of a target that takes none | `plan`, `apply` | `resource "conf": params.content holds a secret, and target "cloud-init" does not take one: it has no private channel to hand a secret to its tool, so the value would be written into a file or dropped. A secret can still decide a when for it; targets that do: ansible, arm, bicep, chef, cloudformation, docker, helm, kubernetes, openvox, opentofu, packer, podman, pulumi, puppet, salt, terraform` |
 | A secret in `params` of a `chef` document for another machine | `apply` | `chef-run has no private way to hand a secret to web01: it takes attributes on its command line only, where every user of this machine could read them. Run chef-client on the host, with the local transport, or keep the secret out of this document` |
 | A secret inside a list or a map, on `puppet` or `openvox` | `compile` | `param "groups" holds a secret inside a list or a map; on this target a secret is a whole param, looked up as one Sensitive value [unsupported-secret-place]` |
 | A secret in a tool's settings resource (`stack`, `deployment`) or a declaration (`variable`, `parameter`, `config`), on `packer`, `cloudformation`, `bicep`, `arm` or `pulumi` | `compile` | `param "region" of the stack holds a secret, and the stack's settings are the command line aws is given, where a secret cannot go. A secret goes in a resource's params, which the tool is handed by a private channel [unsupported-secret-place]` |
 | Two secrets, or a secret and a resource, spelled the same as a CloudFormation parameter | `compile` | `secret "db_password" would be the parameter MeridianSecretDbPassword, which is also what "meridian_secret_db_password" is called in the template; rename one of them [invalid-name]` |
 | A secret in an `exec`, on `salt` | `compile` | `a secret cannot be used in an exec on this target: Salt prints the command line in its report, and nothing turns that off. Put the secret in a file the command reads, or in a runtimeWhen [unsupported-secret-place]` |
+| A secret anywhere but a `v1/Secret`'s `stringData`, on `kubernetes` | `compile` | `param "data" of "v1/ConfigMap" holds a secret, and it would be written into the object for every reader of it to see. A secret goes in the stringData of a v1/Secret, which the workload reads by name [unsupported-secret-place]` |
+| A secret anywhere but the `values`, or in the values beside a Kustomize overlay, on `helm` | `compile` | `param "stringData" of "v1/Secret" holds a secret, and an object is written into a template file as it stands, where a secret cannot go. Put the secret in the values and read it here with ${values.<path>}, in the stringData of a v1/Secret [unsupported-secret-place]` |
+| A secret in the `project`, on `docker` | `compile` | `param "name" of the project holds a secret, and the project's settings are the command line docker is given, where a secret cannot go. A secret goes in a service's params, or as the value of a secret element, which Compose reads from a private environment file [unsupported-secret-place]` |
+| A secret anywhere but the whole value of a container's `Environment` variable, on `podman` | `compile` | `param "Label" of the container holds a secret, and a unit file is written onto the host as it stands, where a secret cannot go; put it in Environment as a map, where it becomes a Podman secret the container reads into the variable [unsupported-secret-place]` |
+| Text that spells a secret's token, on `kubernetes` or `helm` | `compile` | `param "stringData" holds the text "${meridian_secret_", which is how this target writes a secret's place in a manifest; write the secret as ${{ secret.<name> }} or choose other text [reserved-text]` |
 | A secret that is not text, handed to a tool that reads a variables file | `plan`, `apply` | `writing the extra-vars file: the secret is not text, so it cannot be written as a JSON string` |
 
 ## Examples

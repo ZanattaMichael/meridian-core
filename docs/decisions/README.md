@@ -46,3 +46,4 @@ page it affects. The pull request template asks for it.
 | [Helm's plan does not detect live drift](0018-helm-plan-does-not-detect-live-drift.md) | Targets | proposed |
 | [Podman output is Quadlet units only](0019-podman-output-is-quadlet-units-only.md) | Targets | proposed |
 | [Terraform import renames colliding names](0020-terraform-import-renames-colliding-names.md) | Targets | proposed |
+| [A secret has one place on each containers target](0022-a-secret-has-one-place-on-each-containers-target.md) | Targets | proposed |

@@ -1746,6 +1746,34 @@ file. Rank 4 for provider credentials (the table's second half for
 `terraform`), the SSH agent and the containers targets are still to come, as
 are credentials on these targets.
 
+**As built (phase 7, fifth part).** Delivery on the containers targets.
+`kubernetes` and `helm` by standard input (rank 1): the compiled manifests or
+`values.yaml` hold a token, `"${meridian_secret_<name>}"`, inside the quotes
+of a string, and the runner fills the tokens in as JSON strings on the way
+into `kubectl apply --filename -` (the plan's dry run too) and `helm
+--values -` (`template` and `upgrade --install`); the files on disk never
+change. A secret may be a value of a `v1/Secret`'s `stringData` on
+`kubernetes`, and a value in the `values` on `helm`, and nowhere else: any
+other place is written into an object or onto the command line
+(`unsupported-secret-place`), and a document that writes the token's text
+itself is refused (`reserved-text`). A Helm document with a Kustomize overlay
+takes no secret, because the rendered manifests go to Kustomize through a
+file. `docker` deviates from the table's rank 1: Compose's own `secrets` are
+only read from a file or the environment, engine secrets being Swarm's, so
+the value goes by a `0600` environment file (rank 2) given to every `docker
+compose` call as `--env-file`, with the service reading
+`${meridian_secret_<name>}` by Compose's interpolation and a `secret`
+element's `value` becoming `environment: meridian_secret_<name>`, so the
+content is mounted under `/run/secrets`. `podman` keeps rank 1: the apply
+script creates each secret on the host with `podman secret create <name> -`
+from its own standard input, before any unit is written, replacing one that
+exists, and the unit names it as `Secret=<name>,type=env,target=<VAR>` in
+place of the `Environment` variable that held it; a secret anywhere else in
+a unit is refused. The SDK gained `Secrets::filled_text` (tokens to values,
+escaped as JSON, a shell word or a dotenv value, into protected memory) and
+`Secrets::dotenv_file`. Rank 4 for provider credentials, the SSH agent and
+credentials on these targets are still to come.
+
 ### 11.7 The operating system's own stores
 
 The best place for a long-lived credential on a workstation is the store the
@@ -2395,7 +2423,7 @@ green before the next starts.
 | 5b | `Composite`, `include`, `extends`, the configuration type (`segment`, `targets`) | 5 |
 | 6 | `Inventory`, endpoint types, `spec.endpoints`, one instance per endpoint, `--endpoint`, sources from outputs | 4, 5 |
 | 6a (built in part) | `meridian-secret`: the locked, wiped-on-drop value, process hardening, the secret handle in `Value` and how the mark spreads, the output filter, the delivery helpers (standard input, user-only files), `spec.secrets` with the `env`, `file`, `exec` and operating-system store providers, `meridian secret set` and `check`, `resolve_credential`, and the tests of [11.9](#119-what-is-tested). **Built so far:** the crate, the handle and the mark, `spec.secrets` with `env`, `file` and `exec`, fetched per stage and wiped after it, `--strict-secrets` and the warning when memory cannot be locked, `meridian secret check`, and `resolve_credential` for the `registry`, `usernamePassword` and `token` types ([reference](../reference/dsl/secrets.md), [how it is held](../concepts/secrets-in-memory.md)). Then the `keyring`, `systemd-creds`, `secret-service` and `keychain` stores, `fallback` places for one secret, and `meridian secret set` into the keyring and the Secret Service. **Still to come:** `credential-manager` on Windows, writing the keychain, the `tpm` plugin | 2 |
-| 7 (built in part) | secrets and credentials on targets: credential types, sealed references and the secret stream in the protocol, delivery on every target by its channel of [11.6](#116-handing-a-secret-to-a-tool), the plugin contract suite with the recording tool. **Built so far:** the `secrets` capability, secrets by name in the graph and by value in the run context, delivery on `ansible`, `puppet`, `openvox`, `salt`, `chef`, `terraform`, `opentofu`, `packer`, `cloudformation`, `bicep`, `arm`, `pulumi` and the test target, the SDK's `Secrets`, `json_file`, `SecretFile::beside` and `stdin_secret`, and the stand-in and real-tool tests of the handover; credential types in documents (`spec.credentials`, every type checked, `targetHost.credential`, the `credentials` capability, delivery on `ansible` and the test target). **Still to come:** secret delivery on the containers targets (`docker`, `podman`, `kubernetes`, `helm`), provider credentials by rank 4 and the SSH agent, credentials on every target but `ansible`, the recording tool as one suite | 6, 6a |
+| 7 (built in part) | secrets and credentials on targets: credential types, sealed references and the secret stream in the protocol, delivery on every target by its channel of [11.6](#116-handing-a-secret-to-a-tool), the plugin contract suite with the recording tool. **Built so far:** the `secrets` capability, secrets by name in the graph and by value in the run context, delivery on `ansible`, `puppet`, `openvox`, `salt`, `chef`, `terraform`, `opentofu`, `packer`, `cloudformation`, `bicep`, `arm`, `pulumi`, `docker`, `podman`, `kubernetes`, `helm` and the test target, the SDK's `Secrets`, `json_file`, `SecretFile::beside` and `stdin_secret`, and the stand-in and real-tool tests of the handover; credential types in documents (`spec.credentials`, every type checked, `targetHost.credential`, the `credentials` capability, delivery on `ansible` and the test target). **Still to come:** provider credentials by rank 4 and the SSH agent, credentials on every target but `ansible`, the recording tool as one suite | 6, 6a |
 | 7a | events and the run record: the event stream, `status`, `runs`, `events`, locking, `--events json` | 4 |
 | 8 | `Workflow`: steps, order from needs, `with`, `assign` from data, fan-out strategies, gates, failure handling, resume | 5a, 6, 7a |
 | 8a | notification sinks: the sink protocol, `webhook` and `command` built in, then `slack`, `teams`, `email`, `opentelemetry` | 7, 7a |

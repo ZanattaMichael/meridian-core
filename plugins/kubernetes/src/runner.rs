@@ -7,10 +7,10 @@ use std::time::{Duration, Instant};
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
-    RunContext, RunError, Runner, Value,
+    RunContext, RunError, Runner, Value, Written,
 };
 
-use crate::{CLUSTER_PATH, MANIFESTS_PATH};
+use crate::{secret_token, CLUSTER_PATH, MANIFESTS_PATH};
 
 /// Names the program to run, when it is not `kubectl` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_KUBECTL";
@@ -151,6 +151,44 @@ impl KubernetesRunner {
             }
         }
         tool.args(self.extra_args.iter().cloned())
+    }
+
+    /// `kubectl apply`, given the manifests. With no secrets in the run it
+    /// reads the file in the work directory. With secrets, the file holds
+    /// a token where each value goes, and the manifests are put together
+    /// with the values in protected memory and handed over on standard
+    /// input, so that no file ever holds a value: the first choice of
+    /// channel, and the only copy is the API server's.
+    fn apply_manifests(
+        &self,
+        context: &RunContext,
+        cluster: &Cluster,
+        artifact: &Artifact,
+        before: &[&str],
+    ) -> Result<Tool, RunError> {
+        let mut operation = vec!["apply"];
+        operation.extend_from_slice(before);
+        if context.secrets.is_empty() {
+            operation.extend(["--filename", MANIFESTS_PATH]);
+            return Ok(self.kubectl(context, cluster, &operation, ""));
+        }
+        operation.extend(["--filename", "-"]);
+        let text = artifact
+            .files
+            .get(MANIFESTS_PATH)
+            .map(String::as_str)
+            .unwrap_or("");
+        let filled = context
+            .secrets
+            .filled_text(text, secret_token, Written::JsonString)
+            .map_err(|e| {
+                RunError::new(format!(
+                    "the secrets could not be put into the manifests for kubectl: {e}"
+                ))
+            })?;
+        Ok(self
+            .kubectl(context, cluster, &operation, "")
+            .stdin_secret(filled))
     }
 
     fn prepare(&self, context: &RunContext, artifact: &Artifact) -> Result<Cluster, RunError> {
@@ -306,12 +344,7 @@ impl Runner for KubernetesRunner {
         let cluster = self.prepare(context, artifact)?;
         log.out("asking the cluster what an apply would change");
         let finished = self
-            .kubectl(
-                context,
-                &cluster,
-                &["apply", "--dry-run=server", "--filename", MANIFESTS_PATH],
-                "",
-            )
+            .apply_manifests(context, &cluster, artifact, &["--dry-run=server"])?
             .run(log)?;
         let mut plan = Plan {
             changes: read_report(&finished.stdout, &cluster),
@@ -341,12 +374,7 @@ impl Runner for KubernetesRunner {
     ) -> Result<Applied, RunError> {
         let cluster = self.prepare(context, artifact)?;
         let finished = self
-            .kubectl(
-                context,
-                &cluster,
-                &["apply", "--filename", MANIFESTS_PATH],
-                "",
-            )
+            .apply_manifests(context, &cluster, artifact, &[])?
             .run_ok("kubectl could not apply the manifests", log)?;
         let changes = read_report(&finished.stdout, &cluster);
         for change in &changes {

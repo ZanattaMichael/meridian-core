@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{artifact, scratch, stand_in, KeptLog};
-use meridian_sdk::{Artifact, RunContext, Runner, Value};
+use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
+use meridian_sdk::{Artifact, RunContext, Runner, SecretRef, Value};
 use meridian_target_docker::DockerRunner;
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -378,4 +378,132 @@ fn outputs_are_read_from_the_running_project() {
     let outputs = docker.outputs(&context(&dir)).unwrap();
     assert_eq!(outputs.len(), 3);
     assert_eq!(outputs[0].name, "url");
+}
+
+/// Unlike anything else the tests write, with what a dotenv value escapes.
+const SECRET: &str = "hunter2 \"q\" $5 it's \\";
+
+/// A stand-in that also keeps a copy of the environment file it is given,
+/// with its mode, since the file is gone once the stage is over.
+fn runner_keeping_env(dir: &Path, cases: &str) -> DockerRunner {
+    let d = dir.display();
+    let program = stand_in(
+        dir,
+        "docker",
+        &format!(
+            "echo \"$@\" >> \"{d}/calls\"\nprev=''\nfor a in \"$@\"; do\n  if [ \"$prev\" = --env-file ]; then cp \"$a\" \"{d}/env\"; stat -c %a \"$a\" > \"{d}/env.mode\"; fi\n  prev=$a\ndone\ncase \"$*\" in\n{cases}\nesac"
+        ),
+    );
+    DockerRunner {
+        program: program.to_str().unwrap().to_owned(),
+        extra_args: Vec::new(),
+    }
+}
+
+/// The calls with the environment file's path, which differs every run,
+/// replaced by `<env>`.
+fn calls_with_env(dir: &Path) -> Vec<String> {
+    calls(dir)
+        .into_iter()
+        .map(|call| match call.find("--env-file ") {
+            Some(at) => {
+                let rest = &call[at + "--env-file ".len()..];
+                let end = rest.find(' ').unwrap_or(rest.len());
+                format!("{}--env-file <env>{}", &call[..at], &rest[end..])
+            }
+            None => call,
+        })
+        .collect()
+}
+
+#[test]
+fn secrets_reach_compose_in_a_private_environment_file_for_the_stage_alone() {
+    let dir = scratch(TMP, "secrets");
+    let log = KeptLog::default();
+    let docker = runner_keeping_env(&dir, &format!("{CONFIG}\n{RUNNING}\n{UP}\n{READS}"));
+    let mut context = context(&dir);
+    context.secrets = secrets(&[(SecretRef::new(1), "db_password", SECRET)]);
+    let applied = docker.apply(&context, &compiled(""), &log).unwrap();
+    assert_eq!(applied.changes.len(), 0);
+
+    let all = calls_with_env(&dir);
+    // Every reading of the file and the up are given the file; reading the
+    // outputs is not, as Compose finds the containers by their labels.
+    assert_eq!(
+        all,
+        [
+            "compose --env-file <env> config --format json",
+            "compose --env-file <env> config --hash *",
+            "ps --all --format <containers>",
+            "network ls --format {{.Name}}",
+            "volume ls --format {{.Name}}",
+            "compose --env-file <env> up --detach --remove-orphans",
+            "compose port --protocol tcp app 80",
+            "compose ps --all --quiet db",
+            "inspect 4f1c9a",
+            "compose ps --all --quiet db",
+            "inspect 4f1c9a",
+        ]
+    );
+    // The file is Compose's dotenv: the variable, and the value in double
+    // quotes with its own `$` doubled so Compose leaves it alone.
+    assert_eq!(
+        fs::read_to_string(dir.join("env")).unwrap(),
+        "meridian_secret_db_password=\"hunter2 \\\"q\\\" $$5 it's \\\\\"\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("env.mode")).unwrap().trim(),
+        "600"
+    );
+    // It is gone, and the value is in nothing else.
+    let path = calls(&dir)
+        .iter()
+        .find_map(|c| {
+            c.find("--env-file ").map(|at| {
+                c[at + "--env-file ".len()..]
+                    .split(' ')
+                    .next()
+                    .unwrap()
+                    .to_owned()
+            })
+        })
+        .unwrap();
+    assert!(!Path::new(&path).exists(), "{path} is still there");
+    assert!(!fs::read_to_string(dir.join("calls"))
+        .unwrap()
+        .contains("hunter2"));
+    assert!(
+        !log.text().join("\n").contains("hunter2"),
+        "{:?}",
+        log.text()
+    );
+    for entry in fs::read_dir(dir.join("work")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() {
+            assert!(
+                !fs::read_to_string(&path).unwrap().contains("hunter2"),
+                "{} holds the secret",
+                path.display()
+            );
+        }
+    }
+}
+
+#[test]
+fn a_plan_with_secrets_gives_compose_the_file_too_and_removes_it_after() {
+    let dir = scratch(TMP, "secrets-plan");
+    let docker = runner_keeping_env(&dir, &format!("{CONFIG}\n{RUNNING}"));
+    let mut context = context(&dir);
+    context.secrets = secrets(&[(SecretRef::new(1), "db_password", SECRET)]);
+    docker
+        .plan(&context, &compiled(""), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        calls_with_env(&dir)[..2],
+        [
+            "compose --env-file <env> config --format json",
+            "compose --env-file <env> config --hash *",
+        ]
+    );
+    assert!(dir.join("env").exists());
 }

@@ -13,7 +13,9 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use meridian_plugin_testkit::{graph_from_file, graph_from_text, scratch, KeptLog};
+use meridian_plugin_testkit::{
+    graph_from_file, graph_from_text, scratch, secret_at, secrets, KeptLog,
+};
 use meridian_sdk::tool::Tool;
 use meridian_sdk::{Artifact, Data, Emitter, NoLog, RunContext};
 use meridian_target_helm::{Helm, HelmRunner};
@@ -220,4 +222,69 @@ fn a_chart_helm_rejects_is_reported_with_what_helm_said() {
         .unwrap_err();
     assert_eq!(err.msg, "helm could not render the chart");
     assert!(err.output.contains("nil pointer"), "{}", err.output);
+}
+
+/// Unlike anything Helm or the plugin prints, with the characters a JSON
+/// string escapes, so that finding it is finding a leak.
+const SECRET: &str = "zzq-Vt9 \"not\" a\\real $tok'en 4kLm";
+
+#[test]
+#[ignore = "needs helm"]
+fn a_secret_in_the_values_reaches_the_rendered_secret_and_no_file() {
+    let dir = scratch(TMP, "real-secret");
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: login\nspec:\n  target: helm\n  resources:\n    - id: values\n      type: values\n      params:\n        db:\n          user: app\n          password: placeholder\n    - id: login\n      type: v1/Secret\n      params:\n        stringData:\n          user: ${values.db.user}\n          password: ${values.db.password}\n";
+    let mut graph = graph_from_text("login.yaml", text, "helm");
+    let slot = secret_at(&mut graph, "values", &["db", "password"], "token");
+    let artifact = Helm.emit(&graph, &Data::new()).unwrap().artifact;
+    assert!(!artifact.files["chart/values.yaml"].contains(SECRET));
+
+    let mut context = context(&dir);
+    context.secrets = secrets(&[(slot, "token", SECRET)]);
+    let log = KeptLog::default();
+    let rendered = HelmRunner::from_env()
+        .render(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    // Helm rendered the value into the Secret, from the values it read on
+    // standard input; stringData is written as it is.
+    let objects = objects(&rendered);
+    let login = objects
+        .iter()
+        .find(|o| o.contains("kind: Secret"))
+        .unwrap_or_else(|| panic!("no Secret in\n{rendered}"));
+    assert!(login.contains("user: app"), "{login}");
+    let quoted = format!(
+        "password: {}",
+        meridian_yaml::write(&meridian_yaml::Yaml::str(SECRET)).trim()
+    );
+    assert!(
+        login.contains(&quoted) || login.contains(&format!("password: {SECRET}")),
+        "{login}"
+    );
+    // Nothing on disk holds it: the chart's values file holds the token.
+    let mut pending = vec![dir.join("work")];
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                let bytes = std::fs::read(&path).unwrap();
+                assert!(
+                    !String::from_utf8_lossy(&bytes).contains(SECRET),
+                    "{} holds the secret in the open",
+                    path.display()
+                );
+            }
+        }
+    }
+    assert!(
+        std::fs::read_to_string(dir.join("work").join("chart").join("values.yaml"))
+            .unwrap()
+            .contains("\"${meridian_secret_token}\"")
+    );
+    assert!(
+        !log.text().iter().any(|l| l.contains(SECRET)),
+        "the secret reached the log:\n{}",
+        log.text().join("\n")
+    );
 }

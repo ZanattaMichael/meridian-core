@@ -4,8 +4,8 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
-use meridian_plugin_testkit::{artifact, scratch, stand_in, KeptLog};
-use meridian_sdk::{Artifact, RunContext, Runner, Value};
+use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
+use meridian_sdk::{Artifact, RunContext, Runner, SecretRef, Value};
 use meridian_target_kubernetes::KubernetesRunner;
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -201,4 +201,74 @@ fn outputs_are_read_from_the_live_objects() {
     let outputs = kubectl.outputs(&context(&dir)).unwrap();
     assert_eq!(outputs.len(), 2);
     assert_eq!(outputs[1].value, Value::String("c2VjcmV0".into()));
+}
+
+/// Unlike anything else the tests write, with the characters a JSON string
+/// has to escape.
+const SECRET: &str = "hunter2 \"q\" $5 it's \\";
+
+#[test]
+fn secrets_reach_kubectl_on_standard_input_and_no_file_holds_them() {
+    let dir = scratch(TMP, "secrets");
+    let d = dir.display();
+    let log = KeptLog::default();
+    let manifests = "---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: db-login\nstringData:\n  password: \"${meridian_secret_db_password}\"\n  user: app\n";
+    let artifact = artifact(&[
+        ("manifests.yaml", manifests),
+        (
+            "cluster.json",
+            r#"{"context":"prod","namespace":"web","kubeconfig":"","objects":{"secret/db-login":"db_login"},"outputs":[]}"#,
+        ),
+    ]);
+    let cases = format!(
+        "'apply --dry-run=server') cat > \"{d}/stdin-plan\"; echo 'secret/db-login created (server dry run)' ;;\n'apply --filename') cat > \"{d}/stdin-apply\"; echo 'secret/db-login created' ;;"
+    );
+    let mut context = context(&dir);
+    context.secrets = secrets(&[(SecretRef::new(1), "db_password", SECRET)]);
+    let runner = runner(&dir, &cases);
+
+    let plan = runner.plan(&context, &artifact, &log).unwrap();
+    assert_eq!(plan.changes.len(), 1);
+    let applied = runner.apply(&context, &artifact, &log).unwrap();
+    assert_eq!(applied.changes.len(), 1);
+    assert_eq!(
+        calls(&dir),
+        [
+            "apply --dry-run=server --filename - --context prod --namespace web",
+            "apply --filename - --context prod --namespace web",
+        ]
+    );
+    // What kubectl read is the manifests with the value in the token's place,
+    // escaped as the JSON string it sits in.
+    let filled = manifests.replace(
+        "${meridian_secret_db_password}",
+        "hunter2 \\\"q\\\" $5 it's \\\\",
+    );
+    assert_eq!(fs::read_to_string(dir.join("stdin-plan")).unwrap(), filled);
+    assert_eq!(fs::read_to_string(dir.join("stdin-apply")).unwrap(), filled);
+    // The file in the work directory still holds the token, and nothing else
+    // written anywhere holds the value.
+    let on_disk = fs::read_to_string(dir.join("work").join("manifests.yaml")).unwrap();
+    assert_eq!(on_disk, manifests);
+    assert!(
+        !log.text().join("\n").contains("hunter2"),
+        "{:?}",
+        log.text()
+    );
+    assert!(!fs::read_to_string(dir.join("calls"))
+        .unwrap()
+        .contains("hunter2"));
+}
+
+#[test]
+fn without_secrets_kubectl_reads_the_file_as_before() {
+    let dir = scratch(TMP, "no-secrets");
+    let cases = "apply*) echo 'service/web created' ;;";
+    runner(&dir, cases)
+        .apply(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap_err(); // the outputs cannot be read by this stand-in
+    assert_eq!(
+        calls(&dir)[0],
+        "apply --filename manifests.yaml --context prod --namespace web"
+    );
 }

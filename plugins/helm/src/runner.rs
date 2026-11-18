@@ -13,11 +13,42 @@ use std::fs;
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, Log, NoLog, Operations, Output, Plan, RunContext,
-    RunError, Runner, Value,
+    RunError, Runner, Value, Written,
 };
 use meridian_yaml::Yaml;
 
 use crate::emit::RENDERED_FILE;
+use crate::secret_token;
+
+/// Helm given the run's secrets, when it has any: the chart's `values.yaml`
+/// with each token replaced by its value, put together in protected memory
+/// and read by Helm on standard input as one more values file, which
+/// overrides the one in the chart key by key. Nothing on disk holds a
+/// value; what Helm keeps in the release is the cluster's.
+fn with_values(
+    tool: Tool,
+    context: &RunContext,
+    artifact: &Artifact,
+    chart_dir: &str,
+) -> Result<Tool, RunError> {
+    if context.secrets.is_empty() {
+        return Ok(tool);
+    }
+    let values = artifact
+        .files
+        .get(&format!("{chart_dir}/values.yaml"))
+        .map(String::as_str)
+        .unwrap_or("");
+    let filled = context
+        .secrets
+        .filled_text(values, secret_token, Written::JsonString)
+        .map_err(|e| {
+            RunError::new(format!(
+                "the secrets could not be put into the values for helm: {e}"
+            ))
+        })?;
+    Ok(tool.args(["--values", "-"]).stdin_secret(filled))
+}
 use crate::manifest::{self, Key};
 use crate::path::{self, Step};
 use crate::{template, CHART_DIR, KUSTOMIZE_DIR, RELEASE_PATH};
@@ -271,8 +302,8 @@ impl HelmRunner {
         write_artifact(&context.work_dir, artifact)?;
 
         log.out(&format!("release {}: rendering the chart", release.name));
-        let templated = self
-            .helm(context, &release, &["template", &release.name, CHART_DIR])
+        let template = self.helm(context, &release, &["template", &release.name, CHART_DIR]);
+        let templated = with_values(template, context, artifact, CHART_DIR)?
             .capture_stdout()
             .run_ok("helm could not render the chart", log)?
             .stdout;
@@ -572,6 +603,7 @@ impl Runner for HelmRunner {
             if !release.timeout.is_empty() {
                 upgrade = upgrade.args(["--timeout", &release.timeout]);
             }
+            let upgrade = with_values(upgrade, context, artifact, CHART_DIR)?;
             upgrade.run_ok(
                 "helm could not install the release; `helm status` and `helm history` say what \
                  state it was left in",
