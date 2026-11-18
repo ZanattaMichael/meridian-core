@@ -62,7 +62,8 @@ meridian lsp / meridian mcp                 # language server, MCP server
 ```
 
 - Runs are locked, recorded, resumable (`apply --resume`) and can roll back. `adopt` takes an
-  existing thing under management ([adopting what exists](docs/reference/dsl/resources.md#adopting-what-exists)).
+  existing thing under management ([adopting what exists](docs/reference/dsl/resources.md#adopting-what-exists));
+  `meridian retarget` moves a document to another tool ([retargeting](docs/operations/retargeting.md)).
   See [running safely](docs/concepts/run-safety.md) and [policy checks](docs/reference/policy.md).
 - `--report` writes JUnit, JSON, Markdown or HTML; `--sink` streams events. See
   [reports](docs/reference/reporting.md).

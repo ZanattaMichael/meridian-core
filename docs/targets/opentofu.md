@@ -429,6 +429,12 @@ thing into its state on the next apply instead of creating it:
   `adopt: "${{ data.bucket }}"`.
 - Import blocks need OpenTofu 1.6 or later, its first release.
 
+### Moving to another tool
+
+The plugin reports what it manages, read from `tofu show -json`: each
+managed resource's `id`, by resource id. [`meridian retarget`](../operations/retargeting.md)
+uses it to write `adopt:` when a document moves to another tool.
+
 ## What the target does not do
 
 Refused at compile:

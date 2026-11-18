@@ -304,6 +304,7 @@ secret.
 | `plan` | report what an apply would change, and change nothing. If the tool cannot preview, set `Plan::unknown` so an empty list is never read as "in sync" |
 | `apply` | make it so, and report what changed and any outputs |
 | `outputs` | read the values the last apply produced from the tool's own state, without applying |
+| `identifiers` | optional, with `reads_identifiers() -> true`: from the tool's own state, the identifier of each resource it manages, by resource id, in the form the tool's import takes. [`meridian retarget`](../operations/retargeting.md) writes them as `adopt:`. Read only; change nothing |
 
 [`meridian_sdk::tool`](../../crates/meridian-sdk/src/tool.rs): `write_artifact` syncs the
 artifact into the work directory; `Tool` runs a command, relays output and turns failure into

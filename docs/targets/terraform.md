@@ -191,6 +191,12 @@ thing into its state on the next apply instead of creating it:
 
 See [`examples/terraform/adopt.yaml`](../../examples/terraform/adopt.yaml).
 
+### Moving to another tool
+
+The plugin reports what it manages, read from `terraform show -json`: each
+managed resource's `id`, by resource id. [`meridian retarget`](../operations/retargeting.md)
+uses it to write `adopt:` when a document moves to another tool.
+
 ## Importing
 
 `meridian import --from terraform DIR` reads `*.tf` and `*.tf.json` into one document

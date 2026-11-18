@@ -161,6 +161,8 @@ What it does depends on the target, and the
   Terraform data source, with `invalid-adopt`.
 - Once the thing is adopted, `adopt` can stay: the tool's import does nothing
   for a thing already in its state.
+- [`meridian retarget`](../../operations/retargeting.md) writes the `adopt`
+  lines for you when a document moves from one tool to another.
 
 ## A resource in each flavour
 

@@ -71,6 +71,20 @@ kind create cluster --wait 180s
 MERIDIAN_TEST_REAL_SLICE=1 cargo test -p meridian-cli --test vertical_slice -- --ignored --nocapture
 ```
 
+## Moving from Terraform to OpenTofu
+
+`opentofu.yml` also installs Terraform and runs
+[`crates/meridian-cli/tests/retarget_real.rs`](../../crates/meridian-cli/tests/retarget_real.rs)
+with `MERIDIAN_TEST_REAL_RETARGET=1`. It applies a document with Terraform (two
+`random_id` resources from `hashicorp/random`), moves it with
+[`meridian retarget`](../operations/retargeting.md), and checks that OpenTofu's first plan
+adopts both and creates, replaces and deletes nothing, that the apply puts the same ids in
+OpenTofu's state, and that a second plan has nothing to do.
+
+```
+MERIDIAN_TEST_REAL_RETARGET=1 cargo test -p meridian-cli --test retarget_real -- --ignored --nocapture
+```
+
 ## What a real-tool test should do
 
 1. Compile a small document.
