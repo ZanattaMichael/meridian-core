@@ -48,6 +48,7 @@ mod credential;
 pub mod expr;
 pub mod fetch;
 mod import;
+pub mod infra;
 mod listen;
 pub mod rules;
 mod run;

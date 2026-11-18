@@ -61,6 +61,7 @@ The core knows the language; each plugin knows one tool.
 | [The Meridian language](reference/dsl/index.md) | every document field |
 | Language items | [resources](reference/dsl/resources.md), [`dependsOn`](reference/dsl/dependson.md), [`notifies`](reference/dsl/notifies.md), [conditions](reference/dsl/conditions.md), [references](reference/dsl/references.md), [outputs and hand-offs](reference/dsl/outputs-and-hand-offs.md) |
 | Language by segment | [configuration management](reference/dsl/configuration-management.md), [infrastructure as code](reference/dsl/infrastructure-as-code.md), [containerization](reference/dsl/containerization.md), [container orchestration](reference/dsl/container-orchestration.md) |
+| [Common infrastructure types](reference/dsl/common-infrastructure-types.md) | `network`, `subnet`, `firewall`, `address`, `vm` |
 | [Resource types](reference/resource-types.md) | the six shared configuration management types |
 | [Modules](reference/modules.md) | manifest, sources, versions, lockfile |
 | [Lint rules](reference/lint.md) | |
@@ -74,6 +75,7 @@ The core knows the language; each plugin knows one tool.
 | [Capability matrix](reference/capability-matrix.md) | generated |
 | [Plugin settings](reference/plugin-settings.md) | generated |
 | [Conformance matrix](reference/conformance-matrix.md) | generated |
+| [Infra conformance matrix](reference/infra-conformance-matrix.md) | generated |
 | [Refusal rules](reference/refusal-rules.md) | generated |
 | [Compatibility](reference/compatibility.md) | generated |
 

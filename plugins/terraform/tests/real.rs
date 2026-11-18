@@ -463,3 +463,46 @@ fn the_providers_schemas_are_exported_for_an_editor() {
     );
     client.close().expect("the plugin exits cleanly");
 }
+
+/// The common infrastructure types compile to configurations the real AWS and
+/// Azure providers accept: `init` downloads each provider, and `validate`
+/// checks every block and argument against its schema. Nothing is planned,
+/// so no account is needed.
+#[ignore = "needs a real terraform; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn the_common_types_are_configurations_the_real_providers_validate() {
+    use meridian_sdk::Emitter;
+    let Some(program) = terraform() else { return };
+    if std::env::var_os("MERIDIAN_TEST_REAL_TERRAFORM_NETWORK").is_none() {
+        eprintln!("skipped: MERIDIAN_TEST_REAL_TERRAFORM_NETWORK is not set");
+        return;
+    }
+    for name in ["web-aws", "web-azure"] {
+        let dir = scratch(TMP, &format!("real-common-{name}"));
+        let graph = graph_from_file(&format!("examples/common/{name}.yaml"), "terraform");
+        let emitted = meridian_target_terraform::Terraform
+            .emit(&graph, &Data::new())
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        for (path, content) in &emitted.artifact.files {
+            fs::write(dir.join(path), content).unwrap();
+        }
+        let run = |args: &[&str]| {
+            let out = Command::new(&program)
+                .args(args)
+                .current_dir(&dir)
+                .env("TF_IN_AUTOMATION", "1")
+                .output()
+                .expect("terraform runs");
+            assert!(
+                out.status.success(),
+                "{name}: {program} {args:?} failed:\n{}\n{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+        run(&["init", "-input=false", "-no-color", "-backend=false"]);
+        let validated = run(&["validate", "-json", "-no-color"]);
+        assert!(validated.contains("\"valid\": true"), "{name}: {validated}");
+    }
+}

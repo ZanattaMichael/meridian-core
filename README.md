@@ -37,10 +37,15 @@ and apply it. If a tool cannot do what a document asks, the compile fails and sa
 
 - [Capability matrix](docs/reference/capability-matrix.md): what each target can express.
 - [Quickstart](docs/quickstart/install.md), and an example per target in [`examples/`](examples).
+- [Common infrastructure types](docs/reference/dsl/common-infrastructure-types.md): `network`,
+  `subnet`, `firewall`, `address` and `vm` compile for Terraform and OpenTofu (AWS, Azure) and
+  Bicep.
 - [`meridian import`](docs/operations/importing.md) converts existing Terraform, OpenTofu,
   Ansible, Compose, Kubernetes and DSC configuration.
 - [How it fits together](docs/reference/dsl/how-it-fits-together.md) follows one document
   from file to running tool.
+
+<p align="center"><img src="docs/graphics/meridian-common-types.svg" alt="The common infrastructure types: network, subnet, firewall, address and vm written once, and what Terraform for AWS, Terraform for Azure and Bicep compile each to" width="100%"></p>
 
 ## Commands
 

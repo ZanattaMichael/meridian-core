@@ -173,3 +173,32 @@ fn a_secret_in_the_deployments_settings_is_refused_because_they_are_the_command_
         err.msg
     );
 }
+
+#[test]
+fn the_common_types_compile_to_their_golden_file() {
+    let graph = graph_from_file("examples/common/web-bicep.yaml", "bicep");
+    assert_golden(&golden(), "common-web-bicep", &emit(&graph).unwrap());
+}
+
+#[test]
+fn a_common_resource_without_a_location_is_at_the_resource_groups() {
+    let text = bicep(&format!(
+        "{TARGET}    - id: ip\n      type: address\n    - id: ip2\n      type: address\n      params: {{location: northeurope, tags: {{team: web}}}}\n"
+    ));
+    assert!(
+        text.contains("location: resourceGroup().location"),
+        "{text}"
+    );
+    assert!(text.contains("location: 'northeurope'"), "{text}");
+    assert!(text.contains("team: 'web'"), "{text}");
+}
+
+#[test]
+fn an_azure_vm_without_a_key_is_refused() {
+    let err = refusal(&format!(
+        "{TARGET}    - id: net\n      type: network\n      params: {{cidr: 10.0.0.0/16}}\n    - id: sub\n      type: subnet\n      params: {{network: \"${{net}}\", cidr: 10.0.1.0/24}}\n    - id: vm\n      type: vm\n      params: {{subnet: \"${{sub}}\", size: Standard_B1s, image: img}}\n"
+    ));
+    assert_eq!(err.rule, "missing-param");
+    assert_eq!(err.target, "bicep");
+    assert_eq!(err.resource, "vm");
+}

@@ -9,7 +9,7 @@ with `terraform`. OpenTofu's `tofu` takes the same commands.
 
 | | |
 |---|---|
-| Resource types | Terraform's own: any `<provider>_<type>`, plus `data.<type>`, `module`, `variable`, `local`, `provider` and `backend` |
+| Resource types | Terraform's own: any `<provider>_<type>`, plus `data.<type>`, `module`, `variable`, `local`, `provider` and `backend`. Also the [common infrastructure types](#common-infrastructure-types), on AWS and Azure |
 | Import | Yes: `*.tf` and `*.tf.json`. See [Importing](#importing) |
 | `dependsOn` | Yes, as `depends_on`, unless a reference already implies the order |
 | `notifies` | Synthetic, and blunt: the action `replace` only. See [Notifications](#notifications) |
@@ -76,6 +76,39 @@ spec:
 
 [`examples/workflow/bootstrap-then-machine.yaml`](../../examples/workflow/bootstrap-then-machine.yaml)
 creates a machine with the user-data a cloud-init document compiles to.
+
+## Common infrastructure types
+
+`network`, `subnet`, `firewall`, `address` and `vm` are Meridian's own types,
+and this target turns each into the resources of the AWS or the Azure provider
+([the common infrastructure types](../reference/dsl/common-infrastructure-types.md)
+has every param and mapping). They are mixed freely with Terraform's own
+types. The cloud is the one named in `spec.settings`, or the one whose provider
+the document configures:
+
+```yaml
+spec:
+  target: terraform
+  settings:
+    cloud: azure            # or aws; optional when only one provider is configured
+    location: westeurope    # Azure: where a common resource goes unless it says
+    resourceGroup: web-prod # Azure: required
+```
+
+| Common type | AWS | Azure |
+|---|---|---|
+| `network` | `aws_vpc` | `azurerm_virtual_network` |
+| `subnet` | `aws_subnet`; when public, an internet gateway, a route table and a route | `azurerm_subnet` |
+| `firewall` | `aws_security_group` and one rule resource per rule | `azurerm_network_security_group` and one `azurerm_network_security_rule` per rule |
+| `address` | `aws_eip` | `azurerm_public_ip` |
+| `vm` | `aws_instance`, an `aws_key_pair`, a `data.aws_ami` lookup, an `aws_eip_association` | `azurerm_linux_virtual_machine`, an `azurerm_network_interface` and its firewall association |
+
+The rules and routes are separate resources rather than the inline
+`ingress`, `route` or `security_rule` blocks. Those are "attributes as blocks"
+in the providers, which Terraform's JSON syntax would need written out in full.
+Examples: [`examples/common/web-aws.yaml`](../../examples/common/web-aws.yaml)
+and [`web-azure.yaml`](../../examples/common/web-azure.yaml). The OpenTofu target
+takes the common types too, with the same mapping and settings.
 
 ## References
 

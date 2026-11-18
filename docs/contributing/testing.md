@@ -21,7 +21,7 @@ flowchart TD
 | Property tests | `crates/meridian-cli/tests/properties.rs` | `cargo test -p meridian-cli --test properties` |
 | Placement tests | `crates/meridian-cli/tests/placement.rs`, `placement_properties.rs` | `cargo test -p meridian-cli --test placement --test placement_properties` |
 | Secret tests | `crates/meridian-cli/tests/secret_places.rs`, `secret_properties.rs`, `secrets.rs` | `cargo test -p meridian-cli --test secret_places --test secret_properties --test secrets` |
-| Conformance tests | `crates/meridian-cli/tests/conformance.rs`, `condition_conformance.rs`, `secret_conformance.rs` | `cargo test -p meridian-cli --test conformance --test condition_conformance --test secret_conformance` |
+| Conformance tests | `crates/meridian-cli/tests/conformance.rs`, `infra_conformance.rs`, `condition_conformance.rs`, `secret_conformance.rs` | `cargo test -p meridian-cli --test conformance --test infra_conformance --test condition_conformance --test secret_conformance` |
 | Robustness tests | `crates/meridian-cli/tests/robustness.rs` | `cargo test -p meridian-cli --test robustness` |
 | Examples | `crates/meridian-cli/tests/examples.rs` | `cargo test -p meridian-cli --test examples` |
 | Real tools | a workflow per tool under `.github/workflows/` | in CI; [Real-tool tests](real-tool-tests.md) lists what each one runs and how to run it yourself |
@@ -165,6 +165,12 @@ Also:
 - every refusal names its target, its resource and a line;
 - a settled `${...}` leaves no marker;
 - dependencies come first.
+
+**Common infrastructure types.** `infra_conformance.rs` compiles about 40 documents using
+`network`, `subnet`, `firewall`, `address` and `vm` for Terraform and OpenTofu (AWS, Azure)
+and Bicep into the [infra conformance matrix](../reference/infra-conformance-matrix.md). It
+fails if a target declares only some of the five or has no column, and checks a secret ssh key
+is never written.
 
 **Every target.** Each `examples/<target>/` example must compile deterministically to
 relative paths, never drop `runtimeWhen`, refuse undeclared notifies, and refuse unknown

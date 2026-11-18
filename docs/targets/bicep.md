@@ -10,7 +10,7 @@ Compiles an Infrastructure document into a Bicep file, deployed to a resource gr
 | | |
 |---|---|
 | Category | Infrastructure as code |
-| Resource types | Azure's own, with the API version: `Namespace/type@api-version`, plus `deployment` for where the file is deployed |
+| Resource types | Azure's own, with the API version: `Namespace/type@api-version`, plus `deployment` for where the file is deployed. Also the [common infrastructure types](#common-infrastructure-types) |
 | `dependsOn` | Yes, as Bicep's `dependsOn`, unless a reference already implies the order |
 | `notifies` | No. An Azure deployment has no way to react to a change in another resource. Refused |
 | `runtimeWhen` | No. Refused |
@@ -31,6 +31,8 @@ Not supported:
 - **Scopes other than a resource group.**
 - **Per-type checks at compile.** The Bicep compiler checks types when `az` builds.
 - **Deleting.** An empty document is refused.
+
+It also takes the [common infrastructure types](#common-infrastructure-types).
 
 ## Requirements
 
@@ -140,6 +142,27 @@ Exactly one `deployment` resource says where the file goes:
 
 A second is refused (`duplicate-resource`), as is `dependsOn` on it
 (`unsupported-dependency`).
+
+## Common infrastructure types
+
+`network`, `subnet`, `firewall`, `address` and `vm` are Meridian's own types,
+and this target turns each into Azure's own resource types
+([the common infrastructure types](../reference/dsl/common-infrastructure-types.md)
+has every param and mapping). They are mixed freely with Azure's own types and
+go to the deployment's resource group, at the group's location unless a
+resource gives one.
+
+| Common type | Becomes |
+|---|---|
+| `network` | `Microsoft.Network/virtualNetworks@2023-09-01` |
+| `subnet` | `Microsoft.Network/virtualNetworks/subnets@2023-09-01`, with the network as its `parent` |
+| `firewall` | `Microsoft.Network/networkSecurityGroups@2023-09-01`, the rules inside it |
+| `address` | `Microsoft.Network/publicIPAddresses@2023-09-01`, Standard and static |
+| `vm` | `Microsoft.Compute/virtualMachines@2024-03-01` and a `Microsoft.Network/networkInterfaces@2023-09-01` named `<id>_nic` |
+
+The same document compiles with Terraform for Azure, with the same sizes and
+images; compare [`examples/common/web-bicep.yaml`](../../examples/common/web-bicep.yaml)
+with [`web-azure.yaml`](../../examples/common/web-azure.yaml).
 
 ## References and expressions
 
