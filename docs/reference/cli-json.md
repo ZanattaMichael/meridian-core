@@ -1,10 +1,7 @@
 # Machine-readable output: `--output json`
 
-Every `meridian` command prints text for people. With `--output json` (or
-`MERIDIAN_OUTPUT=json`), it instead prints **one JSON object** on stdout at the
-end, and the human-readable report moves to stderr, as with `--events json`.
-Pipelines and wrappers read the object, so the text wording can change without
-breaking them.
+With `--output json` (or `MERIDIAN_OUTPUT=json`), a command prints **one JSON object** on
+stdout at the end; the text report moves to stderr.
 
 ```
 $ meridian plan site.yaml --output json --detailed-exitcode > plan.json; echo $?
@@ -26,11 +23,9 @@ $ jq .summary plan.json
 }
 ```
 
-Each command's object is described here and has a JSON Schema (draft 7) under
-[`schemas/output/`](../../schemas/output/). A test checks every command's output
-against its schema, so the schemas are the contract: fields are added only with
-their schema, and never removed or renamed within a language version. Expect
-new fields, and ignore ones you do not know.
+Each has a JSON Schema (draft 7) in [`schemas/output/`](../../schemas/output/), checked by
+tests. Fields are added, never removed or renamed within a language version; ignore unknown
+ones.
 
 ## What every object has
 
@@ -44,9 +39,7 @@ The rest is the command's own. Text that the records keep as "none" is
 
 ### When the command fails before it has a result
 
-A command that stops early (a missing file, a selector matching nothing, an
-impossible request) prints the error as an object too, so readers never need to
-parse stderr:
+A command that stops early prints the error as an object:
 
 ```json
 {
@@ -58,39 +51,24 @@ parse stderr:
 }
 ```
 
-The same message is on standard error, with `error:` in front, as always.
-Schema: `schemas/output/error.schema.json`.
+Also on stderr as `error: ...`. Schema: `schemas/output/error.schema.json`.
 
-A command that reads documents, and finds one that does not read or does not
-validate, prints the [`validate`](#validate) object instead, under its own
-`command`, with the diagnostics. A `plan site.yaml` of a broken document is
-therefore read exactly like a `validate site.yaml` of it.
-
-A mistake in the command line itself (an unknown option, a missing argument)
-is reported by the argument parser as text, and exits `2`, before any output
-format is settled.
+Invalid documents give the [`validate`](#validate) object under the command's name.
+Command-line mistakes are text, exit `2`.
 
 ### What does not change
 
-- `--events json` and `meridian events` write one JSON object per event, per
-  line. `--output json` cannot be combined with `--events json`, since both use
-  stdout; use `--report json=FILE` for the run as a file.
-- `meridian report --format json` writes the [report](reporting.md#json), a
-  different shape from the run object below: the report folds a recorded run's
-  events; the run object is what the command just saw.
-- `meridian lint --json` and `meridian schema status --json` keep their line
-  per finding or target. `--output json` on `lint` gives the whole result as
-  one object instead, below.
-- `meridian schema` prints a JSON Schema, `meridian import` without `--out`
-  prints documents, and `meridian lsp` speaks to an editor. `--output json`
-  does not change them.
+- `--events json` (one object per line) cannot be combined with `--output json`; use
+  `--report json=FILE`.
+- `meridian report --format json` writes the [report](reporting.md#json), a different shape.
+- `lint --json` and `schema status --json` stay line-per-item.
+- `meridian schema`, `import` without `--out`, and `lsp` are unaffected.
 
 ## The commands
 
 ### `compile`, `plan`, `apply`, `drift`, `rollback`
 
-One object, the run, for the five commands that run a workflow. Schema:
-`schemas/output/run.schema.json`.
+One run object. Schema: `schemas/output/run.schema.json`.
 
 ```json
 {
@@ -194,15 +172,8 @@ A `change` is `resource`, `action` (`create`, `update`, `delete` or
 
 ### `plan --detailed-exitcode`
 
-A `plan` exits `0` whether or not there are changes. With `--detailed-exitcode`
-it exits `2` when an apply would do something, `0` when everything is in sync,
-and `1` on error, as `drift` does and as Terraform users expect. A pipeline can
-then ask "anything to apply?" without reading the plan, and decide whether to
-request approval.
-
-A stage has changes when its tool listed any, when the tool cannot preview
-(`unknown`), or when it is `deferred` (waiting on an output only an apply
-produces). The object's `summary.hasChanges` uses the same test.
+Exit `2` for changes, `0` in sync, `1` on error. A stage has changes if the tool listed any,
+cannot preview (`unknown`), or is `deferred`; `summary.hasChanges` uses the same test.
 
 ### `status`
 
@@ -277,8 +248,7 @@ empty for the whole document) and the `message`. Schema:
 }
 ```
 
-`documents` is how many documents were read when they all validate, and `0`
-when any did not: a bundle is valid as a whole or not at all.
+`documents` is the count when all validate, else `0`.
 
 ### `lint`
 
@@ -298,9 +268,8 @@ Schema: `schemas/output/lint.schema.json`.
 }
 ```
 
-`ok` is false when there is an error, or a warning with `--strict`.
-`pluginsFound` is false when no plugin was found, in which case the documents
-were checked against the language only.
+`ok` is false on an error, or a warning with `--strict`. `pluginsFound` false means
+language-only checks.
 
 ### `fmt`
 
@@ -439,8 +408,7 @@ One object per test document under `files` (`file`, `name`, `ok` and its
 (one line each, empty when it passed), `documents` (each `name`, `target` and
 `outcome`: `compiled`, `refused`, `left-out`, `planned`, `deferred`, `failed`
 or `not-run`) and `millis`; then a `summary` of `files`, `cases`, `passed`,
-`failed` and `errors`. `ok` is true only when every case passed. The report
-for people moves to standard error. Schema: `schemas/output/test.schema.json`.
+`failed` and `errors`. `ok` is true only when every case passed. Schema: `schemas/output/test.schema.json`.
 
 ```json
 {
@@ -466,8 +434,7 @@ for people moves to standard error. Schema: `schemas/output/test.schema.json`.
 
 ## In a pipeline
 
-A pull request job that plans, comments the changes, and fails only on an
-error:
+A pull request job that fails only on error:
 
 ```yaml
 - name: Plan
@@ -484,7 +451,4 @@ error:
     jq -r '.stages[] | select(.status == "planned") | "\(.name): \(.changes | length) changes"' plan.json
 ```
 
-The report for people is on the job's log, since it went to standard error;
-`plan.json` holds the plan as data; and the exit status says whether there is
-anything to apply. [Reports and sinks](reporting.md#in-ci) shows the same job
-keeping a JUnit file and an HTML page.
+See also [reports in CI](reporting.md#in-ci).

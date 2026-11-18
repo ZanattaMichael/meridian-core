@@ -1,53 +1,18 @@
 # Testing documents and modules
 
-`meridian test` runs the tests you write for your own documents and modules. A
-test is a `kind: Test` document naming the documents under test and a list of
-cases. Each case gives the data to compile or plan with and says what should
-happen: which documents compile or are refused (and under which rule), what an
-emitted file holds, what a plan would change. Checks are document fields plus
-expressions in the [one expression language](dsl/expressions.md), so a test is a
-document, not a script.
+`meridian test` runs `kind: Test` documents. Each case compiles or plans the named documents
+with its data and checks outcomes, files, refusals and changes, using fields and
+[expressions](dsl/expressions.md).
 
 <p align="center"><img src="../graphics/meridian-test-flow.svg" alt="meridian test: a Test document names documents and cases; each case compiles or plans them with its data in a scratch directory and checks the outcome, the files, the refusal and the changes" width="100%"></p>
 
-**What it does**
-
-- Compiles the named documents with each case's data, using the same plugins
-  as `meridian compile`, and checks each document's outcome, files, warnings,
-  and a refusal's rule and resource.
-- Plans them when a case asks, from an empty scratch state, and checks the
-  changes each tool reports.
-- Evaluates assertions written as expressions over what came out.
-- Reports every failure of every case, not only the first, as text, as one
-  JSON object with `--output json`, and as JUnit XML with `--junit`.
-- Finds `tests/*.test.yaml` on its own, so a module can carry its tests.
-
-**What it does not do**
-
-- It does not apply. Applying to something disposable, checking it and tearing
-  it down is a third level not yet built; the tracking issue is linked at the
-  end.
-- A plan case needs the document's tool, as `meridian plan` does; a project's
-  [plugin settings](plugin-settings.md) can point the plugin at a stand-in.
-- It is not a scripting language. A case says what should be true; it cannot
-  loop, call out, or change a document on the way.
-
-## Contents
-
-- [A first test](#a-first-test)
-- [The Test document](#the-test-document)
-- [Cases](#cases)
-- [Expectations](#expectations)
-- [Assertions](#assertions)
-- [What `stages` holds](#what-stages-holds)
-- [Running tests](#running-tests)
-- [Tests in a module](#tests-in-a-module)
-- [In a pipeline](#in-a-pipeline)
-- [What is not here yet](#what-is-not-here-yet)
+It reports every failure (text, `--output json`, `--junit`) and finds `tests/*.test.yaml`
+itself. It does not apply, and plan cases need the tool (or a stand-in via
+[plugin settings](plugin-settings.md)).
 
 ## A first test
 
-A project has a document and a data file:
+A document and data file:
 
 ```yaml
 # site.yaml
@@ -73,7 +38,7 @@ spec:
         content: "${{ data.motd }}"
 ```
 
-The test sits beside it under `tests/`:
+The test, under `tests/`:
 
 ```yaml
 # tests/site.test.yaml
@@ -116,7 +81,7 @@ tests/site.test.yaml (site)
 3 cases: 3 passed
 ```
 
-A case that fails says what it found:
+A failing case:
 
 ```
 tests/site.test.yaml (site)
@@ -140,15 +105,12 @@ tests/site.test.yaml (site)
 | `spec.select` | no | A [label selector](cli.md#running-part-of-a-workflow), as `-l` takes it, that every case runs under |
 | `spec.cases` | yes | The cases, at least one, each with a name no other case has |
 
-Only `meridian test` reads `Test` documents. `meridian lint`, `meridian fmt`
-and the language server skip them, as they do module manifests, and
-`meridian compile` refuses them. Given no files, `meridian test` looks for
-`*.test.yaml`.
+Lint, fmt and the language server skip `Test` documents; `compile` refuses them. With no
+files, `meridian test` looks for `*.test.yaml`.
 
 ## Cases
 
-Each entry of `spec.cases` is one run of the documents with its own data,
-followed by its checks.
+Each entry of `spec.cases` is one run with its own data and checks.
 
 | Field | Required | Value |
 |---|---|---|
@@ -160,36 +122,20 @@ followed by its checks.
 | `expect` | one of the two | What each document should have come to, by the document's `metadata.name`. See [expectations](#expectations) |
 | `assert` | one of the two | Expressions that must each be true. See [assertions](#assertions) |
 
-A case must expect or assert something: a case that checks nothing cannot
-fail, so it is refused when the file is read. Every field is checked before
-the first case runs, so a mistake in the last case is reported before the
-first one has taken its time.
+A case that checks nothing is refused. All fields are checked before any case runs.
 
 ### Levels
 
-A **compile** case does what `meridian compile` does: reads the documents,
-decides conditions from the case's data, compiles each selected document, and
-keeps the files, warnings and refusals. No tool runs and nothing is contacted,
-so it needs only the plugins.
+A **compile** case runs `meridian compile`; no tool runs.
 
-A **plan** case goes further: each compiled document's tool is asked what an
-apply would change, as `meridian plan` does. It runs in the case's own scratch
-directory under `tests/` in the state directory, emptied first, so nothing has
-been applied there and the project's state and record are untouched. A tool
-with remote state (Terraform with a remote backend) plans against that; one
-that keeps state in the working directory (the test kit's stand-ins) plans
-against nothing. A document waiting on an unapplied Infrastructure output is
-`deferred`, as in a plan.
-
-A plan case needs the document's tool, or a stand-in: the project's
-[plugin settings](plugin-settings.md) choose each plugin's program, so a
-`meridian.yaml` in the test's directory can name one.
+A **plan** case also runs `meridian plan` in an emptied scratch directory under the state
+directory's `tests/`; project state is untouched. Remote state (a Terraform backend) is
+still used. Stages waiting on outputs are `deferred`. A `meridian.yaml` beside the test can
+point [plugin settings](plugin-settings.md) at a stand-in.
 
 ## Expectations
 
-`expect` is a mapping from a document's name to what it should have come to.
-A name that no document of the case has is a failure, and so is each
-expectation that does not hold; all of them are reported.
+`expect` maps document names to what they should come to. Unknown names fail.
 
 | Field | Checks |
 |---|---|
@@ -202,22 +148,13 @@ expectation that does not hold; all of them are reported.
 | `changes` | In a plan case, changes that must be among the tool's: each names an `action` (`create`, `update`, `delete`, `replace`), a `resource` (the id, or the tool's own name for what changes, as `meridian plan` prints it), or both |
 | `changeCount` | In a plan case, exactly how many changes the tool reports. A tool that cannot preview fails this |
 
-A document that exists only to be refused is still an error to `meridian lint`,
-which cannot know a test wants it. Where possible, make the refusal come from
-the case's data instead, as the [example](../../examples/tests/tests/web.test.yaml)
-does with a numeric file mode: the document is sound, and one case gives it a
-value its target refuses.
-
-A refusal's rule and resource are the ones `meridian compile` prints, and
-the names are the same on every target: `unsupported-resource-type` is
-`unsupported-resource-type` on Ansible and on Puppet. The
-[refusal rules](refusal-rules.md) page lists every rule.
+Prefer triggering refusals through case data, as the
+[example](../../examples/tests/tests/web.test.yaml) does, so `meridian lint` stays clean. Rule
+names are the same on every target ([refusal rules](refusal-rules.md)).
 
 ## Assertions
 
-`assert` is a list of expressions, each of which must be true. An entry is
-the expression as text, or a mapping of `expr` and a `message` to show
-instead of the expression when it is false:
+`assert` is a list of expressions that must be true, as text or `{expr, message}`:
 
 ```yaml
 assert:
@@ -227,23 +164,13 @@ assert:
   - all(map(stages.network.changes, 'c', c.action == 'create'))
 ```
 
-An assertion uses the expression language of `when` and `${{ }}`, with the same
-functions and errors, and is checked when the file is read: an unknown name or
-function is refused before anything runs. It can read two names:
-
-- `stages`: a mapping from each document's name to what it came to; see
-  [below](#what-stages-holds).
-- `data`: the data the case ran with, after its files and its `set`.
-
-An expression that is not a boolean is an error, not a failure to be read as
-false: `stages.web.outcome` on its own is refused, `stages.web.outcome ==
-'compiled'` is a check. A path that is not set, such as a document the case
-does not have, is an error too, with the hint that `defined()` tests for it.
+Same language as `when`, checked on read. Names: `stages` ([below](#what-stages-holds)) and
+`data` (the case's data). A non-boolean result or an unset path is an error (use
+`defined()`).
 
 ## What `stages` holds
 
-`stages.<name>` is a mapping with these fields, for each document the case
-ran, including one left out by its condition:
+`stages.<name>`, for each document including ones left out:
 
 | Field | Value |
 |---|---|
@@ -257,9 +184,7 @@ ran, including one left out by its condition:
 | `condition` | The `when` that left the document out, or `null` |
 | `error` | The failure's text when the document failed or was refused, or `null` |
 
-A secret never reaches a test: a document whose conditions read a secret
-cannot be compiled by `compile`, and so cannot be compiled by a case either.
-It is reported as refused, for exactly that reason, as `compile` reports it.
+A document whose conditions read a secret is reported as refused, as `compile` does.
 
 ## Running tests
 
@@ -271,27 +196,16 @@ meridian test --junit report.xml       # also write JUnit XML
 meridian test --output json            # one object, for a machine
 ```
 
-Every case of every file runs, whatever an earlier one did: a failing case
-does not stop the next. The command exits `0` when every case passed and `1`
-otherwise, including when a test file does not read, when no test file was
-found, or when `--case` matched nothing. The plugins are found as they are
-for every other command: `--plugin-dir`, `MERIDIAN_PLUGIN_DIR`, and the
-directory `meridian` is in.
+Every case runs. Exit `0` only if all pass; `1` otherwise, including unreadable files, no
+files, or no `--case` match.
 
-Each case is one line: `ok`, `FAIL` or `ERR`, the case's name, its level and
-how many documents it ran; a failed case is followed by one line per failure.
-`ERR` is a case that could not run at all: a document that does not load, a
-data file that does not read, a run that was refused. The last line counts the
-cases.
-
-`--output json` prints [one object](cli-json.md#test) with every file, every
-case, its status and its failures. `--junit FILE` writes the same as JUnit
-XML, one `testsuite` per test document and one `testcase` per case, which
-every pipeline engine shows as tests.
+Each case prints `ok`, `FAIL` or `ERR` (could not run), its name, level and document count,
+then one line per failure. `--output json` prints [one object](cli-json.md#test); `--junit
+FILE` writes one `testsuite` per file.
 
 ## Tests in a module
 
-A [module](modules.md) carries its tests the way it carries its documents:
+A [module](modules.md) carries tests:
 
 ```
 acme-nginx/
@@ -301,10 +215,7 @@ acme-nginx/
   tests/proxy.test.yaml
 ```
 
-The test names the module's files relative to itself
-(`../documents/proxy.yaml`, `../data/defaults.yaml`), so `meridian test` in the
-module directory tests it before tagging, signing or pushing. A project using
-the module can test it as delivered, naming its files as any command does:
+Paths are relative to the test. A project can test an installed module too:
 
 ```yaml
 spec:
@@ -312,13 +223,11 @@ spec:
   data: ["@acme/nginx:data/defaults.yaml"]
 ```
 
-`meridian module install` fetches no tests and runs none: a module's tests
-are run by whoever decides to, never on install.
+`module install` never runs tests.
 
 ## In a pipeline
 
-In a [pipeline engine](../operations/running-in-a-pipeline.md), run the tests
-before the plan, and hand the engine the JUnit file:
+Run before the plan ([pipelines](../operations/running-in-a-pipeline.md)):
 
 ```yaml
 - run: meridian test --junit meridian-tests.xml
@@ -330,23 +239,12 @@ before the plan, and hand the engine the JUnit file:
     reporter: java-junit
 ```
 
-The compile cases need nothing but the plugins, so they run on any runner. A
-plan case needs its tool, as the plan job does.
-
 ## What is not here yet
 
-- **Apply cases.** Applying to something disposable (a container for a
-  configuration management target, a `kind` cluster for Kubernetes, the real
-  cloud when asked), checking it and tearing it down. This waits on a `destroy`
-  operation in the plugin protocol
-  ([issue 127](https://github.com/ZanattaMichael/meridian-core/issues/127))
-  and on the disposable machines of
-  [issue 123](https://github.com/ZanattaMichael/meridian-core/issues/123).
-- **Expectations on events and outputs.** A compile or plan case has no
-  outputs to check yet; an apply case would.
-- **A line number for a mistake in a test file.** A problem is named by its
-  path in the document (`spec.cases[2].expect.web.outcome`), not yet by its
-  line.
+- **Apply cases**, waiting on `destroy`
+  ([issue 127](https://github.com/ZanattaMichael/meridian-core/issues/127)) and disposable
+  machines ([issue 123](https://github.com/ZanattaMichael/meridian-core/issues/123)).
+- **Expectations on events and outputs.**
+- **Line numbers** for test-file mistakes (paths only, such as `spec.cases[2]`).
 
-The design choices are recorded in
-[decision 0037](../decisions/0037-a-test-is-a-document-of-cases-over-compile-and-plan.md).
+See [decision 0037](../decisions/0037-a-test-is-a-document-of-cases-over-compile-and-plan.md).

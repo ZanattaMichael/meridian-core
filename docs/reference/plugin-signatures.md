@@ -1,12 +1,7 @@
 # Plugin signatures
 
-A plugin is a program that `meridian` starts with your own rights. Before it
-starts one, `meridian` can check that the binary is the one somebody you trust
-signed, and refuse to start it otherwise.
-
-A released `meridian` does this by default, for the plugins it was released
-with, and you need to do nothing. This page is for when you want to know what
-is checked, use a plugin from somewhere else, or sign plugins of your own.
+`meridian` can refuse to start a plugin binary not signed by a trusted key. A released
+`meridian` does this by default for its own plugins.
 
 ## What is checked
 
@@ -17,19 +12,9 @@ meridian-target-terraform
 meridian-target-terraform.sig
 ```
 
-The `.sig` file holds an Ed25519 signature over the SHA-256 of the binary, and
-the id of the key that made it. Before starting the plugin, `meridian`
-
-1. reads the binary and computes its SHA-256,
-2. looks for the signature's key among the public keys it trusts,
-3. checks the signature against that key and that digest.
-
-The plugin is started only after that. The check needs no network and no
-service, so it happens every time, on every machine.
-
-What it proves is exact and narrow: the binary is, byte for byte, the file the
-holder of a trusted key signed. It does not say the plugin is good, only whose
-it is. Which keys to trust is your decision.
+The `.sig` holds an Ed25519 signature over the binary's SHA-256 and the key id. Before each
+start, `meridian` hashes the binary and verifies it against a trusted key, offline. It proves
+who signed the binary, not that it is safe.
 
 ## The policy
 
@@ -41,14 +26,9 @@ it is. Which keys to trust is your decision.
 | `warn` | started | started, with a warning on stderr |
 | `off` | started | started; signatures are not looked at |
 
-The default is `require` in a released `meridian` and `off` in one built from
-source, which has no key of its own and whose plugins nobody signed.
-
-Every command that starts plugins follows the policy, the
-[language server](../tooling/language-server.md#plugin-signatures) included.
-The one exception is stricter: plugin directories an editor names in its own
-settings are always held to `require`, unless `meridian lsp` is started with
-`--trust-editor-plugin-dirs`.
+Default: `require` for a release, `off` for a source build. The
+[language server](../tooling/language-server.md#plugin-signatures) follows it too, and holds
+editor-named plugin directories to `require` unless given `--trust-editor-plugin-dirs`.
 
 `meridian plugins` shows what the check found for each plugin:
 
@@ -63,23 +43,13 @@ The other values are `unsigned`, `invalid: <why>` and `not checked`.
 
 ## Which keys are trusted
 
-**The release's own key.** Each release build creates a key pair, signs its
-plugins, compiles the public key into its `meridian`, and deletes the secret key
-before finishing. A released `meridian` trusts exactly the plugins built with
-it, and no signing secret survives to be stolen. The public key is also in the
-archive as `release-key.pub`.
+**The release's own key.** Each release build makes a key pair, signs its plugins, embeds the
+public key (also shipped as `release-key.pub`) and deletes the secret key. Plugins from
+another release or platform are refused; install a release whole. To check `meridian`
+itself, see [Check what you downloaded](../quickstart/install.md#check-what-you-downloaded).
 
-The consequence: plugins and `meridian` from one release go together. A
-plugin copied from another release, or another platform's archive, was signed
-with another key and is refused. Install a release whole.
-
-How you know the `meridian` binary itself is genuine is a separate check, made
-when you install it: [Check what you downloaded](../quickstart/install.md#check-what-you-downloaded).
-
-**Keys you name.** `--trusted-key FILE` trusts one more public key, and can be
-given more than once. A directory means every `*.pub` file in it.
-`MERIDIAN_TRUSTED_KEYS` is the same as a list, separated by `:` (`;` on
-Windows).
+**Keys you name.** `--trusted-key FILE` (repeatable; a directory means every `*.pub`), or
+`MERIDIAN_TRUSTED_KEYS` separated by `:` (`;` on Windows).
 
 ```
 meridian plugins --trusted-key ~/keys/acme.pub
@@ -88,22 +58,17 @@ export MERIDIAN_TRUSTED_KEYS=/etc/meridian/trusted-keys
 
 ## Using a plugin from somewhere else
 
-A third-party plugin, or one you built yourself, is not signed by the
-release's key. Under `require` it is not started:
+Under `require`, a plugin not signed by the release key is refused:
 
 ```
 error: plugin /opt/plugins/meridian-target-acme: the plugin was not started: it is not signed: ...
 ```
 
-Choose one:
+- Preferred: trust the author's public key with `--trusted-key`.
+- Sign it with your own key and trust that.
+- Use `--plugin-signatures warn`.
 
-- Get the author's public key from somewhere you trust, and pass it with
-  `--trusted-key`. This is the one to prefer.
-- Sign the plugin with a key of your own, as below, and trust that key.
-- Run with `--plugin-signatures warn`, which starts it and says so each time.
-
-Keep such a plugin in a directory of its own and name it with `--plugin-dir`;
-the install scripts replace the plugins in the directory they install into.
+Keep it in its own `--plugin-dir`; install scripts replace their own directory.
 
 ## Signing plugins of your own
 
@@ -113,33 +78,23 @@ Make a key pair once:
 meridian signing keygen --secret acme.key --public acme.pub
 ```
 
-`acme.key` signs; keep it private. It is written so that only you can read it,
-and an existing key is never written over. `acme.pub` is what the people who
-run your plugin trust; publish it somewhere they have reason to believe is
-yours.
-
-Sign each binary you ship, after the last thing that changes it (stripping,
-compressing, code-signing):
+Keep `acme.key` private (written `0600`, never overwritten); publish `acme.pub`. Sign each
+binary after its last change (strip, compress, code-sign):
 
 ```
 meridian signing sign --key acme.key meridian-target-acme
 ```
 
-That writes `meridian-target-acme.sig`. Ship the two files together. Sign each
-platform's binary separately: they are different files.
-
-Check a binary without starting it:
+Ship `meridian-target-acme.sig` beside it, per platform. To verify:
 
 ```
 meridian signing verify --trusted-key acme.pub meridian-target-acme
 meridian-target-acme: verified, signed by key 5f1c0a94e2b7d310
 ```
 
-It exits non-zero if any binary does not verify.
+Non-zero if any fails.
 
 ## File formats
-
-All three are short text files.
 
 | File | Content |
 |---|---|
@@ -147,34 +102,19 @@ All three are short text files.
 | secret key | `meridian-secret-key-v1 <64 hexadecimal digits>` |
 | signature | four lines: `meridian-plugin-signature-v1`, `key <id>`, `sha256 <digest>`, `sig <128 hexadecimal digits>` |
 
-A key's id is the first 16 hexadecimal digits of the SHA-256 of the public
-key. It names a key in messages and signature files; it is not itself trusted.
-
-The signed message is the line `meridian-plugin-signature-v1`, a newline, the
-binary's SHA-256 in lower-case hexadecimal, and a newline. The `sha256` line in
-the signature file is there to give a clearer message when a binary has
-changed; the check uses the digest of the file as it is.
+A key id is the first 16 hex digits of the public key's SHA-256. The signed message is
+`meridian-plugin-signature-v1\n<lower-case hex sha256>\n`. The file's `sha256` line only
+improves messages; the check hashes the binary.
 
 ## What this does not cover
 
-- Anyone who can replace both `meridian` and a plugin can replace the key too.
-  Signatures protect a plugin directory from tampering on its own; install-time
-  checks protect the whole installation.
-- The check happens when the plugin starts. A binary swapped between check and
-  start, by someone who can already write to your plugin directory, is not
-  caught.
-- A target compiled into `meridian` itself is part of that binary and has no
-  signature of its own.
+- Someone who can replace `meridian` can replace the key.
+- A swap between check and start is not caught.
+- Built-in targets have no signature of their own.
 
 ## Using the check from other code
 
-The signing code is the general-purpose `meridian-signing` crate
-(`crates/meridian-signing`). `SecretKey::sign_file` signs any file,
-`verify_file` checks a file and its `.sig` against a list of `PublicKey`s, and
-`Verification::check` applies a `Policy` (off, warn or require).
-`SecretKey::sign_bytes` and `verify_bytes` do the same for in-memory bytes, which
-is how [modules are signed](modules.md#signatures), with the same keys and
-`--trusted-key`. Such a signature starts with `meridian-statement-signature-v1`,
-which is part of what is signed, so statement and plugin signatures can never
-pass as each other. The plugin host re-exports the crate as
-`meridian_plugin_host::signature`.
+Crate `meridian-signing`: `SecretKey::sign_file`, `verify_file`, `Verification::check`
+(`Policy`: off, warn, require), and `sign_bytes`/`verify_bytes`, used for
+[module signatures](modules.md#signatures) (prefix `meridian-statement-signature-v1`, so the
+two kinds never cross). Re-exported as `meridian_plugin_host::signature`.

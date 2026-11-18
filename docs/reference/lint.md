@@ -1,9 +1,7 @@
 # Lint rules
 
-The rules of [`meridian lint`](../tooling/linter.md), which the
-[language server](../tooling/language-server.md) also shows as you type. A
-lint finding is never an error: the document compiles. It points at something
-that is allowed and likely to hurt later.
+Rules of [`meridian lint`](../tooling/linter.md), also shown by the
+[language server](../tooling/language-server.md). Findings never stop compilation.
 
 | Rule | Severity | Fix | What it finds |
 |---|---|---|---|
@@ -19,12 +17,8 @@ that is allowed and likely to hurt later.
 | [`native-type`](#native-type) | info | | a resource using the tool's own type on a target that shares the six types |
 | [`unused-resource-set-host`](#unused-resource-set-host) | info | | `targetHost` fields its `from` does not read |
 
-Any rule can be silenced where a finding is deliberate, with a
-`# meridian-lint: disable=RULE` comment. See
-[silencing a rule](../tooling/linter.md#silencing-a-rule).
-
-A test (`crates/meridian-tooling/tests/lint.rs`) fails if a rule exists
-without a section on this page, so the page cannot fall behind the linter.
+Silence one with `# meridian-lint: disable=RULE`
+([silencing a rule](../tooling/linter.md#silencing-a-rule)).
 
 ## `unquoted-mode`
 
@@ -36,20 +30,14 @@ params:
   mode: 0644        # read as the number 644
 ```
 
-YAML reads `0644` as the number 644, not as the permissions `0644`, and the
-leading zero is lost before any tool sees it. Write the mode as a quoted
-string:
+YAML reads `0644` as 644. Quote it:
 
 ```yaml
   mode: "0644"
 ```
 
-Compilation also refuses the unquoted mode (`invalid-param`; see
-[the resource types](resource-types.md)), so `lint` reports the line twice: as
-the plugin's refusal and as this rule, which carries the fix.
-
-`meridian lint --fix`, and the quick fix in an editor, add the quotes around
-exactly what was typed.
+Compilation also refuses it (`invalid-param`, [resource types](resource-types.md)).
+`--fix` adds the quotes.
 
 ## `lossy-number`
 
@@ -64,24 +52,15 @@ params:
   build: 1_000        # read as the number 1000
 ```
 
-YAML reads a plain `1.10` as 1.1, `3.0` as 3, `1_000` as 1000 and `+7` as 7,
-losing the typed text before any tool sees it. For a version, image tag or
-build number, that is wrong. Quote it:
+YAML reads `1.10` as 1.1, `3.0` as 3, `1_000` as 1000 and `+7` as 7. Quote it:
 
 ```yaml
   version: "1.10"
 ```
 
-The rule reports only numbers whose canonical form differs from the text:
-`42`, `-3` and `1.5` are fine, as is anything quoted and any `${{ ... }}`
-interpolation. `mode` params are left to [`unquoted-mode`](#unquoted-mode).
-Params the target declares as numbers (such as `uid` on configuration
-management types) are never reported, since the spelling does not matter.
-Values in block lists and nested mappings are checked; numbers inside `[...]`
-or `{...}` flow collections are not, because the rule cannot point at them.
-
-`meridian lint --fix`, and the quick fix in an editor, add the quotes around
-exactly what was typed.
+Only numbers whose canonical form differs are reported. Not checked: `mode` (see
+[`unquoted-mode`](#unquoted-mode)), params declared numeric (such as `uid`), and flow
+collections. `--fix` adds the quotes.
 
 ## `literal-secret`
 
@@ -93,17 +72,11 @@ params:
   password: hunter2
 ```
 
-A password, token or key written into a document ends up in version control
-and in the compiled output. Declare it under `spec.secrets` and write
-`${{ secret.<name> }}` where it is used, reference another resource's value,
-or supply it at apply time through the tool's own secret mechanism.
+Use `spec.secrets` and `${{ secret.<name> }}` instead.
 
-A param looks like a secret when its name contains `password`, `passwd`,
-`secret`, `token`, `api_key`, `apikey`, `private_key` or `access_key`, in any
-letter case. Names that begin with `lock_` or end with `_file` or `_path` are
-settings about a secret rather than the secret, and are left alone. A value
-that contains a `${...}` reference is not a literal, and neither is an empty
-one.
+Matched names contain `password`, `passwd`, `secret`, `token`, `api_key`, `apikey`,
+`private_key` or `access_key` (any case), except `lock_*`, `*_file` and `*_path`. Empty values
+and `${...}` references are not reported.
 
 ## `duplicate-resource`
 
@@ -118,14 +91,8 @@ one.
   params: {name: nginx}     # nginx is already managed by "web_server"
 ```
 
-Two `package` resources named `nginx`, or two `file` resources with one path,
-give the tool two answers for one thing. Most tools refuse this only at apply
-time, and some apply whichever comes last.
-
-The rule compares the `name` param, or else the `path` param, of resources of
-the same type. It only applies to types whose target describes them fully and
-requires that param, so it never guesses about a native type such as
-`aws_instance`. Values that contain a `${...}` reference are not compared.
+Compares `name`, else `path`, on fully described types that require it. Native types and
+`${...}` values are not compared.
 
 ## `redundant-dependency`
 
@@ -140,13 +107,8 @@ requires that param, so it never guesses about a native type such as
     - resource: package     # config already depends on package
 ```
 
-The entry repeats another, or names a resource that one of the other
-dependencies already depends on, directly or through a chain. The order is the
-same without it. This is a note and not a warning because some teams list
-every dependency on purpose.
-
-An entry with its own `when` is never reported, and is not counted as a path
-either: it may be switched off, so it does not make another entry redundant.
+The entry repeats another or is already implied through a chain. Entries with their own
+`when` are neither reported nor counted.
 
 ## `useless-if-missing`
 
@@ -158,11 +120,8 @@ dependsOn:
     ifMissing: skip         # package has no `when`, so it is never missing
 ```
 
-`ifMissing` only matters when a `when` condition can remove the resource the
-edge names ([conditions](dsl/conditions.md)). That resource has no `when`, so
-the edge can never be missing and the policy does nothing. It usually means the
-`when` was meant to be on the other resource, or was removed and this was left
-behind. The rule checks `dependsOn` and `notifies` entries alike.
+The named resource has no `when` ([conditions](dsl/conditions.md)), so `ifMissing` does
+nothing. Checks `dependsOn` and `notifies`.
 
 ## `unguarded-exec`
 
@@ -175,13 +134,8 @@ behind. The rule checks `dependsOn` and `notifies` entries alike.
     command: /opt/app/bin/migrate
 ```
 
-The command has no `creates` or `removes` guard, no `runtimeWhen`, and nothing
-notifies it, so it runs every time the document is applied and the plan is
-never in sync. Add a guard, or trigger it from the resource whose change it
-follows with [`notifies`](dsl/notifies.md).
-
-The rule applies to the shared `exec` type on targets that describe it with a
-`creates` param.
+No `creates`/`removes`, no `runtimeWhen`, and nothing notifies it. Add a guard or use
+[`notifies`](dsl/notifies.md). Applies to the shared `exec` type.
 
 ## `unreferenceable-id`
 
@@ -192,9 +146,7 @@ The rule applies to the shared `exec` type on targets that describe it with a
   type: package
 ```
 
-A [reference](dsl/references.md) names a resource by letters, digits, `_` and
-`-`. An id with a dot, a space or anything else cannot be written as
-`${id.param}`, because the reference would be read as a different path.
+[References](dsl/references.md) allow only letters, digits, `_` and `-` in ids.
 
 ## `unsafe-document-name`
 
@@ -206,9 +158,7 @@ metadata:
   name: web servers/prod
 ```
 
-The name becomes a directory under `--out` and under the state directory. Keep
-it to letters, digits, `.`, `_` and `-`. `meridian validate` refuses such a
-name outright; the lint points at it in the editor first.
+Use letters, digits, `.`, `_` and `-`. `meridian validate` refuses others.
 
 ## `native-type`
 
@@ -224,16 +174,9 @@ six configuration management types.
     line: worker_processes 4;
 ```
 
-The six shared types (`package`, `file`, `service`, `user`, `group`, `exec`)
-compile for every target that takes them, so a document written with them
-moves between tools by changing `spec.target`. A type such as
-`ansible.builtin.lineinfile`, `mysql::db`, `pkgrepo.managed` or
-`native/file` is one tool's own
-([native types beside the six](dsl/configuration-management.md#native-types-beside-the-six)),
-so from this resource on the document compiles for that target only. That is
-often exactly what is wanted; the rule says where the document stopped being
-portable. Silence it with `# meridian-lint: disable=native-type` where that is
-deliberate.
+A type such as `ansible.builtin.lineinfile` or `native/file`
+([native types](dsl/configuration-management.md#native-types-beside-the-six)) ties the
+document to one target. Marks where it stops being portable.
 
 ## `unused-resource-set-host`
 
@@ -246,6 +189,4 @@ targetHost:
   ref: network            # not read with `from: inline`
 ```
 
-With `from: inline` only `host` is read; with `from: infrastructure` only `ref`
-and `output` are. The other fields are ignored, which usually means `from` is
-not what was intended.
+`from: inline` reads only `host`; `from: infrastructure` only `ref` and `output`.
