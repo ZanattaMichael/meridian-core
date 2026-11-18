@@ -14,6 +14,7 @@ with `tofu`.
 | `dependsOn` | Yes, as `depends_on`, unless a reference already implies the order |
 | `notifies` | Synthetic, and blunt: the action `replace` only. See [Notifications](#notifications) |
 | `runtimeWhen` | No. Refused |
+| `adopt` | Yes: an `import` block. See [Adopting what exists](#adopting-what-exists) |
 | `state: absent` | No. OpenTofu removes what the configuration no longer declares, so remove the resource from the document |
 | Plan | Yes: OpenTofu's own plan |
 | Outputs | Yes |
@@ -454,6 +455,37 @@ Every setting can also be written in the project's `meridian.yaml` under
 The names, defaults and the splitting rule for argument lists are in the
 [plugin settings reference](../reference/plugin-settings.md#opentofu).
 
+## Adopting what exists
+
+A resource's `adopt` is the provider's own import identifier of a thing that
+already exists. The target compiles it to an `import` block, so OpenTofu takes the
+thing into its state on the next apply instead of creating it:
+
+```yaml
+    - id: logs
+      type: aws_s3_bucket
+      adopt: example-logs
+      params:
+        bucket: example-logs
+```
+
+```json
+"import": [
+  { "id": "example-logs", "to": "aws_s3_bucket.logs" }
+]
+```
+
+- `meridian plan` reports the resource as `adopt`, or as `update` with
+  `adopted` in its summary when the params differ from what exists. After the
+  apply the block does nothing, so it can stay.
+- Only a managed resource can be adopted. `adopt` on a provider, a backend, a
+  `data.<type>`, a module, a variable or a local is refused with
+  `invalid-adopt`.
+- The identifier is the one `tofu import` takes for that type, as the
+  provider's documentation gives it. It may be placed from data:
+  `adopt: "${{ data.bucket }}"`.
+- Import blocks need OpenTofu 1.6 or later, its first release.
+
 ## What the target does not do
 
 Meridian never degrades silently. Where OpenTofu has no equivalent, the compile fails and
@@ -467,6 +499,7 @@ says why.
 | `invalid-name` | an `id` or output name is not a valid OpenTofu name |
 | `unsupported-state` | `state: absent`. OpenTofu destroys what its configuration no longer declares, so remove the resource from the document |
 | `unsupported-runtime-condition` | a resource has `runtimeWhen`. OpenTofu computes its whole plan before it changes anything |
+| `invalid-adopt` | `adopt` on anything but a managed resource |
 | `unsupported-action` | a `notifies` uses an action other than `replace` |
 | `unknown-dependency` | `dependsOn` or `notifies` names a resource the document does not declare |
 | `unsupported-dependency` | `dependsOn` names, or is written on, a provider, backend, variable, local value or encryption block |

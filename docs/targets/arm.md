@@ -19,6 +19,7 @@ and deploys it to a resource group or a subscription with the `az` command line.
 | `dependsOn` | Yes, as ARM's `dependsOn`. Every reference is written as one too, because Resource Manager infers no order from a resource id |
 | `notifies` | No. Resource Manager has no way to react to a change in another resource. Refused |
 | `runtimeWhen` | No. An ARM `condition` is decided before anything is deployed. Refused |
+| `adopt` | Accepted, and changes nothing: Resource Manager updates a resource of the same name in place. The compile warns |
 | `state: absent` | No. A template only says what should exist. Refused; remove the resource, and use mode `Complete` if it should be deleted |
 | Plan | Yes: `what-if`. Where Azure cannot analyse a resource, the plan is reported as unknown |
 | Apply | Yes: `az deployment group create` or `az deployment sub create` |

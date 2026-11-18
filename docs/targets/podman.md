@@ -14,6 +14,7 @@ and has systemd run them, on this machine or on another over `ssh`.
 | `dependsOn` | `Requires=` and `After=`, left out where a reference already orders the units |
 | `notifies` | The action `restart`, native: systemd's `PartOf=`. See [Notifications](#notifications) |
 | `runtimeWhen` | No. Refused; use a `Condition*=` setting under `unit` |
+| `adopt` | No. Refused: a Quadlet unit refuses a container of the same name it did not create |
 | `state: absent` | No. Remove the resource from the document; the next apply stops and removes its unit |
 | Plan | Yes: an exact comparison of unit files, plus a check by the host's own Quadlet |
 | Outputs | Yes: names known at compile time, or a path into `podman inspect` |

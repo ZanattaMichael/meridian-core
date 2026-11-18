@@ -50,8 +50,8 @@ use std::collections::BTreeMap;
 
 use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
-    holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
-    Resource, ResourceGraph, SecretName, Value,
+    holds_secret, Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter,
+    Position, Resource, ResourceGraph, SecretName, Value,
 };
 
 pub use emit::{CLUSTER_PATH, MANIFESTS_PATH};
@@ -272,6 +272,7 @@ impl Emitter for Kubernetes {
             runtime_condition: false,
             secrets: true,
             credentials: false,
+            adopt: Adoption::Converge,
         }
     }
 

@@ -1,0 +1,37 @@
+# Take a VPC and a bucket that already exist under Terraform's management,
+# and create a subnet in the VPC.
+#
+# `adopt` is the provider's own import identifier. Terraform imports each on
+# the first apply, and `meridian plan` reports them as `adopt`, not `create`.
+# An identifier can also come from data, as `adopt: "${{ data.vpc_id }}"`.
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: adopt
+spec:
+  target: terraform
+  resources:
+    - id: aws
+      type: provider
+      params:
+        source: hashicorp/aws
+        version: "~> 5.0"
+        region: us-east-1
+
+    - id: network
+      type: aws_vpc
+      adopt: vpc-0abc1234def567890
+      params:
+        cidr_block: 10.0.0.0/16
+
+    - id: logs
+      type: aws_s3_bucket
+      adopt: example-logs
+      params:
+        bucket: example-logs
+
+    - id: app
+      type: aws_subnet
+      params:
+        vpc_id: ${network.id}
+        cidr_block: 10.0.1.0/24

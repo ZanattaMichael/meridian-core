@@ -13,6 +13,7 @@ with `kubectl`.
 | `dependsOn` | Orders the manifests in the file, and nothing more. `kubectl` applies them in that order without waiting for one to be ready. A warning says so |
 | `notifies` | Synthetic: the action `restart`, aimed at a Deployment, StatefulSet or DaemonSet. See [Notifications](#notifications) |
 | `runtimeWhen` | No. Refused |
+| `adopt` | Accepted, and changes nothing: `kubectl apply` takes over an object of the same kind, name and namespace. The compile warns |
 | `state: absent` | No. Applying manifests never deletes an object; delete it with `kubectl` and remove it from the document |
 | Plan | Yes: a server-side dry run |
 | Outputs | Yes: any path into a live object |

@@ -56,6 +56,9 @@ pub struct Resource {
     /// target that declares the runtime-condition capability may accept it.
     /// Plain `when` never reaches here.
     pub runtime_when: String,
+    /// `adopt`: the tool's own identifier of a thing that already exists.
+    /// Only a target that can adopt accepts it.
+    pub adopt: String,
     /// The resource's declaration order in the source document, kept so a
     /// target that reorders resources still has the original tiebreak.
     pub index: usize,
@@ -220,6 +223,7 @@ impl ResourceGraph {
                 state: n.resource.state.clone(),
                 params: n.resource.params.clone(),
                 runtime_when: n.resource.runtime_when.clone(),
+                adopt: n.resource.adopt.clone(),
                 index: n.index,
                 pos: n.resource.pos.clone(),
             })
@@ -329,12 +333,17 @@ impl ResourceGraph {
         for r in &self.resources {
             let _ = writeln!(
                 out,
-                "resource {} type={} state={} runtimeWhen={} params={}",
+                "resource {} type={} state={} runtimeWhen={} params={}{}",
                 r.id,
                 r.r#type,
                 r.state,
                 r.runtime_when,
-                canonical_map(&r.params)
+                canonical_map(&r.params),
+                if r.adopt.is_empty() {
+                    String::new()
+                } else {
+                    format!(" adopt={}", r.adopt)
+                }
             );
         }
         for e in &self.edges {

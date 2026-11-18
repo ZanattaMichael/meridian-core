@@ -504,7 +504,9 @@ fn read_preview(json: &str) -> Result<Preview, RunError> {
         };
         let text = |key: &str| step.get(key).and_then(Value::as_str).unwrap_or("");
         let action = match text("op") {
-            "create" | "import" => ChangeAction::Create,
+            "create" => ChangeAction::Create,
+            // A resource's adopt, or Pulumi's own import option.
+            "import" => ChangeAction::Adopt,
             "update" => ChangeAction::Update,
             "delete" => ChangeAction::Delete,
             "replace" => ChangeAction::Replace,

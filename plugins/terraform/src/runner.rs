@@ -315,6 +315,12 @@ fn read_plan(json: &str) -> Result<Vec<Change>, RunError> {
             continue;
         };
         let text = |key: &str| entry.get(key).and_then(Value::as_str).unwrap_or("");
+        // A resource's `adopt`, compiled to an import block: the plan says
+        // it is importing, and its actions say what else is done to it.
+        let importing = entry
+            .get("change")
+            .and_then(Value::as_map)
+            .is_some_and(|c| c.get("importing").is_some_and(|i| *i != Value::Null));
         let actions: Vec<&str> = entry
             .get("change")
             .and_then(Value::as_map)
@@ -325,6 +331,7 @@ fn read_plan(json: &str) -> Result<Vec<Change>, RunError> {
             .filter_map(Value::as_str)
             .collect();
         let action = match actions.as_slice() {
+            ["no-op"] if importing => ChangeAction::Adopt,
             ["create"] => ChangeAction::Create,
             ["update"] => ChangeAction::Update,
             ["delete"] => ChangeAction::Delete,
@@ -342,7 +349,13 @@ fn read_plan(json: &str) -> Result<Vec<Change>, RunError> {
                 text("address").to_owned()
             },
             action,
-            summary: text("type").to_owned(),
+            // An adoption that also changes the thing is reported as the
+            // change, and says it adopts.
+            summary: if importing && action != ChangeAction::Adopt {
+                format!("{}, adopted", text("type"))
+            } else {
+                text("type").to_owned()
+            },
         });
     }
     Ok(changes)
@@ -397,6 +410,27 @@ mod tests {
         );
         assert!(read_plan("{}").unwrap().is_empty());
         assert!(read_plan("not json").is_err());
+    }
+
+    #[test]
+    fn an_import_is_read_as_an_adoption() {
+        let json = r#"{"format_version":"1.2","resource_changes":[
+          {"address":"aws_instance.web","mode":"managed","type":"aws_instance","name":"web","change":{"actions":["no-op"],"importing":{"id":"i-0abc123"}}},
+          {"address":"aws_s3_bucket.logs","mode":"managed","type":"aws_s3_bucket","name":"logs","change":{"actions":["update"],"importing":{"id":"logs"}}},
+          {"address":"aws_eip.addr","mode":"managed","type":"aws_eip","name":"addr","change":{"actions":["no-op"],"importing":null}}
+        ]}"#;
+        let shown: Vec<String> = read_plan(json)
+            .unwrap()
+            .iter()
+            .map(Change::to_string)
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                "adopt web: aws_instance",
+                "update logs: aws_s3_bucket, adopted",
+            ]
+        );
     }
 
     #[test]

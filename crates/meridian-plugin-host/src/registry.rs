@@ -41,8 +41,7 @@ impl Target {
             // A compiled-in emitter does not know its own registered name is
             // what the reader needs to see, so it is stamped here, exactly as
             // it is for a refusal that crossed the process boundary.
-            Kind::InProcess(t) => meridian_sdk::check_settings(t.emitter.as_ref(), graph)
-                .and_then(|()| t.emitter.emit(graph, data))
+            Kind::InProcess(t) => meridian_sdk::emit_checked(t.emitter.as_ref(), graph, data)
                 .map_err(|mut e| {
                     e.target = self.info.name.clone();
                     EmitError::Refused(e)

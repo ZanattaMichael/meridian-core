@@ -151,6 +151,11 @@ One action, `restart`, aimed at a service.
 
 Refused. There is nothing to check a condition against while a project comes up.
 
+## `adopt`
+
+Refused. Compose and Quadlet units both refuse a container of the same name
+that they did not create.
+
 ## Plan and apply
 
 On `docker`, `meridian plan` compares Compose's own configuration hash of each
