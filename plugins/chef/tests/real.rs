@@ -436,11 +436,26 @@ fn the_resources_schemas_are_exported_for_an_editor() {
         export.tool_version
     );
     assert_eq!(export.pins.get("chef"), Some(&export.tool_version));
+    // What the inspector itself says about the one resource, so a reading
+    // this test finds wrong can be compared with the tool's own output.
+    for inspector in [
+        "cinc-resource-inspector",
+        "/opt/cinc/bin/cinc-resource-inspector",
+        "chef-resource-inspector",
+    ] {
+        if let Ok(output) = Command::new(inspector).arg("apt_repository").output() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            let head: String = text.chars().take(6000).collect();
+            eprintln!("--- {inspector} apt_repository ---\n{head}");
+            break;
+        }
+    }
     let repo = export
         .schemas
         .iter()
         .find(|s| s.r#type == "apt_repository")
         .unwrap_or_else(|| panic!("apt_repository is described: {:?}", export.notes));
+    eprintln!("--- as read ---\n{repo:?}");
     assert!(!repo.open, "{repo:?}");
     assert!(repo.find_param("uri").is_some(), "{repo:?}");
     assert!(
