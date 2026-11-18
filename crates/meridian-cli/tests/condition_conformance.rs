@@ -241,6 +241,7 @@ fn compile(target: &str, dir: &Path, document: &str, data: Option<&str>) -> Comp
     fs::write(dir.join("doc.yaml"), document).unwrap();
     let binary = plugin_binary(&format!("meridian-target-{target}"));
     let mut meridian = Command::new(env!("CARGO_BIN_EXE_meridian"));
+    meridian.env("MERIDIAN_ANNOTATIONS", "off");
     meridian
         .args(["compile", "doc.yaml", "--out", "out", "--plugin-dir"])
         .arg(binary.parent().unwrap())

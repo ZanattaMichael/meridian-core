@@ -24,6 +24,7 @@ fn scratch(test: &str) -> PathBuf {
 /// documents read, and with any further variables.
 fn meridian_with(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_meridian"));
+    command.env("MERIDIAN_ANNOTATIONS", "off");
     command
         .args(args)
         .current_dir(dir)
@@ -611,6 +612,7 @@ fn meridian_unlockable(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Outpu
     command
         .args(["-c", "ulimit -l 0 && exec \"$0\" \"$@\""])
         .arg(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(args)
         .current_dir(dir)
         .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())

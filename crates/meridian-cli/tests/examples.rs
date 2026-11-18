@@ -117,6 +117,7 @@ fn given_hosts(text: &str) -> String {
 /// given.
 fn meridian(command: &str, file: &Path, data: &[PathBuf]) -> Command {
     let mut meridian = Command::new(env!("CARGO_BIN_EXE_meridian"));
+    meridian.env("MERIDIAN_ANNOTATIONS", "off");
     meridian.arg(command).arg(file);
     if command != "validate" {
         for target in targets(file) {
@@ -652,6 +653,7 @@ fn secrets_decide_an_example_and_are_written_nowhere() {
 
         let meridian = |command: &str| {
             let mut meridian = Command::new(env!("CARGO_BIN_EXE_meridian"));
+            meridian.env("MERIDIAN_ANNOTATIONS", "off");
             meridian
                 .arg(command)
                 .arg("site.yaml")
@@ -749,6 +751,7 @@ fn one_document_finds_its_secret_wherever_each_machine_keeps_it() {
 
     let meridian = |dir: &Path, command: &[&str], env: &[(&str, &str)]| {
         let mut meridian = Command::new(env!("CARGO_BIN_EXE_meridian"));
+        meridian.env("MERIDIAN_ANNOTATIONS", "off");
         meridian
             .args(command)
             .arg("site.yaml")
