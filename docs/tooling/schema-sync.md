@@ -204,7 +204,7 @@ that gains an exporter needs no change anywhere else; see
 
 CloudFormation, Bicep, ARM, cloud-init and Docker run no tool: the vendor
 publishes the catalogue as a file, and the sync fetches it. Every such source
-keeps the same rules ([decision 0035](../decisions/0035-a-published-schema-file-is-fetched-over-https-pinned-by-hash-and-reused-offline.md)):
+keeps the same rules ([decision 0036](../decisions/0036-a-published-schema-file-is-fetched-over-https-pinned-by-hash-and-reused-offline.md)):
 
 - it fetches over HTTPS only;
 - it pins what it read by the file's SHA-256, so the lock tells one revision

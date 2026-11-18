@@ -826,7 +826,7 @@ The rules a schema source keeps:
   sync downloads nothing when it is unchanged, uses the last copy with a
   note when the server cannot be reached, and gives you its SHA-256 to pin
   (`Fetched::pin`). The rules are
-  [decision 0035](../decisions/0035-a-published-schema-file-is-fetched-over-https-pinned-by-hash-and-reused-offline.md);
+  [decision 0036](../decisions/0036-a-published-schema-file-is-fetched-over-https-pinned-by-hash-and-reused-offline.md);
   the CloudFormation and Compose plugins are the shortest examples.
 
 Test it twice: a unit test that reads a saved sample of the tool's output
