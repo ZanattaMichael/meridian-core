@@ -220,6 +220,31 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: SecretCommand,
     },
+    /// Run Test documents: compile or plan the documents each names, with
+    /// the data each case gives, and check what came out
+    Test {
+        /// The test files (kind: Test). With none, every *.test.yaml under
+        /// tests/ in the current directory
+        files: Vec<PathBuf>,
+        /// Run only the cases whose name holds this text
+        #[arg(long, value_name = "TEXT")]
+        case: Option<String>,
+        /// Also write the results as JUnit XML to this file, for a pipeline
+        /// engine to show as tests
+        #[arg(long, value_name = "FILE")]
+        junit: Option<PathBuf>,
+        #[command(flatten)]
+        plugins: PluginDirs,
+        /// Where each case's scratch state is kept (under tests/ in it), and
+        /// where fetched modules are, for a document written @module:path
+        #[arg(
+            long,
+            value_name = "DIR",
+            env = "MERIDIAN_STATE_DIR",
+            default_value = ".meridian"
+        )]
+        state_dir: PathBuf,
+    },
     /// Rewrite documents in the one standard layout, changing no value
     Fmt(tools::FmtArgs),
     /// Report errors, and things that compile but are probably mistakes
@@ -279,6 +304,7 @@ impl Command {
             Command::Secret {
                 command: SecretCommand::Set { .. },
             } => "secret set".to_owned(),
+            Command::Test { .. } => "test".to_owned(),
             Command::Fmt(_) => "fmt".to_owned(),
             Command::Lint(_) => "lint".to_owned(),
             Command::Schema(_) => "schema".to_owned(),

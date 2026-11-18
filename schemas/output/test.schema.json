@@ -1,0 +1,151 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ZanattaMichael/meridian-core/schemas/output/test.schema.json",
+  "title": "test",
+  "description": "Every test document that ran, each of its cases with its status and why it failed, and the totals.",
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "const": "test",
+      "description": "The subcommand as it is typed"
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "Whether every case passed and the JUnit file, if asked for, was written"
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "The test file, as given"
+          },
+          "name": {
+            "type": "string",
+            "description": "The test document's metadata.name"
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "Whether every case of this document passed"
+          },
+          "cases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "run": {
+                  "type": "string",
+                  "enum": [
+                    "compile",
+                    "plan"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "passed",
+                    "failed",
+                    "error"
+                  ],
+                  "description": "passed: every expectation held; failed: one did not; error: the case could not run"
+                },
+                "failures": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Why it failed or could not run, one line each; empty when it passed"
+                },
+                "documents": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "target": {
+                        "type": "string"
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "description": "compiled, refused, left-out, planned, deferred, failed or not-run"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "name",
+                      "target",
+                      "outcome"
+                    ]
+                  }
+                },
+                "millis": {
+                  "type": "integer",
+                  "description": "How long the case took"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "run",
+                "status",
+                "failures",
+                "documents",
+                "millis"
+              ]
+            }
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "file",
+          "name",
+          "ok",
+          "cases"
+        ]
+      }
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "files": {
+          "type": "integer"
+        },
+        "cases": {
+          "type": "integer"
+        },
+        "passed": {
+          "type": "integer"
+        },
+        "failed": {
+          "type": "integer"
+        },
+        "errors": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "files",
+        "cases",
+        "passed",
+        "failed",
+        "errors"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "command",
+    "ok",
+    "files",
+    "summary"
+  ]
+}

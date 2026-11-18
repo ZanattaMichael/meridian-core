@@ -247,6 +247,58 @@ fn every_example_validates_and_compiles_with_the_real_plugins() {
 /// up in a directory of its own, named after the document. A ResourceSet that
 /// waits for an output of an earlier stage has no host yet, so it is reported
 /// as deferred and nothing is written for it.
+/// Every `tests/*.test.yaml` under an example directory, sorted.
+fn example_tests() -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for directory in fs::read_dir(repo_root().join("examples")).unwrap() {
+        let tests = directory.unwrap().path().join("tests");
+        if !tests.is_dir() {
+            continue;
+        }
+        for file in fs::read_dir(&tests).unwrap() {
+            let file = file.unwrap().path();
+            let name = file.file_name().unwrap().to_str().unwrap();
+            if name.ends_with(".test.yaml") {
+                found.push(file);
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+#[test]
+fn every_example_test_passes_with_the_real_plugins() {
+    let tests = example_tests();
+    assert!(!tests.is_empty(), "no example carries tests under tests/");
+    for file in &tests {
+        let directory = file.parent().unwrap().parent().unwrap();
+        // The targets of every document the directory holds, fixtures
+        // under tests/ included.
+        let mut targets = BTreeSet::new();
+        for (path, _) in everything_under(directory) {
+            if path.extension().is_some_and(|e| e == "yaml") && !is_data(&path) {
+                targets.extend(self::targets(&path));
+            }
+        }
+        let mut command = Command::new(env!("CARGO_BIN_EXE_meridian"));
+        command
+            .env("MERIDIAN_ANNOTATIONS", "off")
+            .arg("test")
+            .arg(file)
+            .current_dir(directory)
+            .arg("--state-dir")
+            .arg(scratch(env!("CARGO_TARGET_TMPDIR"), "example-tests"));
+        for target in targets {
+            let binary = plugin_binary(&format!("meridian-target-{target}"));
+            command.arg("--plugin-dir").arg(binary.parent().unwrap());
+        }
+        let text = run(command, &format!("meridian test {}", file.display()));
+        assert!(!text.contains("FAIL"), "{text}");
+        assert!(!text.contains("ERR "), "{text}");
+    }
+}
+
 #[test]
 fn every_workflow_compiles_each_document_or_defers_it() {
     let workflows: Vec<PathBuf> = examples()

@@ -25,6 +25,7 @@ meridian-report = { path = "../meridian-report" }
 meridian-resolve = { path = "../meridian-resolve" }
 meridian-rules = { path = "../meridian-rules" }
 meridian-sdk = { path = "../meridian-sdk" }
+meridian-test = { path = "../meridian-test" }
 meridian-tooling = { path = "../meridian-tooling" }
 serde_json = { workspace = true }
 meridian-secret = { path = "../meridian-secret" }

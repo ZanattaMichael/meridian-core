@@ -1,0 +1,67 @@
+# Tests for ../web.yaml. Run them with `meridian test` from examples/tests.
+#
+# A Test document names the documents under test and a list of cases. Each
+# case compiles (or plans) them with its own data, then checks what came
+# out: the outcome of each document, the files, the rule of a refusal, and
+# any expression over `stages`.
+apiVersion: meridian/v1
+kind: Test
+metadata:
+  name: web
+  description: The web server compiles for each environment, and only when asked
+spec:
+  documents: [../web.yaml]
+  data: [../web.data.yaml]
+  cases:
+    - name: dev compiles nginx and the message
+      expect:
+        web:
+          outcome: compiled
+          files:
+            playbook.yml:
+              contains:
+                - "name: nginx"
+                - "welcome to dev"
+              notContains: welcome to prod
+            inventory.ini:
+              matches: "^\\[meridian\\]"
+      assert:
+        - length(keys(stages.web.files)) == 2
+        - stages.web.target == 'ansible'
+    - name: production says so
+      set: {env: prod}
+      assert:
+        - contains(stages.web.files['playbook.yml'], 'welcome to prod')
+        - expr: "!contains(stages.web.files['playbook.yml'], 'welcome to dev')"
+          message: the development message must not leak into production
+    - name: a site with no web tier compiles nothing
+      set: {web: false}
+      expect:
+        web: {outcome: left-out}
+      assert:
+        - stages.web.files == {}
+        - stages.web.condition == 'data.web'
+---
+# A second test in the same file: a value that makes the document refused,
+# with the rule that names the mistake. The mistake comes from the case's
+# data, so the document itself is sound and `meridian lint` has nothing to
+# say about it.
+apiVersion: meridian/v1
+kind: Test
+metadata:
+  name: refusals
+spec:
+  documents: [../web.yaml]
+  data: [../web.data.yaml]
+  cases:
+    - name: a mode written as a number is refused
+      set: {mode: 644}
+      expect:
+        web:
+          outcome: refused
+          rule: invalid-param
+          resource: motd
+          message: must be text, not a number
+      assert:
+        - stages.web.files == {}
+        - contains(stages.web.refusal.message, '"644"')

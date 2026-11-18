@@ -70,6 +70,7 @@ meridian compile site.yaml --out build      # write each target's own files; cha
 meridian plan site.yaml                     # ask each tool what applying would change
 meridian apply site.yaml                    # make it so
 meridian import ./compose.yaml -o imported  # turn a tool's existing configuration into documents
+meridian test                               # run the project's own tests: compile and plan, then check
 ```
 
 Plugins are found beside the `meridian` binary, or in the directories named by `--plugin-dir`
@@ -140,6 +141,7 @@ The core is a Cargo workspace under `crates/`:
 - `meridian-resolve` — hierarchical data resolution
 - `meridian-module` — modules: the `meridian.yaml` manifest, path, git and OCI registry sources, version
   resolution, `meridian.lock` and the content hash every pinned module is checked against
+- `meridian-test` — [`meridian test`](docs/reference/testing.md): `Test` documents that compile or plan a project's documents with given data and check what came out
 - `meridian-rules` — [compile rules](docs/concepts/compile-rules.md): policies checked over the layers of a hierarchy before anything is compiled, such as "a more specific layer may not change a variable or a secret a less specific layer set"
 - `meridian-graph` — dependency graph and topological sort
 - `meridian-ast` — the target-agnostic resource tree every plugin consumes
