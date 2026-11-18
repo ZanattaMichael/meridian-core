@@ -428,14 +428,22 @@ fn a_module_named_in_full_runs_with_its_own_arguments_and_is_run_again_when_noti
             ("run stamp", ChangeAction::Update),
         ]
     );
+    // In the real run the stamp task writes the file in its place, so the
+    // handler, the same module run again because the line changed, finds
+    // it there and reports nothing; in the check run neither had happened.
     let applied = apply(&runner, &dir, &first);
-    assert_eq!(changes(&applied.changes), changes(&preview.changes));
+    assert_eq!(
+        changes(&applied.changes),
+        [
+            ("conf", ChangeAction::Update),
+            ("workers", ChangeAction::Update),
+            ("stamp", ChangeAction::Update),
+        ]
+    );
     assert_eq!(
         fs::read_to_string(dir.join("app.conf")).unwrap(),
         "# settings\nworkers = 4\n"
     );
-    // The handler ran because the line changed: the module it names ran
-    // again as written.
     assert_eq!(fs::read_to_string(dir.join("stamp")).unwrap(), "changed\n");
 
     // In sync, and a module that only reads reports no change.
