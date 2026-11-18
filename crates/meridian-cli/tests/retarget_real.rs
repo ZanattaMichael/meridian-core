@@ -94,6 +94,23 @@ fn meridian(dir: &Path, args: &[&str]) -> String {
     said
 }
 
+/// The changes Meridian's plan lists, as `<action> <resource>`, from its own
+/// lines (`= adopt first: random_id`), not the tool's output beneath them,
+/// which is prefixed with the document's name.
+fn actions(plan: &str) -> Vec<String> {
+    const ACTIONS: &[&str] = &["create", "update", "replace", "delete", "adopt"];
+    plan.lines()
+        .filter(|line| line.starts_with("  ") && !line.contains(" | "))
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            let (_sign, action, resource) = (words.next()?, words.next()?, words.next()?);
+            ACTIONS
+                .contains(&action)
+                .then(|| format!("{action} {}", resource.trim_end_matches(':')))
+        })
+        .collect()
+}
+
 /// The identifier the moved file gives a resource.
 fn adopted(moved: &str, id: &str) -> String {
     let after = moved
@@ -139,9 +156,7 @@ fn what_terraform_made_is_adopted_by_opentofu_and_nothing_is_made_again() {
     let plan = meridian(&dir, &["plan", "site.opentofu.yaml"]);
     assert!(plan.contains("= adopt first"), "{plan}");
     assert!(plan.contains("= adopt second"), "{plan}");
-    for word in ["create", "replace", "delete"] {
-        assert!(!plan.contains(word), "{word} in\n{plan}");
-    }
+    assert_eq!(actions(&plan), ["adopt first", "adopt second"], "{plan}");
 
     // The apply takes them into OpenTofu's state as they are.
     meridian(&dir, &["apply", "site.opentofu.yaml"]);
@@ -152,7 +167,12 @@ fn what_terraform_made_is_adopted_by_opentofu_and_nothing_is_made_again() {
 
     // And after it there is nothing left to do.
     let again = meridian(&dir, &["plan", "site.opentofu.yaml"]);
-    for word in ["adopt", "create", "update", "replace", "delete"] {
-        assert!(!again.contains(&format!(" {word} ")), "{word} in\n{again}");
-    }
+    assert!(actions(&again).is_empty(), "{again}");
+}
+
+#[test]
+fn a_plans_own_lines_are_read_and_the_tools_output_is_not() {
+    let plan = "ids (Infrastructure, target opentofu)\n  = adopt first: random_id\n  = adopt second: random_id\n  2 changes to make\n  ids | \n  ids | Terraform has created a lock file\n  ids |   + create\n";
+    assert_eq!(actions(plan), ["adopt first", "adopt second"]);
+    assert!(actions("ids (Infrastructure, target opentofu)\n  no changes\n").is_empty());
 }
