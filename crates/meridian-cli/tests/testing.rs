@@ -184,14 +184,19 @@ fn meridian(dir: &Path, args: &[&str]) -> Output {
         .expect("meridian runs")
 }
 
-/// What was printed, with a found file's path written with `/` wherever
-/// the test runs, since Windows finds `tests\\site.test.yaml`.
+/// What was printed for a person, with a found file's path written with
+/// `/` wherever the test runs, since Windows finds `tests\\site.test.yaml`.
+/// JSON is read from the raw bytes instead: its escapes hold backslashes.
 fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).replace('\\', "/")
 }
 
 fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).replace('\\', "/")
+}
+
+fn raw_stdout(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
 #[test]
@@ -267,7 +272,7 @@ fn case_picks_by_name_and_json_and_junit_describe_the_run() {
         ],
     );
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    let text = stdout(&out);
+    let text = raw_stdout(&out);
     let value: serde_json::Value =
         serde_json::from_str(&text).unwrap_or_else(|e| panic!("{e}:\n{text}"));
     let schema_path = repo_root().join("schemas/output/test.schema.json");
@@ -380,7 +385,7 @@ fn a_document_that_does_not_load_is_an_error_of_the_case_not_of_the_command() {
     .unwrap();
     let out = meridian(&dir, &["test", "--output", "json"]);
     assert_eq!(out.status.code(), Some(1));
-    let value: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&raw_stdout(&out)).unwrap();
     assert_eq!(value["ok"], false);
     assert_eq!(value["files"][0]["cases"][0]["status"], "error");
     assert!(value["files"][0]["cases"][0]["failures"][0]
