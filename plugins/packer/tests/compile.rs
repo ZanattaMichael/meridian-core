@@ -76,6 +76,7 @@ fn the_plugin_says_what_it_is() {
         Packer.capabilities(),
         Capabilities {
             secrets: true,
+            cloud_credentials: true,
             ..Capabilities::default()
         }
     );
@@ -682,6 +683,50 @@ fn a_secret_in_a_variables_declaration_is_refused_because_it_would_be_written_as
     assert!(
         err.msg
             .starts_with("param \"default\" of the variable holds a secret"),
+        "{}",
+        err.msg
+    );
+}
+
+#[test]
+fn an_aws_or_gcp_credential_is_taken_and_an_azure_one_is_refused_with_the_reason() {
+    let spec = |kind: &str, fields: &str| {
+        format!(
+            "  secrets:\n    - name: cloud_secret\n      from: env\n      key: CLOUD_SECRET\n  \
+             credentials:\n    - {{name: prod, type: {kind}, {fields}}}\n  \
+             endpoint: {{type: cloud, credential: prod}}\n  resources:\n{SOURCE}"
+        )
+    };
+    let compiled = compile(&spec(
+        "aws",
+        "accessKeyId: AKIA1, secretAccessKey: \"${{ secret.cloud_secret }}\", region: eu-west-1",
+    ))
+    .unwrap();
+    let text: String = compiled.artifact.files.values().cloned().collect();
+    for part in ["AKIA1", "cloud_secret", "prod"] {
+        assert!(!text.contains(part), "{part} is in the template:\n{text}");
+    }
+    compile(&spec(
+        "gcp",
+        "project: shop, serviceAccountKey: \"${{ secret.cloud_secret }}\"",
+    ))
+    .unwrap();
+    let err = refusal(&spec(
+        "azure",
+        "clientId: c, tenantId: t, clientSecret: \"${{ secret.cloud_secret }}\"",
+    ));
+    assert_eq!(err.rule, "unsupported-credential");
+    assert_eq!(
+        err.msg,
+        "the credential \"prod\": packer reaches a cloud, as an aws or gcp credential, not azure"
+    );
+    let err = refusal(&spec(
+        "gcp",
+        "project: shop, impersonate: ci@shop.iam.gserviceaccount.com",
+    ));
+    assert!(
+        err.msg
+            .contains("packer takes no account to impersonate from Meridian"),
         "{}",
         err.msg
     );

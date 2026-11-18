@@ -27,12 +27,14 @@ pub use resolve::{
     resolve, resolve_for, resolve_with, resolved_labels, Removed, Resolution, Secrets,
 };
 pub use types::{
-    Credential, Dependency, Document, IfMissing, Import, Infrastructure, InfrastructureSpec, Kind,
-    Metadata, Notification, Output, Resource, ResourceSet, ResourceSetSpec, Secret, TargetHost,
-    API_VERSION_V1, CREDENTIAL_FROM_AMBIENT, IMPORT_FROM_ARTIFACT, IMPORT_FROM_OUTPUT,
+    Credential, Dependency, Document, Endpoint, IfMissing, Import, Infrastructure,
+    InfrastructureSpec, Kind, Metadata, Notification, Output, Resource, ResourceSet,
+    ResourceSetSpec, Secret, TargetHost, API_VERSION_V1, CREDENTIAL_FROM_AMBIENT,
+    ENDPOINT_TYPE_CLOUD, ENDPOINT_TYPE_CLUSTER, IMPORT_FROM_ARTIFACT, IMPORT_FROM_OUTPUT,
     NOTIFY_ON_CHANGED, TARGET_HOST_FROM_INFRASTRUCTURE, TARGET_HOST_FROM_INLINE,
 };
 pub use validate::{
-    is_document_name, load, secret_reference, validate, Bundle, HOST_CREDENTIAL_TYPES,
+    endpoint_credential_types, is_document_name, load, secret_reference, validate, Bundle,
+    CLOUD_CREDENTIAL_TYPES, CLUSTER_CREDENTIAL_TYPES, ENDPOINT_TYPES, HOST_CREDENTIAL_TYPES,
     MAX_DOCUMENT_NAME,
 };

@@ -42,6 +42,7 @@ const TARGETS: &[Target] = &[
             runtime_condition: true,
             secrets: true,
             credentials: true,
+            cloud_credentials: false,
         },
     },
     Target {
@@ -54,6 +55,7 @@ const TARGETS: &[Target] = &[
             runtime_condition: false,
             secrets: true,
             credentials: true,
+            cloud_credentials: false,
         },
     },
 ];

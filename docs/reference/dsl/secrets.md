@@ -301,7 +301,10 @@ Three things hold wherever a secret is handed over:
 - **Never on the command line, never in the environment.** The command line
   names the file's path and nothing more, or nothing at all when the tool
   reads standard input, and the tool's environment holds nothing of the
-  value.
+  value. The one exception the table allows is a
+  [cloud credential](credentials.md#reaching-a-cloud-as-a-credential), which
+  the providers take from the environment and no other way; the plan line
+  says when a stage goes that way.
 - **The tool's own state is the tool's own.** A tool that keeps what it was
   given keeps it the way it always has: Terraform writes a resource's
   arguments into its state file, whichever variable they came from; Pulumi

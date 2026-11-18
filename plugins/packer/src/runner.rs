@@ -6,8 +6,8 @@ use std::path::Path;
 
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
-    decode_value, Applied, Artifact, Change, ChangeAction, Log, Operations, Output, Plan,
-    RunContext, RunError, Runner, SecretFile, Value,
+    cloud_for, decode_value, Applied, Artifact, Change, ChangeAction, CloudHandover, Log,
+    Operations, Output, Plan, RunContext, RunError, Runner, SecretFile, Value,
 };
 use meridian_sdk::{settings, Setting};
 
@@ -71,7 +71,7 @@ impl PackerRunner {
         }
     }
 
-    fn tool(&self, context: &RunContext) -> Tool {
+    fn tool(&self, context: &RunContext, cloud: Option<&CloudHandover>) -> Tool {
         let mut tool = Tool::new(&self.program)
             .dir(&context.work_dir)
             .env("PACKER_NO_COLOR", "1")
@@ -86,7 +86,7 @@ impl PackerRunner {
             };
             tool = tool.env(format!("PKR_VAR_{name}"), text);
         }
-        tool
+        CloudHandover::tell_if_any(cloud, tool)
     }
 
     /// The secrets of the run as a variables file only the user can read,
@@ -110,11 +110,12 @@ impl PackerRunner {
     fn reading(
         &self,
         context: &RunContext,
+        cloud: Option<&CloudHandover>,
         command: &[&str],
         secrets: Option<&SecretFile>,
     ) -> Tool {
         let tool = self
-            .tool(context)
+            .tool(context, cloud)
             .args(command.iter().copied())
             .args(self.extra_args.iter().cloned());
         match secrets {
@@ -129,6 +130,7 @@ impl PackerRunner {
     fn prepare(
         &self,
         context: &RunContext,
+        cloud: Option<&CloudHandover>,
         artifact: &Artifact,
         secrets: Option<&SecretFile>,
         log: &dyn Log,
@@ -145,10 +147,10 @@ impl PackerRunner {
         let described = read_described(described)?;
         write_artifact(&context.work_dir, artifact)?;
 
-        self.tool(context)
+        self.tool(context, cloud)
             .args(["init", "."])
             .run_ok("packer init failed", log)?;
-        self.reading(context, &["validate"], secrets)
+        self.reading(context, cloud, &["validate"], secrets)
             .run_ok("packer validate failed", log)?;
         Ok(described)
     }
@@ -177,8 +179,12 @@ impl Runner for PackerRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
+        // A cloud credential reaches the tool in the environment of every
+        // call of the stage; the files a provider reads live to the end of it.
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let cloud = cloud.as_ref();
         let secrets = Self::secrets(context)?;
-        let described = self.prepare(context, artifact, secrets.as_ref(), log)?;
+        let described = self.prepare(context, cloud, artifact, secrets.as_ref(), log)?;
         Ok(Plan {
             changes: described
                 .sources
@@ -195,10 +201,14 @@ impl Runner for PackerRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
+        // A cloud credential reaches the tool in the environment of every
+        // call of the stage; the files a provider reads live to the end of it.
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let cloud = cloud.as_ref();
         let secrets = Self::secrets(context)?;
-        let described = self.prepare(context, artifact, secrets.as_ref(), log)?;
+        let described = self.prepare(context, cloud, artifact, secrets.as_ref(), log)?;
         let built = self
-            .reading(context, &["build", "-color=false"], secrets.as_ref())
+            .reading(context, cloud, &["build", "-color=false"], secrets.as_ref())
             .run_ok("packer build failed", log);
         drop(secrets);
         built?;

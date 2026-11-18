@@ -3,7 +3,9 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
+use meridian_plugin_testkit::{
+    artifact, cloud_credential, cloud_env, nothing_under_holds, scratch, secrets, stand_in, KeptLog,
+};
 use meridian_sdk::{Artifact, RunContext, Runner, SecretRef, Value};
 use meridian_target_cloudformation::CloudFormationRunner;
 
@@ -34,8 +36,9 @@ fn runner(dir: &Path, cases: &str) -> CloudFormationRunner {
         dir,
         "aws",
         &format!(
-            "echo \"$@\" | sed 's/meridian-[0-9]*/meridian-N/' >> \"{dir}/calls\"\ncase \"$2\" in\n{cases}\nesac",
-            dir = dir.display()
+            "echo \"$@\" | sed 's/meridian-[0-9]*/meridian-N/' >> \"{dir}/calls\"\n{record}case \"$2\" in\n{cases}\nesac",
+            dir = dir.display(),
+            record = meridian_plugin_testkit::record_cloud_env(dir, "$2"),
         ),
     );
     CloudFormationRunner {
@@ -308,4 +311,64 @@ fn a_run_without_secrets_names_no_parameters_file() {
         calls(&dir)
     );
     assert!(!dir.join("secrets.json").exists());
+}
+
+#[test]
+fn an_aws_credential_reaches_every_call_in_its_environment_and_nowhere_else() {
+    let dir = scratch(TMP, "aws-credential");
+    let mut context = context(&dir);
+    context.credential = Some(cloud_credential(
+        "aws",
+        &[("accessKeyId", "AKIA1")],
+        &[
+            ("secretAccessKey", "s3cr3t-9fXw"),
+            ("sessionToken", "t0k3n-9fXw"),
+        ],
+    ));
+    let log = KeptLog::default();
+    runner(&dir, &format!("{NEW_STACK}\n{CHANGES}"))
+        .plan(&context, &compiled(), &log)
+        .unwrap();
+    for call in [
+        "describe-stacks",
+        "create-change-set",
+        "wait",
+        "describe-change-set",
+        "delete-change-set",
+        "delete-stack",
+    ] {
+        assert_eq!(
+            cloud_env(&dir, call),
+            [
+                "AWS_ACCESS_KEY_ID=AKIA1",
+                "AWS_SECRET_ACCESS_KEY=s3cr3t-9fXw",
+                "AWS_SESSION_TOKEN=t0k3n-9fXw",
+            ],
+            "{call}"
+        );
+        fs::remove_file(dir.join(format!("cloud-env.{call}"))).unwrap();
+    }
+    assert!(!calls(&dir).iter().any(|c| c.contains("9fXw")));
+    assert!(!log.text().iter().any(|l| l.contains("9fXw")));
+    nothing_under_holds(&dir.join("work"), "9fXw");
+}
+
+#[test]
+fn a_credential_for_another_cloud_stops_the_run_before_the_tool_starts() {
+    let dir = scratch(TMP, "gcp-credential");
+    let mut context = context(&dir);
+    context.credential = Some(cloud_credential(
+        "gcp",
+        &[("project", "shop")],
+        &[("serviceAccountKey", "{}")],
+    ));
+    let err = runner(&dir, &format!("{NEW_STACK}\n{CHANGES}"))
+        .plan(&context, &compiled(), &KeptLog::default())
+        .unwrap_err();
+    assert_eq!(
+        err.msg,
+        "the credential \"prod\": aws cloudformation reaches AWS only, as an aws credential, \
+         not gcp"
+    );
+    assert!(!dir.join("calls").exists(), "the tool was started");
 }

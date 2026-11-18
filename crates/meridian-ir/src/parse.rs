@@ -403,6 +403,7 @@ impl Decoder<'_> {
                     conditions: self.conditions(f.get("conditions")),
                     secrets: self.secrets(f.get("secrets"), &pos),
                     credentials: self.credentials(f.get("credentials"), &pos),
+                    endpoint: self.endpoint(f.get("endpoint"), &pos),
                     imports: self.imports(f.get("imports"), &pos),
                     resources: self.resources(f.get("resources"), &pos),
                     outputs: self.outputs(f.get("outputs"), &pos),
@@ -425,6 +426,7 @@ impl Decoder<'_> {
                     secrets: self.secrets(f.get("secrets"), &pos),
                     credentials: self.credentials(f.get("credentials"), &pos),
                     target_host: self.target_host(f.get("targetHost"), &pos),
+                    endpoint: self.endpoint(f.get("endpoint"), &pos),
                     imports: self.imports(f.get("imports"), &pos),
                     resources: self.resources(f.get("resources"), &pos),
                 };
@@ -745,6 +747,17 @@ impl Decoder<'_> {
             r#ref: self.string(f.get("ref"), &join(path, "ref")),
             output: self.string(f.get("output"), &join(path, "output")),
             host: self.string(f.get("host"), &join(path, "host")),
+            credential: self.string(f.get("credential"), &join(path, "credential")),
+            pos: self.at_or(node, doc_pos),
+        })
+    }
+
+    fn endpoint(&mut self, node: Option<&Node>, doc_pos: &Position) -> Option<Endpoint> {
+        let node = node.filter(|n| !n.is_null())?;
+        let path = "spec.endpoint";
+        let f = self.fields(Some(node), path, &schema::ENDPOINT.names());
+        Some(Endpoint {
+            r#type: self.string(f.get("type"), &join(path, "type")),
             credential: self.string(f.get("credential"), &join(path, "credential")),
             pos: self.at_or(node, doc_pos),
         })

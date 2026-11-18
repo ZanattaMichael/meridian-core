@@ -466,6 +466,36 @@
         }
       }
     },
+    "Endpoint": {
+      "description": "The place a document is applied to that is not a host, and the credential it is reached as. A host is `targetHost`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "credential"
+      ],
+      "properties": {
+        "type": {
+          "description": "What kind of place it is. The type fixes which credential types reach it.",
+          "type": "string",
+          "oneOf": [
+            {
+              "const": "cloud",
+              "description": "An account, subscription or project of a cloud, for an infrastructure target; reached as an `aws`, `azure` or `gcp` credential."
+            },
+            {
+              "const": "cluster",
+              "description": "A Kubernetes API, for an orchestration target; reached as a `kubeconfig` credential."
+            }
+          ]
+        },
+        "credential": {
+          "description": "The credential the endpoint is reached with, by the name `spec.credentials` declares it under: `aws`, `azure` or `gcp` for a cloud, `kubeconfig` for a cluster.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "Import": {
       "description": "A value the document's tool is handed from another document of the workflow.",
       "type": "object",
@@ -802,6 +832,14 @@
           "items": {
             "$ref": "#/definitions/Credential"
           }
+        },
+        "endpoint": {
+          "description": "The cloud or cluster this document is applied to, and the credential it is reached as.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Endpoint"
+            }
+          ]
         },
         "imports": {
           "description": "Values handed to the document's tool from other documents of the workflow.",
@@ -1434,6 +1472,14 @@
           "allOf": [
             {
               "$ref": "#/definitions/TargetHost"
+            }
+          ]
+        },
+        "endpoint": {
+          "description": "The cloud or cluster this document is applied to, and the credential it is reached as.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Endpoint"
             }
           ]
         },

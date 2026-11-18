@@ -55,8 +55,8 @@ mod validate;
 use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::{
-    holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
-    Resource, ResourceGraph, Value,
+    holds_secret, Artifact, Capabilities, Category, CloudTakes, CompileError, Data, Emitted,
+    Emitter, Position, Resource, ResourceGraph, Value,
 };
 
 pub use emit::{BUILD_PATH, CONFIG_PATH, MANIFEST_PATH};
@@ -197,6 +197,33 @@ impl Template {
 }
 
 /// A refusal of one resource, stamped with this target.
+/// How `packer` takes a cloud credential: the Amazon plugin reads its login
+/// from the environment as the AWS SDK does, and the Google Compute plugin
+/// reads a service account key from the file `GOOGLE_APPLICATION_CREDENTIALS`
+/// names. The Azure plugin reads its login from the template, which this
+/// plugin does not write one into, so an `azure` credential is refused.
+pub(crate) const CLOUD_TAKES: CloudTakes = CloudTakes {
+    tool: "packer",
+    providers: &["aws", "gcp"],
+    azure_certificate: Err("the Azure plugin for Packer reads its login from the template, not from the environment, and this plugin does not write one there yet"),
+    gcp_impersonation: Err("the Google Compute plugin for Packer reads the account from the template, not from the environment"),
+};
+
+/// Refuses a credential the tool cannot take, at compile, so that nothing
+/// is fetched for it.
+fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
+    let Some(credential) = &graph.credential else {
+        return Ok(());
+    };
+    meridian_sdk::check_cloud_credential(credential, &CLOUD_TAKES).map_err(|msg| CompileError {
+        target: NAME.to_owned(),
+        resource: String::new(),
+        rule: "unsupported-credential".to_owned(),
+        msg: format!("the credential {:?}: {msg}", credential.name),
+        pos: Position::default(),
+    })
+}
+
 pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
@@ -274,6 +301,7 @@ impl Emitter for Packer {
             runtime_condition: false,
             secrets: true,
             credentials: false,
+            cloud_credentials: true,
         }
     }
 
@@ -286,6 +314,7 @@ impl Emitter for Packer {
     }
 
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        check_credential(graph)?;
         // A secret in a param is written as a reference to a sensitive input
         // variable, which the runner gives its value from a private file.
         refuse_secret_in(

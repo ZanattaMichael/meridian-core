@@ -76,6 +76,7 @@ fn the_binary_reports_what_the_plugin_is() {
         info.capabilities,
         Capabilities {
             secrets: true,
+            cloud_credentials: true,
             ..Capabilities::default()
         }
     );

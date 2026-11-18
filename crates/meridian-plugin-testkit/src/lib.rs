@@ -632,6 +632,108 @@ pub fn credential(kind: &str, user: &str, fields: &[(&str, &str)]) -> HeldCreden
     )
 }
 
+/// A cloud credential named `prod` of `kind`, with the plain `text` fields
+/// and the value of each secret field given, as a runner receives one at
+/// plan and apply.
+pub fn cloud_credential(
+    kind: &str,
+    text: &[(&str, &str)],
+    secrets: &[(&str, &str)],
+) -> HeldCredential {
+    HeldCredential::from_values(
+        Credential {
+            name: "prod".to_owned(),
+            kind: kind.to_owned(),
+            text: text
+                .iter()
+                .map(|(field, value)| ((*field).to_owned(), (*value).to_owned()))
+                .collect(),
+            ..Credential::default()
+        },
+        secrets
+            .iter()
+            .map(|(field, value)| {
+                (
+                    (*field).to_owned(),
+                    SecretValue::from_reader(value.as_bytes(), 1 << 16)
+                        .expect("a test value fits in a secret"),
+                )
+            })
+            .collect(),
+    )
+}
+
+/// The variables a cloud credential can become, which the stand-ins record.
+pub const CLOUD_VARIABLES: &[&str] = &[
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_PROFILE",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+    "ARM_CLIENT_ID",
+    "ARM_CLIENT_SECRET",
+    "ARM_TENANT_ID",
+    "ARM_SUBSCRIPTION_ID",
+    "ARM_USE_MSI",
+    "ARM_CLIENT_CERTIFICATE_PATH",
+    "GOOGLE_PROJECT",
+    "CLOUDSDK_CORE_PROJECT",
+    "GOOGLE_IMPERSONATE_SERVICE_ACCOUNT",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+];
+
+/// The lines of a stand-in's shell script that record the cloud variables
+/// ([`CLOUD_VARIABLES`]) it was given, sorted, in `<dir>/cloud-env.<tag>`,
+/// and copy the file `GOOGLE_APPLICATION_CREDENTIALS` names, when it names
+/// one, to `<dir>/gcp-key-seen`. `tag` is a shell expression, such as `$1`.
+pub fn record_cloud_env(dir: &Path, tag: &str) -> String {
+    let d = dir.display();
+    format!(
+        "env | grep -E '^({})=' | sort > \"{d}/cloud-env.{tag}\"\n\
+         if [ -n \"$GOOGLE_APPLICATION_CREDENTIALS\" ]; then cp \"$GOOGLE_APPLICATION_CREDENTIALS\" \"{d}/gcp-key-seen\"; fi\n",
+        CLOUD_VARIABLES.join("|")
+    )
+}
+
+/// The cloud variables a stand-in recorded under `tag`, as `NAME=value`
+/// lines, less any the test's own environment already held with that value
+/// (a machine's own `AWS_REGION`, say), which a tool inherits as it would
+/// from a shell.
+pub fn cloud_env(dir: &Path, tag: &str) -> Vec<String> {
+    fs::read_to_string(dir.join(format!("cloud-env.{tag}")))
+        .unwrap_or_else(|e| panic!("no cloud-env.{tag} was recorded: {e}"))
+        .lines()
+        .filter(|line| {
+            let (name, value) = line.split_once('=').unwrap_or((line, ""));
+            std::env::var(name).map_or(true, |own| own != value)
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Asserts that no file under `dir` holds `needle`, naming the one that
+/// does.
+pub fn nothing_under_holds(dir: &Path, needle: &str) {
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if let Ok(bytes) = fs::read(&path) {
+                assert!(
+                    !bytes
+                        .windows(needle.len())
+                        .any(|window| window == needle.as_bytes()),
+                    "{} holds {needle:?}",
+                    path.display()
+                );
+            }
+        }
+    }
+}
+
 /// Stand-ins for `ssh-agent` and `ssh-add` that record what they are given.
 /// The agent creates a plain file where its socket is asked for and waits
 /// until it is stopped or that file is gone (on Windows a stopped stand-in

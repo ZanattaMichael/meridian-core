@@ -75,6 +75,7 @@ fn the_plugin_describes_itself_as_infrastructure_as_code() {
             runtime_condition: false,
             secrets: true,
             credentials: false,
+            cloud_credentials: true,
         }
     );
     assert_eq!(
@@ -719,4 +720,35 @@ fn a_secret_in_a_param_is_a_sensitive_variable_the_runner_hands_over() {
         "{config}"
     );
     assert!(!config.contains("(sensitive)"), "{config}");
+}
+
+#[test]
+fn a_cloud_credential_leaves_nothing_in_the_configuration_and_a_role_is_refused() {
+    let spec = |fields: &str| {
+        format!(
+            "  secrets:\n    - name: cloud_secret\n      from: env\n      key: CLOUD_SECRET\n  \
+             credentials:\n    - {{name: prod, type: aws, {fields}}}\n  \
+             endpoint: {{type: cloud, credential: prod}}\n  \
+             resources:\n    - id: logs\n      type: aws_s3_bucket\n      params: {{bucket: logs}}\n"
+        )
+    };
+    let compiled = compile(&spec(
+        "accessKeyId: AKIA1, secretAccessKey: \"${{ secret.cloud_secret }}\", region: eu-west-1",
+    ))
+    .unwrap();
+    let text: String = compiled.artifact.files.values().cloned().collect();
+    for part in ["AKIA1", "eu-west-1", "cloud_secret", "prod"] {
+        assert!(
+            !text.contains(part),
+            "{part} is in the configuration:\n{text}"
+        );
+    }
+    let err = compile(&spec("roleArn: \"arn:aws:iam::1:role/x\"")).unwrap_err();
+    assert_eq!(err.rule, "unsupported-credential");
+    assert!(
+        err.msg
+            .starts_with("the credential \"prod\": tofu takes no roleArn from Meridian"),
+        "{}",
+        err.msg
+    );
 }

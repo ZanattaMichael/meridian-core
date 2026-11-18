@@ -2356,14 +2356,13 @@ fn print_rollback(out: &mut dyn Write, report: &RollbackReport) -> std::io::Resu
 
 impl Printer<'_> {
     fn print(&self, out: &mut dyn Write, report: &StageReport) -> std::io::Result<()> {
-        let on = if report.host.is_empty() {
-            String::new()
-        } else if report.credential.is_empty() {
-            format!(" on {}", report.host)
-        } else {
-            // Which identity touches the machine is part of what a plan
-            // shows, so it can be reviewed.
-            format!(" on {} as {}", report.host, report.credential)
+        // Which identity touches the machine, or the cloud, is part of what
+        // a plan shows, so it can be reviewed.
+        let on = match (report.host.is_empty(), report.credential.is_empty()) {
+            (true, true) => String::new(),
+            (true, false) => format!(" as {}", report.credential),
+            (false, true) => format!(" on {}", report.host),
+            (false, false) => format!(" on {} as {}", report.host, report.credential),
         };
         writeln!(
             out,

@@ -306,7 +306,12 @@ Every setting can also be written in the project's `meridian.yaml` under
 The names, defaults and the splitting rule for argument lists are in the
 [plugin settings reference](../reference/plugin-settings.md#bicep).
 
-Credentials are the `az` command's own (`az login`).
+Credentials are the `az` command's own (`az login`). The target does not yet take a
+[cloud credential](../reference/dsl/credentials.md#reaching-a-cloud-as-a-credential)
+from a document: `az login --service-principal` takes a secret on its command line only,
+which Meridian never does, so a document that names one for `bicep` is refused before
+anything runs. Declare the credential `from: ambient` to name the identity the signed-in
+`az` is.
 
 ## What is refused
 

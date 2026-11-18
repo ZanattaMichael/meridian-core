@@ -1366,6 +1366,25 @@ struct Compiled {
     credential: Option<meridian_ir::Credential>,
 }
 
+/// The credential as a plan names it, with how it reaches the tool when
+/// that is worth reviewing: a cloud credential goes in the tool's own
+/// environment, rank 4 of the plan's channels, because the providers take
+/// one no other way. Never any part of a secret.
+fn credential_line(
+    credential: &meridian_ir::Credential,
+    endpoint: Option<&meridian_ir::Endpoint>,
+) -> String {
+    let summary = credential.summary();
+    match endpoint {
+        // An ambient one hands nothing secret, but its plain fields (a
+        // profile, a region) still go the same way.
+        Some(e) if e.r#type == meridian_ir::ENDPOINT_TYPE_CLOUD => {
+            format!("{summary}, in the tool's environment")
+        }
+        _ => summary,
+    }
+}
+
 /// Why a stage did not compile, or cannot yet.
 enum NotCompiled {
     Failed {
@@ -1503,7 +1522,10 @@ impl Run<'_> {
             .expect("the stage was compiled by its target");
         let info = target.info();
         report.host = host;
-        report.credential = credential.as_ref().map(|c| c.summary()).unwrap_or_default();
+        report.credential = credential
+            .as_ref()
+            .map(|c| credential_line(c, document.endpoint()))
+            .unwrap_or_default();
         report.warnings = emitted.warnings;
         self.artifacts.insert(id.clone(), emitted.artifact.clone());
         report.artifact = Some(emitted.artifact.clone());
@@ -1859,26 +1881,8 @@ impl Run<'_> {
             .map(|th| th.credential.as_str())
             .filter(|name| !name.is_empty())
         {
-            let takes_credentials = self
-                .registry
-                .target(document.target())
-                .is_some_and(|target| target.info().capabilities.credentials);
-            if !takes_credentials {
-                let takers: Vec<&str> = self
-                    .registry
-                    .names()
-                    .into_iter()
-                    .filter(|name| {
-                        self.registry
-                            .target(name)
-                            .is_some_and(|t| t.info().capabilities.credentials)
-                    })
-                    .collect();
-                let takers = if takers.is_empty() {
-                    "no loaded target does".to_owned()
-                } else {
-                    format!("targets that do: {}", takers.join(", "))
-                };
+            let takes = |capabilities: &meridian_sdk::Capabilities| capabilities.credentials;
+            if let Some(takers) = self.refusing_credential(document.target(), takes) {
                 return Read::Failed(format!(
                     "spec.targetHost names the credential {name:?}, and target {:?} does not \
                      take one: it has no way to reach its host as that identity, so the \
@@ -1888,11 +1892,62 @@ impl Run<'_> {
                 ));
             }
         }
+        // A credential named for the endpoint, the same way: a provider that
+        // is not handed it would use whatever login it finds on this machine.
+        if let Some(endpoint) = document.endpoint() {
+            let takes = |capabilities: &meridian_sdk::Capabilities| {
+                endpoint.r#type == meridian_ir::ENDPOINT_TYPE_CLOUD
+                    && capabilities.cloud_credentials
+            };
+            if let Some(takers) = self.refusing_credential(document.target(), takes) {
+                return Read::Failed(format!(
+                    "spec.endpoint names the credential {:?} for a {}, and target {:?} does \
+                     not take one: it has no way to hand its tool that identity, so the \
+                     document would be applied as whatever login the tool finds on this \
+                     machine. Leave the endpoint out to use the tool's own; {takers}",
+                    endpoint.credential,
+                    endpoint.r#type,
+                    document.target()
+                ));
+            }
+        }
         Read::Kept {
             document: Box::new(document),
             removed,
             secrets,
         }
+    }
+
+    /// `None` when `target` takes the credential, by `takes` of its
+    /// capabilities; otherwise the loaded targets that do, as a refusal
+    /// lists them.
+    fn refusing_credential(
+        &self,
+        target: &str,
+        takes: impl Fn(&meridian_sdk::Capabilities) -> bool,
+    ) -> Option<String> {
+        if self
+            .registry
+            .target(target)
+            .is_some_and(|t| takes(&t.info().capabilities))
+        {
+            return None;
+        }
+        let takers: Vec<&str> = self
+            .registry
+            .names()
+            .into_iter()
+            .filter(|name| {
+                self.registry
+                    .target(name)
+                    .is_some_and(|t| takes(&t.info().capabilities))
+            })
+            .collect();
+        Some(if takers.is_empty() {
+            "no loaded target does".to_owned()
+        } else {
+            format!("targets that do: {}", takers.join(", "))
+        })
     }
 
     /// Compiles a document that has been [read](Run::read).

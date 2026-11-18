@@ -300,7 +300,12 @@ Outputs are read from the deployment's record. An output of a secure type is rep
 sensitive, and Azure does not return its value. Asking for outputs before the document
 was ever applied is an error that says so.
 
-Credentials are the `az` command's own (`az login`). Meridian stores and passes none.
+Credentials are the `az` command's own (`az login`). Meridian stores and passes none. The
+target does not yet take a [cloud credential](../reference/dsl/credentials.md#reaching-a-cloud-as-a-credential)
+from a document: `az login --service-principal` takes a secret on its command line only,
+which Meridian never does, so a document that names one for `arm` is refused before
+anything runs. Declare the credential `from: ambient` to name the identity the signed-in
+`az` is.
 
 Every template this plugin writes is read by the real Bicep compiler's ARM reader
 (`az bicep decompile`) on every pull request that touches it, which has to parse the whole

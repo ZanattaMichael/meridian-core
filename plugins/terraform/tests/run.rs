@@ -3,7 +3,9 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
+use meridian_plugin_testkit::{
+    artifact, cloud_credential, cloud_env, scratch, secrets, stand_in, KeptLog,
+};
 use meridian_sdk::{Artifact, RunContext, Runner, SecretRef, Value};
 use meridian_target_terraform::TerraformRunner;
 
@@ -219,4 +221,142 @@ fn a_run_without_secrets_keeps_its_saved_plan_and_passes_no_variables_file() {
         .unwrap();
     assert!(!calls(&dir).iter().any(|c| c.contains("-var-file")));
     assert!(dir.join("work").join("meridian.tfplan").exists());
+}
+
+/// A stand-in that answers like `keeping_secrets` and records the cloud
+/// variables each call sees.
+fn cloud_runner(dir: &Path) -> TerraformRunner {
+    let program = stand_in(
+        dir,
+        "terraform",
+        &format!(
+            "echo \"$@\" >> \"{dir}/calls\"\n{record}case \"$1\" in\n{cases}\nesac",
+            dir = dir.display(),
+            record = meridian_plugin_testkit::record_cloud_env(dir, "$1"),
+            cases = keeping_secrets(dir)
+        ),
+    );
+    TerraformRunner {
+        program: program.to_str().unwrap().to_owned(),
+        extra_args: Vec::new(),
+    }
+}
+
+/// The runner's work and the stand-in's records hold nothing of `secret`.
+fn nothing_kept(dir: &Path, log: &KeptLog, secret: &str) {
+    assert!(
+        !calls(dir).iter().any(|c| c.contains(secret)),
+        "{:?}",
+        calls(dir)
+    );
+    assert!(
+        !log.text().iter().any(|l| l.contains(secret)),
+        "{:?}",
+        log.text()
+    );
+    meridian_plugin_testkit::nothing_under_holds(&dir.join("work"), secret);
+}
+
+#[test]
+fn an_aws_credential_reaches_every_call_in_its_environment_and_nowhere_else() {
+    let dir = scratch(TMP, "aws-credential");
+    let runner = cloud_runner(&dir);
+    let mut context = context(&dir);
+    context.credential = Some(cloud_credential(
+        "aws",
+        &[("accessKeyId", "AKIA1"), ("region", "eu-west-1")],
+        &[
+            ("secretAccessKey", "s3cr3t-9fXw"),
+            ("sessionToken", "t0k3n-9fXw"),
+        ],
+    ));
+    let log = KeptLog::default();
+    runner.plan(&context, &compiled(), &log).unwrap();
+    // init, plan and show: each is a process of its own, and the providers
+    // are loaded by each, so each is told.
+    for call in ["init", "plan", "show"] {
+        assert_eq!(
+            cloud_env(&dir, call),
+            [
+                "AWS_ACCESS_KEY_ID=AKIA1",
+                "AWS_DEFAULT_REGION=eu-west-1",
+                "AWS_REGION=eu-west-1",
+                "AWS_SECRET_ACCESS_KEY=s3cr3t-9fXw",
+                "AWS_SESSION_TOKEN=t0k3n-9fXw",
+            ],
+            "{call}"
+        );
+    }
+    // The stand-in's own record is the one place the value is written.
+    for call in ["init", "plan", "show"] {
+        fs::remove_file(dir.join(format!("cloud-env.{call}"))).unwrap();
+    }
+    nothing_kept(&dir, &log, "s3cr3t-9fXw");
+    nothing_kept(&dir, &log, "t0k3n-9fXw");
+    // No variables file was passed: a credential is not a secret in a param.
+    assert!(!calls(&dir).iter().any(|c| c.contains("-var-file")));
+
+    runner.apply(&context, &compiled(), &log).unwrap();
+    assert!(cloud_env(&dir, "apply").contains(&"AWS_SECRET_ACCESS_KEY=s3cr3t-9fXw".to_owned()));
+    assert!(cloud_env(&dir, "output").contains(&"AWS_ACCESS_KEY_ID=AKIA1".to_owned()));
+}
+
+#[test]
+fn a_gcp_key_is_a_private_file_the_environment_names_and_it_is_removed_after_the_run() {
+    let dir = scratch(TMP, "gcp-credential");
+    let runner = cloud_runner(&dir);
+    let mut context = context(&dir);
+    let key = "{\"type\": \"service_account\", \"private_key\": \"-----BEGIN-9fXw\"}";
+    context.credential = Some(cloud_credential(
+        "gcp",
+        &[("project", "shop-prod")],
+        &[("serviceAccountKey", key)],
+    ));
+    let log = KeptLog::default();
+    runner.plan(&context, &compiled(), &log).unwrap();
+    let env = cloud_env(&dir, "plan");
+    assert!(
+        env.contains(&"GOOGLE_PROJECT=shop-prod".to_owned()),
+        "{env:?}"
+    );
+    assert!(
+        env.contains(&"CLOUDSDK_CORE_PROJECT=shop-prod".to_owned()),
+        "{env:?}"
+    );
+    let path = env
+        .iter()
+        .find_map(|l| l.strip_prefix("GOOGLE_APPLICATION_CREDENTIALS="))
+        .expect("the key file is named");
+    // The tool read the key from the file while it ran, the file was not in
+    // the work directory, and it is gone now.
+    assert_eq!(fs::read_to_string(dir.join("gcp-key-seen")).unwrap(), key);
+    assert!(!Path::new(path).starts_with(dir.join("work")), "{path}");
+    assert!(!Path::new(path).exists(), "{path} was left behind");
+    assert!(!env.iter().any(|l| l.contains("9fXw")), "{env:?}");
+    for call in ["init", "plan", "show"] {
+        fs::remove_file(dir.join(format!("cloud-env.{call}"))).unwrap();
+    }
+    fs::remove_file(dir.join("gcp-key-seen")).unwrap();
+    nothing_kept(&dir, &log, "9fXw");
+}
+
+#[test]
+fn a_credential_the_providers_cannot_take_stops_the_run_before_the_tool_starts() {
+    let dir = scratch(TMP, "ssh-credential");
+    let runner = cloud_runner(&dir);
+    let mut context = context(&dir);
+    context.credential = Some(meridian_plugin_testkit::credential(
+        "ssh",
+        "deploy",
+        &[("privateKey", "-----KEY-9fXw-----")],
+    ));
+    let err = runner
+        .plan(&context, &compiled(), &KeptLog::default())
+        .unwrap_err();
+    assert_eq!(
+        err.msg,
+        "the credential \"deploy\": terraform reaches a cloud, as an aws, azure or gcp \
+         credential, not ssh"
+    );
+    assert!(!dir.join("calls").exists(), "the tool was started");
 }

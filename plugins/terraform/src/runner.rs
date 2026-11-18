@@ -3,8 +3,8 @@
 
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
-    decode_value, Applied, Artifact, Change, ChangeAction, Log, Operations, Output, Plan,
-    RunContext, RunError, Runner, Value,
+    cloud_for, decode_value, Applied, Artifact, Change, ChangeAction, CloudHandover, Log,
+    Operations, Output, Plan, RunContext, RunError, Runner, Value,
 };
 use meridian_sdk::{settings, Setting};
 
@@ -63,7 +63,9 @@ impl TerraformRunner {
         }
     }
 
-    fn tool(&self, context: &RunContext) -> Tool {
+    /// One call, in the work directory, told the cloud credential when
+    /// the stage has one.
+    fn tool(&self, context: &RunContext, cloud: Option<&CloudHandover>) -> Tool {
         let mut tool = Tool::new(&self.program)
             .dir(&context.work_dir)
             .env("TF_IN_AUTOMATION", "1")
@@ -77,13 +79,14 @@ impl TerraformRunner {
             };
             tool = tool.env(format!("TF_VAR_{name}"), text);
         }
-        tool
+        CloudHandover::tell_if_any(cloud, tool)
     }
 
     /// Writes the configuration, initialises the directory and saves a plan.
     fn prepare(
         &self,
         context: &RunContext,
+        cloud: Option<&CloudHandover>,
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Vec<Change>, RunError> {
@@ -94,7 +97,7 @@ impl TerraformRunner {
         }
         write_artifact(&context.work_dir, artifact)?;
 
-        self.tool(context)
+        self.tool(context, cloud)
             .args(["init", "-input=false", "-no-color"])
             .args(self.extra_args.iter().cloned())
             .run_ok("terraform init failed", log)?;
@@ -114,7 +117,7 @@ impl TerraformRunner {
             )
         };
         let mut plan = self
-            .tool(context)
+            .tool(context, cloud)
             .args(["plan", "-input=false", "-no-color"])
             .args(self.extra_args.iter().cloned())
             .arg(format!("-out={PLAN_FILE}"));
@@ -125,7 +128,7 @@ impl TerraformRunner {
         drop(secrets);
         planned?;
         let shown = self
-            .tool(context)
+            .tool(context, cloud)
             .args(["show", "-json", PLAN_FILE])
             .capture_stdout()
             .run_ok("terraform could not show the plan it saved", log)?;
@@ -160,9 +163,14 @@ impl TerraformRunner {
         let _ = std::fs::remove_file(&path);
     }
 
-    fn read_outputs(&self, context: &RunContext, log: &dyn Log) -> Result<Vec<Output>, RunError> {
+    fn read_outputs(
+        &self,
+        context: &RunContext,
+        cloud: Option<&CloudHandover>,
+        log: &dyn Log,
+    ) -> Result<Vec<Output>, RunError> {
         let finished = self
-            .tool(context)
+            .tool(context, cloud)
             .args(["output", "-json", "-no-color"])
             .capture_stdout()
             .run_ok("terraform could not report its outputs", log)?;
@@ -189,7 +197,10 @@ impl Runner for TerraformRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
-        let prepared = self.prepare(context, artifact, log);
+        // A cloud credential reaches the providers in the environment of
+        // every call of the stage, and the files it needs live to the end.
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let prepared = self.prepare(context, cloud.as_ref(), artifact, log);
         self.scrub(context);
         Ok(Plan {
             changes: prepared?,
@@ -203,7 +214,8 @@ impl Runner for TerraformRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
-        let changes = match self.prepare(context, artifact, log) {
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let changes = match self.prepare(context, cloud.as_ref(), artifact, log) {
             Ok(changes) => changes,
             Err(e) => {
                 self.scrub(context);
@@ -213,7 +225,7 @@ impl Runner for TerraformRunner {
         // The saved plan is applied, so nothing changes that was not just
         // reported. A plan file is its own approval.
         let applied = self
-            .tool(context)
+            .tool(context, cloud.as_ref())
             .args(["apply", "-input=false", "-no-color"])
             .args(self.extra_args.iter().cloned())
             .arg(PLAN_FILE)
@@ -222,7 +234,7 @@ impl Runner for TerraformRunner {
         applied?;
         Ok(Applied {
             changes,
-            outputs: self.read_outputs(context, log)?,
+            outputs: self.read_outputs(context, cloud.as_ref(), log)?,
         })
     }
 
@@ -232,7 +244,10 @@ impl Runner for TerraformRunner {
                 "nothing has been applied for this document yet, so it has no outputs",
             ));
         }
-        self.read_outputs(context, &meridian_sdk::NoLog)
+        // Outputs are read with no credential: the host hands one to plan
+        // and apply only. A backend that needs the cloud's login to read
+        // the state is read right after the apply, inside it.
+        self.read_outputs(context, None, &meridian_sdk::NoLog)
     }
 }
 

@@ -14,6 +14,12 @@ pub const TARGET_HOST_FROM_INFRASTRUCTURE: &str = "infrastructure";
 /// `targetHost.from` value that names an already-existing node directly.
 pub const TARGET_HOST_FROM_INLINE: &str = "inline";
 
+/// `endpoint.type` for an account, subscription or project of a cloud,
+/// reached as an `aws`, `azure` or `gcp` credential.
+pub const ENDPOINT_TYPE_CLOUD: &str = "cloud";
+/// `endpoint.type` for a Kubernetes API, reached as a `kubeconfig` credential.
+pub const ENDPOINT_TYPE_CLUSTER: &str = "cluster";
+
 /// The only event a notify can fire on: the notifying resource really
 /// changed. It is also what a notify with no `on` means.
 pub const NOTIFY_ON_CHANGED: &str = "changed";
@@ -260,8 +266,10 @@ impl Credential {
     /// deploy)`, never any part of a secret.
     pub fn summary(&self) -> String {
         let mut what = self.r#type.clone();
-        if let Some(user) = self.text("user") {
-            what.push_str(&format!(", user {user}"));
+        for field in SUMMARISED_FIELDS {
+            if let Some(value) = self.text(field) {
+                what.push_str(&format!(", {field} {value}"));
+            }
         }
         if self.is_ambient() {
             what.push_str(", ambient");
@@ -269,6 +277,10 @@ impl Credential {
         format!("{} ({what})", self.name)
     }
 }
+
+/// The plain fields a credential's summary names, in this order: who it is
+/// and where it points, and never anything secret.
+pub const SUMMARISED_FIELDS: &[&str] = &["user", "profile", "region", "project", "subscriptionId"];
 
 /// Binds a ResourceSet to the node it configures. `from: infrastructure`
 /// resolves `ref`/`output` against a sibling Infrastructure document.
@@ -280,6 +292,18 @@ pub struct TargetHost {
     pub host: String,
     /// The credential the host is reached with, by the name
     /// `spec.credentials` declares it under; empty for the tool's own.
+    pub credential: String,
+    pub pos: Position,
+}
+
+/// `spec.endpoint`: the place a document is applied to that is not a host,
+/// and the credential it is reached as. A host is `targetHost`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Endpoint {
+    /// [`ENDPOINT_TYPE_CLOUD`] or [`ENDPOINT_TYPE_CLUSTER`].
+    pub r#type: String,
+    /// The credential the endpoint is reached with, by the name
+    /// `spec.credentials` declares it under.
     pub credential: String,
     pub pos: Position,
 }
@@ -324,6 +348,9 @@ pub struct InfrastructureSpec {
     pub secrets: Vec<Secret>,
     /// `spec.credentials`: the identities the document names.
     pub credentials: Vec<Credential>,
+    /// `spec.endpoint`: the cloud the document provisions in, and the
+    /// credential it is reached as.
+    pub endpoint: Option<Endpoint>,
     pub imports: Vec<Import>,
     pub resources: Vec<Resource>,
     pub outputs: Vec<Output>,
@@ -362,6 +389,10 @@ pub struct ResourceSetSpec {
     /// `spec.credentials`: the identities the document names.
     pub credentials: Vec<Credential>,
     pub target_host: Option<TargetHost>,
+    /// `spec.endpoint`: the cloud or cluster the document is applied to,
+    /// and the credential it is reached as, for a target that reaches no
+    /// host.
+    pub endpoint: Option<Endpoint>,
     pub imports: Vec<Import>,
     pub resources: Vec<Resource>,
 }
@@ -475,6 +506,27 @@ impl Document {
             Document::Infrastructure(d) => &d.spec.credentials,
             Document::ResourceSet(d) => &d.spec.credentials,
         }
+    }
+
+    /// `spec.endpoint`, when the document names one.
+    pub fn endpoint(&self) -> Option<&Endpoint> {
+        match self {
+            Document::Infrastructure(d) => d.spec.endpoint.as_ref(),
+            Document::ResourceSet(d) => d.spec.endpoint.as_ref(),
+        }
+    }
+
+    /// The credential the document is applied as, when it names one: the
+    /// host's, through `targetHost.credential`, or the endpoint's, through
+    /// `endpoint.credential`. Validation refuses both at once.
+    pub fn named_credential(&self) -> Option<&Credential> {
+        let name = self
+            .as_resource_set()
+            .and_then(|d| d.spec.target_host.as_ref())
+            .map(|th| th.credential.as_str())
+            .filter(|name| !name.is_empty())
+            .or_else(|| self.endpoint().map(|e| e.credential.as_str()))?;
+        self.credentials().iter().find(|c| c.name == name)
     }
 
     /// The credential declared as `name`, if there is one.

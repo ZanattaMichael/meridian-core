@@ -54,6 +54,7 @@ fn the_plugin_says_what_it_is() {
             runtime_condition: false,
             secrets: true,
             credentials: true,
+            cloud_credentials: false,
         }
     );
     assert_eq!(

@@ -62,6 +62,7 @@ flowchart TD
 - [`spec` of an Infrastructure document](#spec-of-an-infrastructure-document)
 - [`spec` of a ResourceSet](#spec-of-a-resourceset)
 - [`targetHost`](#targethost)
+- [`endpoint`](#endpoint)
 - [Resources](#resources)
 - [`dependsOn`](#dependson)
 - [`notifies`](#notifies)
@@ -255,6 +256,7 @@ every `-l` given. Rules:
 | `conditions` | no | a mapping of named conditions, read as `cond.<name>`. See [named conditions](interpolation.md#named-conditions) |
 | `secrets` | no | a list of secrets, each a name and where it comes from, read as `secret.<name>`. See [secrets](secrets.md) |
 | `credentials` | no | a list of credentials, each a name, a type and the type's fields, used by name. See [credentials](credentials.md) |
+| `endpoint` | no | the cloud the document is applied to and the credential it is reached as. See [`endpoint`](#endpoint) |
 | `imports` | no | a list of [imports](#imports): values handed to this document from others |
 | `resources` | yes | a list of at least one [resource](#resources) |
 | `outputs` | no | a list of [outputs](#outputs) |
@@ -273,6 +275,7 @@ every `-l` given. Rules:
 | `secrets` | no | a list of secrets, each a name and where it comes from, read as `secret.<name>`. See [secrets](secrets.md) |
 | `credentials` | no | a list of credentials, each a name, a type and the type's fields, used by name. See [credentials](credentials.md) |
 | `targetHost` | yes, to compile | the machine, and the credential it is reached as. See [`targetHost`](#targethost) |
+| `endpoint` | no | the cloud the document is applied to and the credential it is reached as, for a target that reaches no host. See [`endpoint`](#endpoint) |
 | `imports` | no | a list of [imports](#imports): values handed to this document from others |
 | `resources` | yes | a list of at least one [resource](#resources) |
 
@@ -354,6 +357,27 @@ document has been applied; until then the ResourceSet is reported as
 
 `meridian validate` accepts a ResourceSet with no `targetHost`, but it cannot be
 compiled: `document "web" declares no targetHost`.
+
+## `endpoint`
+
+Where a document is applied when that is not a host: an account, a
+subscription or a project of a cloud, and the credential it is reached as.
+
+```yaml
+endpoint:
+  type: cloud
+  credential: prod     # one of spec.credentials, of type aws, azure or gcp
+```
+
+| Field | Value |
+|---|---|
+| `type` | `cloud` for an infrastructure target; `cluster`, a Kubernetes API, is declared but no target takes one yet. Required |
+| `credential` | the name of a credential in `spec.credentials` of a type the kind takes: `aws`, `azure` or `gcp` for a cloud, `kubeconfig` for a cluster. Required |
+
+A field of both kinds of document. Left out, the tool reaches its cloud as
+whatever login it finds on the machine. A ResourceSet names one identity,
+in `targetHost.credential` or here. See
+[Reaching a cloud as a credential](credentials.md#reaching-a-cloud-as-a-credential).
 
 ## Resources
 

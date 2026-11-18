@@ -3,7 +3,9 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
+use meridian_plugin_testkit::{
+    artifact, cloud_credential, cloud_env, nothing_under_holds, scratch, secrets, stand_in, KeptLog,
+};
 use meridian_sdk::{Artifact, RunContext, Runner, SecretRef, Value};
 use meridian_target_pulumi::PulumiRunner;
 
@@ -42,9 +44,10 @@ fn stand_in_for_pulumi(dir: &Path, cases: &str) -> String {
         &format!(
             "echo \"$@\" >> \"{dir}/calls\"\n\
              echo \"backend=${{PULUMI_BACKEND_URL-unset}} passphrase=${{PULUMI_CONFIG_PASSPHRASE-unset}} check=$PULUMI_SKIP_UPDATE_CHECK\" > \"{dir}/env\"\n\
-             pwd > \"{dir}/cwd\"\n\
+             pwd > \"{dir}/cwd\"\n{record}\
              case \"$1 $2\" in\n{cases}\nesac",
-            dir = dir.display()
+            dir = dir.display(),
+            record = meridian_plugin_testkit::record_cloud_env(dir, "$1"),
         ),
     );
     program.to_str().unwrap().to_owned()
@@ -452,4 +455,59 @@ fn a_plan_forgets_the_secrets_it_set_even_when_the_preview_fails() {
             "config rm meridian_secret_db_password --stack prod",
         ]
     );
+}
+
+#[test]
+fn an_aws_credential_reaches_every_call_in_its_environment_and_nowhere_else() {
+    let dir = scratch(TMP, "aws-credential");
+    let mut context = context(&dir);
+    context.credential = Some(cloud_credential(
+        "aws",
+        &[("profile", "ci"), ("region", "eu-west-1")],
+        &[("secretAccessKey", "s3cr3t-9fXw")],
+    ));
+    let log = KeptLog::default();
+    runner(&dir, HAPPY)
+        .apply(&context, &compiled(), &log)
+        .unwrap();
+    // `stack select`, `preview`, `up` and `stack output` are each a process
+    // of their own, and each loads the provider, so each is told.
+    for call in ["stack", "preview", "up"] {
+        assert_eq!(
+            cloud_env(&dir, call),
+            [
+                "AWS_DEFAULT_REGION=eu-west-1",
+                "AWS_PROFILE=ci",
+                "AWS_REGION=eu-west-1",
+                "AWS_SECRET_ACCESS_KEY=s3cr3t-9fXw",
+            ],
+            "{call}"
+        );
+        fs::remove_file(dir.join(format!("cloud-env.{call}"))).unwrap();
+    }
+    assert!(!calls(&dir).iter().any(|c| c.contains("9fXw")));
+    assert!(!log.text().iter().any(|l| l.contains("9fXw")));
+    nothing_under_holds(&dir.join("work"), "9fXw");
+}
+
+#[test]
+fn a_credential_the_providers_cannot_take_stops_the_run_before_the_tool_starts() {
+    let dir = scratch(TMP, "ssh-credential");
+    let mut context = context(&dir);
+    context.credential = Some(meridian_plugin_testkit::credential(
+        "ssh",
+        "deploy",
+        &[("privateKey", "-----KEY-9fXw-----")],
+    ));
+    let err = runner(&dir, HAPPY)
+        .plan(&context, &compiled(), &KeptLog::default())
+        .unwrap_err();
+    assert!(
+        err.msg.starts_with(
+            "the credential \"deploy\": pulumi reaches a cloud, as an aws, azure or gcp"
+        ),
+        "{}",
+        err.msg
+    );
+    assert!(!dir.join("calls").exists(), "the tool was started");
 }

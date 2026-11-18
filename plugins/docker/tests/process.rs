@@ -66,6 +66,7 @@ fn the_plugin_describes_itself_over_the_protocol() {
             runtime_condition: false,
             secrets: true,
             credentials: false,
+            cloud_credentials: false,
         }
     );
     assert_eq!(

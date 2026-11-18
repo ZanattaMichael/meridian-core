@@ -267,6 +267,7 @@ pub fn capabilities_to_wire(c: Capabilities) -> pb::Capabilities {
         runtime_condition: c.runtime_condition,
         secrets: c.secrets,
         credentials: c.credentials,
+        cloud_credentials: c.cloud_credentials,
     }
 }
 
@@ -324,6 +325,7 @@ pub fn capabilities_from_wire(c: Option<pb::Capabilities>) -> Capabilities {
         runtime_condition: c.runtime_condition,
         secrets: c.secrets,
         credentials: c.credentials,
+        cloud_credentials: c.cloud_credentials,
     })
     .unwrap_or_default()
 }
@@ -1227,6 +1229,7 @@ mod tests {
             runtime_condition: true,
             secrets: true,
             credentials: false,
+            cloud_credentials: false,
         };
         assert_eq!(capabilities_from_wire(Some(capabilities_to_wire(all))), all);
         assert!(!capabilities_from_wire(None).secrets);
@@ -1239,6 +1242,15 @@ mod tests {
             with_credentials
         );
         assert!(!capabilities_from_wire(None).credentials);
+        let with_cloud = Capabilities {
+            cloud_credentials: true,
+            ..all
+        };
+        assert_eq!(
+            capabilities_from_wire(Some(capabilities_to_wire(with_cloud))),
+            with_cloud
+        );
+        assert!(!capabilities_from_wire(None).cloud_credentials);
     }
 
     fn declared_credential() -> Credential {

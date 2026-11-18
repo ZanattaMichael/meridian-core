@@ -160,6 +160,7 @@ impl Emitter for Chef {
             runtime_condition: true,
             secrets: true,
             credentials: true,
+            cloud_credentials: false,
         }
     }
 

@@ -40,6 +40,10 @@ pub struct Credential {
     pub secret_fields: Vec<String>,
 }
 
+/// The plain fields a credential's summary names, in this order: who it is
+/// and where it points, and never anything secret.
+pub const SUMMARISED_FIELDS: &[&str] = &["user", "profile", "region", "project", "subscriptionId"];
+
 impl Credential {
     /// A field that is not secret, when the credential has it.
     pub fn text(&self, field: &str) -> Option<&str> {
@@ -60,8 +64,10 @@ impl Credential {
     /// user deploy)`. Never any part of a secret.
     pub fn summary(&self) -> String {
         let mut what = self.kind.clone();
-        if let Some(user) = self.text("user") {
-            what.push_str(&format!(", user {user}"));
+        for field in SUMMARISED_FIELDS {
+            if let Some(value) = self.text(field) {
+                what.push_str(&format!(", {field} {value}"));
+            }
         }
         if self.ambient {
             what.push_str(", ambient");

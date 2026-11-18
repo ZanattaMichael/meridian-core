@@ -89,6 +89,17 @@ const TAKE_A_CREDENTIAL: &[(&str, bool)] = &[
     ("salt", false),
 ];
 
+/// The targets that reach a cloud as a credential, in name order. Each
+/// hands it to its tool in the tool's environment and compiles nothing of
+/// it.
+const TAKE_A_CLOUD_CREDENTIAL: &[&str] = &[
+    "cloudformation",
+    "opentofu",
+    "packer",
+    "pulumi",
+    "terraform",
+];
+
 /// The targets, each with the examples of its own that hold one document
 /// and decide nothing from data, in name order.
 fn examples() -> Vec<(String, Vec<PathBuf>)> {
@@ -237,6 +248,28 @@ fn with_credential(example: &str) -> (String, bool) {
     }
     assert!(declared, "no spec.target to declare beside");
     (out, named)
+}
+
+/// The example with an AWS credential declared whose secret key is a
+/// secret, named for a cloud endpoint.
+fn with_cloud_credential(example: &str) -> String {
+    let mut out = String::new();
+    let mut declared = false;
+    for line in example.lines() {
+        out.push_str(line);
+        out.push('\n');
+        if !declared && line.starts_with("  target: ") {
+            out.push_str(SECRETS);
+            out.push_str(
+                "  credentials:\n    - name: prod\n      type: aws\n      accessKeyId: AKIA1\n      \
+                 secretAccessKey: ${{ secret.deploy_key }}\n      region: eu-west-1\n  \
+                 endpoint:\n    type: cloud\n    credential: prod\n",
+            );
+            declared = true;
+        }
+    }
+    assert!(declared, "no spec.target to declare beside");
+    out
 }
 
 /// The directories every target's plugin was built into.
@@ -511,6 +544,81 @@ fn credential(target: &str, files: &[PathBuf]) -> Vec<String> {
     failures
 }
 
+/// One target: an AWS credential whose secret key is a secret, named for a
+/// cloud endpoint, in its first example.
+fn cloud_credential(target: &str, files: &[PathBuf]) -> Vec<String> {
+    let mut failures = Vec::new();
+    let example = fs::read_to_string(&files[0]).unwrap();
+    let dir = scratch(
+        env!("CARGO_TARGET_TMPDIR"),
+        &format!("cloud-credential-conformance-{target}"),
+    );
+    let document = with_cloud_credential(&example);
+    let takes = TAKE_A_CLOUD_CREDENTIAL.contains(&target);
+
+    let validated = meridian(&dir, "validate", &document);
+    nothing_leaked(&format!("{target}: validate"), &validated);
+    if !validated.succeeded {
+        failures.push(format!(
+            "{target}: validate refused the cloud credential:\n{}",
+            validated.said
+        ));
+    }
+
+    for command in ["compile", "plan"] {
+        let outcome = meridian(&dir, command, &document);
+        nothing_leaked(&format!("{target}: {command}"), &outcome);
+        let artifact: String = outcome.files.values().cloned().collect();
+        if !takes {
+            let expected = format!(
+                "spec.endpoint names the credential \"prod\" for a cloud, and target \
+                 \"{target}\" does not take one"
+            );
+            if outcome.succeeded || !outcome.said.contains(&expected) {
+                failures.push(format!(
+                    "{target}: {command} must refuse the cloud credential before anything \
+                     runs:\n{}",
+                    outcome.said
+                ));
+            }
+            if !outcome.said.contains(&format!(
+                "targets that do: {}",
+                TAKE_A_CLOUD_CREDENTIAL.join(", ")
+            )) {
+                failures.push(format!(
+                    "{target}: {command}: the refusal must say who takes one:\n{}",
+                    outcome.said
+                ));
+            }
+        } else if command == "compile" {
+            // The providers take the login from the environment, so the
+            // artifact holds nothing of the credential.
+            if !outcome.succeeded {
+                failures.push(format!(
+                    "{target}: compile with a cloud credential:\n{}",
+                    outcome.said
+                ));
+            }
+            for part in ["AKIA1", "deploy_key"] {
+                if artifact.contains(part) {
+                    failures.push(format!(
+                        "{target}: the artifact holds {part:?} of the credential:\n{artifact}"
+                    ));
+                }
+            }
+        } else if outcome.succeeded {
+            // The tool is not installed here; a plan that reached it fails
+            // at the tool, which is as far as a plan with the credential
+            // should get. One that succeeded ran nothing.
+            failures.push(format!(
+                "{target}: plan with a cloud credential succeeded without the tool:\n{}",
+                outcome.said
+            ));
+        }
+    }
+    failures
+}
+
 fn all(check: fn(&str, &[PathBuf]) -> Vec<String>) -> Vec<String> {
     let examples = examples();
     let targets = fs::read_dir(repo_root().join("plugins")).unwrap().count();
@@ -540,5 +648,11 @@ fn a_secret_in_a_param_reaches_a_tool_by_name_on_every_target_and_its_value_reac
 #[test]
 fn a_credential_reaches_a_host_only_where_the_target_can_and_its_key_reaches_no_file() {
     let failures = all(credential);
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn a_cloud_credential_reaches_a_tool_only_where_the_target_can_and_its_key_reaches_no_file() {
+    let failures = all(cloud_credential);
     assert!(failures.is_empty(), "{failures:#?}");
 }

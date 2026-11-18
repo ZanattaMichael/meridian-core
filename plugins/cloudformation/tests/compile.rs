@@ -207,3 +207,37 @@ fn a_secret_in_the_stacks_settings_is_refused_because_they_are_the_command_line(
         err.msg
     );
 }
+
+#[test]
+fn an_aws_credential_leaves_nothing_in_the_template_and_another_cloud_is_refused() {
+    let spec = |kind: &str, fields: &str| {
+        format!(
+            "  secrets:\n    - name: cloud_secret\n      from: env\n      key: CLOUD_SECRET\n  \
+             credentials:\n    - {{name: prod, type: {kind}, {fields}}}\n  \
+             endpoint: {{type: cloud, credential: prod}}\n  \
+             resources:\n{BUCKET}"
+        )
+    };
+    let compiled = compile_named(
+        "net",
+        &spec(
+            "aws",
+            "accessKeyId: AKIA1, secretAccessKey: \"${{ secret.cloud_secret }}\", region: eu-west-1",
+        ),
+    )
+    .unwrap();
+    let text: String = compiled.artifact.files.values().cloned().collect();
+    for part in ["AKIA1", "cloud_secret", "prod"] {
+        assert!(!text.contains(part), "{part} is in the template:\n{text}");
+    }
+    let err = refusal(&spec(
+        "azure",
+        "clientId: c, tenantId: t, clientSecret: \"${{ secret.cloud_secret }}\"",
+    ));
+    assert_eq!(err.rule, "unsupported-credential");
+    assert_eq!(
+        err.msg,
+        "the credential \"prod\": aws cloudformation reaches AWS only, as an aws credential, \
+         not azure"
+    );
+}

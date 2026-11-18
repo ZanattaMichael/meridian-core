@@ -282,6 +282,7 @@ fn the_target_declares_what_it_is_and_can_express() {
             runtime_condition: false,
             secrets: false,
             credentials: false,
+            cloud_credentials: false,
         }
     );
 }

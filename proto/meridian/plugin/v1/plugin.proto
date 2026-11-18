@@ -193,6 +193,15 @@ message Capabilities {
   // host refuses a document that names a credential for a target that does
   // not say so. A plugin built before this field existed reports false.
   bool credentials = 5;
+  // cloud_credentials says the target takes the credential a document names
+  // for its cloud endpoint (spec.endpoint with type cloud: an aws, azure or
+  // gcp credential): its runner hands the credential to the tool in the
+  // tool's own environment, which is the only way the providers take one,
+  // and a secret file where a provider reads one (a Google service account
+  // key). A host refuses a document that names a cloud credential for a
+  // target that does not say so. A plugin built before this field existed
+  // reports false.
+  bool cloud_credentials = 6;
 }
 
 // Artifact is the complete output of a compile: relative path to file content.

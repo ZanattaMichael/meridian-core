@@ -51,3 +51,4 @@ page it affects. The pull request template asks for it.
 | [Terraform import renames colliding names](0020-terraform-import-renames-colliding-names.md) | Targets | proposed |
 | [A secret has one place on each containers target](0022-a-secret-has-one-place-on-each-containers-target.md) | Targets | proposed |
 | [A key reaches a host through an agent Meridian starts](0028-a-key-reaches-a-host-through-an-agent-meridian-starts.md) | Targets | proposed |
+| [A cloud credential reaches a tool in its environment](0029-a-cloud-credential-reaches-a-tool-in-its-environment.md) | Targets | proposed |

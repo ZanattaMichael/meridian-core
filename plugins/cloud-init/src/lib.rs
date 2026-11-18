@@ -193,6 +193,7 @@ impl Emitter for CloudInit {
             runtime_condition: false,
             secrets: false,
             credentials: false,
+            cloud_credentials: false,
         }
     }
 

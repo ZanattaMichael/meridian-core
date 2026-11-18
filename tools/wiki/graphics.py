@@ -438,7 +438,7 @@ def secrets_flow() -> str:
     ny = 470
     p.append(rect(40, ny, 1120, 70, WELL, RED, 14, 1.2))
     p.append(text(70, ny + 28, "Never", 16, 700, RED, "start"))
-    p.append(text(70, ny + 52, "on a command line · in a tool's environment · in a compiled file · in the state directory · in a plan file Meridian keeps · in an event",
+    p.append(text(70, ny + 52, "on a command line · in a tool's environment (but a cloud login, which the providers take no other way; the plan says so) · in a compiled file · in the state directory · in a plan file Meridian keeps · in an event",
                   13, 400, TEXT_SOFT, "start"))
     p.append(caption(W, H, "The protection is structural: the bytes were never in what a log or a plan is made from, so there is nothing to forget to mask."))
     return doc(W, H, "How a secret moves: from a provider into locked memory, as a reference everywhere else, and to the tool by a private file at run time", "".join(p))

@@ -6,8 +6,8 @@ use std::path::Path;
 
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
-    decode_value, Applied, Artifact, Change, ChangeAction, Log, Operations, Output, Plan,
-    RunContext, RunError, Runner, Value,
+    cloud_for, decode_value, Applied, Artifact, Change, ChangeAction, CloudHandover, Log,
+    Operations, Output, Plan, RunContext, RunError, Runner, Value,
 };
 
 use crate::{PROGRAM_PATH, STACK_PATH};
@@ -122,7 +122,7 @@ impl PulumiRunner {
     }
 
     /// One `pulumi` call in the project directory.
-    fn pulumi(&self, context: &RunContext, stack: &Stack) -> Tool {
+    fn pulumi(&self, context: &RunContext, cloud: Option<&CloudHandover>, stack: &Stack) -> Tool {
         let mut tool = Tool::new(&self.program)
             .dir(&context.work_dir)
             .env("PULUMI_SKIP_UPDATE_CHECK", "true");
@@ -137,12 +137,18 @@ impl PulumiRunner {
             // amounts to anyway; an operator who wants more sets their own.
             tool = tool.env(PASSPHRASE_VARIABLES[0], "");
         }
-        tool
+        CloudHandover::tell_if_any(cloud, tool)
     }
 
     /// A call that acts on the stack.
-    fn on_stack(&self, context: &RunContext, stack: &Stack, command: &[&str]) -> Tool {
-        self.pulumi(context, stack)
+    fn on_stack(
+        &self,
+        context: &RunContext,
+        cloud: Option<&CloudHandover>,
+        stack: &Stack,
+        command: &[&str],
+    ) -> Tool {
+        self.pulumi(context, cloud, stack)
             .args(command.iter().copied())
             .args(["--stack", &stack.name])
             .args(["--non-interactive", "--color", "never"])
@@ -171,6 +177,7 @@ impl PulumiRunner {
     fn set_secrets(
         &self,
         context: &RunContext,
+        cloud: Option<&CloudHandover>,
         stack: &Stack,
         log: &dyn Log,
     ) -> Result<(), RunError> {
@@ -179,7 +186,7 @@ impl PulumiRunner {
                 .duplicate()
                 .map_err(|e| RunError::new(format!("copying the secret {name:?}: {e}")))?;
             let key = crate::secret_key(name);
-            self.on_stack(context, stack, &["config", "set", "--secret", &key])
+            self.on_stack(context, cloud, stack, &["config", "set", "--secret", &key])
                 .stdin_secret(value)
                 .run_ok("pulumi could not take a secret as configuration", log)?;
         }
@@ -191,11 +198,17 @@ impl PulumiRunner {
     /// behind for the next: with no passphrase chosen the encryption
     /// protects nothing (see `pulumi`). The state keeps what the resources
     /// were given, as Pulumi's state always does, encrypted the same way.
-    fn forget_secrets(&self, context: &RunContext, stack: &Stack, log: &dyn Log) {
+    fn forget_secrets(
+        &self,
+        context: &RunContext,
+        cloud: Option<&CloudHandover>,
+        stack: &Stack,
+        log: &dyn Log,
+    ) {
         for name in context.secrets.names() {
             let key = crate::secret_key(name);
             let _ = self
-                .on_stack(context, stack, &["config", "rm", &key])
+                .on_stack(context, cloud, stack, &["config", "rm", &key])
                 .run(log);
         }
     }
@@ -205,6 +218,7 @@ impl PulumiRunner {
     fn prepare(
         &self,
         context: &RunContext,
+        cloud: Option<&CloudHandover>,
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<(Stack, Vec<Change>), RunError> {
@@ -221,21 +235,21 @@ impl PulumiRunner {
         write_artifact(&context.work_dir, artifact)?;
 
         let mut select = self
-            .pulumi(context, &stack)
+            .pulumi(context, cloud, &stack)
             .args(["stack", "select", &stack.name, "--create"])
             .args(["--non-interactive", "--color", "never"]);
         if !stack.encryption.is_empty() {
             select = select.args(["--secrets-provider", &stack.encryption]);
         }
         select.run_ok("pulumi could not select or create the stack", log)?;
-        self.set_secrets(context, &stack, log)?;
+        self.set_secrets(context, cloud, &stack, log)?;
 
         log.out(&format!(
             "stack {}: asking Pulumi what would change",
             stack.name
         ));
         let preview = Self::with_inputs(
-            self.on_stack(context, &stack, &["preview"])
+            self.on_stack(context, cloud, &stack, &["preview"])
                 .args(self.extra_args.iter().cloned())
                 .arg("--json"),
             context,
@@ -245,7 +259,7 @@ impl PulumiRunner {
         let preview = match preview {
             Ok(preview) => preview,
             Err(e) => {
-                self.forget_secrets(context, &stack, log);
+                self.forget_secrets(context, cloud, &stack, log);
                 return Err(e);
             }
         };
@@ -273,13 +287,13 @@ impl PulumiRunner {
                 err.output.push_str(said.trim_end());
                 err.output.push('\n');
             }
-            self.forget_secrets(context, &stack, log);
+            self.forget_secrets(context, cloud, &stack, log);
             return Err(err);
         }
         match read {
             Ok(preview) => Ok((stack, preview.changes)),
             Err(e) => {
-                self.forget_secrets(context, &stack, log);
+                self.forget_secrets(context, cloud, &stack, log);
                 Err(e)
             }
         }
@@ -288,18 +302,19 @@ impl PulumiRunner {
     fn read_outputs(
         &self,
         context: &RunContext,
+        cloud: Option<&CloudHandover>,
         stack: &Stack,
         log: &dyn Log,
     ) -> Result<Vec<Output>, RunError> {
         // Asked twice: once as Pulumi would show them, with secrets masked,
         // and once in full. Whatever differs between the two is a secret.
         let masked = self
-            .on_stack(context, stack, &["stack", "output"])
+            .on_stack(context, cloud, stack, &["stack", "output"])
             .arg("--json")
             .capture_stdout()
             .run_ok("pulumi could not report the stack's outputs", log)?;
         let shown = self
-            .on_stack(context, stack, &["stack", "output"])
+            .on_stack(context, cloud, stack, &["stack", "output"])
             .args(["--json", "--show-secrets"])
             .capture_stdout()
             .run_ok("pulumi could not report the stack's outputs", log)?;
@@ -326,8 +341,12 @@ impl Runner for PulumiRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
-        let (stack, changes) = self.prepare(context, artifact, log)?;
-        self.forget_secrets(context, &stack, log);
+        // A cloud credential reaches the tool in the environment of every
+        // call of the stage; the files a provider reads live to the end of it.
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let cloud = cloud.as_ref();
+        let (stack, changes) = self.prepare(context, cloud, artifact, log)?;
+        self.forget_secrets(context, cloud, &stack, log);
         Ok(Plan {
             changes,
             unknown: false,
@@ -340,32 +359,40 @@ impl Runner for PulumiRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
-        let (stack, changes) = self.prepare(context, artifact, log)?;
+        // A cloud credential reaches the tool in the environment of every
+        // call of the stage; the files a provider reads live to the end of it.
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let cloud = cloud.as_ref();
+        let (stack, changes) = self.prepare(context, cloud, artifact, log)?;
         // The preview above is the report; the update does not print a
         // second one.
         let updated = Self::with_inputs(
-            self.on_stack(context, &stack, &["up"])
+            self.on_stack(context, cloud, &stack, &["up"])
                 .args(self.extra_args.iter().cloned())
                 .args(["--yes", "--skip-preview"]),
             context,
         )
         .run_ok("pulumi up failed", log);
-        self.forget_secrets(context, &stack, log);
+        self.forget_secrets(context, cloud, &stack, log);
         updated?;
         Ok(Applied {
             changes,
-            outputs: self.read_outputs(context, &stack, log)?,
+            outputs: self.read_outputs(context, cloud, &stack, log)?,
         })
     }
 
     fn outputs(&self, context: &RunContext) -> Result<Vec<Output>, RunError> {
+        // A cloud credential reaches the tool in the environment of every
+        // call of the stage; the files a provider reads live to the end of it.
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let cloud = cloud.as_ref();
         let Ok(settings) = std::fs::read_to_string(context.work_dir.join(STACK_PATH)) else {
             return Err(RunError::new(
                 "nothing has been applied for this document yet, so it has no outputs",
             ));
         };
         let stack = Stack::read(&settings)?;
-        self.read_outputs(context, &stack, &meridian_sdk::NoLog)
+        self.read_outputs(context, cloud, &stack, &meridian_sdk::NoLog)
     }
 }
 
