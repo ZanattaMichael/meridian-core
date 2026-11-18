@@ -40,9 +40,8 @@ jobs:
       - name: Install Checkov
         run: pip install --quiet checkov==3.2.477
 
-      - uses: aquasecurity/setup-trivy@v0.2.3
-        with:
-          version: v0.67.0
+      - name: Install Trivy
+        run: curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
 
       - name: Show the versions under test
         run: |
