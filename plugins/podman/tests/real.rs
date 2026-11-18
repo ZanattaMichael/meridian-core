@@ -546,8 +546,9 @@ fn a_secret_is_created_in_podman_and_read_by_the_container_and_no_file_holds_it(
             .lines()
             .any(|l| l == "meridian_secret_token")
     );
-    // The container reads the value, exactly as it was.
-    assert_eq!(
+    // The container reads the value, exactly as it was. A fixed message, so
+    // that a failure never prints the value.
+    assert!(
         as_root(&[
             "podman",
             "exec",
@@ -555,8 +556,8 @@ fn a_secret_is_created_in_podman_and_read_by_the_container_and_no_file_holds_it(
             "sh",
             "-c",
             "printf '%s' \"$PASSWORD\""
-        ]),
-        SECRET
+        ]) == SECRET,
+        "the container's environment does not hold the value Podman was handed"
     );
     assert_eq!(
         as_root(&[

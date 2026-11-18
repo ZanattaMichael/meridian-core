@@ -431,7 +431,11 @@ fn a_secret_reaches_the_cluster_as_a_secret_and_is_in_no_file() {
         .run_ok("base64", &NoLog)
         .unwrap()
         .stdout;
-    assert_eq!(decoded, SECRET);
+    // A fixed message, so that a failure never prints the value.
+    assert!(
+        decoded == SECRET,
+        "the Secret in the cluster does not hold the value kubectl was handed"
+    );
 
     // Nothing printed holds it, and no file does: the manifests in the work
     // directory hold the token, as the artifact does.

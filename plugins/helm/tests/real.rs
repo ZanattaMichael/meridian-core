@@ -251,14 +251,20 @@ fn a_secret_in_the_values_reaches_the_rendered_secret_and_no_file() {
         .iter()
         .find(|o| o.contains("kind: Secret"))
         .unwrap_or_else(|| panic!("no Secret in\n{rendered}"));
-    assert!(login.contains("user: app"), "{login}");
-    let quoted = format!(
-        "password: {}",
-        meridian_yaml::write(&meridian_yaml::Yaml::str(SECRET)).trim()
-    );
+    // Helm writes a string either bare or as a double-quoted scalar with `"`
+    // and `\` escaped. The failure message is fixed, so that a failure never
+    // prints the rendered object, which holds the value.
+    let has = |key: &str, value: &str| {
+        let quoted = format!(
+            "{key}: \"{}\"",
+            value.replace('\\', "\\\\").replace('"', "\\\"")
+        );
+        login.contains(&quoted) || login.contains(&format!("{key}: {value}"))
+    };
+    assert!(has("user", "app"), "the rendered Secret lacks the user");
     assert!(
-        login.contains(&quoted) || login.contains(&format!("password: {SECRET}")),
-        "{login}"
+        has("password", SECRET),
+        "the rendered Secret does not hold the value Helm was handed"
     );
     // Nothing on disk holds it: the chart's values file holds the token.
     let mut pending = vec![dir.join("work")];

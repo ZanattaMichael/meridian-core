@@ -460,13 +460,14 @@ fn a_secret_reaches_a_service_by_interpolation_and_as_a_compose_secret_and_no_fi
 
     // The container was given the value both ways, exactly.
     let container = format!("{project}-probe-1");
-    assert_eq!(
-        in_container(&container, &["sh", "-c", "printf '%s' \"$TOKEN\""]),
-        SECRET
+    // Fixed messages, so that a failure never prints the value.
+    assert!(
+        in_container(&container, &["sh", "-c", "printf '%s' \"$TOKEN\""]) == SECRET,
+        "the service's environment does not hold the value Compose was handed"
     );
-    assert_eq!(
-        in_container(&container, &["cat", "/run/secrets/token_file"]),
-        SECRET
+    assert!(
+        in_container(&container, &["cat", "/run/secrets/token_file"]) == SECRET,
+        "the service's secret file does not hold the value Compose was handed"
     );
     // Nothing printed holds it, and no file in the work directory does.
     assert!(
