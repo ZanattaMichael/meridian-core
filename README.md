@@ -98,6 +98,10 @@ on the pull request at its line and the run's report becomes the job's summary; 
 the report is an annotation. [Running Meridian in a pipeline](docs/operations/running-in-a-pipeline.md)
 has a tested GitHub Actions workflow and a snippet for each of the other engines, what the engine
 owns and what Meridian owns, and how the job's identity is checked before anything runs.
+What the reviewers approved is what gets applied: `meridian plan --out` saves the plan, two
+actions post it on the pull request and apply it after the approval, and `meridian apply --plan`
+refuses if anything has changed since
+([a saved plan](docs/operations/pull-requests.md)).
 
 <p align="center"><img src="docs/graphics/meridian-in-a-pipeline.svg" alt="Meridian inside a pipeline engine: the engine's band above Meridian's band, the job running meridian apply, and the events coming back as annotations and a summary" width="100%"></p>
 

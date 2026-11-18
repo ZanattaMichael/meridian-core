@@ -1,0 +1,143 @@
+name: Meridian plan
+description: >-
+  Runs `meridian plan --out` on a pull request, saves the plan as an artifact
+  for the apply action to carry out, and posts the plan's report as one
+  comment on the pull request that is updated in place.
+
+# Used as `uses: ZanattaMichael/meridian-core/.github/actions/plan@v0.1.0`
+# with `meridian` already on the PATH (the install step of
+# docs/operations/running-in-a-pipeline.md), or with `install` set to a
+# release version. What it does is documented in
+# docs/operations/pull-requests.md, and run for real against the fake target
+# by .github/workflows/saved-plan.yml.
+
+inputs:
+  files:
+    description: The documents that make up the workflow, separated by spaces
+    required: true
+  working-directory:
+    description: Where the documents are
+    required: false
+    default: '.'
+  plan-file:
+    description: Where the plan is written, relative to the working directory
+    required: false
+    default: meridian.mplan
+  args:
+    description: More arguments for `meridian plan`, such as `-l env=prod --data prod.yaml --policy policies/`
+    required: false
+    default: ''
+  artifact:
+    description: The name of the artifact the plan, its report and the state directory are kept under; the apply action takes it by this name
+    required: false
+    default: meridian-plan
+  comment:
+    description: Whether to post the plan's report on the pull request as one comment, updated in place. Needs `pull-requests: write` and a pull request
+    required: false
+    default: 'true'
+  install:
+    description: A release version to install `meridian` from, checking the release's signature; empty leaves the PATH alone
+    required: false
+    default: ''
+  token:
+    description: The token the comment is posted with
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  has-changes:
+    description: "'true' when an apply would do something, 'false' when every stage is in sync"
+    value: ${{ steps.plan.outputs.has-changes }}
+  plan-file:
+    description: The plan file, relative to the working directory
+    value: ${{ inputs.plan-file }}
+  run:
+    description: The id of the run that took the plan
+    value: ${{ steps.plan.outputs.run }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install a pinned Meridian, checking the release's signature
+      if: inputs.install != ''
+      shell: bash
+      run: |
+        curl -fsSL "https://github.com/ZanattaMichael/meridian-core/releases/download/v${{ inputs.install }}/install.sh" | sh
+        echo "$HOME/.meridian/bin" >> "$GITHUB_PATH"
+
+    - name: Plan, and save the plan
+      id: plan
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        mkdir -p .meridian-pr
+        status=0
+        meridian --output json plan ${{ inputs.files }} ${{ inputs.args }} \
+          --out "${{ inputs.plan-file }}" \
+          --report markdown=.meridian-pr/plan.md \
+          > .meridian-pr/plan.json || status=$?
+        # The one object says whether there is anything to apply, and
+        # which run took the plan; both become outputs for the jobs after.
+        python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+        import json
+        try:
+            result = json.load(open(".meridian-pr/plan.json"))
+        except Exception:
+            result = {}
+        plan = result.get("plan") or {}
+        print("has-changes=" + ("true" if plan.get("hasChanges") else "false"))
+        print("run=" + (result.get("run") or ""))
+        EOF
+        exit $status
+
+    - name: Post the plan on the pull request
+      if: always() && inputs.comment == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        GH_REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+        HEAD: ${{ github.event.pull_request.head.sha }}
+        OUTCOME: ${{ steps.plan.outcome }}
+        FILES: ${{ inputs.files }}
+      run: |
+        # One comment per working directory, found again by its marker and
+        # edited in place, so a pull request with ten pushes has one plan on
+        # it and not ten.
+        marker="<!-- meridian-plan: ${{ inputs.working-directory }} -->"
+        {
+          echo "$marker"
+          if [ "$OUTCOME" = success ]; then
+            echo "### Meridian plan for \`$FILES\` at $HEAD"
+          else
+            echo "### Meridian plan for \`$FILES\` at $HEAD: **failed**"
+          fi
+          echo
+          if [ -f .meridian-pr/plan.md ]; then
+            cat .meridian-pr/plan.md
+          else
+            echo "The plan did not run far enough to write a report; see the job's log."
+          fi
+          echo
+          echo "<sub>Saved as the artifact \`${{ inputs.artifact }}\`; \`meridian apply --plan\` carries out exactly this plan, and refuses if anything has changed since.</sub>"
+        } > .meridian-pr/comment.md
+        existing=$(gh api "repos/$GH_REPO/issues/$PR/comments" --paginate \
+          --jq "map(select(.body | startswith(\"$marker\"))) | .[0].id // empty")
+        if [ -n "$existing" ]; then
+          gh api -X PATCH "repos/$GH_REPO/issues/comments/$existing" -F body=@.meridian-pr/comment.md > /dev/null
+        else
+          gh api -X POST "repos/$GH_REPO/issues/$PR/comments" -F body=@.meridian-pr/comment.md > /dev/null
+        fi
+
+    - name: Keep the plan, its report and the record
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact }}
+        path: |
+          ${{ inputs.working-directory }}/${{ inputs.plan-file }}
+          ${{ inputs.working-directory }}/.meridian-pr/
+          ${{ inputs.working-directory }}/.meridian/
+        include-hidden-files: true
+        if-no-files-found: ignore

@@ -419,6 +419,8 @@ refuses what it left out.
 | `inputs` | values handed over from earlier stages of a workflow |
 | `secrets` | the value of each secret the document's params hold, for a target that declared `secrets`; see [Secrets](#secrets) |
 | `credential` | the credential the host is reached as, with the values of its secret fields, for a target that declared `credentials`; `None` when the document names none. See [Credentials](#credentials) |
+| `save_plan` | on a plan: the operator asked for a saved plan (`plan --out`), and the host will keep what `Plan::saved` returns; see [Saved plans](#saved-plans) |
+| `saved_plan` | on an apply: the plan this runner saved when the plan was taken, handed back by `apply --plan`; `None` when there is none |
 
 and you implement up to three operations. Declare only the ones you implement
 in `operations()`; the host never calls the others.
@@ -468,6 +470,36 @@ Three rules for a runner:
 
 Let the operator point at the program with an environment variable named
 `MERIDIAN_<TOOL>`, as the template does. The tests rely on it too.
+
+### Saved plans
+
+`meridian plan --out` saves one plan for the whole workflow, and
+`meridian apply --plan` carries out exactly that plan
+([a saved plan](../operations/pull-requests.md)). The host checks every
+stage by its artifact hash; your runner takes part only if its tool can save
+a plan of its own and apply it later, as Terraform's `-out` file does:
+
+```rust
+fn saves_plans(&self) -> bool {
+    true
+}
+```
+
+Then, in `plan`, when `context.save_plan` is set, put the tool's plan in
+`Plan::saved` as `SavedPlan::new(bytes)` with the changes it lists; in
+`apply`, when `context.saved_plan` is `Some`, hand those bytes to the tool
+and apply that and nothing else, and let the tool refuse a stale one. Two
+rules:
+
+- **Save nothing that holds a value.** A Terraform plan file holds every
+  variable, so the Terraform runner saves none when `context.secrets` is not
+  empty, and the apply plans again for that stage. The file a saved plan is
+  written to is kept as a pipeline artifact, by design.
+- **The saved plan is the tool's, the check is the host's.** Do not read
+  the saved bytes for the changes to report; report what the tool did.
+
+The default is `false`, and a runner that leaves it so is checked by its
+artifact hash and plans again at apply.
 
 ### Settings
 

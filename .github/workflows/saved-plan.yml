@@ -1,0 +1,160 @@
+name: saved plan
+
+# The two actions of docs/operations/pull-requests.md, run for real: the plan
+# action plans fixtures/pipeline against the fake target, saves the plan and,
+# on a pull request, posts it as one comment on this very pull request; the
+# apply action, in a second job, applies exactly that plan. A third job
+# checks that a plan whose document changed since is refused before anything
+# is applied, which is the point of the file.
+#
+# No release has been published yet, so the binaries are built here instead
+# of installed by the actions' `install` input; everything else is the
+# actions as written.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'crates/**'
+      - 'fixtures/pipeline/**'
+      - 'docs/operations/pull-requests.md'
+      - '.github/actions/plan/**'
+      - '.github/actions/apply/**'
+      - '.github/workflows/saved-plan.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+
+permissions:
+  contents: read
+  pull-requests: write      # the plan action's comment
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  MERIDIAN_PLUGIN_SIGNATURES: 'off'   # a build from source is unsigned; a release would be `require`
+  MERIDIAN_ANNOTATIONS: 'off'         # the pipeline-shell workflow covers annotations
+  SITE_DB_PASSWORD: zzq-not-a-real-password-for-the-smoke-test
+
+jobs:
+  plan:
+    name: plan --out, in a job, and comment on the pull request
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      has-changes: ${{ steps.plan.outputs.has-changes }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-rust
+
+      - name: Build the command and the fake target
+        run: cargo build --locked -p meridian-cli -p meridian-target-fake
+
+      - name: Put them on the PATH, as the install script would
+        run: echo "$GITHUB_WORKSPACE/target/debug" >> "$GITHUB_PATH"
+
+      - name: Plan, save the plan and post it
+        id: plan
+        uses: ./.github/actions/plan
+        with:
+          files: site.yaml
+          working-directory: fixtures/pipeline
+
+      - name: The plan was saved and has changes
+        working-directory: fixtures/pipeline
+        run: |
+          test "${{ steps.plan.outputs.has-changes }}" = true
+          test -n "${{ steps.plan.outputs.run }}"
+          python3 - <<'EOF'
+          import json
+          plan = json.load(open("meridian.mplan"))
+          assert plan["meridianPlan"] == 1, plan
+          stages = {s["name"]: s for s in plan["stages"]}
+          assert stages["network"]["status"] == "planned", stages
+          assert stages["network"]["saved"], "the fake target saves a plan"
+          # The second stage waits on the first's output, so it was deferred
+          # and is applied unchecked, as the page says.
+          assert stages["web"]["status"] == "deferred", stages
+          EOF
+          ! grep -r "$SITE_DB_PASSWORD" meridian.mplan .meridian-pr
+
+      - name: Keep the binaries for the jobs after
+        uses: actions/upload-artifact@v4
+        with:
+          name: meridian-binaries
+          path: |
+            target/debug/meridian
+            target/debug/meridian-target-fake
+
+  apply:
+    name: apply --plan, in a second job
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Take the binaries from the plan job
+        uses: actions/download-artifact@v4
+        with:
+          name: meridian-binaries
+          path: bin
+
+      - name: Put them on the PATH, as the install script would
+        run: |
+          chmod +x "$GITHUB_WORKSPACE"/bin/meridian*
+          echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+
+      - name: Apply exactly the plan
+        id: apply
+        uses: ./.github/actions/apply
+        with:
+          working-directory: fixtures/pipeline
+
+      - name: Each tool was handed the plan it saved, and the record says which plan was applied
+        working-directory: fixtures/pipeline
+        run: |
+          test -f .meridian/infrastructure/network/fake/applied-from-plan.json
+          grep -q '"plan":"' <(meridian events --type run.started)
+          meridian status
+          ! grep -r "$SITE_DB_PASSWORD" .meridian-pr
+
+  stale:
+    name: a plan whose document changed since is refused
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Take the binaries from the plan job
+        uses: actions/download-artifact@v4
+        with:
+          name: meridian-binaries
+          path: bin
+
+      - name: Put them on the PATH, as the install script would
+        run: |
+          chmod +x "$GITHUB_WORKSPACE"/bin/meridian*
+          echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+
+      - name: Change a document after the plan was taken
+        run: sed -i 's/10.0.0.5/10.0.0.6/' fixtures/pipeline/site.yaml
+
+      - name: Apply the plan
+        id: apply
+        continue-on-error: true
+        uses: ./.github/actions/apply
+        with:
+          working-directory: fixtures/pipeline
+          artifact: meridian-plan
+
+      - name: The apply was refused with plan-differs, and nothing was applied
+        working-directory: fixtures/pipeline
+        run: |
+          test "${{ steps.apply.outcome }}" = failure
+          grep -q '"reason":"plan-differs"' .meridian-pr/apply.json
+          test ! -e .meridian/infrastructure/network/fake/current

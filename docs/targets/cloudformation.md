@@ -229,6 +229,7 @@ previewed. A change set's name is `meridian-<time>`.
 |---|---|
 | Plan | `describe-stacks` to learn whether the stack exists, `create-change-set` (`CREATE` for a new stack, `UPDATE` otherwise), `wait change-set-create-complete`, `describe-change-set`, then `delete-change-set`. For a stack that does not exist yet, the empty stack in review that creating the change set left behind is deleted too |
 | Apply | the same preview, then `execute-change-set`, `wait stack-create-complete` or `stack-update-complete`, and `describe-stacks` for the outputs. A preview with nothing to change is discarded and nothing is executed |
+| Saved plan | `meridian plan --out` keeps the change set instead of discarding it and records its name; `meridian apply --plan` executes that change set, so what is applied is what the reviewer read. The change set's values stay with CloudFormation; the plan file holds only its name ([a saved plan](../operations/pull-requests.md)) |
 | Outputs later | `describe-stacks` |
 
 Changes are read from the change set's description, resource by resource,

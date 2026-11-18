@@ -607,6 +607,7 @@ pub(crate) fn diff(desired: &Desired, actual: &Actual) -> Plan {
         // Whether a build would produce a different image cannot be known
         // without building it.
         unknown: desired.services.iter().any(|s| s.builds),
+        saved: None,
     }
 }
 

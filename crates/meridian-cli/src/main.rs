@@ -45,10 +45,10 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use meridian_ir::Bundle;
 use meridian_orchestrator::{
-    describe_duration, lock, record, run_selected, selected, Backend, Decisions, Drift, Event,
-    ExecBackend, LocalBackend, LockInfo, Mode, Observer, OnFailure, Options, Outcome, Policy,
-    Reason, Refusal, Resume, RollbackOutcome, RollbackReport, RunRecord, RunReport, Selector,
-    StageId, StageReport, Stop, MASK,
+    describe_duration, lock, record, run_selected, selected, Asked, Backend, Decisions, Drift,
+    Event, ExecBackend, LocalBackend, LockInfo, Mode, Observer, OnFailure, Options, Outcome,
+    PlanFile, Policy, Reason, Refusal, Resume, RollbackOutcome, RollbackReport, RunRecord,
+    RunReport, RunState, Selector, StageId, StageReport, Stop, MASK,
 };
 use meridian_plugin_host::{
     signature::signature_path, Policy as SignaturePolicy, PublicKey, Registry, SecretKey,
@@ -147,11 +147,13 @@ fn main() -> ExitCode {
         Command::Plan {
             workflow,
             detailed_exitcode,
+            out,
         } => orchestrate(
             &workflow,
             Mode::Plan,
             &How {
                 detailed_exitcode,
+                plan_out: out.as_deref(),
                 ..How::default()
             },
         ),
@@ -159,12 +161,14 @@ fn main() -> ExitCode {
             workflow,
             resume,
             on_failure,
+            plan,
         } => orchestrate(
             &workflow,
             Mode::Apply,
             &How {
                 resume: resume.as_deref(),
                 rollback_on_failure: on_failure == FailureAction::Rollback,
+                from_plan: plan.as_deref(),
                 ..How::default()
             },
         ),
@@ -260,6 +264,13 @@ fn main() -> ExitCode {
         Err(Failure::Drifted) | Err(Failure::Changes) => 2,
         // The status a shell gives a command ended by Ctrl-C.
         Err(Failure::Interrupted) => 130,
+        Err(Failure::Usage(msg)) => {
+            eprintln!("error: {msg}");
+            if json_output() {
+                emit_error(&msg);
+            }
+            2
+        }
         Err(Failure::Message(msg)) => {
             eprintln!("error: {msg}");
             // The machine reading stdout is told as well: an empty stdout
@@ -293,4 +304,7 @@ pub(crate) enum Failure {
     /// `plan --detailed-exitcode` found something an apply would do. Already
     /// printed.
     Changes,
+    /// The command line does not make sense, as `clap` would have said:
+    /// exit 2, so that a script tells a wrong command from a failed one.
+    Usage(String),
 }

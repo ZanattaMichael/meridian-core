@@ -375,6 +375,7 @@ impl Runner for KubernetesRunner {
         let mut plan = Plan {
             changes: read_report(&finished.stdout, &cluster),
             unknown: false,
+            saved: None,
         };
         if !finished.success() {
             if !only_missing_new_namespaces(&finished.stdout, &finished.stderr) {

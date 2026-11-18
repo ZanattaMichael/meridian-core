@@ -1336,6 +1336,7 @@ dependencies = [
 name = "meridian-orchestrator"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "meridian-ast",
  "meridian-ir",
  "meridian-plugin-host",

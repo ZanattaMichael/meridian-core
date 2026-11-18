@@ -59,6 +59,7 @@ byte. The reasons, the layout and the order of work are in
 | Operating | |
 |---|---|
 | [Running Meridian in a pipeline](operations/running-in-a-pipeline.md) | one job per engine: a tested GitHub Actions workflow and reviewed snippets for Azure Pipelines, GitLab CI, Buildkite, Jenkins, Argo Workflows, Tekton and Octopus; what the engine owns and what Meridian owns; annotations and job summaries; checking the job's identity first; sharing the record between jobs |
+| [A saved plan, and applying it from a pull request](operations/pull-requests.md) | `plan --out` writes one plan file, `apply --plan` applies exactly that or refuses; what the file holds and never holds; two GitHub Actions that plan on every push, comment on the pull request and apply after the approval; a GitLab recipe |
 
 | Concepts | |
 |---|---|
@@ -80,6 +81,7 @@ byte. The reasons, the layout and the order of work are in
 | [A run](concepts/run-safety.md) | the lock, the policy check, the record, the run-state, and what happens when a stage fails |
 | [Modules](reference/modules.md) | the manifest, the sources, the lockfile, and what every run verifies |
 | [Inside a pipeline engine](operations/running-in-a-pipeline.md) | the engine's band above Meridian's: the job runs `meridian apply`, and the events come back as annotations and a summary |
+| [A saved plan](operations/pull-requests.md) | `plan --out` writes the file, the reviewer reads it on the pull request, and `apply --plan` compiles again, refuses what has moved, and hands each tool the plan it saved |
 
 Each picture is drawn by [`tools/wiki/graphics.py`](https://github.com/ZanattaMichael/meridian-core/blob/main/tools/wiki/graphics.py)
 and checked against the file in every build, so none can fall behind the script that describes it.

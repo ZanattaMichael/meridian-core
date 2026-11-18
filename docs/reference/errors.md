@@ -62,6 +62,7 @@ and in the `failure` element of a [JUnit report](reporting.md).
 | `policy-denied` | the run's [policy](policy.md) does not allow the change, or could not be asked |
 | `interrupted` | the operator stopped the run with Ctrl-C (or a `SIGTERM`) while the step was going, or before its tool was started |
 | `timed-out` | the step's tool ran past `--stage-timeout` and was stopped |
+| `plan-differs` | an `apply --plan` compiled the stage to an artifact other than the one the saved plan recorded, or the plan previewed a stage the document now leaves out; the stages after it are not run |
 
 A step's record can also hold words that are not a stage failure: a step that
 was skipped because an earlier one failed says `earlier-step-failed`, and a

@@ -41,6 +41,7 @@ pub mod history;
 mod journal;
 pub mod lock;
 mod options;
+pub mod plan;
 pub mod policy;
 mod reason;
 pub mod record;
@@ -75,6 +76,7 @@ pub use backend::{Backend, ExecBackend, LocalBackend, MemoryBackend};
 pub use event::Event;
 pub use lock::{LockError, LockInfo};
 pub use options::{mask, Observer, OnFailure, Options, Quiet, Resume, DEFAULT_KEEP_RUNS, MASK};
+pub use plan::{Asked, PlanFile, PlannedStage, PlannedStatus, PLAN_FILE_VERSION};
 pub use policy::{Decisions, Policy};
 pub use reason::{Reason, UnknownReason};
 pub use record::{RunRecord, RunStatus, StepRecord, StepStatus};
@@ -176,6 +178,32 @@ pub fn run_selected(
         },
     };
 
+    if let Some(plan) = &options.from_plan {
+        if mode != Mode::Apply {
+            report.refused = Some(Refusal::Plan(
+                "only an apply carries out a saved plan".to_owned(),
+            ));
+            return report;
+        }
+        if resume.is_some() {
+            report.refused = Some(Refusal::Plan(
+                "a saved plan is applied whole, so it cannot be combined with --resume; apply                  the plan again, or take a new one"
+                    .to_owned(),
+            ));
+            return report;
+        }
+        // The plan must fit this run before anything runs: the same stages,
+        // none of them applied by anyone since the plan was taken.
+        let ids: Vec<StageId> = stages(bundle, selector, &options.data)
+            .iter()
+            .map(Stage::id)
+            .collect();
+        if let Err(refusal) = plan::check(plan, &ids, &state) {
+            report.refused = Some(refusal);
+            return report;
+        }
+    }
+
     let rolling_back = if mode == Mode::Rollback {
         match rollback::find(backend.as_ref(), &options.rollback_of) {
             Ok(record) => Some(record),
@@ -223,6 +251,15 @@ pub fn run_selected(
             ("mode", Value::from(mode.as_str())),
             ("command", Value::from(journal.record.command.as_str())),
             ("resumes", Value::from(journal.record.resumes.as_str())),
+            (
+                "plan",
+                Value::from(
+                    options
+                        .from_plan
+                        .as_ref()
+                        .map_or("", |plan| plan.run.as_str()),
+                ),
+            ),
             (
                 "rollsBack",
                 Value::from(rolling_back.as_ref().map_or("", |r| r.id.as_str())),

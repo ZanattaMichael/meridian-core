@@ -436,7 +436,9 @@ params is compiled as `${var.meridian_secret_<name>}`, with the variable declare
 user can read, held in memory where the system allows, and passed to `tofu plan` as
 `-var-file=<path>`; the file is removed once the plan is saved, and the saved plan, which
 holds every variable's value, is overwritten and removed as soon as it has been applied
-or shown. The value is never on the command line and never in OpenTofu's environment. A
+or shown. For the same reason a [saved plan](../operations/pull-requests.md)
+(`meridian plan --out`) keeps no OpenTofu plan file for such a stage, and the apply plans
+again for it. The value is never on the command line and never in OpenTofu's environment. A
 document that hands OpenTofu a secret should [encrypt its state](#state-and-plan-encryption),
 since a resource's arguments are written there whichever variable they came from.
 

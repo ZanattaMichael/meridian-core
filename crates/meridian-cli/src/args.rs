@@ -56,6 +56,12 @@ pub(crate) enum Command {
         /// anything to apply?" without reading the plan
         #[arg(long)]
         detailed_exitcode: bool,
+        /// Save the plan to this file, for `apply --plan FILE` to carry out
+        /// exactly: each stage's artifact hash, its changes, and the tool's
+        /// own saved plan where the tool has one. Written only when every
+        /// stage planned
+        #[arg(short, long, value_name = "FILE")]
+        out: Option<PathBuf>,
     },
     /// Make the documents' desired state real
     Apply {
@@ -79,6 +85,13 @@ pub(crate) enum Command {
         /// what was applied before
         #[arg(long, value_name = "ACTION", default_value = "stop")]
         on_failure: FailureAction,
+        /// Carry out the plan `plan --out` saved here, and nothing else: the
+        /// apply is refused when a document no longer compiles to what was
+        /// planned, or a stage was applied since. The documents, data,
+        /// values and selector not given on the command line are taken
+        /// from the plan; those given must match it
+        #[arg(long, value_name = "FILE", conflicts_with = "resume")]
+        plan: Option<PathBuf>,
     },
     /// Check whether what was applied is still what is there, changing
     /// nothing; exits 2 when something has drifted
@@ -566,8 +579,8 @@ pub(crate) enum EventFormat {
 
 #[derive(Args)]
 pub(crate) struct Workflow {
-    /// The documents that make up the workflow
-    #[arg(required = true)]
+    /// The documents that make up the workflow. May be left out only with
+    /// `apply --plan`, which takes them from the plan
     pub(crate) files: Vec<PathBuf>,
     #[command(flatten)]
     pub(crate) state: State,
