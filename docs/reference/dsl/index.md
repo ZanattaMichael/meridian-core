@@ -2,15 +2,11 @@
 
 <img src="../../branding/logos/meridian-core.svg" width="72" alt="Meridian logo">
 
-This is the reference for everything a Meridian document can say: every field,
-what it must hold, and what happens when it does not. It describes what the
-`meridian` command accepts today. Every field on this page does something: a
-field Meridian cannot honour for a document is refused, not ignored.
+Every field a document can hold, what it must contain, and how it is checked. A field
+Meridian cannot honour is refused, not ignored.
 
-The language has one core and four **flavours**. The core is the same for every
-tool: the document, its resources, how they are ordered, how they refer to each
-other. The flavour is what a resource's `type`, `state` and `params` mean, and
-that depends on which segment the target belongs to:
+The core (documents, resources, order, references) is the same for every tool. The
+**flavour**, what `type`, `state` and `params` mean, depends on the target's segment:
 
 | Segment | Flavour in one line | Reference |
 |---|---|---|
@@ -19,8 +15,7 @@ that depends on which segment the target belongs to:
 | Containerization | the elements of a container project on one host | [containerization](containerization.md) |
 | Container orchestration | the cluster's own API objects | [container orchestration](container-orchestration.md) |
 
-A target's page under [`targets/`](../../targets/ansible.md) then says what that
-one tool makes of the flavour.
+Each [target page](../../targets/ansible.md) covers one tool.
 
 ```mermaid
 flowchart TD
@@ -75,10 +70,9 @@ flowchart TD
 
 ## Files
 
-A file is YAML or JSON. Meridian decides which from the content, not from the
-file's extension. YAML in flow style, including
-[KYAML](https://kubernetes.io/docs/reference/encodings/kyaml/) as `kubectl`
-prints it, is YAML and reads the same as the block form.
+A file is YAML or JSON, decided by content, not extension. Flow-style YAML, including
+[KYAML](https://kubernetes.io/docs/reference/encodings/kyaml/), reads the same as block
+form.
 
 | | YAML | JSON |
 |---|---|---|
@@ -86,17 +80,12 @@ prints it, is YAML and reads the same as the block form.
 | A number where text belongs (`name: 123`) | read as the text `"123"` | an error: JSON is typed |
 | Anchors, aliases and `<<` merge keys | supported | not applicable |
 
-Rules that hold for both:
-
 - The file must be UTF-8. A byte order mark at the start is ignored.
-- An **unknown field is an error**, at every level except inside `params` and
-  `metadata.labels`. A misspelt `dependsOn` is reported with its line; it is
-  never silently ignored.
+- An **unknown field is an error**, except inside `params` and `metadata.labels`.
 - A field set twice in the same mapping is an error.
 - An empty file is an error (`no documents found`).
 
-How a plain YAML value is typed matters inside `params`, because the value is
-handed to the tool with its type:
+A plain YAML value reaches the tool with its YAML type:
 
 | You write | It is |
 |---|---|
@@ -111,8 +100,7 @@ handed to the tool with its type:
 | anything quoted, or tagged `!!str` | text |
 | any other tag (`!!int`, `!!binary`, `!custom`) | an error: write the value plainly, or quote it |
 
-Every one of these traps, and what to do about it, is on
-[YAML pitfalls](yaml-pitfalls.md).
+See [YAML pitfalls](yaml-pitfalls.md).
 
 ## The document
 
@@ -134,14 +122,9 @@ spec:
 
 ### `apiVersion`
 
-`apiVersion` says which version of the Meridian language a document is written
-in. It is `meridian/v` and a whole number, and `meridian/v1` is the only
-version so far.
-
-The number changes only when a document that compiles today would stop compiling
-or change meaning. New fields, document kinds and resource types are added
-within the current version, so you never need to touch `apiVersion` to keep a
-document working or to use something new.
+`meridian/v` and a whole number. `meridian/v1` is the only version. It changes only when a
+document that compiles today would stop compiling or change meaning; additions stay within
+the version.
 
 A build reads each version it knows in one of three ways:
 
@@ -151,7 +134,7 @@ A build reads each version it knows in one of three ways:
 | deprecated | the document compiles, and the run prints one warning naming the version to move to |
 | removed | the document is refused, and the message names the release that removed the version |
 
-A value the build does not know is refused, and the message says why:
+An unknown value is refused:
 
 ```
 site.yaml:1:1: apiVersion: unsupported apiVersion "meridian/v2": it is newer than this build, which understands meridian/v1; upgrade meridian
@@ -163,13 +146,12 @@ site.yaml:1:1: apiVersion: unsupported apiVersion "apps/v1": expected "meridian/
 [`meridian version`](../cli.md#version) lists the versions a build reads, and
 [compatibility](../compatibility.md) has the full rules.
 
-The two kinds answer different questions. An **Infrastructure** document says
-what should exist, and can promise [outputs](#outputs). A **ResourceSet** says
-how a machine that exists is configured, and names that machine with
-[`targetHost`](#targethost). Why they are separate is in
+An **Infrastructure** document declares what should exist and can have
+[outputs](#outputs). A **ResourceSet** configures an existing machine named by
+[`targetHost`](#targethost). See
 [the two-stage architecture](../../concepts/two-stage-architecture.md).
 
-Which kind goes with which segment:
+Kind by segment:
 
 | Segment | `Infrastructure` | `ResourceSet` |
 |---|---|---|
@@ -178,9 +160,7 @@ Which kind goes with which segment:
 | Containerization | yes | yes: the project runs on the daemon of the host the document names |
 | Configuration management | refused | yes |
 
-Meridian enforces this pairing. Every plugin declares its segment (shown as its
-category by `meridian plugins`), and a document of the wrong kind is refused at
-compile time, before the plugin sees it:
+A document of the wrong kind for its plugin's category is refused at compile time:
 
 ```
 this is a ResourceSet document, and its target is an infrastructure-as-code
@@ -188,13 +168,8 @@ tool: it creates what should exist and is not pointed at one machine, so it
 takes kind: Infrastructure, without a targetHost
 ```
 
-A tool that provisions has no machine to be pointed at, and a tool that
-configures one machine has nothing to provision. Before this check, the wrong
-pairing compiled into something that meant less than the document said. A
-plugin built before categories existed declares none, and takes either kind.
-
-The check needs the plugin, so `compile`, `plan` and `apply` make it and
-`validate` does not.
+A plugin that declares no category takes either kind. `validate` does not make this
+check.
 
 ## `metadata`
 
@@ -203,11 +178,8 @@ The check needs the plugin, so `compile`, `plan` and `apply` make it and
 | `name` | yes | the document's name. It must be unique among the documents of the same kind given to one command. Other documents refer to it (`targetHost.ref`), compiled files are written under it, and state is kept under it. It must start with a letter or a digit, hold only letters, digits, `.`, `_` and `-`, and be at most 128 characters; `validate` refuses any other name, because the name becomes one directory name under `--out` and under the state directory |
 | `labels` | no | a mapping of text to text, for choosing which documents a command runs. See [labels and selectors](#labels-and-selectors) |
 
-Some targets build a name in their own files from `metadata.name`, and are
-stricter about it than Meridian is. Puppet and Chef, for example, need
-lower-case letters, digits and underscores, because the name becomes a class or
-cookbook name. A name a target cannot use is refused when the document is
-compiled, not rewritten.
+Some targets are stricter. Puppet and Chef need lower-case letters, digits and
+underscores. A name a target cannot use is refused at compile, not rewritten.
 
 ### Labels and selectors
 
@@ -219,11 +191,9 @@ metadata:
     env: prod
 ```
 
-Labels mean nothing to Meridian on their own, and they are not passed to the
-tool. They exist so that one command can run part of a workflow. A label's
-value may hold an [interpolation](interpolation.md), such as
-`env: ${{ data.env }}`, and a selector matches the value it comes to.
-`compile`, `plan` and `apply` take `-l` (or `--selector`):
+Labels select documents and are not passed to the tool. A value may hold an
+[interpolation](interpolation.md) (`env: ${{ data.env }}`). `compile`, `plan` and `apply`
+take `-l` (or `--selector`):
 
 ```
 meridian apply site.yaml -l tier=web
@@ -237,17 +207,16 @@ meridian plan  site.yaml -l env=prod,tier!=db
 | `key` | set `key`, to anything |
 | `!key` | do not set `key` |
 
-Requirements separated by commas must all hold, and so must the requirements of
-every `-l` given. Rules:
+All comma-separated requirements, and every `-l`, must hold.
 
 - A document that is not selected does not run, and is not reported.
 - It is still loaded, checked and referable. A selected ResourceSet whose
   `targetHost` names an unselected Infrastructure document takes its host from
   that document's last apply, or is deferred if there was none.
 - A selector matching nothing is an error (`no document's labels match the
-  selector tier=cache`), not a silent successful no-op.
+  selector tier=cache`).
 - A malformed selector (`=web`, an empty requirement) is an error.
-- `validate` takes no selector: it always checks every document.
+- `validate` takes no selector.
 
 ## `spec` of an Infrastructure document
 
@@ -293,13 +262,8 @@ spec:
   targetVersion: "3"
 ```
 
-Some tools changed so much between versions that the same document has to be
-compiled differently. `targetVersion` says which version the document is written
-for. Quote it: an unquoted `3.0` is still read as the text `3.0`, but quoting
-keeps `1.10` from ever being taken for `1.1`.
-
-A plugin declares the versions it compiles for, and `meridian plugins` lists
-them on its `versions:` line. The rules:
+The tool version the document is written for. Quote it (`"1.10"`). A plugin lists its
+versions on the `versions:` line of `meridian plugins`.
 
 - The version must be one the plugin declares, or a more specific version under
   one of them. A plugin that declares `3` takes `3`, `3.0` and `3.1.4`. Versions
@@ -309,23 +273,21 @@ them on its `versions:` line. The rules:
   declares `3.1` does not take `3`.
 - A version the plugin does not compile for is refused:
   `the document asks for targetVersion "4", and target "dsc" compiles for: 2, 3`.
-- A plugin that declares no versions cannot honour the field, so setting it is
-  refused: `target "terraform" does not say which versions of its tool it
-  compiles for, so the request cannot be honoured; remove targetVersion`.
-  Accepting an unchecked version would be a silent loss.
+- A plugin that declares no versions refuses the field: `target "terraform" does not
+  say which versions of its tool it compiles for, so the request cannot be honoured;
+  remove targetVersion`.
 - The version is passed to the plugin, which may compile differently for it;
   the target's page says how.
-- A document with no `targetVersion` is compiled the plugin's default way.
+- With no `targetVersion` the plugin's default applies.
 
-Which targets declare versions today:
+Targets that declare versions:
 
 | Target | Versions | What the version changes |
 |---|---|---|
 | `dsc` | `2`, `3` | the engine that evaluates the resources: [DSC](../../targets/dsc.md#the-version-of-dsc) |
 | every other target | none | `targetVersion` is refused |
 
-The check needs the plugin, so `compile`, `plan` and `apply` make it and
-`validate` does not.
+`validate` does not make this check.
 
 ## `settings`
 
@@ -337,35 +299,26 @@ spec:
     target: WinRM
 ```
 
-A tool has settings that belong to the whole document and to no resource of
-it: which engine runs it, how its host is reached. `settings` is one mapping
-for them. The target checks it exactly as it checks a resource's `params`: each
-target's page lists the keys it takes and what each accepts, and a value may
-hold interpolation.
+Tool settings for the whole document, such as the engine or how the host is reached.
+Checked like `params`; values may hold interpolation. Each target page lists its keys.
 
-The rules:
-
-- A plugin declares the keys it reads; `meridian plugins` lists them on its
-  `settings:` line. Any other key is refused before the plugin is asked:
-  `the document sets spec.settings.transport, and target "dsc" takes only:
-  credential, engine, target`. A plugin that declares none (including one built
-  before `settings` existed) refuses any setting. Dropping an unread setting
-  would be a silent loss.
+- A plugin lists its keys on the `settings:` line of `meridian plugins`. Any other key is
+  refused: `the document sets spec.settings.transport, and target "dsc" takes only:
+  credential, engine, target`. A plugin that declares none refuses any setting.
 - The plugin checks the values; the target's page lists what each accepts and
   the rule it refuses under.
 - A setting is not a resource: no `id`, no `when`, no `dependsOn` or
   `notifies`. `spec.when` skips the whole document, settings included.
 
-Which targets take settings today:
+Targets that take settings:
 
 | Target | Keys | What they say |
 |---|---|---|
 | `dsc` | `engine`, `target`, `credential` | [how the configuration is run](../../targets/dsc.md#how-the-configuration-is-run) |
 | every other target | none | the tool's own settings are a [settings resource](resources.md#type) for now, such as `stack` or `cluster` |
 
-The settings resources will move under `settings`, one target at a time, and
-each keeps compiling with a warning until the next `apiVersion` removes it. The
-`dsc` target's `runner` resource is the first to have moved.
+Settings resources will move under `settings` one target at a time, compiling with a
+warning until the next `apiVersion`. `dsc`'s `runner` has moved.
 
 ## `targetHost`
 
@@ -394,10 +347,8 @@ targetHost:
 | `output` | required with `from: infrastructure`: the name of an output that document declares |
 | `credential` | optional, with either form: the name of a credential in `spec.credentials` the host is reached as, of type `ssh` or `usernamePassword`, for a target that takes one. Left out, the tool reaches the host as its own identity. See [Credentials](credentials.md#reaching-a-host-as-a-credential) |
 
-With `from: infrastructure`, the document and the output must exist, and
-`meridian validate` checks that. The value is only known once the Infrastructure
-document has been applied; until then the ResourceSet is reported as
-**deferred** and is not compiled against a guess.
+With `from: infrastructure`, `validate` checks the document and output exist. Until that
+document is applied, the ResourceSet is **deferred**.
 
 `meridian validate` accepts a ResourceSet with no `targetHost`, but it cannot be
 compiled: `document "web" declares no targetHost`.
@@ -432,14 +383,10 @@ compiled: `document "web" declares no targetHost`.
 
 In depth: [resources](resources.md).
 
-Many tools use the `id` as a name in their own files, so they limit what it may
-hold. Letters, digits and underscores, starting with a letter, work on every
-target. A target that needs a different spelling in its own file (a
-CloudFormation logical id, a Kubernetes object name) derives it, and still
-reports the id you wrote.
+An `id` of letters, digits and underscores, starting with a letter, works on every
+target. A target that needs another spelling derives it and still reports your id.
 
-The order resources are written in matters only as a tiebreak: resources with no
-dependency between them keep the order of the document.
+Independent resources keep document order.
 
 ## `dependsOn`
 
@@ -448,8 +395,7 @@ dependsOn:
   - resource: nginx_pkg
 ```
 
-"Do not touch this resource until that one is done." It is about order and
-nothing else. In depth, with the sort worked through: [`dependsOn`](dependson.md).
+Order only. In depth: [`dependsOn`](dependson.md).
 
 | Field | Required | Value |
 |---|---|---|
@@ -463,17 +409,11 @@ Rules:
 - A resource cannot depend on itself.
 - The dependencies of a document must not form a cycle. A cycle is reported with
   the resources in it, in the order they would have to be applied:
-  `dependency cycle among 2 resources: a -> b -> a`. `meridian validate` finds
-  it, and so does every other command. Every resource counts, whatever its
-  `when` says: an order that only works while one condition happens to be false
-  is still a mistake. Only `dependsOn` can form a cycle; two resources that
-  notify each other are fine.
-- A dependency cannot point into another document. Documents are ordered by
-  [kind](#workflows-several-documents), and connected only by outputs.
+  `dependency cycle among 2 resources: a -> b -> a`. Every resource counts, whatever
+  its `when`. Notifies do not form cycles.
+- A dependency cannot point into another document.
 
-What a dependency becomes in the tool's file differs by tool (a keyword, or
-simply the order of the file) and is described in
-[dependencies and notifications](../../concepts/dependencies.md).
+What each tool writes: [dependencies and notifications](../../concepts/dependencies.md).
 
 ## `notifies`
 
@@ -483,9 +423,8 @@ notifies:
     action: restart
 ```
 
-"When this resource really changes, do that to the other one." On a run where
-nothing changed, nothing happens. A notify is a reaction and not an order: it takes no part in
-the sort that `dependsOn` drives. In depth: [`notifies`](notifies.md).
+Runs an action on another resource when this one changes. It does not affect order. In
+depth: [`notifies`](notifies.md).
 
 | Field | Required | Value |
 |---|---|---|
@@ -497,23 +436,16 @@ the sort that `dependsOn` drives. In depth: [`notifies`](notifies.md).
 Rules:
 
 - The resource must exist in the document, and cannot be the notifier itself.
-- `on` names the event that fires the notify. There is one: `changed` (the
-  notifier actually changed). Every tool's mechanism (Ansible handler, Puppet
-  refresh, Chef notification) fires only on change, so any other value is
-  refused at validation: `unknown event "always" (expected "changed", ...)`.
-  Write `on: changed` explicitly or leave it out.
-- A target accepts only actions its tool can actually perform. `reload` on a
-  service is refused on Puppet, which can only restart on refresh; it is not
-  turned into a restart.
-- A target with no way to react to a change refuses every notify.
+- `on` takes one value, `changed` (the default). Any other is refused:
+  `unknown event "always" (expected "changed", ...)`.
+- A target accepts only actions its tool can perform. `reload` is refused on Puppet.
+- A target that cannot react to change refuses every notify.
 
-The actions by segment are on each flavour's page, and the
-[capability matrix](../capability-matrix.md) says which targets take a notify at
-all.
+See each flavour's page and the [capability matrix](../capability-matrix.md).
 
 ## `when` and `runtimeWhen`
 
-They are two different times. In depth: [conditions](conditions.md).
+In depth: [conditions](conditions.md).
 
 A `when` can also be written on a whole document (`spec.when`), on an output
 and on a `dependsOn` or `notifies` entry:
@@ -521,15 +453,12 @@ and on a `dependsOn` or `notifies` entry:
 Values anywhere in a document can hold an expression between `${{` and `}}`:
 [interpolation](interpolation.md).
 
-**`runtimeWhen`** is a condition the tool checks on the machine while it
-applies, so it is written in the tool's own language and Meridian passes it
-through as written. Only some configuration management targets have such a
-moment; every other target refuses a resource that carries one. See
-[configuration management](configuration-management.md#runtimewhen).
+**`runtimeWhen`**: checked by the tool on the machine at apply time, in the tool's own
+language, passed through as written. Only some configuration management targets take it
+([configuration management](configuration-management.md#runtimewhen)).
 
-**`when`** is decided by Meridian before anything is compiled, so a resource is
-either in the compiled output or it is not, and no target ever sees a
-condition. It works on every target.
+**`when`**: decided by Meridian before compiling. The resource is in the output or not.
+Works on every target.
 
 ```yaml
 - id: debug_log
@@ -541,9 +470,7 @@ condition. It works on every target.
 
 ### What a `when` can say
 
-A condition is an [expression](expressions.md) over the values given to the
-command with `--data` and `--set`. Quote the whole condition in YAML, because
-`!`, `'`, `[` and `>` mean something to YAML.
+An [expression](expressions.md) over `--data` and `--set` values. Quote it in YAML.
 
 | You write | Meaning |
 |---|---|
@@ -568,13 +495,9 @@ Rules:
   an optional key with `data.x ?? false`.
 - Nothing is converted silently. Comparing or adding text and a number is an
   error that names both types.
-- `facts.*` is refused: Meridian does not gather node facts yet, so a condition
-  cannot depend on the node. To decide on the node at apply time, use
-  `runtimeWhen` on a target that supports it.
-- `meridian validate` checks a condition's syntax, names and functions. Its
-  value needs the data, so `compile`, `plan` and `apply` decide it.
-- A condition is decided before the target's plugin is involved, so it means
-  the same on every target.
+- `facts.*` is refused; use `runtimeWhen` to decide on the node.
+- `validate` checks syntax, names and functions. `compile`, `plan` and `apply` decide the
+  value.
 
 ### Giving the data
 
@@ -582,18 +505,15 @@ Rules:
 meridian apply site.yaml --data common.yaml --data prod.yaml --set replicas=5
 ```
 
-A data file is YAML or JSON holding one mapping of names to values. `--data` may
-be given more than once; a key in a later file replaces the same key from an
-earlier file, whole (mappings are not merged). `--set KEY=VALUE` gives one
-value after every file, typed as YAML types it, and a dotted key sets one key
-inside a mapping. The same data is also handed to every plugin when it
-compiles. In depth: [giving the data](conditions.md#giving-the-data).
+A data file is one YAML or JSON mapping. With several `--data` files, a later key
+replaces an earlier one whole. `--set KEY=VALUE` applies after every file, YAML-typed; a
+dotted key sets a key inside a mapping. Plugins get the same data. In depth:
+[giving the data](conditions.md#giving-the-data).
 
 ### What removing a resource does
 
-A resource whose `when` is false is not in the compiled output, and neither are
-its own `dependsOn` and `notifies`. What matters is the entries of *other*
-resources that name it.
+A resource whose `when` is false is left out, with its own `dependsOn` and `notifies`.
+Entries in *other* resources that name it are handled by `ifMissing`.
 
 ### `ifMissing`
 
@@ -610,19 +530,15 @@ resources that name it.
 | `error` (the default) | the document is refused: `resource "app_conf" depends on "legacy_dir", which its when removed from this run; set ifMissing: skip on this entry if the resource should carry on without it` |
 | `skip` | the entry is dropped and the resource carries on without it |
 
-It is the same on `dependsOn` and on `notifies`. The default is `error` because
-a resource depending on something that is not there is far more often a mistake
-than an intention. Any other value is refused when the document is validated.
-`ifMissing` has no effect on an entry whose resource is present, and it never
-excuses an entry that names a resource the document does not declare at all.
+The same on `dependsOn` and `notifies`. The default is `error`. It never excuses a
+resource the document does not declare.
 
-Two more consequences of removing a resource:
+Also:
 
 - An output, or a `${...}` reference, that reads a removed resource is refused
   by the target as a reference to a resource that is not there.
-- If every resource is removed, the document compiles to nothing, and applying
-  it tells the tool nothing should exist. On a tool that deletes undeclared
-  resources, that is a deletion.
+- If every resource is removed, the document compiles to nothing. On a tool that deletes
+  undeclared resources, applying it deletes them.
 
 ## References
 
@@ -644,27 +560,19 @@ params:
 
 Rules:
 
-- The first name of a path must be the `id` of a resource in the same document.
-  A reference to a resource that is not there is a compile error with the line.
+- The first name must be the `id` of a resource in the same document.
 - A `${` that is never closed is an error. Braces inside an expression balance,
   so `${merge({a = 1}, x)}` is one expression.
-- The tool decides what can be read from a resource: a Terraform attribute, a
-  CloudFormation `GetAtt` attribute, a Kubernetes object's name. Some targets
-  allow less in `params` than in an output, because params are fixed at compile
-  time and outputs are read after the apply.
-- A reference usually implies order. Where the tool derives order from the
-  reference, the target does not repeat the dependency.
-- A reference never crosses documents. To carry a value from one document to
-  the next, declare an [output](#outputs).
+- The tool decides what can be read: a Terraform attribute, a CloudFormation `GetAtt`
+  attribute, a Kubernetes object name. Some targets allow less in `params` than in an
+  output.
+- Where the tool derives order from a reference, the target does not repeat it.
+- A reference never crosses documents; use an [output](#outputs).
 
-The configuration management targets using the shared types (`ansible`,
-`puppet`, `chef`, `salt`, `cloud-init`) have nothing to read at apply time, so
-references are settled at compile time: `${id.param}` becomes that param's value
-on resource `id`. A bare `${id}`, a deeper path, an unset param, or anything
-that is not a path is refused.
+On configuration management targets using the shared types, `${id.param}` becomes that
+param's value at compile time. A bare `${id}`, a deeper path or an unset param is refused.
 
-In depth, with what each target rewrites a reference into:
-[references](references.md).
+In depth: [references](references.md).
 
 ## `outputs`
 
@@ -681,24 +589,16 @@ outputs:
 | `name` | yes | unique among the document's outputs |
 | `value` | no, but give one | text holding one or more references. The core does not check that it is there; an output without a value has nothing to report |
 
-In depth, with the life of a hand-off: [outputs and hand-offs](outputs-and-hand-offs.md).
+In depth: [outputs and hand-offs](outputs-and-hand-offs.md).
 
-An output is a value the tool reports after the document is applied. It is
-shown, kept in the state directory, and handed to the stage that asked for it. A
-value the tool marks as sensitive is shown as `(sensitive)`. On an apply, an
-output the tool has no value for is an error, not an empty value.
-
-An output can be consumed in two places: as the `targetHost` of a
-ResourceSet, and as an [import](#imports) of any document.
-
-Configuration management documents are ResourceSets, which have no `outputs`
-field, so those targets produce none. The
-[capability matrix](../capability-matrix.md) has the column for every target.
+A value the tool reports after apply. It is shown, kept in the state directory, and
+handed to the stage that uses it, as a ResourceSet's `targetHost` or an
+[import](#imports). Sensitive values show as `(sensitive)`. An output with no value is an
+error. See the [capability matrix](../capability-matrix.md).
 
 ## `imports`
 
-In either kind of document: `spec.imports`, values the document is handed from
-other documents of the workflow.
+`spec.imports`, in either kind: values from other documents of the workflow.
 
 ```yaml
 imports:
@@ -722,9 +622,8 @@ imports:
 | `output` | with `output` | the `name` of an output that document declares |
 | `sensitive` | no | `true` masks the value wherever Meridian prints. An output its tool marks sensitive stays sensitive without it |
 
-An import reaches the document's **tool**, as the tool's own variable or
-parameter of that name. It is never spliced into the document's text, so the
-document declares the variable and reads it the way its tool does:
+An import reaches the **tool** as its own variable or parameter of that name, never
+spliced into the text. The document declares and reads it as the tool does:
 
 ```yaml
 resources:
@@ -737,25 +636,21 @@ resources:
       user_data: ${user_data}
 ```
 
-A document that imports runs after every document it imports from. Only a
-target that takes inputs can import; the
-[capability matrix](../capability-matrix.md) has the column. In depth, with
-diagrams and every rule: [outputs and hand-offs](outputs-and-hand-offs.md#imports).
+A document runs after every document it imports from. Only targets that take inputs can
+import ([capability matrix](../capability-matrix.md)). In depth:
+[outputs and hand-offs](outputs-and-hand-offs.md#imports).
 
 ## Workflows: several documents
 
-The documents given to one `meridian` command are one workflow, whether they are
-in one file or in several.
+The documents given to one command, in one file or several.
 
 ```
 meridian apply machine.yaml web.yaml
 ```
 
-- Every Infrastructure document runs before any ResourceSet, whatever order the
-  files are given in. Within a kind, documents run in the order given.
-- A document runs after every document it needs: its `targetHost` source and
-  every document it [imports](#imports) from. Only this changes the order above,
-  and it can put a ResourceSet before an Infrastructure document.
+- Infrastructure documents run before ResourceSets; within a kind, in the order given.
+- A document runs after its `targetHost` source and every document it
+  [imports](#imports) from. This can put a ResourceSet first.
 - Documents that wait on each other cannot be ordered, and are refused by
   `validate`.
 - Two documents of the same kind cannot share a name. An Infrastructure document
@@ -764,12 +659,10 @@ meridian apply machine.yaml web.yaml
   until that output exists.
 - When a stage fails, the stages after it do not run. Nothing is rolled back.
 
-Every step from file to running tool is in
-[how it fits together](how-it-fits-together.md). A worked example is
+See [how it fits together](how-it-fits-together.md),
 [a two-stage workflow](../../quickstart/first-two-stage.md),
-and [`examples/workflow/`](../../../examples/workflow) holds its files.
-[Worked workflows](../../quickstart/workflows.md) walks through six larger ones
-that between them use every target.
+[worked workflows](../../quickstart/workflows.md) and
+[`examples/workflow/`](../../../examples/workflow).
 
 ## Which check happens when
 
@@ -798,13 +691,10 @@ that between them use every target.
 | The target takes the `type`, the `state`, every param, the notify's action, `runtimeWhen` | no | yes |
 | Every `${...}` points at something | no | yes |
 
-`validate` loads no plugin, so it knows the shape of the language and nothing
-about what a tool can express. A document that validates can still be refused by
-its target. That refusal is the point of the
-[capability model](../../concepts/capability-model.md): a document either does
-what it says or does not compile.
+`validate` loads no plugin, so a valid document can still be refused by its target
+([capability model](../../concepts/capability-model.md)).
 
-Every error names the file, the line and column, and the field:
+Every error names the file, line, column and field:
 
 ```
 web.yaml:12:19: spec.resources[0].dependsOn[0].resource: resource "a" depends on unknown resource "s2"
