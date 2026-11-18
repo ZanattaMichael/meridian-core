@@ -1,0 +1,57 @@
+# A web server configured with Salt, reaching past the six shared types.
+#
+# `package` and `service` are the abstract types every configuration
+# management target takes. `pkgrepo.managed`, `file.symlink` and
+# `docker_container.running` are Salt's own state functions, written by
+# their dotted names: their params are the function's arguments, passed
+# through as written, and the function is the state. From the first such
+# resource on, the document compiles for Salt only, and `meridian lint`
+# says so (rule native-type).
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: web_states
+spec:
+  target: salt
+  targetHost:
+    from: inline
+    host: web01.example.com
+  resources:
+    - id: nginx_repo
+      type: pkgrepo.managed
+      params:
+        name: deb http://nginx.org/packages/debian bookworm nginx
+        file: /etc/apt/sources.list.d/nginx.list
+        key_url: https://nginx.org/keys/nginx_signing.key
+      runtimeWhen: grains['os_family'] == 'Debian'
+    - id: nginx_pkg
+      type: package
+      params:
+        name: nginx
+      dependsOn:
+        - resource: nginx_repo
+    - id: nginx_site
+      type: file.symlink
+      params:
+        name: /etc/nginx/sites-enabled/web
+        target: /etc/nginx/sites-available/web
+      dependsOn:
+        - resource: nginx_pkg
+      notifies:
+        - resource: nginx_svc
+          action: restart
+        - resource: app
+          action: watch
+    - id: nginx_svc
+      type: service
+      state: running
+      params:
+        name: nginx
+        enabled: true
+      dependsOn:
+        - resource: nginx_pkg
+    - id: app
+      type: docker_container.running
+      params:
+        image: app:1.2
+        port_bindings: ["8080:80"]

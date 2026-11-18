@@ -501,8 +501,8 @@ fn the_schemas_offer_any_puppet_type_as_an_open_pattern() {
     assert_eq!(
         Puppet.supported_resource_types(),
         [
-            "<type>",
             "<module>::<type>",
+            "<type>",
             "exec",
             "file",
             "group",

@@ -403,9 +403,9 @@ const CASES: &[Case] = &[
     // ---- types ---------------------------------------------------------
     case(
         "types",
-        "a type outside the dialect (`firewall_rule`)",
+        "a type that is no shared type and no tool's own (`Firewall.Rule`)",
         Same,
-        "    - id: a\n      type: firewall_rule\n      params:\n        port: 80\n",
+        "    - id: a\n      type: Firewall.Rule\n      params:\n        port: 80\n",
     ),
     case(
         "types",
@@ -434,8 +434,14 @@ const CASES: &[Case] = &[
     ),
     case(
         "native types",
+        "a bare word that is no shared type (`firewall_rule`)",
+        Varies,
+        "    - id: a\n      type: firewall_rule\n      params:\n        port: 80\n",
+    ),
+    case(
+        "native types",
         "a bare module name (`lineinfile`)",
-        Same,
+        Varies,
         "    - id: a\n      type: lineinfile\n      params:\n        path: /etc/motd\n        line: hi\n",
     ),
     case(
@@ -455,6 +461,42 @@ const CASES: &[Case] = &[
         "a Salt state function (`pkgrepo.managed`)",
         Varies,
         "    - id: a\n      type: pkgrepo.managed\n      params:\n        name: deb http://example.com stable main\n",
+    ),
+    case(
+        "native types",
+        "a Chef resource (`template`), notified with `create`",
+        Varies,
+        "    - id: conf\n      type: file\n      params:\n        path: /etc/app.conf\n        content: \"x\\n\"\n      notifies:\n        - resource: a\n          action: create\n    - id: a\n      type: template\n      params:\n        path: /etc/motd\n        source: motd.erb\n",
+    ),
+    case(
+        "native types",
+        "a cloud-config module (`ntp`)",
+        Varies,
+        "    - id: a\n      type: ntp\n      params:\n        enabled: true\n        servers: [0.pool.ntp.org]\n",
+    ),
+    case(
+        "native types",
+        "the tool's own `package` under the prefix, with a state (`native/package`)",
+        Varies,
+        "    - id: a\n      type: native/package\n      state: latest\n      params:\n        name: nginx\n",
+    ),
+    case(
+        "native types",
+        "a Puppet type notified with `refresh`",
+        Varies,
+        "    - id: conf\n      type: file\n      params:\n        path: /etc/app.conf\n        content: \"x\\n\"\n      notifies:\n        - resource: a\n          action: refresh\n    - id: a\n      type: cron\n      params:\n        command: /bin/true\n",
+    ),
+    case(
+        "native types",
+        "a Salt state function notified with `watch`",
+        Varies,
+        "    - id: conf\n      type: file\n      params:\n        path: /etc/app.conf\n        content: \"x\\n\"\n      notifies:\n        - resource: a\n          action: watch\n    - id: a\n      type: docker_container.running\n      params:\n        image: app\n",
+    ),
+    case(
+        "native types",
+        "a native type that depends on a shared one",
+        Varies,
+        "    - id: pkg\n      type: package\n      params:\n        name: nginx\n    - id: a\n      type: native/file\n      params:\n        path: /etc/motd\n        source: x\n      dependsOn:\n        - resource: pkg\n",
     ),
     case(
         "types",

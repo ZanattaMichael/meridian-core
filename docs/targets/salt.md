@@ -12,9 +12,9 @@ have written and runs Salt on it.
 | | |
 |---|---|
 | Category | Configuration management |
-| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)) |
+| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)), and any state function beside them: `pkgrepo.managed`, `file.symlink`, `docker_container.running` ([State functions beside the six](#state-functions-beside-the-six)) |
 | `dependsOn` | Yes, as `require`. The states are also written in apply order, so the dependency graph survives into the state file intact and nothing is flattened |
-| `notifies` | Native: `watch` and `onchanges`. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec |
+| `notifies` | Native: `watch` and `onchanges`. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec, `watch` on a state function of Salt's own |
 | `runtimeWhen` | Yes: a Jinja expression over grains and pillar, which the minion evaluates when it renders the file |
 | Secrets | Yes: as pillar data, from a pillar root only the user can read. A file state given one shows no diff; an `exec` is refused one, because Salt prints the command line. See [Secrets](#secrets) |
 | References | `${id.param}` is settled from the document when it is compiled; anything else in `${...}` is refused, and `$${` is a literal `${` ([rules](../reference/resource-types.md#references)) |
@@ -32,8 +32,10 @@ What it does not do:
 - **No grains or custom modules are written, and no pillar beyond the document's
   [secrets](#secrets).** A `runtimeWhen` can read the node's grains and pillar; the
   plugin does not create them.
-- **No resource types beyond the six.** There is no passthrough to arbitrary Salt state
-  modules. Anything else is refused at compile time.
+- **A state function of Salt's own is passed through unchecked.** Its arguments are
+  written as the document gives them, and an argument the function does not take is
+  Salt's to refuse when the state is applied, not Meridian's. See
+  [State functions beside the six](#state-functions-beside-the-six).
 - **`restarted` and `reloaded` are not service states.** Use a notification.
 - **It creates no infrastructure.** It configures a node that already exists, and has
   no resource types for anything else.
@@ -43,6 +45,7 @@ Contents: [Requirements](#requirements) ·
 [A worked example](#a-worked-example) ·
 [What a document compiles to](#what-a-document-compiles-to) ·
 [How resources map](#how-resources-map) ·
+[State functions beside the six](#state-functions-beside-the-six) ·
 [Ordering](#ordering) ·
 [Notifications](#notifications) ·
 [Runtime conditions](#runtime-conditions) ·
@@ -333,9 +336,10 @@ Things to notice:
 
 ## How resources map
 
-Every resource type, state and param the plugin accepts is listed here. Anything else is
-refused at compile time with a message that names what would have worked; nothing is
-dropped silently.
+Every shared type, state and param the plugin accepts is listed here; any other type is
+a state function of Salt's own, [below](#state-functions-beside-the-six). A param a
+shared type does not take is refused at compile time with a message that names what
+would have worked; nothing is dropped silently.
 
 ### `package`
 
@@ -419,6 +423,96 @@ is refused unless the resource says `shell: true`:
     shell: true
 ```
 
+## State functions beside the six
+
+Any state function is a resource type, written by its dotted name as a state file
+writes it: `pkgrepo.managed`, `file.symlink`, `docker_container.running`,
+`postgres_database.present`. The function's arguments are the resource's `params`,
+written into the state exactly as given; Meridian checks nothing against a list of what
+the function takes. An argument the function does not have, or a module the minion does
+not ship, is Salt's to refuse when the state is applied, as a provider's type is
+Terraform's, until the module's schema is synced and the editor reports it in place.
+
+A Salt state is always dotted, so no state function has the bare name of a shared type
+and `native/<name>` reaches nothing here: `native/file` is refused, with `file.managed`
+as what to write. The shared `file` and `file.managed` written in full are both Salt's
+`file.managed`; the shared one takes the six's params and moves between tools, the
+dotted one takes every argument the function has and compiles for Salt only.
+
+```yaml
+resources:
+  - id: nginx_repo
+    type: pkgrepo.managed
+    params:
+      name: deb http://nginx.org/packages/debian bookworm nginx
+      file: /etc/apt/sources.list.d/nginx.list
+      key_url: https://nginx.org/keys/nginx_signing.key
+  - id: nginx_pkg
+    type: package
+    params:
+      name: nginx
+    dependsOn:
+      - resource: nginx_repo
+  - id: app_conf
+    type: file
+    params:
+      path: /etc/app/app.conf
+      content: "workers = 4\n"
+    notifies:
+      - resource: app
+        action: watch
+  - id: app
+    type: docker_container.running
+    params:
+      image: app:1.2
+```
+
+compiles to
+
+```yaml
+nginx_repo:
+  pkgrepo.managed:
+    - name: deb http://nginx.org/packages/debian bookworm nginx
+    - file: /etc/apt/sources.list.d/nginx.list
+    - key_url: https://nginx.org/keys/nginx_signing.key
+
+nginx_pkg:
+  pkg.installed:
+    - name: nginx
+    - require:
+        - pkgrepo: nginx_repo
+
+app_conf:
+  file.managed:
+    - name: /etc/app/app.conf
+    - contents: |
+        workers = 4
+
+app:
+  docker_container.running:
+    - image: app:1.2
+    - watch:
+        - file: app_conf
+```
+
+| | |
+|---|---|
+| `type` | `module.function`: two lower-case words of letters, digits and underscores, joined by one dot. A bare word, a wrong case, three parts, or `native/<name>` is refused with what to write |
+| `params` | the function's arguments, as written, `name` first when there is one. A state with no `name` is named by its `id`, as Salt reads it |
+| `state` | none: the function is the state. Any `state` is refused (`unsupported-state`) |
+| `notifies` to a state function | action `watch`: the state watches the notifier, and what the function does when something it watches changes is the function's own business (a running service restarts, a managed file is written again). Any other action is refused (`unsupported-action`). When the notifier is applied after the state, the same state is declared once more after both, as `watch <id>`, as a service's restart is |
+| `notifies` from a state function | as from any resource |
+| `runtimeWhen` | a Jinja expression, as for the six |
+| Secrets | as for the six: a pillar lookup the runner answers. A `file.*` state given one shows no changes; a `cmd.*` state is refused one, because Salt prints the command line |
+| References | `${id.param}` is settled from the document, as for the six |
+
+[`examples/salt/native-states.yaml`](../../examples/salt/native-states.yaml) is a whole
+document of both kinds. A document that names a state function compiles for Salt only.
+The [`native-type`](../reference/lint.md#native-type) lint rule marks each such
+resource. The six shared types stay the portable way to say what they can say; a state
+function is for everything else. The split, and why `native/file` is refused here, is
+[decision 0032](../decisions/0032-native-types-beside-the-six-and-a-prefix-for-colliding-names.md).
+
 ## Ordering
 
 Salt evaluates states in the order the file lists them and honours requisites on top.
@@ -437,6 +531,7 @@ that require it are not run, and Salt says so.
 | `service` | `start` | a state `start <id>`: `service.running` with `onchanges` |
 | `service` | `stop` | a state `stop <id>`: `service.dead` with `onchanges` |
 | `exec` | `run` | a state `run <id>`: the same `cmd.run` with `onchanges` |
+| a state function of Salt's own | `watch` | `watch` on the state itself, or a state `watch <id>` after both when the notifier comes later |
 
 The extra states are written after every resource's own state, in name order. Each
 requires the resource it acts on and is tied to every resource that notifies it, so
@@ -730,14 +825,14 @@ Rules about what you wrote:
 
 | Rule | When |
 |---|---|
-| `unsupported-resource-type` | The type is not one of the six above |
+| `unsupported-resource-type` | The type is not one of the six above and not a dotted state function either: a bare word, a wrong case, or `native/<name>` |
 | `unsupported-param` | The type has no such param |
 | `param-conflicts-with-state` | The param belongs to another state, such as `content` on a directory or `version` on a package that is `latest` |
 | `missing-param` | A required param is absent |
 | `empty-param` | A param has no value |
-| `unsupported-state` | The state is not in the type's table, or an `exec` has one |
+| `unsupported-state` | The state is not in the type's table, or an `exec` or a state function of Salt's own has one |
 | `shell-required` | A command holds shell syntax and does not say `shell: true` |
-| `unsupported-action` | The type cannot perform the notify action, or a stopped service is asked to restart or reload |
+| `unsupported-action` | The type cannot perform the notify action, a stopped service is asked to restart or reload, or a state function of Salt's own is asked for anything but `watch` |
 | `invalid-runtime-condition` | `runtimeWhen` is blank, spans lines, or holds a Jinja delimiter |
 | `invalid-sls-name` | The document name holds something other than letters, digits, `_` and `-`; Salt reads a dot as a directory |
 | `reserved-sls-name` | The document is named `top` |
@@ -797,6 +892,9 @@ because the tools do:
   no state that means "restart every time"; use a notification.
 - **Empty files.** A `file` with no `content` creates a missing file here; Ansible's
   `file` module would fail instead.
+- **The tool's own types.** Every state function is reachable by its dotted name, and
+  none has a bare name, so `native/<name>` is refused here where Puppet and Chef accept
+  it.
 
 ## How it is tested
 

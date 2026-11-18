@@ -95,8 +95,8 @@ fn the_binary_is_discovered_by_name_and_says_what_it_is() {
     assert_eq!(
         info.resource_types,
         [
-            "<type>",
             "<module>::<type>",
+            "<type>",
             "exec",
             "file",
             "group",

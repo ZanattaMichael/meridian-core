@@ -55,7 +55,16 @@ const TARGETS: &[Target] = &[
     Target {
         name: "puppet",
         refused: &["web_stack", "runtime_condition"],
-        resource_types: &["exec", "file", "group", "package", "service", "user"],
+        resource_types: &[
+            "<module>::<type>",
+            "<type>",
+            "exec",
+            "file",
+            "group",
+            "package",
+            "service",
+            "user",
+        ],
         capabilities: Capabilities {
             native_notify: true,
             synthetic_notify: false,

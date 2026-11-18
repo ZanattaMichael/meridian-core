@@ -64,8 +64,8 @@ fn the_plugin_describes_itself_as_openvox() {
     assert_eq!(
         OpenVox.supported_resource_types(),
         [
-            "<type>",
             "<module>::<type>",
+            "<type>",
             "exec",
             "file",
             "group",

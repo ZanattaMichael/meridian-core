@@ -204,9 +204,10 @@ pub fn resource_schemas() -> Vec<ResourceSchema> {
 /// The six shared types, sorted.
 const SHARED: &[&str] = &["exec", "file", "group", "package", "service", "user"];
 
-/// How an editor is told that any Puppet type is a type: a core type by its
-/// bare name, a defined type or a module's type by its qualified name.
-pub const NATIVE_PATTERNS: &[&str] = &["<type>", "<module>::<type>"];
+/// How an editor is told that any Puppet type is a type: a defined type or
+/// a module's type by its qualified name, a core type by its bare name.
+/// Sorted, as the type list is.
+pub const NATIVE_PATTERNS: &[&str] = &["<module>::<type>", "<type>"];
 
 /// Every IR resource type this target maps: the patterns every Puppet type
 /// fits, then the shared six, sorted.
