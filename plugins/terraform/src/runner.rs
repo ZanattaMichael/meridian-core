@@ -309,6 +309,34 @@ impl Runner for TerraformRunner {
         // the state is read right after the apply, inside it.
         self.read_outputs(context, None, &meridian_sdk::NoLog)
     }
+
+    fn reads_identifiers(&self) -> bool {
+        true
+    }
+
+    fn identifiers(
+        &self,
+        context: &RunContext,
+    ) -> Result<std::collections::BTreeMap<String, String>, RunError> {
+        if !context.work_dir.join(CONFIG_PATH).exists() {
+            return Err(RunError::new(
+                "nothing has been applied for this document yet, so there is nothing to adopt",
+            ));
+        }
+        let log = &meridian_sdk::NoLog;
+        // The state is read through the tool, which needs the directory
+        // initialised for its backend and providers.
+        self.tool(context)
+            .args(["init", "-input=false", "-no-color"])
+            .args(self.extra_args.iter().cloned())
+            .run_ok("terraform init failed", log)?;
+        let shown = self
+            .tool(context)
+            .args(["show", "-json", "-no-color"])
+            .capture_stdout()
+            .run_ok("terraform could not show its state", log)?;
+        read_identifiers(&shown.stdout)
+    }
 }
 
 fn unreadable(what: &str, detail: impl std::fmt::Display) -> RunError {
@@ -396,6 +424,45 @@ fn read_outputs(json: &str) -> Result<Vec<Output>, RunError> {
         .collect())
 }
 
+/// Reads `terraform show -json` of the state into each top-level managed
+/// resource's `id`, by the resource's name, which is its id in the document.
+/// A resource inside a module, or one of several made by `count` or
+/// `for_each`, has no one resource of the document to belong to.
+fn read_identifiers(json: &str) -> Result<std::collections::BTreeMap<String, String>, RunError> {
+    let mut found = std::collections::BTreeMap::new();
+    if json.trim().is_empty() {
+        return Ok(found);
+    }
+    let state = decode_value(json.as_bytes()).map_err(|e| unreadable("state", e))?;
+    let resources = state
+        .as_map()
+        .and_then(|s| s.get("values"))
+        .and_then(Value::as_map)
+        .and_then(|v| v.get("root_module"))
+        .and_then(Value::as_map)
+        .and_then(|m| m.get("resources"))
+        .and_then(Value::as_list)
+        .unwrap_or(&[]);
+    for entry in resources {
+        let Some(entry) = entry.as_map() else {
+            continue;
+        };
+        let text = |key: &str| entry.get(key).and_then(Value::as_str).unwrap_or("");
+        if text("mode") != "managed" || entry.contains_key("index") || text("name").is_empty() {
+            continue;
+        }
+        let id = entry
+            .get("values")
+            .and_then(Value::as_map)
+            .and_then(|v| v.get("id"))
+            .and_then(Value::as_str);
+        if let Some(id) = id.filter(|id| !id.is_empty()) {
+            found.insert(text("name").to_owned(), id.to_owned());
+        }
+    }
+    Ok(found)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,6 +493,21 @@ mod tests {
         );
         assert!(read_plan("{}").unwrap().is_empty());
         assert!(read_plan("not json").is_err());
+    }
+
+    #[test]
+    fn the_state_is_read_into_identifiers_by_resource_id() {
+        let json = r#"{"format_version":"1.0","values":{"root_module":{"resources":[
+          {"address":"aws_instance.web","mode":"managed","type":"aws_instance","name":"web","values":{"id":"i-0abc123","ami":"ami-1"}},
+          {"address":"data.aws_ami.ubuntu","mode":"data","type":"aws_ami","name":"ubuntu","values":{"id":"ami-1"}},
+          {"address":"aws_subnet.a[0]","mode":"managed","type":"aws_subnet","name":"a","index":0,"values":{"id":"subnet-1"}}
+        ],"child_modules":[{"resources":[{"address":"module.net.aws_vpc.this","mode":"managed","type":"aws_vpc","name":"this","values":{"id":"vpc-1"}}]}]}}}"#;
+        let found = read_identifiers(json).unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found["web"], "i-0abc123");
+        assert!(read_identifiers("").unwrap().is_empty());
+        assert!(read_identifiers("{}").unwrap().is_empty());
+        assert!(read_identifiers("not json").is_err());
     }
 
     #[test]

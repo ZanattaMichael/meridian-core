@@ -2,10 +2,8 @@
 
 <img src="../branding/logos/meridian-salt.svg" width="72" alt="Meridian Salt plugin logo">
 
-Compiles a ResourceSet into a [Salt](https://saltproject.io) state file and the top
-file that assigns it, and applies it with `salt-call --local`, or with `salt-ssh` for
-another machine. Salt still does the work: Meridian writes the state file a person would
-have written and runs Salt on it.
+Compiles a ResourceSet into a [Salt](https://saltproject.io) state file and top file, and
+applies it with `salt-call --local`, or `salt-ssh` for another machine.
 
 ## What it does and does not support
 
@@ -28,19 +26,13 @@ have written and runs Salt on it.
 
 What it does not do:
 
-- **It does not talk to a Salt master.** Plan and apply are masterless. The compiled
-  files work on a master, but you copy them there yourself; see
-  [Using the files with a Salt master](#using-the-files-with-a-salt-master).
-- **No grains or custom modules are written, and no pillar beyond the document's
-  [secrets](#secrets).** A `runtimeWhen` can read the node's grains and pillar; the
-  plugin does not create them.
-- **A state function of Salt's own is passed through unchecked.** Its arguments are
-  written as the document gives them, and an argument the function does not take is
-  Salt's to refuse when the state is applied, not Meridian's. See
-  [State functions beside the six](#state-functions-beside-the-six).
+- **No Salt master.** Plan and apply are masterless; copy the files to a master yourself
+  ([with a master](#using-the-files-with-a-salt-master)).
+- **No grains, custom modules or pillar** beyond the document's [secrets](#secrets).
+- **Salt's own state functions are passed through unchecked**
+  ([state functions](#state-functions-beside-the-six)).
 - **`restarted` and `reloaded` are not service states.** Use a notification.
-- **It creates no infrastructure.** It configures a node that already exists, and has
-  no resource types for anything else.
+- **No infrastructure.** It configures an existing node.
 
 Contents: [Requirements](#requirements) ·
 [Quick start](#quick-start) ·
@@ -57,7 +49,6 @@ Contents: [Requirements](#requirements) ·
 [Warnings](#warnings) ·
 [What the plugin refuses](#what-the-plugin-refuses) ·
 [When a run fails](#when-a-run-fails) ·
-[Differences from other targets](#differences-from-other-targets) ·
 [How it is tested](#how-it-is-tested)
 
 ## Requirements
@@ -98,10 +89,9 @@ meridian plan site.yaml                  # salt-call --local ... state.apply web
 meridian apply site.yaml                 # the same, for real
 ```
 
-Salt has to be installed on the machine Meridian runs on. With `host: localhost` the
-state is applied to that machine with `salt-call --local`, which needs no master and no
-running minion. With any other host it is applied over SSH with `salt-ssh`, which needs
-nothing installed on the host but Python.
+Salt must be installed where Meridian runs. `host: localhost` uses `salt-call --local`
+(no master or minion). Any other host uses `salt-ssh`, which needs only Python on the
+host.
 
 ## A worked example
 
@@ -296,22 +286,12 @@ base:
     - web
 ```
 
-Things to notice:
-
-- **One state per resource, under the resource's own ID.** What Salt reports about
-  `nginx_conf` is about the resource you wrote as `nginx_conf`.
-- **`dependsOn` became `require`.** The file is in apply order and every dependency is
-  also stated, so the result reads the same to Salt as it does to you.
-- **The restart is a `watch` on the service itself.** That is how a Salt author writes
-  it: when `nginx_conf` changes, `service.running` restarts nginx.
-- **The reload is a second state, `reload nginx_svc`.** One Salt state either restarts or
-  reloads on a change, never both, so the reload has a state of its own that watches only
-  `nginx_site`.
-- **`runtimeWhen` became a Jinja test.** The first line of the file says it is rendered
-  through Jinja, and on a minion that is not in the Debian family `open_firewall` is
-  skipped.
-- **The top file matches the host exactly.** A bare key in a top file is a glob;
-  `match: list` makes it the one minion ID and nothing else.
+- One state per resource, under the resource's ID.
+- `dependsOn` became `require`; the file is in apply order.
+- The restart is a `watch` on the service.
+- The reload is a separate state, `reload nginx_svc`, watching only `nginx_site`.
+- `runtimeWhen` became a Jinja test.
+- `match: list` makes the top file match the one minion ID.
 
 ## What a document compiles to
 
@@ -323,26 +303,20 @@ Things to notice:
 `states/` is a Salt file root. The state is applied by the document's name:
 `state.apply web` for a document named `web`.
 
-- **The document name names the state file**, so it may hold only letters, digits, `_`
-  and `-`. Salt reads a dot in a state name as a directory, and `top` is the top file.
-  A name that cannot be used is refused, not rewritten.
-- **Each resource's `id` is its state's ID.** Salt's reports, and requisites between
-  states, use it as written. The IDs `include`, `extend` and `exclude` mean something
-  else at the top of a state file and are refused.
+- **The document name is the state file name**: letters, digits, `_` and `-`, not `top`.
+  Others are refused.
+- **Each resource's `id` is its state ID.** `include`, `extend` and `exclude` are refused.
 - **The first line says how Salt must read the file.** `#!yaml` for plain YAML,
   `#!jinja|yaml` when a resource has a `runtimeWhen`. See
   [Runtime conditions](#runtime-conditions).
-- **Arguments are in a fixed order**: `name`, then the rest alphabetically, then
-  `require`, `watch` and `onchanges`. The same document always compiles to the same
-  bytes.
+- **Arguments are in a fixed order**: `name`, the rest alphabetically, then `require`,
+  `watch` and `onchanges`.
 - **The host must be usable as a minion ID**: not empty, and without spaces or commas.
 
 ## How resources map
 
-Every shared type, state and param the plugin accepts is listed here; any other type is
-a state function of Salt's own, [below](#state-functions-beside-the-six). A param a
-shared type does not take is refused at compile time with a message that names what
-would have worked; nothing is dropped silently.
+Every shared type, state and param accepted. Any other type is a
+[Salt state function](#state-functions-beside-the-six). Any other param is refused.
 
 ### `package`
 
@@ -352,8 +326,7 @@ would have worked; nothing is dropped silently.
 | `latest` | `pkg.latest` | `name` |
 | `absent` | `pkg.removed` | `name` |
 
-`version` pins the package and is only meaningful when it is installed, so it is refused
-with `latest` and `absent`.
+`version` is refused with `latest` and `absent`.
 
 ### `service`
 
@@ -373,16 +346,13 @@ A service can be notified with `restart`, `reload`, `start` and `stop`; see
 | `directory` | `file.directory`, with `makedirs: true` | `path`, `owner` → `user`, `group`, `mode` |
 | `absent` | `file.absent` | `path` |
 
-- Without `content`, only the file's existence, owner, group and mode are managed. The
-  plugin adds `replace: false` so Salt never touches what an existing file holds; a file
-  that is missing is created empty.
-- Salt ends a managed file with a newline. Content that already ends with one is written
-  as it is; content that does not gets one added.
-- A directory is created together with any missing parents.
-- Write `mode` as a quoted string, `"0644"`. An unquoted `0644` is a YAML number.
+- Without `content`, `replace: false` is added: an existing file's content is kept and a
+  missing file is created empty.
+- Content without a final newline gets one.
+- A directory is created with missing parents.
+- Quote `mode`: `"0644"`.
 - `content` is refused with `directory` and `absent`. `owner`, `group` and `mode` on an
-  absent file are left out with a warning, so a resource can be switched to `absent`
-  without first being stripped.
+  absent file are dropped with a warning.
 
 ### `user` and `group`
 
@@ -393,14 +363,12 @@ A service can be notified with `restart`, `reload`, `start` and `stop`; see
 | `group` | `present` (default) | `group.present` | `name` (required), `gid`, `system` |
 | `group` | `absent` | `group.absent` | `name` |
 
-`groups` is the complete list of the user's supplementary groups: Salt removes the user
-from any group that is not in it. Params that describe an absent user or group are left
-out with a warning.
+`groups` is the complete supplementary group list; Salt removes the user from others.
+Params on an absent user or group are dropped with a warning.
 
 ### `exec`
 
-`exec` is the escape hatch: a command to run, not a state to converge on. It takes no
-`state` and compiles to `cmd.run`.
+Compiles to `cmd.run`. Takes no `state`.
 
 | Param | Becomes | Meaning |
 |---|---|---|
@@ -410,13 +378,10 @@ out with a warning.
 | `removes` | an `onlyif` that asks Salt's `file.access` | Run the command only when this path exists |
 | `shell` | nothing | Says the command is meant for a shell |
 
-A command with neither `creates` nor `removes` runs on every apply, and every plan
-reports it as a change.
+Without `creates` or `removes` it runs on every apply and every plan shows a change.
 
-Salt always hands a command to a shell. Other targets do not unless `shell: true` is
-set, so the same document could mean two things. To keep it meaning one, a command that
-a shell would read differently, one holding any of `| & ; < > ( ) $ ` \ * ? [ ] { } ~ #`,
-is refused unless the resource says `shell: true`:
+Salt always uses a shell. A command holding any of `| & ; < > ( ) $ ` \ * ? [ ] { } ~ #`
+is refused unless the resource sets `shell: true`:
 
 ```yaml
 - id: rotate
@@ -431,16 +396,16 @@ is refused unless the resource says `shell: true`:
 Any state function is a resource type, written by its dotted name as a state file
 writes it: `pkgrepo.managed`, `file.symlink`, `docker_container.running`,
 `postgres_database.present`. The function's arguments are the resource's `params`,
-written into the state exactly as given; Meridian checks nothing against a list of what
-the function takes. An argument the function does not have, or a module the minion does
-not ship, is Salt's to refuse when the state is applied, as a provider's type is
-Terraform's, until the module's schema is synced and the editor reports it in place.
+written into the state as given. Meridian does not check them. Salt refuses an
+unknown argument, or a module the minion does not ship, when the state is applied.
+Once the module's schema is synced, the editor reports these in place.
 
-A Salt state is always dotted, so no state function has the bare name of a shared type
-and `native/<name>` reaches nothing here: `native/file` is refused, with `file.managed`
-as what to write. The shared `file` and `file.managed` written in full are both Salt's
-`file.managed`; the shared one takes the six's params and moves between tools, the
-dotted one takes every argument the function has and compiles for Salt only.
+A Salt state is always dotted, so `native/<name>` reaches nothing here.
+`native/file` is refused, with `file.managed` as what to write. The shared `file`
+and `file.managed` both compile to Salt's `file.managed`:
+
+- the shared `file` takes the six's params and moves between tools
+- `file.managed` takes every argument the function has and compiles for Salt only
 
 ```yaml
 resources:
@@ -509,23 +474,19 @@ app:
 | Secrets | as for the six: a pillar lookup the runner answers. A `file.*` state given one shows no changes; a `cmd.*` state is refused one, because Salt prints the command line |
 | References | `${id.param}` is settled from the document, as for the six |
 
-[`examples/salt/native-states.yaml`](../../examples/salt/native-states.yaml) is a whole
-document of both kinds. A document that names a state function compiles for Salt only.
-The [`native-type`](../reference/lint.md#native-type) lint rule marks each such
-resource. The six shared types stay the portable way to say what they can say; a state
-function is for everything else. The split, and why `native/file` is refused here, is
+Example: [`examples/salt/native-states.yaml`](../../examples/salt/native-states.yaml). A
+document using a state function compiles for Salt only; the
+[`native-type`](../reference/lint.md#native-type) lint marks it. See
 [decision 0032](../decisions/0032-native-types-beside-the-six-and-a-prefix-for-colliding-names.md).
 
 ## Ordering
 
-Salt evaluates states in the order the file lists them and honours requisites on top.
-The plugin writes the states in Meridian's apply order and turns every `dependsOn` into
-a `require`, so the dependency graph survives edge for edge. If a state fails, the states
-that require it are not run, and Salt says so.
+States are written in apply order and every `dependsOn` becomes a `require`. States that
+require a failed state do not run.
 
 ## Notifications
 
-`notifies` compiles to Salt's own requisites. Nothing is shelled out.
+`notifies` compiles to Salt requisites:
 
 | Notified type | Action | Compiles to |
 |---|---|---|
@@ -536,29 +497,22 @@ that require it are not run, and Salt says so.
 | `exec` | `run` | a state `run <id>`: the same `cmd.run` with `onchanges` |
 | a state function of Salt's own | `watch` | `watch` on the state itself, or a state `watch <id>` after both when the notifier comes later |
 
-The extra states are written after every resource's own state, in name order. Each
-requires the resource it acts on and is tied to every resource that notifies it, so
-several notifiers of one change share one state.
+Extra states come after all resource states, in name order. Several notifiers share one
+state.
 
-- **A watched service reacts in place.** A `restart` happens where the service's state
-  is evaluated, not at the end of the run. If the resource that notifies is applied
-  *after* the service, a watch on the service would turn the order round, so the plugin
-  writes a `restart <id>` state after both instead.
-- **A stopped service cannot be restarted or reloaded.** Salt does both through the state
-  that keeps a service running, so the plugin refuses the combination.
-- **A notified `exec` runs in its own place and again on a change.** The `exec` resource
-  is an ordinary command in the run. The `run <id>` state is the same command, run once
-  more when a notifier changed. It keeps the resource's `creates` and `removes` guards.
-- **Reactions ignore `runtimeWhen`.** A `run <id>` or `reload <id>` state runs because
-  something changed, not because the notified resource's condition holds.
+- A `restart` happens where the service state is evaluated. If the notifier is applied
+  after the service, a `restart <id>` state is written after both.
+- A `stopped` service cannot be restarted or reloaded; refused.
+- A notified `exec` runs in its place and again, as `run <id>`, on a change, keeping its
+  `creates` and `removes`.
+- Reactions ignore `runtimeWhen`.
 
 `package`, `file`, `user` and `group` cannot be notified.
 
 ## Runtime conditions
 
-`runtimeWhen` is a condition evaluated on the node at the moment of apply. On this target
-it is a **Jinja expression**, written without `{{ }}` or `{% %}`, over what the minion
-knows about itself: `grains`, `pillar`, `salt`, `opts`.
+`runtimeWhen` is a **Jinja expression**, without `{{ }}` or `{% %}`, over `grains`,
+`pillar`, `salt` and `opts`.
 
 ```yaml
 - id: tune_kernel
@@ -569,33 +523,18 @@ knows about itself: `grains`, `pillar`, `salt`, `opts`.
     creates: /etc/tuned/active_profile
 ```
 
-A minion renders a state file itself, with its own grains and pillar, each time the state
-is applied. The expression is written into the file and the minion decides.
+The minion renders it each apply. When false, the state gets an always-true `unless`, so
+Salt skips it as succeeded and dependents still run.
 
-When the condition is false the state is not removed from the file. It is given an
-`unless` that always holds, so Salt skips it and counts it as succeeded. That is what
-lets another resource depend on a conditional one: its `require` still resolves, and it
-still runs.
+A file with a runtime condition starts with `#!jinja|yaml`, and every authored string is
+escaped so Jinja passes it unchanged. Otherwise it starts with `#!yaml`.
 
-A file with a runtime condition starts with `#!jinja|yaml`. In such a file every string
-you wrote is written so that Jinja passes it on unchanged: a `{{`, `{%` or `{#` in file
-content reaches the node as those characters. A file with no runtime condition starts
-with `#!yaml` and is not rendered through Jinja at all.
-
-The expression is yours: the plugin checks that it is one line and holds no tag
-delimiters, and Salt checks the rest when it renders the file. A mistake in it is
-reported by `meridian plan` as "salt-call could not compile the state file", with Salt's
-own message.
-
-`runtimeWhen` is target-native by design, so a document that uses it is written for one
-target. Prefer an ordinary `when`, which Meridian evaluates itself, wherever the answer
-is known before apply.
+The plugin checks the expression is one line without tag delimiters. Salt's errors appear
+in `meridian plan` as "salt-call could not compile the state file".
 
 ## Running it
 
-`meridian plan` runs Salt's own dry run, `test=True`, and reports each state that would
-change. `meridian apply` runs the same command without it. Both show one line per state
-as Salt reported it:
+`plan` runs with `test=True`; `apply` without. Both show one line per state:
 
 ```
 nginx_pkg (pkg.installed): would change: The following packages would be installed/updated: nginx
@@ -605,15 +544,9 @@ legacy_user (user.absent): ok: User old is not present
 
 How the result is read:
 
-- The plugin asks Salt for its result as JSON and reads every state from it, in the
-  order Salt ran them. Salt prints that result once, at the end, so the lines above
-  appear when the run finishes. Anything Salt writes to its error stream is relayed as
-  it happens.
-- **A plan** counts a state as a change when Salt says it would change. **An apply**
-  counts a state as a change when Salt reports it changed something.
-- A change is reported as `delete` for `file.absent`, `user.absent`, `group.absent` and
-  `pkg.removed`, and as `update` for everything else. Salt does not say whether a
-  state created something or altered it.
+- Results are read from Salt's JSON at the end of the run; stderr is relayed live.
+- A change is `delete` for `file.absent`, `user.absent`, `group.absent` and `pkg.removed`,
+  and `update` otherwise.
 - A state skipped by a false `runtimeWhen`, by `creates` or `removes`, or because
   nothing it reacts to changed, is reported as `ok` and is not a change.
 - If any state fails, the run fails. See [When a run fails](#when-a-run-fails).
@@ -625,10 +558,8 @@ How the result is read:
 | `localhost`, `127.0.0.1`, `::1` | local | `salt-call --local --file-root <work>/states --out json state.apply <document>` |
 | anything else | SSH | `salt-ssh --config-dir <work>/ssh --roster-file <work>/ssh/roster --out json <host> state.apply <document>` |
 
-`<work>` is the directory Meridian keeps for the document under its state directory.
-For SSH the plugin writes two small files there: a configuration that points `salt-ssh`
-at the compiled states and keeps its cache inside the work directory, and a roster with
-the one host.
+`<work>` is the document's directory under the state directory. For SSH it holds a
+`salt-ssh` configuration and a one-host roster.
 
 ### Settings
 
@@ -643,10 +574,8 @@ The plugin reads four environment variables:
 | `MERIDIAN_SSH_AGENT` | The `ssh-agent` program, started for a credential's key; see [Credentials](#credentials) | `ssh-agent` on `PATH` |
 | `MERIDIAN_SSH_ADD` | The `ssh-add` program | `ssh-add` on `PATH` |
 
-Every setting can also be written in the project's `meridian.yaml` under
-`spec.settings.salt`, by its short name; the environment variable still wins.
-The names, defaults and the splitting rule for argument lists are in the
-[plugin settings reference](../reference/plugin-settings.md#salt).
+Also settable in `meridian.yaml` under `spec.settings.salt`; the environment wins. See
+[plugin settings](../reference/plugin-settings.md#salt).
 
 Common uses:
 
@@ -661,14 +590,12 @@ export MERIDIAN_SALT_ARGS="--user deploy --priv /home/me/.ssh/deploy --sudo -i"
 export MERIDIAN_SALT_ARGS="--config-dir /home/me/salt-config"
 ```
 
-`salt-call` normally runs as root, because it writes to `/var/cache/salt` and most
-states change the system. To run it unprivileged, point `--config-dir` at a directory
-whose `minion` file sets `root_dir` to somewhere you can write.
+`salt-call` normally runs as root. To run unprivileged, point `--config-dir` at a
+directory whose `minion` file sets a writable `root_dir`.
 
 ### Secrets
 
-A [secret](../reference/dsl/secrets.md) in a resource's params reaches Salt as pillar
-data, and through nothing else.
+A [secret](../reference/dsl/secrets.md) reaches Salt as pillar data only.
 
 ```yaml
 spec:
@@ -686,12 +613,9 @@ spec:
         content: ${{ secret.db_password }}
 ```
 
-**What the compile writes.** The state file is rendered through Jinja (its first line
-becomes `#!jinja|yaml`, as it is for a `runtimeWhen`), and the param is a read of the
-secret's pillar key. The value goes through Salt's `yaml_encode` filter, so whatever it
-holds, what Jinja writes in its place is one quoted YAML scalar, and the reference is
-written unquoted where YAML reads that scalar. A file state given a secret is told not
-to show its diff, since the diff would print the value:
+**Compile.** The file becomes `#!jinja|yaml` and the param reads the pillar key through
+`yaml_encode`, giving one quoted YAML scalar. A file state with a secret gets
+`show_changes: false`:
 
 ```yaml
 db_conf:
@@ -702,36 +626,30 @@ db_conf:
     - show_changes: false
 ```
 
-Every other string in the file is still escaped so that Jinja leaves it alone, as it is
-for a condition; see [Runtime conditions](#runtime-conditions). The compiled file holds
-the key, never the value.
+Other strings are escaped for Jinja. The file holds the key, never the value.
 
-**How the value reaches the tool.** When a stage runs, the runner writes a pillar root in
-a directory only the user can enter (mode `0700`, the files `0600`, on a memory filesystem
-where the system has one): `meridian.sls` with each secret under its key, and a `top.sls`
-that applies it to every minion. On this machine `salt-call` is given `--pillar-root
-<dir>`; for another host the `salt-ssh` configuration the plugin writes names it as
-`pillar_roots`, and `salt-ssh` sends the pillar to the node the way it sends every
-pillar. The directory is overwritten and removed when the run ends. Neither the command
-line nor the tool's environment ever holds the value, and nothing in the stage's work
-directory does. The report Meridian reads says the file is set to be changed, as it does
-for any file, without the content.
+**Run.** The runner writes a private pillar root (`0700`, files `0600`, in memory where
+possible) with `meridian.sls` and a `top.sls`. `salt-call` gets `--pillar-root <dir>`;
+`salt-ssh` gets it as `pillar_roots`. It is removed when the run ends. The value is never on
+the command line, in the environment or in the work directory.
 
-**What is refused.** A secret in an `exec`. Salt writes the command line into its
-result's comment, in a dry run (`Command "..." would have been executed`) and in a real
-one, and no setting keeps it out, so the value would be in the report Meridian reads. The
-compile refuses it, rule `unsupported-secret-place`; put the secret in a file the command
-reads, or use it in a `runtimeWhen`.
+**Refused.** A secret in an `exec` (`unsupported-secret-place`), because Salt prints the
+command line in its result. Put it in a file the command reads, or a `runtimeWhen`.
 
-The handover is tested against a stand-in `salt-call` that keeps a copy of the pillar
-files, their mode, its arguments and its environment, and against the real `salt-call` in
-CI, which applies a file whose content is a secret, and whose value then appears in the
-file and in nothing Salt printed or the plugin wrote.
+The handover is tested two ways:
+
+- against a stand-in `salt-call` that records the pillar files, their mode, its
+  arguments and its environment
+- against the real `salt-call` in CI, which applies a file whose content is a
+  secret and checks the value appears in the file and nowhere in Salt's output or
+  the plugin's
 
 ## Credentials
 
 `targetHost.credential` names the [credential](../reference/dsl/credentials.md) the host is
-reached as. Another machine is reached with `salt-ssh`, which reads how to sign in from its roster, so the plugin writes the credential into the roster it already writes for the run, and the roster into a private place when it holds a password:
+reached as. Another machine is reached with `salt-ssh`, which reads how to sign in
+from its roster. The plugin writes the credential into the run's roster, and keeps
+the roster in a private place when it holds a password:
 
 ```yaml
 spec:
@@ -752,44 +670,33 @@ spec:
 ```
 
 - **The user** is the roster's `user:`.
-- **A password** (an `ssh` credential with a `password`, or a `usernamePassword` one) is the
-  roster's `passwd:`. The roster is then written to a file only you can read, in a
-  directory of its own that is removed when the run ends, and `--roster-file` names it; the
-  work directory's `ssh/roster` is not written. Without a password the roster is in the
-  work directory, as before, and holds the user and `priv: agent-forwarding` at most.
+- **A password** is the roster's `passwd:`; the roster is then a private file, removed
+  after the run, named by `--roster-file`. Otherwise the roster is in the work directory.
 - **A key** is the roster's `priv: agent-forwarding`, which makes `salt-ssh` use the agent
   `SSH_AUTH_SOCK` names.
-- Leave `--user`, `--priv` and `--passwd` out of `MERIDIAN_SALT_ARGS` when the document
-  names a credential: `salt-ssh` lets a command-line option override the roster.
-- **A key is never on disk.** It goes into an SSH agent Meridian starts for the stage:
-  `ssh-agent -D -a <socket>`, its socket in a directory only you can enter, loaded with
-  `ssh-add -` from standard input. `salt-ssh` is told the socket in `SSH_AUTH_SOCK` and
-  nothing else. A `passphrase` is answered to `ssh-add` from a file only you can read. The
-  agent is stopped and its directory removed when the stage ends. Nothing of the key is on
-  the command line, in the environment, in the compiled files or in a file Meridian keeps.
-- **`agent: true`** names a key in your own agent: `salt-ssh` reads `SSH_AUTH_SOCK` as it is,
-  and Meridian starts nothing. **`from: ambient`** leaves signing in to the tool's own
-  configuration, as with no credential at all.
+- Leave `--user`, `--priv` and `--passwd` out of `MERIDIAN_SALT_ARGS`; they override the
+  roster.
+- **A key** goes into an SSH agent Meridian starts for the stage, loaded through `ssh-add`'s
+  stdin; `salt-ssh` gets only `SSH_AUTH_SOCK`. A `passphrase` is answered from a private file.
+  See [0028](../decisions/0028-a-key-reaches-a-host-through-an-agent-meridian-starts.md).
+- **`agent: true`** uses your own agent. **`from: ambient`** leaves signing in to the tool.
 - **Refused at compile**, rule `unsupported-credential`: a `certificate` (put it
   beside the key in an agent of your own and set `agent: true`); a `domain` (for WinRM
   hosts, which this plugin does not reach); a user name with a space or a line break.
 - **Refused at run time:** a credential for this machine (`localhost`, `127.0.0.1`, `::1`
-  or no host). `salt-call` configures this machine as the user running Meridian, whoever the document names. Leave the credential out, or name another host.
+  or no host). Leave the credential out, or name another host.
 
 The plan line names the identity, `web (salt) on web01.example.com as deploy (ssh,
 user deploy)`, and never a value. `ssh-agent` and `ssh-add` are run from `PATH`, or from
 `MERIDIAN_SSH_AGENT` and `MERIDIAN_SSH_ADD`.
 
-The handover is tested against stand-ins for `salt-ssh`, `ssh-agent` and `ssh-add` that keep what they are given (the roster and its mode, the environment, the key and the passphrase), and against the real `salt-ssh` in CI, which configures the machine the tests run on over SSH as a credential whose key is read into a secret and reaches `salt-ssh` only through the agent Meridian starts.
+Tested against stand-ins for `salt-ssh`, `ssh-agent` and `ssh-add`, and against the real
+`salt-ssh` in CI over SSH with a key delivered only through the agent.
 
 ## Editor schemas
 
-`meridian schema sync` asks `salt-call --local` what the state functions the
-documents use take, so an editor completes and checks a `file.symlink` or a
-`pkgrepo.managed`'s arguments as it does the six types' params
-([Tool schemas](../tooling/schema-sync.md)). Until a function is synced, the
-editor knows it by name only, as [State functions beside the six](#state-functions-beside-the-six)
-says.
+`meridian schema sync` asks `salt-call --local` for the arguments of the state functions
+used, for editor completion and checks ([tool schemas](../tooling/schema-sync.md)).
 
 | | |
 |---|---|
@@ -797,16 +704,12 @@ says.
 | Listed by name | every other state function `sys.list_state_functions` knows: built in, and from the modules the minion's `file_roots` hold. Salt's own `file`, `pkg`, `service`, `user`, `group` and `cmd` modules are among them; a document reaches them by their dotted names, never under `native/` |
 | Pinned | Salt's version, from `salt-call --version` |
 
-Every call runs `salt-call --local --out=json` with the target's own
-settings (`MERIDIAN_SALT_CALL`, `MERIDIAN_SALT_ARGS`), so the minion
-configuration the runs use is the one the sync reads. Every function takes
-the `watch` action, which is what `notifies` sends it.
+It uses `MERIDIAN_SALT_CALL` and `MERIDIAN_SALT_ARGS`. Every function takes the `watch`
+action.
 
 ## Using the files with a Salt master
 
-The compiled `states/` directory is an ordinary Salt file root, so it also works where a
-master pushes to minions. Copy the two files into the master's file root, for example
-`/srv/salt`, and apply as usual:
+Copy the two files into the master's file root, such as `/srv/salt`:
 
 ```
 meridian compile site.yaml --out build
@@ -814,13 +717,9 @@ cp build/web/states/web.sls /srv/salt/
 salt 'web01.example.com' state.apply web test=True
 ```
 
-`top.sls` assigns the state to the document's host for a highstate. If the master already
-has a top file, merge the entry into it by hand; do not overwrite it. `meridian plan`
-and `meridian apply` do not talk to a master.
+Merge `top.sls` into an existing top file by hand.
 
 ## Warnings
-
-A warning does not stop a compile; it is printed beside the result:
 
 ```
 web (ResourceSet, target salt on localhost)
@@ -828,7 +727,7 @@ web (ResourceSet, target salt on localhost)
   compiled 2 files into build/web
 ```
 
-This target has one:
+Warnings:
 
 | Warning | When |
 |---|---|
@@ -836,8 +735,7 @@ This target has one:
 
 ## What the plugin refuses
 
-A refusal stops the compile. It names the resource, the rule and the line in your
-document, for example:
+A refusal names the resource, rule and line:
 
 ```
 web (ResourceSet, target salt on localhost)
@@ -896,28 +794,6 @@ Messages name `salt-ssh` in place of `salt-call` when that is what ran.
 
 A permission error from `salt-call`, such as being unable to write under `/var/cache/salt`,
 means it needs root or a configuration directory of its own; see [Settings](#settings).
-
-## Differences from other targets
-
-The same document compiles for Ansible, Puppet and Salt. Where they differ, it is
-because the tools do:
-
-- **Reload.** Salt can reload a service on a change; so can Ansible. Puppet cannot, and
-  its plugin refuses the document.
-- **Runtime conditions.** Salt and Ansible support `runtimeWhen`, each in its own
-  expression language. Puppet does not.
-- **Restart timing.** Salt restarts a watched service where its state is evaluated.
-  Ansible runs handlers at the end of the play.
-- **Ordering.** Salt and Puppet keep the dependency graph. Ansible flattens it to a
-  sequence and warns about it.
-- **Commands.** Salt always uses a shell, hence the `shell-required` rule.
-- **Service states.** `restarted` and `reloaded` are not states on this target. Salt has
-  no state that means "restart every time"; use a notification.
-- **Empty files.** A `file` with no `content` creates a missing file here; Ansible's
-  `file` module would fail instead.
-- **The tool's own types.** Every state function is reachable by its dotted name, and
-  none has a bare name, so `native/<name>` is refused here where Puppet and Chef accept
-  it.
 
 ## How it is tested
 

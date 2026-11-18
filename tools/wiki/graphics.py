@@ -228,8 +228,8 @@ def architecture() -> str:
         "order by dependsOn", "stages and outputs", "lock, record, resume",
     ]))
     p.append(chip_row(L + 28, core_y + 96, [
-        "secrets in locked memory", "policy checks", "reports and sinks", "plugin signatures",
-        "rollback and drift", "import", "adopt", "schema sync",
+        "locked-memory secrets", "policy checks", "reports, sinks", "plugin signatures",
+        "rollback, drift", "import", "adopt", "retarget", "schema sync",
     ], TEXT_SOFT))
     for i, cx in enumerate(centres):
         p.append(flow(f"M{cx:g} {top + card_h}L{cx:g} {core_y}", WHITE if i < 3 else TEXT_SOFT, delay=i * 0.9, seconds=3 if i < 3 else 4))
@@ -239,7 +239,7 @@ def architecture() -> str:
     p.append(rect(L, proto_y, R - L, proto_h, TILE, LINE, 29))
     mid = (L + R) / 2
     p.append(text(mid, proto_y + 25, "one plugin program per target, spoken to over a private socket", 15, 600, WHITE))
-    p.append(text(mid, proto_y + 45, "Describe · Emit · Plan · Apply · Outputs · Import · ExportSchemas", 13, 400, TEXT_SOFT, mono=True))
+    p.append(text(mid, proto_y + 45, "Describe · Emit · Plan · Apply · Outputs · Identifiers · Import · ExportSchemas", 13, 400, TEXT_SOFT, mono=True))
     p.append(flow(f"M{mid - 40:g} {core_y + core_h}L{mid - 40:g} {proto_y}", WHITE, delay=0.4))
     p.append(flow(f"M{mid + 40:g} {proto_y}L{mid + 40:g} {core_y + core_h}", LINE, delay=1.6))
     p.append(text(mid - 56, core_y + core_h + 22, "ordered resources, data, secrets", 12.5, 400, TEXT_SOFT, "end"))
@@ -794,6 +794,35 @@ def adopt_flow() -> str:
     return doc(W, H, "adopt: a resource names the tool's identifier of a thing that exists; a stateful target compiles it into the tool's import and the plan reports adopt, a converging target accepts it and changes nothing, and any other target is refused before its plugin is asked", "".join(p))
 
 
+def retarget_flow() -> str:
+    """meridian retarget: the old tool reports what it manages, the new file adopts it."""
+    W, H = 1200, 480
+    p: list[str] = []
+    p.append(heading(40, 48, "One document, from one tool to another"))
+    p.append(card(40, 60, 330, 170, "site.yaml", None, IAC, 17))
+    p.append(lines(70, 112, ["spec:", "  target: terraform", "  resources:", "    - id: logs", "      type: aws_s3_bucket"], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(card(435, 60, 330, 170, "the old tool's state", None, WHITE, 17))
+    p.append(lines(465, 112, ["terraform show -json", "", "logs  ->  example-logs", "web   ->  i-0abc123"], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(card(830, 60, 330, 170, "site.opentofu.yaml", None, GREEN, 17))
+    p.append(lines(860, 112, ["spec:", "  target: opentofu", "  resources:", "    - id: logs", "      adopt: \"example-logs\""], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(flow("M370 145L435 145", WHITE, delay=0.2, seconds=1.6))
+    p.append(flow("M765 145L830 145", WHITE, delay=0.9, seconds=1.6))
+    p.append(text(602, 255, "meridian retarget site.yaml --to opentofu", 13, 600, WHITE, mono=True))
+    p.append(heading(40, 300, "What the new target decides"))
+    kinds = [
+        ("import", "an adopt line per resource the old tool manages", IAC),
+        ("converge", "only the target: the tool takes what it finds", CM),
+        ("none", "only the target, and a warning: it creates again", RED),
+    ]
+    for i, (name, body, colour) in enumerate(kinds):
+        p.append(chip(40, 312 + i * 38, 110, name, colour, 28, 13, True))
+        p.append(text(165, 312 + i * 38 + 19, body, 13, 400, TEXT_SOFT, "start"))
+    p.append(card(760, 300, 400, 96, "meridian plan site.opentofu.yaml", None, GREEN, 15))
+    p.append(lines(790, 350, ["= adopt logs: aws_s3_bucket", "= adopt web: aws_instance"], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(caption(W, H, "The old file is left as it was, and no tool changes anything until you plan and apply the new one."))
+    return doc(W, H, "retarget: the old tool reports the identifier of each resource it manages, meridian retarget writes a new file with the new target and an adopt line per resource, and the new tool's first plan adopts each one instead of creating it", "".join(p))
+
+
 GRAPHIC_FILES = {
     "meridian-architecture.svg": architecture,
     "meridian-compile-pipeline.svg": compile_pipeline,
@@ -808,6 +837,7 @@ GRAPHIC_FILES = {
     "meridian-common-types.svg": common_types,
     "meridian-schema-bundles.svg": schema_bundles,
     "meridian-adopt.svg": adopt_flow,
+    "meridian-retarget.svg": retarget_flow,
 }
 
 # ---------------------------------------------------------------------------

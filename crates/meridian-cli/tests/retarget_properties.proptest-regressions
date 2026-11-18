@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 1aaad42a89755593c535132b89e15f3aa1be3a8e14019027dbf4788a98fd1fb8 # shrinks to layout = Layout { indent: 2, crlf: true, id_first: false, comment: false, quoted_target: false, final_newline: false }, reported = [None]
+cc 9b29604d06a52f5de616758b30990cb529adb90fc7dd3cf4b9719154abc7006d # shrinks to layout = Layout { indent: 2, crlf: false, id_first: false, comment: false, quoted_target: false, final_newline: false }, reported = [Some("a")]
+cc 5351aeeb3f6706ee512bc368902a7b94fcb6a0d0e1bab4ec81d0baf7f30a6530 # shrinks to layout = Layout { indent: 2, crlf: false, id_first: false, comment: false, quoted_target: false, final_newline: false }, reported = [Some("${")]

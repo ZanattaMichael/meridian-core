@@ -1,25 +1,17 @@
 # Visual Studio Code
 
-The Meridian extension gives VS Code completion, hover documentation, errors
-as you type, navigation, formatting and quick fixes for Meridian documents. It
-is a thin wrapper: it starts [`meridian lsp`](language-server.md) and connects
-the editor to it. It holds no knowledge of the language itself, so a new field
-or a new plugin shows up in the editor without a new version of the extension.
-
-It lives in [`editors/vscode`](../../editors/vscode) and is packaged from
-there. It is not published to the Visual Studio Marketplace or to Open VSX.
+The extension starts [`meridian lsp`](language-server.md) for completion, hover, errors,
+navigation, formatting and quick fixes. It lives in [`editors/vscode`](../../editors/vscode)
+and is not on the Marketplace or Open VSX.
 
 ## Install
 
-You need the `meridian` command and the plugins for the targets you use
-([Install](../quickstart/install.md)). Then install the extension package,
-`meridian.vsix`, in one of two ways.
+Install `meridian` and your plugins ([Install](../quickstart/install.md)), then get
+`meridian.vsix`:
 
-**From a build on GitHub.** Every run of the `vscode` workflow attaches the
-package. Open the latest run under *Actions, vscode*, download the
-`meridian-vscode` artifact and unzip it.
+**From GitHub:** the `meridian-vscode` artifact of the latest *Actions, vscode* run.
 
-**From a checkout.** With Node.js 18 or later:
+**From a checkout** (Node.js 18+):
 
 ```sh
 cd editors/vscode
@@ -33,15 +25,12 @@ Then:
 code --install-extension meridian.vsix
 ```
 
-or, in VS Code, run **Extensions: Install from VSIX...** from the command
-palette and choose the file.
+or **Extensions: Install from VSIX...**.
 
 ## Use
 
-Open a folder that holds Meridian documents and open one. The extension starts
-when a YAML file is opened, and the status bar shows **Meridian** with a tick
-once the server is running. It acts on any YAML file whose `apiVersion` starts
-with `meridian/` and leaves every other YAML file alone.
+It starts on the first YAML file; the status bar shows **Meridian** with a tick. Only files
+with `apiVersion: meridian/...` are touched.
 
 | To | Do |
 |---|---|
@@ -56,10 +45,7 @@ with `meridian/` and leaves every other YAML file alone.
 | Jump between resources | the Outline view, or `Ctrl+Shift+O` |
 | Format the document | `Shift+Alt+F` |
 
-What each of these does is described, with pictures, in
-[the language server](language-server.md).
-
-To format on save, add this to your settings:
+See [the language server](language-server.md). Format on save:
 
 ```json
 {
@@ -69,9 +55,6 @@ To format on save, add this to your settings:
   }
 }
 ```
-
-The Meridian formatter leaves YAML files that are not Meridian documents
-untouched.
 
 ## Settings
 
@@ -84,8 +67,8 @@ untouched.
 | `meridian.stateDir` | `.meridian` | Where each workspace folder's [synced tool schemas](schema-sync.md) are read from, relative to the folder; the `--state-dir` the sync was run with. |
 | `meridian.trace.server` | `off` | Log the messages exchanged with the server to the Meridian output channel: `off`, `messages` or `verbose`. |
 
-`${workspaceFolder}` and a leading `~` are expanded in `meridian.path` and
-`meridian.pluginDirs`. To use a build from a checkout of this repository:
+`${workspaceFolder}` and `~` are expanded in `meridian.path` and `meridian.pluginDirs`. For
+a local build:
 
 ```json
 {
@@ -106,35 +89,24 @@ Changing a setting restarts the server.
 
 ## With the YAML extension
 
-The Red Hat YAML extension can be installed alongside. Do not give it the
-[Meridian JSON Schema](json-schema.md) for the same files, or each problem is
-reported twice: the language server already checks everything the schema does.
+It can run alongside; do not also give it the [JSON Schema](json-schema.md).
 
 ## Troubleshooting
 
-**"Meridian could not find the `meridian` command."** The command is not on
-the `PATH` VS Code was started with. Set `meridian.path` to its full path.
+**"Meridian could not find the `meridian` command."** Set `meridian.path`.
 
-**No completion for resource types, or `unknown-target` on every document.**
-The server found no plugin for the target. Plugins are looked for in
-`meridian.pluginDirs`, then `MERIDIAN_PLUGIN_DIR`, then the directory the
-`meridian` binary is in. `meridian plugins` in a terminal lists what is found
-and where.
+**No type completion, or `unknown-target` everywhere.** No plugin found in
+`meridian.pluginDirs`, `MERIDIAN_PLUGIN_DIR` or `meridian`'s directory; run
+`meridian plugins`.
 
-**"A plugin directory named in the editor's settings only loads plugins
-signed by a trusted key."** A plugin in a `meridian.pluginDirs` directory is
-started only when it is signed, since those settings can come with a project.
-Sign it, or trust the directory by starting the server with
-`MERIDIAN_LSP_TRUST_EDITOR_PLUGIN_DIRS=true` in VS Code's environment;
-[the language server](language-server.md#plugin-signatures) explains.
+**"A plugin directory named in the editor's settings only loads plugins signed by a
+trusted key."** Sign it, or set `MERIDIAN_LSP_TRUST_EDITOR_PLUGIN_DIRS=true`
+([why](language-server.md#plugin-signatures)).
 
-**Params are not completed for a Terraform or Kubernetes resource.** Those
-targets take their tool's own types, and do not list params.
-[What a target describes](index.md#what-a-target-describes) says which do.
+**No params for Terraform or Kubernetes types.** Run `meridian schema sync`
+([what a target describes](index.md#what-a-target-describes)).
 
-**Nothing happens in a file.** The server only acts on documents with
-`apiVersion: meridian/v1`. Check the language mode in the status bar says
-YAML.
+**Nothing happens.** Check `apiVersion: meridian/v1` and that the language mode is YAML.
 
 ## Working on the extension
 
@@ -147,14 +119,8 @@ npm run build          # bundle to out/extension.js
 MERIDIAN_BIN=../../target/debug/meridian npm run test:e2e
 ```
 
-The last command downloads a copy of VS Code, starts it with the extension and
-the `meridian` binary named, opens a document and checks what the editor
-shows: diagnostics, completion, hover, go to definition, a quick fix and
-formatting. Build the binary and a plugin first with
-`cargo build -p meridian-cli -p meridian-target-ansible`.
-
-Open `editors/vscode` in VS Code and press `F5` to run the extension in a
-second window. The `vscode` workflow runs all of these and packages the
-extension on every pull request that touches it or the language server. The server's behaviour is
-tested in Rust, in `crates/meridian-lsp` and `crates/meridian-cli/tests/tools.rs`,
-where a real `meridian lsp` process is driven over standard input and output.
+The last command runs VS Code with the extension and checks diagnostics, completion,
+hover, definition, a quick fix and formatting. Build first with
+`cargo build -p meridian-cli -p meridian-target-ansible`. Press `F5` in `editors/vscode` to
+debug. The `vscode` workflow runs these; the server is tested in `crates/meridian-lsp` and
+`crates/meridian-cli/tests/tools.rs`.

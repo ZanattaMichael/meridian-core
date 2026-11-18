@@ -51,9 +51,24 @@ use meridian_sdk::{
 /// The compiling half: each `file` resource becomes one artifact file.
 pub struct Fake;
 
+/// `fake`, or for a copy of the plugin installed as
+/// `meridian-target-fake-<more>`, `fake-<more>`: a second target, for a test
+/// that moves a document from one tool to another.
+fn name() -> &'static str {
+    static NAME: OnceLock<String> = OnceLock::new();
+    NAME.get_or_init(|| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|path| path.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            .and_then(|stem| stem.strip_prefix("meridian-target-").map(str::to_owned))
+            .filter(|name| name.starts_with("fake"))
+            .unwrap_or_else(|| "fake".to_owned())
+    })
+}
+
 impl Emitter for Fake {
     fn name(&self) -> &str {
-        "fake"
+        name()
     }
 
     fn supported_resource_types(&self) -> Vec<String> {
@@ -616,6 +631,26 @@ impl Runner for FakeRunner {
             return Err(RunError::new("nothing has been applied yet"));
         }
         Ok(outputs_of(&state, context))
+    }
+
+    /// `FAKE_IDENTIFIERS=off` stands it in for a plugin that cannot report
+    /// what it manages.
+    fn reads_identifiers(&self) -> bool {
+        std::env::var("FAKE_IDENTIFIERS").as_deref() != Ok("off")
+    }
+
+    /// Each file the state holds, by its resource id; its identifier is
+    /// `fake-<id>`, as a cloud's would be some id of its own.
+    fn identifiers(&self, context: &RunContext) -> Result<BTreeMap<String, String>, RunError> {
+        let state = read_state(&context.work_dir)?;
+        if state.is_empty() {
+            return Err(RunError::new("nothing has been applied yet"));
+        }
+        Ok(state
+            .keys()
+            .filter_map(|path| path.strip_prefix("files/"))
+            .map(|id| (id.to_owned(), format!("fake-{id}")))
+            .collect())
     }
 }
 

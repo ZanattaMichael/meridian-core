@@ -1,6 +1,7 @@
 //! What a plugin is, beyond a compiler: its category, the operations it
 //! offers, and the [`Runner`] half that hands an artifact to the real tool.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
@@ -442,5 +443,20 @@ pub trait Runner: Send + Sync {
     fn outputs(&self, context: &RunContext) -> Result<Vec<Output>, RunError> {
         let _ = context;
         Err(RunError::new("this plugin does not report outputs"))
+    }
+
+    /// Whether [`Runner::identifiers`] is answered. Say true only when the
+    /// identifiers are what the tool's import takes back, so that `meridian
+    /// retarget` can write them as `adopt` for another target.
+    fn reads_identifiers(&self) -> bool {
+        false
+    }
+
+    /// The tool's own identifier of each thing it manages, by the id of the
+    /// resource it was declared as, read from the tool's state without
+    /// changing anything. A resource the tool has no record of is left out.
+    fn identifiers(&self, context: &RunContext) -> Result<BTreeMap<String, String>, RunError> {
+        let _ = context;
+        Err(RunError::new("this plugin does not read identifiers"))
     }
 }

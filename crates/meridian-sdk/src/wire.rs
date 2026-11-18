@@ -946,6 +946,31 @@ pub fn outputs_response_from_wire(
     Ok(Ok(outputs_from_wire(r.outputs)?))
 }
 
+pub fn identifiers_response(
+    outcome: Result<BTreeMap<String, String>, RunError>,
+) -> pb::IdentifiersResponse {
+    match outcome {
+        Ok(identifiers) => pb::IdentifiersResponse {
+            identifiers: identifiers.into_iter().collect(),
+            error: None,
+        },
+        Err(e) => pb::IdentifiersResponse {
+            identifiers: Default::default(),
+            error: Some(run_error_to_wire(e)),
+        },
+    }
+}
+
+/// The outer error is a malformed message; the inner one is the tool failing.
+pub fn identifiers_response_from_wire(
+    r: pb::IdentifiersResponse,
+) -> Result<Result<BTreeMap<String, String>, RunError>, String> {
+    if let Some(e) = r.error {
+        return Ok(Err(run_error_from_wire(e, Vec::new())));
+    }
+    Ok(Ok(r.identifiers.into_iter().collect()))
+}
+
 pub fn settings_to_wire(settings: Vec<Setting>) -> Vec<pb::Setting> {
     settings
         .into_iter()
