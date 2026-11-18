@@ -1,12 +1,10 @@
 # Contributing to Meridian
 
-Thank you for being here. Meridian is one language for infrastructure and
-configuration, compiled to the tools people already run, and most of its value
-comes from the number of tools it speaks well. That makes it a project where
-outside contributions matter a great deal, and where a first contribution can
-be small and still be real.
+Meridian is one language for infrastructure and configuration, compiled to the
+tools people already run. Its value grows with every tool it supports well, so
+outside contributions matter, and a first one can be small.
 
-This page is the whole path from a fresh clone to a merged pull request. By
+This page covers everything from a fresh clone to a merged pull request. By
 taking part you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Ways to help
@@ -21,16 +19,15 @@ taking part you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 | Report a bug or ask for a feature | [open an issue](https://github.com/ZanattaMichael/meridian-core/issues/new/choose) |
 | Report a security problem | not in an issue: see [`SECURITY.md`](SECURITY.md) |
 
-Before starting on anything bigger than a small fix, comment on the issue (or
-open one) to say you are taking it. It avoids two people doing the same work,
-and it is the cheapest moment to find out that a maintainer had something else
-in mind.
+Before anything bigger than a small fix, comment on the issue (or open one) to
+say you are taking it. This avoids duplicate work and surfaces any different
+plans early.
 
 ## Set up
 
-You need a stable Rust toolchain and Python 3. Nothing else. The tests use
-stand-ins for every tool, so you do not need Terraform, Ansible, Docker or
-anything like them.
+You need a stable Rust toolchain and Python 3, nothing else. The tests use
+stand-ins for every tool, so Terraform, Ansible, Docker and the rest are not
+needed.
 
 ```
 git clone https://github.com/<you>/meridian-core
@@ -39,9 +36,9 @@ cargo build --workspace
 cargo test --workspace
 ```
 
-If the tests do not pass on a fresh clone, that is a bug. Please report it.
+If the tests fail on a fresh clone, that is a bug: please report it.
 
-What kinds of test there are, what each is for and how to add one is in
+The kinds of test, and how to add one, are in
 [how Meridian is tested](docs/contributing/testing.md).
 
 To try what you built:
@@ -67,8 +64,8 @@ target/debug/meridian compile examples/ansible/web-server.yaml --out build
 | `docs/` | user documentation, and the design under `docs/plans/` |
 | `tools/` | `check_links.py`, `new_plugin.py` |
 
-The [README](README.md#layout) describes each crate, and the
-[design plan](docs/plans/design-plan.md) explains why it is shaped this way.
+The [README](README.md#layout) describes each crate. The
+[design plan](docs/plans/design-plan.md) explains the shape.
 
 ## The one rule
 
@@ -78,8 +75,8 @@ The [README](README.md#layout) describes each crate, and the
 
 Every review comes back to this. If a tool cannot express something, the
 plugin refuses the document with a reason. If a plugin declares a capability,
-a test proves it. If you are unsure whether a change keeps the rule, ask in
-the pull request.
+a test proves it. Unsure whether a change keeps the rule? Ask in the pull
+request.
 
 ## Making a change
 
@@ -95,7 +92,7 @@ the pull request.
 
 ### The checks
 
-CI runs these four, and a pull request is not reviewed until they pass:
+CI runs these four. A pull request is reviewed once they pass:
 
 ```
 cargo fmt --all --check
@@ -110,8 +107,8 @@ workspace.
 
 ### Commits and pull requests
 
-- Keep a pull request to one subject. Two small pull requests are reviewed
-  faster than one large one.
+- One subject per pull request. Two small ones are reviewed faster than one
+  large one.
 - Write the commit subject as a short sentence saying what changes, for
   example `docker: refuse a service with neither image nor build`.
 - Fill in the pull request form. Say what you tested and what you did not.
@@ -121,17 +118,17 @@ workspace.
 
 1. CI runs. If it fails and you cannot see why, say so in the pull request and
    someone will help.
-2. A maintainer reviews it. We aim to respond within five working days. If
-   you have heard nothing after a week, a comment asking is welcome, not rude.
-3. Review comments are about the change, never about you. Push further commits
-   to the same branch; there is no need to squash.
+2. A maintainer reviews it, aiming to respond within five working days. After
+   a week of silence, feel free to ask.
+3. Review comments are about the change, not you. Push more commits to the
+   same branch; no need to squash.
 4. A maintainer merges it once CI is green, the documentation is complete and
    the review is settled.
 
 ### Changes that need a second reviewer
 
-Some code is easy to get subtly wrong in ways that hurt users. A change to any
-of these needs two reviewers, whoever wrote it:
+Some code is easy to get subtly wrong. A change to any of these needs two
+reviewers, whoever wrote it:
 
 - Code that builds a shell command string, or escapes one, in any runner.
 - Anything that handles a secret: `secret_arg`, a `sensitive` output, masking.
@@ -142,14 +139,14 @@ of these needs two reviewers, whoever wrote it:
 ### Capability claims
 
 A plugin's declared capabilities are published in the
-[capability matrix](docs/reference/capability-matrix.md), and users decide by
-them. If a reviewer doubts a claim, they write a test that would fail if the
-claim were false, and the test decides. Ties go to the weaker claim.
+[capability matrix](docs/reference/capability-matrix.md), and users rely on
+them. If a reviewer doubts a claim, they write a test that fails if the claim
+is false, and the test decides. Ties go to the weaker claim.
 
 ## Documentation
 
-The documentation is part of the product, and the bar for it is the same as
-for code: complete and current.
+Documentation is part of the product and has the same bar as code: complete
+and current.
 
 - A change in behaviour updates the page that describes it, in the same pull
   request.
@@ -165,12 +162,11 @@ for code: complete and current.
 
 ## Where the project is going
 
-The plugin tiers (Supported, Community, Experimental), who owns what, and how
-disputes are settled are in the [governance model](docs/plans/governance.md).
-The test tiers it refers to are in the
-[testing plan](docs/plans/testing-plan.md). Parts of both describe where the
-project is heading, not what is enforced today. What is enforced today is on
-this page.
+Plugin tiers (Supported, Community, Experimental), ownership and dispute
+resolution are in the [governance model](docs/plans/governance.md); its test
+tiers are in the [testing plan](docs/plans/testing-plan.md). Parts of both
+describe intent, not current enforcement. What is enforced today is on this
+page.
 
 ## Licence
 

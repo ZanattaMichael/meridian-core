@@ -6,39 +6,36 @@
 </picture>
 
 Meridian is one declarative language that compiles to Ansible, Puppet, Chef, DSC,
-cloud-init, Terraform, CloudFormation, Bicep, ARM templates, Pulumi, Docker Compose, Kubernetes and Helm, and then drives
-the tool you chose to plan and apply it.
+cloud-init, Terraform, CloudFormation, Bicep, ARM templates, Pulumi, Docker Compose,
+Kubernetes and Helm, then runs the tool you chose to plan and apply it.
 
-These pages are published at <https://zanattamichael.github.io/meridian-core/>, with
-search and a sidebar, and as the repository's
-[wiki](https://github.com/ZanattaMichael/meridian-core/wiki). Both are built from
-[`docs/`](https://github.com/ZanattaMichael/meridian-core/tree/main/docs) on every merge.
+These pages are built from
+[`docs/`](https://github.com/ZanattaMichael/meridian-core/tree/main/docs) on every merge and
+published at <https://zanattamichael.github.io/meridian-core/> and as the repository's
+[wiki](https://github.com/ZanattaMichael/meridian-core/wiki).
 
 <p align="center"><img src="graphics/meridian-architecture.svg" alt="Meridian architecture: documents go into the core, the core speaks to one plugin per target over the plugin protocol, and each plugin drives its own tool" width="100%"></p>
 
-The core knows the language and nothing about any tool. Each plugin knows one tool and
-nothing about the others. [How it fits together](reference/dsl/how-it-fits-together.md)
-follows one document through both.
+The core knows the language and nothing about any tool. Each plugin knows one tool.
+[How it fits together](reference/dsl/how-it-fits-together.md) follows one document through
+both.
 
 ## Honest scope statement
 
-Meridian is a **transpiler and orchestrator**, not a replacement execution engine. It
-does not reimplement Ansible's SSH orchestration, Terraform's state graph, or Puppet's
-catalog model — it compiles a single declarative intent into the native artifact each of
-those tools already knows how to run.
+Meridian compiles and orchestrates. It does not reimplement Ansible's SSH orchestration,
+Terraform's state graph or Puppet's catalog. It compiles one declarative intent into the
+native files each tool already runs.
 
-The consequence, stated up front rather than discovered later: these tools differ in
-execution model, state tracking, dependency expression, and idempotency guarantees.
-Meridian abstracts intent, not those differences. Where a feature has no clean mapping
-on a target, Meridian emits a documented workaround or fails at compile time. It never
-degrades silently. See [the capability model](plans/design-plan.md#8-the-notifies-property--capability-matrix).
+The tools differ in execution model, state, dependencies and idempotency. Meridian
+abstracts intent, not those differences. Where a feature has no clean mapping on a target,
+Meridian emits a documented workaround or fails at compile time. It never degrades
+silently. See [the capability model](plans/design-plan.md#8-the-notifies-property--capability-matrix).
 
 ## Project status
 
-Early implementation. The core, the plugin protocol and the plugins are written in Rust.
-The first implementation was in Go; the core language was changed to Rust on 2026-11-17
-and the Go code was removed once the Rust core and plugins reproduced its output byte for
-byte. The reasons, the layout and the order of work are in
+Early implementation, written in Rust: core, plugin protocol and plugins. The first version
+was Go. The project switched to Rust on 2026-11-17 and removed the Go code once the Rust
+build reproduced its output byte for byte. Reasons, layout and order of work:
 [design plan §11](plans/design-plan.md#11-system-architecture-rust) and
 [§12.1](plans/design-plan.md#121-rust-migration-sequencing).
 
@@ -83,8 +80,8 @@ byte. The reasons, the layout and the order of work are in
 | [Inside a pipeline engine](operations/running-in-a-pipeline.md) | the engine's band above Meridian's: the job runs `meridian apply`, and the events come back as annotations and a summary |
 | [A test](reference/testing.md) | a Test document's cases, each compiled or planned in a scratch directory, and the checks over what came out |
 
-Each picture is drawn by [`tools/wiki/graphics.py`](https://github.com/ZanattaMichael/meridian-core/blob/main/tools/wiki/graphics.py)
-and checked against the file in every build, so none can fall behind the script that describes it.
+Each picture is drawn by [`tools/wiki/graphics.py`](https://github.com/ZanattaMichael/meridian-core/blob/main/tools/wiki/graphics.py),
+and every build checks the committed file matches the script.
 
 | Editor and authoring tools | |
 |---|---|
@@ -129,9 +126,8 @@ and checked against the file in every build, so none can fall behind the script 
 | Infrastructure as code | [terraform](targets/terraform.md), [opentofu](targets/opentofu.md), [cloudformation](targets/cloudformation.md), [bicep](targets/bicep.md), [arm](targets/arm.md), [pulumi](targets/pulumi.md), [packer](targets/packer.md) |
 | Containers | [docker](targets/docker.md), [podman](targets/podman.md), [kubernetes](targets/kubernetes.md), [helm](targets/helm.md) (with Kustomize) |
 
-Every target page opens with what the target does and does not support. Every example the
-pages show is a file under [`examples/`](../examples) that a test compiles with the real
-plugins.
+Every target page opens with what the target does and does not support. Every example is a
+file under [`examples/`](../examples) that a test compiles with the real plugins.
 
 ## Planning documents
 
@@ -164,13 +160,10 @@ plugins.
 
 Security reports go through [`SECURITY.md`](../SECURITY.md), not the issue tracker.
 
-These pages are published as [the documentation site](https://zanattamichael.github.io/meridian-core/)
-and as the repository's [wiki](https://github.com/ZanattaMichael/meridian-core/wiki) by a
-pipeline; [how the documentation is published](contributing/documentation-site.md)
-describes it, what a new page needs, and how the graphics and the animated theme are made.
+[How the documentation is published](contributing/documentation-site.md) covers the
+pipeline, what a new page needs, and how the graphics and theme are made.
 
 ## Reading order
 
-New to the project: start with the design plan's problem statement and guiding
-principles (§1–§2), then the IR schema overview (§4). Everything else is downstream of
-those.
+New to the project? Read the design plan's problem statement and principles (§1–§2), then
+the IR schema overview (§4). Everything else follows from those.
