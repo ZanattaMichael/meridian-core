@@ -93,10 +93,14 @@ say "what the registry holds is a schema bundle and an index"
 oras manifest fetch --plain-http "$open/ansible/builtin:2.17.0" > "$work/manifest.json"
 grep -q '"artifactType":"application/vnd.meridian.schema-bundle.v1"' "$work/manifest.json" \
   || { cat "$work/manifest.json"; fail "the bundle's artifact type"; }
-oras manifest fetch --plain-http "$open/index:latest" | grep -q 'application/vnd.meridian.schema-index.v1' \
-  || fail "the index's artifact type"
-oras pull --plain-http "$open/index:latest" -o "$work/index"
-grep -q "\"digest\": \"$digest\"" "$work/index/index.json" || { cat "$work/index/index.json"; fail "the index does not list the bundle"; }
+oras manifest fetch --plain-http "$open/index:latest" > "$work/index-manifest.json"
+grep -q 'application/vnd.meridian.schema-index.v1' "$work/index-manifest.json" \
+  || { cat "$work/index-manifest.json"; fail "the index's artifact type"; }
+# The title annotation is on the manifest, not the layer, so `oras pull`
+# skips the layer; fetch it as a blob by its digest instead.
+layer=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["layers"][0]["digest"])' "$work/index-manifest.json")
+oras blob fetch --plain-http "$open@$layer" --output "$work/index.json"
+grep -q "\"digest\": \"$digest\"" "$work/index.json" || { cat "$work/index.json"; fail "the index does not list the bundle"; }
 
 say "a project takes its schemas from the registry, signatures required"
 site="$work/site"
