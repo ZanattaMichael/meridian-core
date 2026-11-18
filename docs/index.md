@@ -56,6 +56,7 @@ byte. The reasons, the layout and the order of work are in
 |---|---|
 | [Importing existing configuration](operations/importing.md) | `meridian import`: Terraform, OpenTofu, Ansible, Compose, Kubernetes and DSC configuration into documents, with everything that could not be carried over marked |
 | [Adopting what exists](reference/dsl/resources.md#adopting-what-exists) | `adopt` on a resource: the tool takes a thing that already exists under management instead of creating a second one |
+| [Moving a document to another tool](operations/retargeting.md) | `meridian retarget`: change `spec.target` and write `adopt:` for everything the old tool manages, so the new tool adopts it instead of creating it again |
 
 | Operating | |
 |---|---|

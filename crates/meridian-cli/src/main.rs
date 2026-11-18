@@ -246,6 +246,14 @@ fn main() -> ExitCode {
             &state_dir,
         ),
         Command::Migrate { files, to, check } => migrate(&files, to.as_deref(), check),
+        Command::Retarget {
+            file,
+            to,
+            out,
+            no_adopt,
+            state_dir,
+            plugins,
+        } => retarget(&file, &to, out.as_deref(), no_adopt, &state_dir, &plugins),
         Command::Version => {
             version();
             Ok(())

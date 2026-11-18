@@ -498,6 +498,13 @@ already exists. The target writes it as the resource's `import` option, so
   a `stack` or a `pulumi:providers:<name>` is refused with `invalid-adopt`, and
   so is an `adopt` that names another identifier than `resourceOptions.import`.
 
+### Moving to another tool
+
+The plugin reports what it manages, read from `pulumi stack export`: each
+resource's `id`, by resource id, leaving out the stack and providers.
+[`meridian retarget`](../operations/retargeting.md) uses it to write
+`adopt:` when a document moves to another tool.
+
 ## What is refused
 
 Every refusal carries a rule and, where it is about one resource, that resource with its file and line.

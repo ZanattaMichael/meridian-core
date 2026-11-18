@@ -324,6 +324,14 @@ file failed, or when `--check` found one that is not formatted. Schema:
 `needs-decisions` (with the `decisions`), `unreadable` or `unwritable` (with
 the `message`). Schema: `schemas/output/migrate.schema.json`.
 
+### `retarget`
+
+`file`, the file read; `out`, the file written; `to`; `adoption`, how the new
+target takes what exists (`import`, `converge` or `none`); one row per
+document with `name`, `from`, `adopted` (the resource ids given `adopt:`)
+and `notes`; and `warning`, set when the new target will create every
+resource again. Schema: `schemas/output/retarget.schema.json`.
+
 ### `plugins`
 
 The catalogue: one object per plugin with `name`, `category`, `can` (the
