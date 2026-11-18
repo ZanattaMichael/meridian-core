@@ -10,12 +10,14 @@ name: release
 #   demand (workflow_dispatch). Everything is built and tested; nothing leaves
 #   the run but its own workflow artifacts.
 #
-#   A release, when a tag `v<version>` is pushed AND the repository variable
-#   MERIDIAN_RELEASE_PUBLISH is `true`. After the same build and the same
-#   tests, the `publish` job signs the checksums and the image with Sigstore,
-#   records build provenance, pushes the image to GHCR and opens a DRAFT
-#   GitHub release holding every file. Without the variable, a tag is only
-#   another rehearsal.
+#   A release, in either of two ways: the `cut release` workflow was run
+#   from the Actions tab (it makes the tag `v<version>` and dispatches this
+#   workflow at it), or a tag `v<version>` was pushed by hand AND the
+#   repository variable MERIDIAN_RELEASE_PUBLISH is `true`. After the same
+#   build and the same tests, the `publish` job signs the checksums and the
+#   image with Sigstore, records build provenance, pushes the image to GHCR
+#   and opens a DRAFT GitHub release holding every file. A tag pushed by
+#   hand without the variable is only another rehearsal.
 #
 # docs/contributing/releasing.md is the maintainer's guide to all of it.
 
@@ -59,18 +61,25 @@ jobs:
         run: |
           version="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
           publish=false
-          if [ "$EVENT" = push ]; then
-            # The tag and the workspace version are one fact, stated twice.
-            if [ "$REF" != "refs/tags/v$version" ]; then
-              echo "::error::the tag is ${REF#refs/tags/} and Cargo.toml says the version is $version"
-              exit 1
-            fi
-            if [ "$PUBLISH_ENABLED" = true ]; then
-              publish=true
-            else
-              echo "::notice::MERIDIAN_RELEASE_PUBLISH is not 'true', so this tag is built and tested and nothing is published"
-            fi
-          fi
+          case "$REF" in
+            refs/tags/v*)
+              # The tag and the workspace version are one fact, stated twice.
+              if [ "$REF" != "refs/tags/v$version" ]; then
+                echo "::error::the tag is ${REF#refs/tags/} and Cargo.toml says the version is $version"
+                exit 1
+              fi
+              if [ "$EVENT" = workflow_dispatch ]; then
+                # Dispatched at a tag: the `cut release` workflow, or a person
+                # choosing the tag under Run workflow. Both are the decision
+                # to release, so there is no second switch.
+                publish=true
+              elif [ "$PUBLISH_ENABLED" = true ]; then
+                publish=true
+              else
+                echo "::notice::MERIDIAN_RELEASE_PUBLISH is not 'true', so this tag is built and tested and nothing is published"
+              fi
+              ;;
+          esac
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
           echo "Meridian $version; publish: $publish" >> "$GITHUB_STEP_SUMMARY"
