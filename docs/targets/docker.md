@@ -6,29 +6,7 @@ Compiles a document into a Docker Compose file and brings it up with
 `docker compose`. An Infrastructure document runs on the local Docker daemon,
 or the one its `project` names. A ResourceSet runs on its target host's daemon.
 
-This is Meridian's Docker Compose support. There is no separate `compose`
-target.
-
-On this page:
-[support at a glance](#what-it-does-and-does-not-support) ·
-[before you start](#before-you-start) ·
-[a first document](#a-first-document) ·
-[resource types](#resource-types) ·
-[the project](#the-project) ·
-[fields every resource has](#fields-every-resource-has) ·
-[compile-time checks](#what-is-checked-at-compile-time) ·
-[warnings](#warnings) ·
-[dependencies](#dependencies) ·
-[notifications](#notifications) ·
-[relative paths](#relative-paths) ·
-[references](#references) ·
-[outputs](#outputs) ·
-[compiled files](#what-is-compiled) ·
-[editor schemas](#editor-schemas) ·
-[running](#running) ·
-[examples](#examples) ·
-[troubleshooting](#troubleshooting) ·
-[tests](#how-it-is-tested)
+There is no separate `compose` target.
 
 ## What it does and does not support
 
@@ -48,17 +26,11 @@ On this page:
 
 ## Before you start
 
-- `docker` with the Compose plugin (`docker compose version` works) on the
-  machine that runs `meridian`. Compose v2.23 or later is needed for inline
-  config `content`; the plugin is tested with Compose 5.
-- A daemon to talk to. With no `project` and no target host that is the local
-  one, or whatever `DOCKER_HOST` and your current Docker context select.
-- For another machine, SSH access that works without a prompt
-  (`docker --host ssh://deploy@web01 ps` succeeds). Docker is needed on that
-  machine; Meridian is not.
-
-Meridian stores no credentials. Registry logins are the ones `docker login`
-already saved.
+- `docker compose` on the machine running `meridian` (v2.23+ for inline config `content`;
+  tested with Compose 5).
+- A daemon: the local one, or what `DOCKER_HOST` and your Docker context select.
+- For another machine, prompt-free SSH (`docker --host ssh://deploy@web01 ps` works).
+- Registry logins are those `docker login` saved.
 
 ## A first document
 
@@ -143,9 +115,7 @@ volumes:
   db_data: {}
 ```
 
-A ResourceSet looks the same, with `kind: ResourceSet` and the host it runs on.
-Meridian reaches that host's daemon over SSH; `localhost` is the machine
-Meridian runs on:
+A ResourceSet adds the host, whose daemon is reached over SSH (`localhost` is local):
 
 ```yaml
 apiVersion: meridian/v1
@@ -166,20 +136,11 @@ spec:
 
 ## Resource types
 
-A resource's `type` is the section of the Compose file it belongs to and its
-`params` are that element's fields, exactly as the
-[Compose specification](https://docs.docker.com/reference/compose-file/)
-documents them. The resource's id is the element's name in the file, and the
-name other containers resolve a service by.
-
-Params are passed through as written: Meridian does not rename them, fill in
-defaults or change their form. It checks their names, and the few values listed
-under [compile-time checks](#what-is-checked-at-compile-time). Whether a value
-is one Compose accepts (a port syntax, a duration) is checked by Compose itself
-when the project is planned.
-
-Any param whose name starts with `x-` is an extension field. It is yours to
-name and is written to the file untouched.
+`type` is the Compose file section; `params` are that element's fields as the
+[Compose specification](https://docs.docker.com/reference/compose-file/) names them. The id
+is the element's name. Params pass through unchanged; Meridian checks names and the values
+under [compile-time checks](#what-is-checked-at-compile-time), Compose checks the rest at
+plan. `x-` params are written untouched.
 
 ### `service`
 
@@ -256,9 +217,7 @@ Accepted params: `attachable`, `driver`, `driver_opts`, `enable_ipv4`,
     name: company-shared     # a network that already exists, under its real name
 ```
 
-The network `default` exists in every Compose project. A service may name it
-without the document declaring it; declare a `network` with the id `default` to
-change its settings.
+`default` exists in every project; declare a `network` with id `default` to change it.
 
 ### `volume`
 
@@ -279,9 +238,8 @@ Accepted params: `driver`, `driver_opts`, `external`, `labels`, `name`.
       device: ":/exports/media"
 ```
 
-Only a named volume is a resource. A bind mount (`/srv/data:/data`) and an
-anonymous volume (`/data`) are written in the service's `volumes` and need no
-declaration.
+Only named volumes are resources. Bind mounts and anonymous volumes go in the service's
+`volumes`.
 
 ### `config`
 
@@ -299,8 +257,7 @@ Accepted params: `content`, `environment`, `external`, `file`, `labels`,
       action: restart
 ```
 
-`content` keeps the configuration in the document. `file` reads it from the
-host the daemon runs on; a relative `file` is
+`content` is inline. `file` is read on the daemon's host; a relative one is
 [warned about](#relative-paths).
 
 ### `secret`
@@ -320,16 +277,13 @@ Accepted params: `driver`, `driver_opts`, `environment`, `external`, `file`,
     file: /etc/ssl/private/site.key
 ```
 
-`value` is not a Compose field: it takes one of the document's
-[declared secrets](#secrets) and nothing else, and compiles to the `environment`
-Compose reads the content from. A secret's value never appears in the document
-or the compiled file, only where Compose should read it from.
+`value` is Meridian's: it takes only a [declared secret](#secrets) and compiles to the
+`environment` Compose reads it from.
 
 ## The project
 
-One resource may have the type `project`. It is not part of the Compose file:
-it says what the project is called, where it runs and how it is brought up. A
-document with none uses the defaults in the table.
+An optional `project` resource sets the project's name, where it runs and how it is
+brought up. It is not written to the Compose file.
 
 | Param | Value | Default | Meaning |
 |---|---|---|---|
@@ -354,21 +308,17 @@ document with none uses the defaults in the table.
 
 Rules:
 
-- A document has at most one `project`. A second is refused
-  (`duplicate-resource`).
-- Any other param is refused (`unsupported-param`), and a value of the wrong
-  kind is refused (`invalid-param`).
-- A `project` cannot depend on anything or be depended on
-  (`unsupported-dependency`): it is not something Docker creates.
-- The document's name is used as the project name when `name` is not set. If
-  it is not a valid Compose project name, such as `Web Shop`, the compile is
-  refused (`invalid-name`) and says to set `name`.
+- At most one (`duplicate-resource`).
+- Other params (`unsupported-param`) and wrong kinds (`invalid-param`) are refused.
+- No dependencies either way (`unsupported-dependency`).
+- Without `name`, the document's name is used; an invalid one such as `Web Shop` is
+  refused (`invalid-name`).
 
 ## Secrets
 
-A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a service's params,
-or as a `secret` element's `value`, reaches Compose through a private environment file
-that exists for the length of the stage, and through nothing else.
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a service's params, or
+as a `secret` element's `value`, reaches Compose through a private env file that lasts for
+the stage.
 
 ```yaml
 spec:
@@ -392,13 +342,9 @@ spec:
         value: ${{ secret.db_password }}
 ```
 
-**What the compile writes.** In a service, the param becomes Compose's own interpolation of
-a variable, `${meridian_secret_db_password}`, which Compose fills in when it reads the file.
-A `secret` element whose `value` is a secret becomes `environment:
-meridian_secret_db_password`, so Compose reads the content from the same variable and
-mounts it under `/run/secrets/<name>`. The compiled `compose.yaml` holds the variable's
-name and never its value, and `docker compose config` prints the file with the values
-filled in, so Meridian never prints that output.
+In a service the param becomes `${meridian_secret_db_password}`. A `secret` element becomes
+`environment: meridian_secret_db_password`, mounted at `/run/secrets/<name>`. Meridian never
+prints `docker compose config`, which would show values.
 
 ```yaml
 services:
@@ -413,37 +359,18 @@ secrets:
     environment: meridian_secret_db_password
 ```
 
-**How the value reaches the tool.** When a stage runs, the runner writes a file
-`secrets.env` only the user can read (mode `0600`), in a private directory and in memory
-where the system allows, with one line `meridian_secret_<name>="<value>"` per secret,
-quoted the way Compose's dotenv reader expects: `"`, `\` and line breaks escaped, and `$`
-doubled so Compose does not interpolate inside the value. Every `docker compose` call of
-the stage, plan and apply alike, is given `--env-file <path>`, and the file is removed when
-the stage is over. The command line names the file and nothing more, and the daemon's and
-the tool's environment hold nothing of the value.
+The runner writes `secrets.env` (mode `0600`, in memory where possible), one
+`meridian_secret_<name>="<value>"` line per secret, escaped for Compose's dotenv reader.
+Every `docker compose` call gets `--env-file <path>`; the file is removed after the stage.
 
-Compose's own `secrets` are the way a container reads a value without it being in the
-container's environment: the engine mounts the content as a file, and `docker inspect`
-shows the mount and not the content. A value interpolated into `environment:` is in the
-container's configuration, where `docker inspect` and anyone who can read the daemon's
-socket can see it. Prefer the `secret` element for a value the image can read from a file
-(`POSTGRES_PASSWORD_FILE`, `*_FILE` variables are common).
+A value in `environment:` is visible to `docker inspect`; a `secret` element is a mounted
+file. Prefer the `secret` element where the image reads `*_FILE` variables.
 
-**What is refused.** A secret in the `project` resource is refused at compile, rule
-`unsupported-secret-place`: the project's settings are the command line `docker` is given.
-A `secret` element whose `value` is not a declared secret is refused, rule `invalid-param`:
-a literal there would be written into the file. Text that reads as a variable's reference,
-`${meridian_secret_`, is written as Compose text (`$$`) like any other dollar sign, so a
-document cannot make Compose fill a value in where the document wrote the reference
-itself.
+Refused: a secret in `project` (`unsupported-secret-place`), a `secret` `value` that is not
+a declared secret (`invalid-param`). A literal `${meridian_secret_` is escaped as `$$`.
 
-The handover is tested two ways:
-
-- against a stand-in `docker` that records the file and environment it was given
-  (`plugins/docker/tests/run.rs`)
-- against the real Compose in CI (`plugins/docker/tests/real.rs`): the value
-  reaches a service's environment and its `/run/secrets` file, and is not in the
-  plan or apply output or any file the plugin wrote
+Tested against a stand-in `docker` (`plugins/docker/tests/run.rs`) and real Compose in CI
+(`plugins/docker/tests/real.rs`).
 
 ## Fields every resource has
 
@@ -457,15 +384,11 @@ The handover is tested two ways:
 | `notifies` | see [Notifications](#notifications) |
 | `runtimeWhen` | refused (`unsupported-runtime-condition`): a Compose file is declared state, with no condition for Docker to evaluate |
 
-A document must declare at least one service, or there is nothing to run
-(`empty-document`).
+A document needs at least one service (`empty-document`).
 
 ## What is checked at compile time
 
-Compose would refuse most of these itself, but only when the project is planned
-or brought up, and in terms of the compiled file. Meridian refuses them when the
-document compiles, against the line you wrote. A refusal stops the compile;
-nothing is written and nothing runs.
+Refused at compile, against your line:
 
 | The document | Is refused with |
 |---|---|
@@ -516,15 +439,10 @@ stack.yaml:11:7: docker: resource "db" [invalid-reference]: uses the volume "dbd
 stack.yaml:28:7: docker: resource "web" [unsupported-param]: "enviroment" is not an attribute of a Compose service; did you mean "environment"?
 ```
 
-What is not checked: the values of attributes Meridian only passes through, and
-anything that needs the daemon, such as whether an image exists or an external
-network is there. Compose reports those at plan time, and the plan fails with
-what Compose said.
+Passed-through values and anything needing the daemon (images, external networks) are
+checked by Compose at plan.
 
 ## Warnings
-
-A warning does not stop the compile. `meridian compile`, `plan` and `apply`
-print each one.
 
 | Warning | Why |
 |---|---|
@@ -541,8 +459,7 @@ print each one.
 | a network, volume, config or secret on anything | nothing, with a [warning](#warnings) |
 | anything on the `project`, or the `project` on anything | refused |
 
-Between two services the condition is chosen from the service being waited
-for:
+The condition depends on the service waited for:
 
 | The other service | Condition written |
 |---|---|
@@ -574,12 +491,9 @@ app:
       condition: service_healthy
 ```
 
-For anything else, write `depends_on` in the service's `params` as Compose
-documents it. An entry you write for a service is kept as written, and a
-`dependsOn` on that same service adds nothing to it. A `dependsOn` on another
-service adds its own entry beside yours. A `depends_on` written as a list of
-names is rewritten in the long form, each waiting for `service_started`. This is
-how a service waits for a job that runs once:
+Otherwise write `depends_on` in `params`. Your entries are kept; `dependsOn` adds entries
+for other services. A list form is rewritten long-form with `service_started`. Waiting for a
+one-off job:
 
 ```yaml
 - id: migrate
@@ -598,19 +512,13 @@ how a service waits for a job that runs once:
         condition: service_completed_successfully
 ```
 
-A `depends_on` you write is checked like one Meridian writes: it must name
-services of the document, wait on a condition Compose has, not wait for health
-that will never be reported, and not close a circle.
+Your `depends_on` is checked the same way: known services, valid conditions, reachable
+health, no cycle.
 
 ## Notifications
 
-The one action is `restart`, and the one thing that can be restarted is a
-service.
-
-A service notifying a service is Compose's own mechanism: the notified service
-gets `depends_on` on the notifier with `restart: true`, and Compose restarts it
-after the other is updated. The condition is chosen as for a
-[dependency](#dependencies).
+The only action is `restart`, on a service. Service to service is native: `depends_on`
+with `restart: true`, condition as for a [dependency](#dependencies).
 
 ```yaml
 - id: api
@@ -630,26 +538,17 @@ web:
       restart: true
 ```
 
-Because the notified service now starts after the notifier, a notify from `api`
-to `web` together with a `dependsOn` from `api` on `web` is a circle, and is
-refused.
+This orders the notified service after the notifier, so it can form a cycle with
+`dependsOn`.
 
-A config, secret, network or volume notifying a service is synthetic. Compose
-does not restart a service because a config it mounts changed. Meridian writes a
-checksum of the notifier's params into a label on the service,
-`meridian.dev/restart-on-<id>`. When the notifier's params change the label
-changes, and Compose recreates the container. The compile warns that this is how
-it works, and `docker inspect` will show the label. The checksum covers what the
-document says, so a config read from a `file` restarts the service when the
-param changes and not when the file's content does.
+From a config, secret, network or volume it is synthetic, with a warning: a checksum of the
+notifier's params in the label `meridian.dev/restart-on-<id>`. A config `file`'s content is
+not covered.
 
 ## Relative paths
 
-Compose resolves a relative host path against the project directory, which is
-the directory Meridian keeps the compiled file in, under its state directory.
-Nothing you keep beside the document is there. A build context, an `env_file`, a
-bind mount, or the `file` of a config or secret that is a relative path compiles
-with a warning for each:
+Compose resolves relative paths from the compiled file's directory under the state
+directory, not from the document. Each relative path warns:
 
 ```
 docker: web: the build context "./web" is a relative path, which Compose resolves against the directory Meridian keeps the compiled file in and not the document's. Write an absolute path, or name the directory with "directory" on a resource of type "project"
@@ -682,16 +581,12 @@ Write absolute paths, or say where the relative ones start:
     volumes: ["./public:/usr/share/nginx/html:ro"]
 ```
 
-With a `directory` set there are no warnings. The directory is on the machine
-that runs `docker compose` for build contexts and `env_file`, and on the
-daemon's machine for bind mounts.
+With `directory` set there are no warnings. It is on the `docker compose` machine for build
+contexts and `env_file`, and the daemon's machine for bind mounts.
 
 ## References
 
-Inside `params`, `${id}` is the name of another element of the document, checked
-at compile time. Use it wherever Compose expects that name: under `networks`,
-as the source of a volume mount, config or secret, or as a host name in an
-environment variable.
+In `params`, `${id}` is another element's name, checked at compile.
 
 ```yaml
 environment:
@@ -700,21 +595,12 @@ volumes:
   - ${db_data}:/var/lib/postgresql/data
 ```
 
-Nothing else can be read in a param, because nothing else is known until the
-project is up. `${db.State.Status}` in a param is refused; read it in an
-[output](#outputs). Writing the bare name (`db_data:/var/lib/...`) works too
-and is checked the same way.
-
-A `$` in a param is written to the Compose file as `$$`, so Compose does not
-take it for a variable of its own. A command such as `sh -c 'echo $HOME'`
-reaches the container as written. Values belong in the document, not in the
-shell environment of whoever runs it, so Compose's own `${VAR}` interpolation
-is not available.
+`${db.State.Status}` in a param is refused; use an [output](#outputs). A bare name is
+checked too. `$` is written as `$$`, so Compose's `${VAR}` interpolation is not available.
 
 ## Outputs
 
-An output is read from Docker after an apply. Each `${...}` in its value must
-start with the id of a service.
+Outputs are read after apply. Each `${...}` starts with a service id.
 
 | You write | You get |
 |---|---|
@@ -733,15 +619,9 @@ outputs:
     value: ${db.State.Status}
 ```
 
-An inspect path is fields and indexes only: letters, digits, `.`, `_`, `-` and
-`[n]`. A network's key under `Networks` is its name as Docker knows it, which
-is the project name, an underscore and the network's id (`web_backend`).
-
-When a service has several containers the first one Compose lists is read.
-
-An output with nothing behind it is an error and not an empty value: a port the
-service does not publish, a service with no container, or a path with nothing
-at it.
+Inspect paths use letters, digits, `.`, `_`, `-` and `[n]`. Network keys are
+`<project>_<id>` (`web_backend`). With several containers the first is read. An output with
+no value is an error.
 
 ## What is compiled
 
@@ -750,19 +630,13 @@ at it.
 | `compose.yaml` | the Compose file: `name`, then `services`, `networks`, `volumes`, `configs`, `secrets`, each element in the order the document declares it. A service's `image`, `build`, `command` and `depends_on` come first and the rest alphabetically |
 | `project.json` | what the runner needs that is not Compose's: the project's name, host, context, directory, profiles, wait settings, and the outputs to read |
 
-The same document always compiles to the same bytes. `meridian compile --out
-build` writes both files to `build/<document name>/`, and the Compose file there
-can be read, or run by hand with `docker compose -f`.
+`meridian compile --out build` writes both files to `build/<document name>/`.
 
 ## Editor schemas
 
-`meridian schema sync` reads the Compose Specification's JSON Schema
-(`schema/compose-spec.json` in the
-[compose-spec repository](https://github.com/compose-spec/compose-spec)),
-so an editor completes and checks every attribute of a `service`, `network`,
-`volume`, `config` and `secret` with its kind, not only the names the compile
-checks ([Tool schemas](../tooling/schema-sync.md)). No daemon is needed;
-`docker compose version` only names the installed version, when it runs.
+`meridian schema sync` reads the
+[Compose Specification](https://github.com/compose-spec/compose-spec) JSON Schema
+([Tool schemas](../tooling/schema-sync.md)). No daemon is needed.
 
 | | |
 |---|---|
@@ -770,21 +644,16 @@ checks ([Tool schemas](../tooling/schema-sync.md)). No daemon is needed;
 | Listed by name | nothing: the five are the whole catalogue |
 | Pinned | the schema, to its SHA-256, and the installed Compose's version |
 
-The `project` resource is Meridian's own and is not in the schema. The
-attribute names the compile checks against stay as they are; the real-tool
-test holds them to the schema, so a name the specification drops fails the
-build and a name it gains is reported. The source is tested against the real
-schema in the `docker` workflow.
+`project` is not in the schema. The real-tool test keeps the compile's attribute names in
+step with it.
 
 ## Running
 
 Every call is `docker compose --project-name <name> --file compose.yaml`, with
 `--host` or `--context` before `compose` when the project names one.
 
-A plan changes nothing. It does not parse what `docker compose up --dry-run`
-prints. It asks for data and compares it the way Compose itself does: Compose
-stamps every container it creates with a hash of its service's configuration,
-and recreates the container when the hash of the file's service differs.
+A plan changes nothing. It compares each container's Compose config hash with the
+compiled file's, as Compose does:
 
 | A plan runs | To learn |
 |---|---|
@@ -799,17 +668,11 @@ and recreates the container when the hash of the file's service differs.
 | `update` | a container is not running and would be started, or the number of containers differs from the service's `scale` or `deploy.replicas` |
 | `delete` | containers belong to a service the document no longer declares, or a service is scaled to none |
 
-Containers started with `docker compose run` are not counted. Networks and
-volumes the document no longer declares are left alone, as `docker compose up`
-leaves them; remove them with `docker network rm` or `docker volume rm`.
+`docker compose run` containers are not counted. Undeclared networks and volumes are left
+alone. A service with `build` makes the plan unsure.
 
-A plan with no changes means the project is as the document describes. The one
-exception is a service built from source (`build`): whether building again would
-give a different image cannot be known without building it, so the plan says it
-cannot be sure.
-
-An apply makes the same comparison, so it reports what the plan would have, and
-then runs `docker compose up --detach --remove-orphans`, with:
+An apply compares the same way, then runs `docker compose up --detach --remove-orphans`
+with:
 
 | Flag | When |
 |---|---|
@@ -818,29 +681,18 @@ then runs `docker compose up --detach --remove-orphans`, with:
 | `--build` | when a service is built from source, so a change to the source is applied and not only a change to the file |
 | `--project-directory`, `--profile` | when the project sets `directory` or `profiles`; these go on every call |
 
-Set `wait: false` for a project whose services are meant to exit, such as a job
-that runs once with nothing depending on it: Compose's wait treats a service
-that has stopped as one that failed to stay up.
-
-The outputs are then read with `docker compose port`, `docker compose ps` and
-`docker inspect`.
-
-Nothing here takes a project down. To remove one, run
-`docker compose --project-name <name> down` yourself, with `--volumes` to
-delete its data too.
+Set `wait: false` when services are meant to exit. Outputs are read with `docker compose
+port`, `ps` and `docker inspect`. Nothing takes a project down; run
+`docker compose --project-name <name> down [--volumes]`.
 
 | Variable | Meaning |
 |---|---|
 | `MERIDIAN_DOCKER` | the program to run, when it is not `docker` on `PATH` |
 | `MERIDIAN_DOCKER_ARGS` | arguments added to `docker compose up`, split like a shell command line (quotes hold a word together): `--pull always`, `--force-recreate` |
 
-Every setting can also be written in the project's `meridian.yaml` under
-`spec.settings.docker`, by its short name; the environment variable still wins.
-The names, defaults and the splitting rule for argument lists are in the
-[plugin settings reference](../reference/plugin-settings.md#docker).
-
-Docker's own variables, such as `DOCKER_HOST` and `DOCKER_CONFIG`, apply as
-they do to any `docker` command when the project names no host or context.
+Settings can also go in `meridian.yaml` under `spec.settings.docker`; the environment wins.
+See the [plugin settings reference](../reference/plugin-settings.md#docker). `DOCKER_HOST`
+and `DOCKER_CONFIG` apply when the project names no host or context.
 
 ## Examples
 
@@ -897,10 +749,9 @@ proxy:
 
 ## Importing
 
-`meridian import compose.yaml` reads one Compose file and writes one Infrastructure
-document. [Importing existing configuration](../operations/importing.md) is the guide. A file named `compose.yaml`, `compose.yml`,
-`docker-compose.yaml`, `docker-compose.yml`, or one of those with a middle part such as
-`compose.prod.yaml`, is recognised without `--from`.
+`meridian import compose.yaml` writes one Infrastructure document
+([guide](../operations/importing.md)). `compose.yaml`, `docker-compose.yml` and variants such
+as `compose.prod.yaml` need no `--from`.
 
 | In the Compose file | In the document |
 |---|---|
@@ -923,13 +774,9 @@ What is reported:
 | A name that cannot be an id, such as `my.service` | Left out, for the same reason | not translated |
 | `version`, and top-level `x-` extension fields | Left out: neither is part of the project | note |
 
-More than one Compose file is refused: Compose merges several files into one project by
-rules of its own. Merge them first with `docker compose -f a.yaml -f b.yaml config`.
-
-The round-trip test imports
-[`shop/compose.yaml`](../../plugins/docker/testdata/import/shop/compose.yaml), compiles
-the document, and compares the Compose file it compiles to with the original as Compose
-reads them. The imported document is
+Several files are refused; merge them with `docker compose -f a.yaml -f b.yaml config`.
+The round-trip test uses
+[`shop/compose.yaml`](../../plugins/docker/testdata/import/shop/compose.yaml) and
 [`shop.meridian.yaml`](../../plugins/docker/testdata/import/shop.meridian.yaml).
 
 ## Troubleshooting
@@ -949,16 +796,9 @@ reads them. The imported document is
 
 ## How it is tested
 
-Beside the compile and runner tests, the plugin is driven as a real process over
-the plugin protocol, and end to end against a real Docker daemon:
-
-- a project is brought up, its outputs read and the page it serves fetched
-- a service is changed and another removed
-- a container stopped behind Compose's back is found by the next plan
-
-These tests run wherever `docker compose` and a daemon are available, CI
-included, and are skipped with a note elsewhere. `MERIDIAN_TEST_REAL_DOCKER=1` makes a missing Docker a failure, and
-`MERIDIAN_TEST_REAL_DOCKER=0` skips them.
+Compile, runner and protocol tests, plus end-to-end tests against a real daemon (bring up,
+change, remove, detect a stopped container). They run where Docker is available;
+`MERIDIAN_TEST_REAL_DOCKER=1` makes a missing Docker fail, `=0` skips.
 
 ```console
 $ cargo test -p meridian-target-docker                              # everything; real Docker when present
