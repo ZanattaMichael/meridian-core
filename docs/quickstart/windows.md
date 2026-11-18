@@ -31,7 +31,7 @@ Puppet and Chef install `.bat` files. Meridian looks names up as a Windows
 shell does, through `PATH`, trying `.exe`, `.cmd`, `.bat` and `.com` in that
 order. If a tool runs when you type its name, it runs for Meridian. For a tool
 not on `PATH`, set its full path in the target's variable, such as
-`MERIDIAN_TERRAFORM`; each [target page](../index.md#user-documentation) names
+`MERIDIAN_TERRAFORM`; each [target page](../index.md) names
 it.
 
 **Work directories** are plain paths such as `C:\work\.meridian\work\web`,

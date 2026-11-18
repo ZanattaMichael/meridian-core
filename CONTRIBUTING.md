@@ -64,8 +64,38 @@ target/debug/meridian compile examples/ansible/web-server.yaml --out build
 | `docs/` | user documentation, and the design under `docs/plans/` |
 | `tools/` | `check_links.py`, `new_plugin.py` |
 
-The [README](README.md#layout) describes each crate. The
-[design plan](docs/plans/design-plan.md) explains the shape.
+Every crate under `crates/`:
+
+- `meridian-ir`: parses and validates documents
+- `meridian-yaml`: YAML scalar rules and a deterministic writer, shared by the parser and YAML-emitting plugins
+- `meridian-resolve`: hierarchical data resolution
+- `meridian-module`: modules: the `meridian.yaml` manifest, path, git and OCI sources, version
+  resolution, `meridian.lock` and content hashes
+- `meridian-test`: [`meridian test`](docs/reference/testing.md): `Test` documents that compile or plan documents with given data and check the result
+- `meridian-rules`: [compile rules](docs/concepts/compile-rules.md): policies over the layers of a hierarchy, checked before compiling (for example "a more specific layer may not change a variable a less specific layer set")
+- `meridian-graph`: dependency graph and topological sort
+- `meridian-ast`: the target-agnostic resource tree every plugin consumes
+- `meridian-value`: the dynamic value type and its canonical JSON form
+- `meridian-sdk`: what plugins build against: the `Emitter`, `Runner` and `Importer` traits,
+  `serve`, wire conversion, and helpers for running command-line tools
+- `meridian-import`: shared importer code: line-preserving YAML and HCL readers, the document
+  writer with `TODO` markers, and the semantic diff used by round-trip tests
+- `meridian-plugin-host`: launches, discovers and drives plugins
+- `meridian-orchestrator`: runs a workflow: compiles each document, drives its tool, passes
+  outputs between stages, stops on the first failure
+- `meridian-tooling`: shared editor code: formatter, linter, completion, hover, navigation and
+  JSON Schema export, all read from the parser's field tables and the plugins' declarations
+- `meridian-lsp`: the language server
+- `meridian-mcp`: the MCP server: the compiler and catalogue as tools for an AI model
+- `meridian-cli`: the `meridian` command
+- `meridian-policy-opa`: the Open Policy Agent engine behind `--policy`
+- `meridian-target-fake`: a small complete plugin whose tool is a directory; used by tests and
+  a worked example of the SDK
+- `meridian-plugin-testkit`: shared test code for first-party plugins
+- `meridian-plugin-template`: the working plugin that `tools/new_plugin.py` copies
+
+A plugin depends on `meridian-sdk` (and `meridian-yaml` / `meridian-import` where needed),
+never on the compiler. The [design plan](docs/plans/design-plan.md) explains the shape.
 
 ## The one rule
 

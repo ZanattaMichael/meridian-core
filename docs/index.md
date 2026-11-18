@@ -7,120 +7,73 @@
 
 Meridian is one declarative language that compiles to Ansible, Puppet, Chef, DSC,
 cloud-init, Terraform, CloudFormation, Bicep, ARM templates, Pulumi, Docker Compose,
-Kubernetes and Helm, then runs the tool you chose to plan and apply it.
-
-These pages are built from
-[`docs/`](https://github.com/ZanattaMichael/meridian-core/tree/main/docs) on every merge and
-published at <https://zanattamichael.github.io/meridian-core/> and as the repository's
-[wiki](https://github.com/ZanattaMichael/meridian-core/wiki).
+Kubernetes and Helm, then runs the chosen tool to plan and apply it. A target that cannot do
+what a document asks refuses it at compile time.
 
 <p align="center"><img src="graphics/meridian-architecture.svg" alt="Meridian architecture: documents go into the core, the core speaks to one plugin per target over the plugin protocol, and each plugin drives its own tool" width="100%"></p>
 
-The core knows the language and nothing about any tool. Each plugin knows one tool.
-[How it fits together](reference/dsl/how-it-fits-together.md) follows one document through
-both.
-
-## Honest scope statement
-
-Meridian compiles and orchestrates. It does not reimplement Ansible's SSH orchestration,
-Terraform's state graph or Puppet's catalog. It compiles one declarative intent into the
-native files each tool already runs.
-
-The tools differ in execution model, state, dependencies and idempotency. Meridian
-abstracts intent, not those differences. Where a feature has no clean mapping on a target,
-Meridian emits a documented workaround or fails at compile time. It never degrades
-silently. See [the capability model](plans/design-plan.md#8-the-notifies-property--capability-matrix).
-
-## Project status
-
-Early implementation, written in Rust: core, plugin protocol and plugins. The first version
-was Go. The project switched to Rust on 2026-11-17 and removed the Go code once the Rust
-build reproduced its output byte for byte. Reasons, layout and order of work:
-[design plan §11](plans/design-plan.md#11-system-architecture-rust) and
-[§12.1](plans/design-plan.md#121-rust-migration-sequencing).
-
-## User documentation
+The core knows the language; each plugin knows one tool.
 
 | Start here | |
 |---|---|
-| [Install](quickstart/install.md) | install a release or build from source, check what you downloaded, and what each target needs |
-| [Meridian on Windows](quickstart/windows.md) | what is different on Windows, and which targets make sense there |
-| [Your first ResourceSet](quickstart/first-resourceset.md) | one document, from validate to apply, and the same document on another tool |
+| [Install](quickstart/install.md) | releases, building from source, what each target needs |
+| [Windows](quickstart/windows.md) | what differs on Windows |
+| [Your first ResourceSet](quickstart/first-resourceset.md) | one document from validate to apply |
 | [A two-stage workflow](quickstart/first-two-stage.md) | one tool creates a machine, another configures it |
-| [Worked workflows](quickstart/workflows.md) | eight workflows across every target: three tiers on four tools, a cluster platform, a golden image, Windows on Azure, an edge site, one file for every environment, one file for every customer, and the vertical slice CI applies for real |
-
-| Bringing in what you have | |
-|---|---|
-| [Importing existing configuration](operations/importing.md) | `meridian import`: Terraform, OpenTofu, Ansible, Compose, Kubernetes and DSC configuration into documents, with everything that could not be carried over marked |
-
-| Operating | |
-|---|---|
-| [Testing documents and modules](reference/testing.md) | `meridian test`: a `Test` document of cases that compile or plan your documents with given data and check the outcome, the files, the rule of a refusal and the changes; JUnit for the pipeline |
-| [Running Meridian in a pipeline](operations/running-in-a-pipeline.md) | one job per engine: a tested GitHub Actions workflow and reviewed snippets for Azure Pipelines, GitLab CI, Buildkite, Jenkins, Argo Workflows, Tekton and Octopus; what the engine owns and what Meridian owns; annotations and job summaries; checking the job's identity first; sharing the record between jobs |
-| [A saved plan, and applying it from a pull request](operations/pull-requests.md) | `plan --out` writes one plan file, `apply --plan` applies exactly that or refuses; what the file holds and never holds; two GitHub Actions that plan on every push, comment on the pull request and apply after the approval; a GitLab recipe |
+| [Worked workflows](quickstart/workflows.md) | eight workflows across every target |
+| [Importing existing configuration](operations/importing.md) | `meridian import` |
 
 | Concepts | |
 |---|---|
-| [Documents, resources and targets](concepts/ir-overview.md) | the two kinds of document, and the two families of resource types |
-| [Dependencies and notifications](concepts/dependencies.md) | `dependsOn` and `notifies`, and what each tool makes of them |
-| [The capability model](concepts/capability-model.md) | why a document either does what it says or does not compile |
-| [The two-stage architecture](concepts/two-stage-architecture.md) | Infrastructure, ResourceSet and the hand-off between them |
-| [Running safely](concepts/run-safety.md) | one run at a time, the record of every run, resuming a failed run, putting one back, finding drift, asking a policy first, sharing state |
-| [Compile rules](concepts/compile-rules.md) | policies over layered configuration: what a layer may and may not override, checked before anything is compiled |
-| [How a secret is held in memory](concepts/secrets-in-memory.md) | locked, wiped memory, the hardened process, how a secret reaches a tool, and what is not promised |
+| [How it fits together](reference/dsl/how-it-fits-together.md) | one document from file to running tool |
+| [Documents, resources and targets](concepts/ir-overview.md) | the two document kinds and two families of types |
+| [Dependencies and notifications](concepts/dependencies.md) | `dependsOn` and `notifies` per tool |
+| [The capability model](concepts/capability-model.md) | why a document compiles exactly or not at all |
+| [The two-stage architecture](concepts/two-stage-architecture.md) | Infrastructure, ResourceSet and the hand-off |
+| [Running safely](concepts/run-safety.md) | locks, run records, resume, rollback, drift, policy |
+| [Compile rules](concepts/compile-rules.md) | what a data layer may override |
+| [Secrets in memory](concepts/secrets-in-memory.md) | how a secret is held and handed to a tool |
 
-| In pictures | |
+| Operating | |
 |---|---|
-| [The architecture](reference/dsl/how-it-fits-together.md#the-same-thing-as-an-architecture) | documents, the core, the plugin protocol, the plugins by category, and the tools |
-| [The path of a document](reference/dsl/how-it-fits-together.md) | nine steps from a file to a tool that has run, and how far each command goes |
-| [Kinds and categories](concepts/ir-overview.md#two-kinds) | which kind of document each plugin category takes |
-| [The two stages](concepts/two-stage-architecture.md) | an Infrastructure stage hands one declared value to a ResourceSet stage |
-| [A secret's path](concepts/secrets-in-memory.md) | from a provider into locked memory, as a reference everywhere else, to the tool by a private file |
-| [A run](concepts/run-safety.md) | the lock, the policy check, the record, the run-state, and what happens when a stage fails |
-| [Modules](reference/modules.md) | the manifest, the sources, the lockfile, and what every run verifies |
-| [Inside a pipeline engine](operations/running-in-a-pipeline.md) | the engine's band above Meridian's: the job runs `meridian apply`, and the events come back as annotations and a summary |
-| [A saved plan](operations/pull-requests.md) | `plan --out` writes the file, the reviewer reads it on the pull request, and `apply --plan` compiles again, refuses what has moved, and hands each tool the plan it saved |
-| [A test](reference/testing.md) | a Test document's cases, each compiled or planned in a scratch directory, and the checks over what came out |
+| [Testing documents and modules](reference/testing.md) | `meridian test` |
+| [Running in a pipeline](operations/running-in-a-pipeline.md) | one job per CI engine |
+| [A saved plan](operations/pull-requests.md) | `plan --out` and `apply --plan` from a pull request |
 
-Each picture is drawn by [`tools/wiki/graphics.py`](https://github.com/ZanattaMichael/meridian-core/blob/main/tools/wiki/graphics.py),
-and every build checks the committed file matches the script.
-
-| Editor and authoring tools | |
+| Editor tools | |
 |---|---|
-| [Overview](tooling/index.md) | what the tools are, and why they never disagree with the compiler |
-| [The language server](tooling/language-server.md) | completion, hover documentation, errors as you type, navigation |
-| [Visual Studio Code](tooling/vscode.md) | the extension: install, settings, commands |
-| [Other editors](tooling/other-editors.md) | Neovim, Helix, Emacs, and pre-commit |
-| [The formatter](tooling/formatter.md) | `meridian fmt`: one layout, and the guarantee that it changes nothing else |
-| [The linter](tooling/linter.md) | `meridian lint`: every error in a project, plus probable mistakes |
-| [The JSON Schema](tooling/json-schema.md) | `meridian schema`: validation for editors that only know YAML |
-| [Tool schemas](tooling/schema-sync.md) | `meridian schema sync`: a tool's own types, read once from the tool and cached, so the editor completes and checks them |
-| [The MCP server](tooling/mcp-server.md) | `meridian mcp`: the compiler and the catalogue as tools for an AI model, read-only, with the one diagnostic shape a small model can act on |
+| [Overview](tooling/index.md) | |
+| [Language server](tooling/language-server.md) | completion, hover, errors, navigation |
+| [Visual Studio Code](tooling/vscode.md) | the extension |
+| [Other editors](tooling/other-editors.md) | Neovim, Helix, Emacs, pre-commit |
+| [Formatter](tooling/formatter.md) | `meridian fmt` |
+| [Linter](tooling/linter.md) | `meridian lint` |
+| [JSON Schema](tooling/json-schema.md) | `meridian schema` |
+| [Tool schemas](tooling/schema-sync.md) | `meridian schema sync` |
+| [MCP server](tooling/mcp-server.md) | `meridian mcp` |
 
 | Reference | |
 |---|---|
 | [The `meridian` command](reference/cli.md) | commands, options, exit status |
-| [Machine-readable output](reference/cli-json.md) | `--output json`: the one object every command prints for a pipeline, its schema, and `plan --detailed-exitcode` |
-| [Lint rules](reference/lint.md) | every rule of `meridian lint`, with an example and what to do |
-| [Plugin signatures](reference/plugin-signatures.md) | how `meridian` decides a plugin may be started, trusting a plugin from elsewhere, and signing your own |
-| [Policy checks](reference/policy.md) | asking a policy before a change is made: the options, the input a policy sees, Rego with Open Policy Agent, and how to write an engine |
-| [State, runs and backends](reference/state.md) | what Meridian keeps about its runs, the events, and how to write a state backend |
-| [Reports and sinks](reference/reporting.md) | report files in JSON, JUnit, Markdown and HTML, sending a run's events elsewhere as they happen, and how to write a sink |
-| [The report server](reference/report-server.md) | an optional server that collects the runs of every project and shows them; running it, securing it, its HTTP interface |
-| [The Meridian language](reference/dsl/index.md) | every field of a document, what it must hold, and which check happens when |
-| [How it fits together](reference/dsl/how-it-fits-together.md) | a document's path from file to running tool, with diagrams and a worked example |
-| The language item by item | [resources](reference/dsl/resources.md), [`dependsOn`](reference/dsl/dependson.md), [`notifies`](reference/dsl/notifies.md), [conditions](reference/dsl/conditions.md), [references](reference/dsl/references.md), [outputs and hand-offs](reference/dsl/outputs-and-hand-offs.md) |
-| The language by segment | how `type`, `state`, `params`, references and notifies are written for [configuration management](reference/dsl/configuration-management.md), [infrastructure as code](reference/dsl/infrastructure-as-code.md), [containerization](reference/dsl/containerization.md) and [container orchestration](reference/dsl/container-orchestration.md) |
-| [Configuration management resource types](reference/resource-types.md) | `package`, `file`, `service`, `user`, `group`, `exec`, and how each target differs |
-| [Testing documents and modules](reference/testing.md) | `meridian test`: the `Test` document, its cases, expectations and assertions, what `stages` holds, tests in a module, JUnit output |
-| [Modules](reference/modules.md) | packaging configuration to share it: the manifest, sources (path, git, registry), versions, the lockfile, integrity, the `meridian module` commands |
-| [Capability matrix](reference/capability-matrix.md) | generated from the plugins |
-| [Plugin settings](reference/plugin-settings.md) | every setting of every target's runner, how a value is found, how argument lists are split; generated from the plugins |
-| [Conformance matrix](reference/conformance-matrix.md) | the same document on every configuration management target, cell by cell; generated from the plugins |
-| [Refusal rules](reference/refusal-rules.md) | every rule a compile-time refusal can carry, what it refuses and what to write instead; generated from the registry and the plugins |
-| [Compatibility](reference/compatibility.md) | which language versions a build reads, and which plugins it loads; generated from the code |
-| [Compile rules](reference/compile-rules.md) | the rules file, every rule and every refusal, and `meridian rules check` |
-| [Error kinds and codes](reference/errors.md) | every kind of error the crates produce, with its fixed code: expressions, stages of a run, modules, compile rules, layered data, keys and signatures |
+| [Machine-readable output](reference/cli-json.md) | `--output json` |
+| [The Meridian language](reference/dsl/index.md) | every document field |
+| Language items | [resources](reference/dsl/resources.md), [`dependsOn`](reference/dsl/dependson.md), [`notifies`](reference/dsl/notifies.md), [conditions](reference/dsl/conditions.md), [references](reference/dsl/references.md), [outputs and hand-offs](reference/dsl/outputs-and-hand-offs.md) |
+| Language by segment | [configuration management](reference/dsl/configuration-management.md), [infrastructure as code](reference/dsl/infrastructure-as-code.md), [containerization](reference/dsl/containerization.md), [container orchestration](reference/dsl/container-orchestration.md) |
+| [Resource types](reference/resource-types.md) | the six shared configuration management types |
+| [Modules](reference/modules.md) | manifest, sources, versions, lockfile |
+| [Lint rules](reference/lint.md) | |
+| [Compile rules](reference/compile-rules.md) | |
+| [Error codes](reference/errors.md) | |
+| [Plugin signatures](reference/plugin-signatures.md) | which plugins may start |
+| [Policy checks](reference/policy.md) | Rego with Open Policy Agent |
+| [State, runs and backends](reference/state.md) | |
+| [Reports and sinks](reference/reporting.md) | |
+| [Report server](reference/report-server.md) | |
+| [Capability matrix](reference/capability-matrix.md) | generated |
+| [Plugin settings](reference/plugin-settings.md) | generated |
+| [Conformance matrix](reference/conformance-matrix.md) | generated |
+| [Refusal rules](reference/refusal-rules.md) | generated |
+| [Compatibility](reference/compatibility.md) | generated |
 
 | Targets | |
 |---|---|
@@ -128,44 +81,29 @@ and every build checks the committed file matches the script.
 | Infrastructure as code | [terraform](targets/terraform.md), [opentofu](targets/opentofu.md), [cloudformation](targets/cloudformation.md), [bicep](targets/bicep.md), [arm](targets/arm.md), [pulumi](targets/pulumi.md), [packer](targets/packer.md) |
 | Containers | [docker](targets/docker.md), [podman](targets/podman.md), [kubernetes](targets/kubernetes.md), [helm](targets/helm.md) (with Kustomize) |
 
-Every target page opens with what the target does and does not support. Every example is a
-file under [`examples/`](../examples) that a test compiles with the real plugins.
-
-## Planning documents
-
-| Document | What it settles |
+| Contributing | |
 |---|---|
-| [Design plan](plans/design-plan.md) | IR schema, pipeline stages, plugin SDK, architecture, build milestones |
-| [Testing plan](plans/testing-plan.md) | The five test tiers, the shared fixture library, CI wiring |
-| [Documentation plan](plans/documentation-plan.md) | Doc set structure, audiences, generated capability matrix |
-| [Governance & contribution model](plans/governance.md) | Plugin tiers, ownership, capability disputes, triage |
-| [Migration & adoption path](plans/migration-and-adoption.md) | Forward-compile scope decision, coexistence, pilot guidance |
-| [Observability, logging & diagnostics](plans/observability.md) | Log schema, plan output, fact provenance, telemetry, audit |
-| [Release, versioning & compatibility](plans/release-and-versioning.md) | apiVersion, SDK compatibility, run-state migration, channels |
-| [Modules and versioning](plans/modules-and-versioning.md) | Built, awaiting the owner's review: shareable modules (sources, lockfile, integrity), how `apiVersion` is enforced, protocol negotiation |
-| [Security & secrets handling](plans/security.md) | Threat model, `secret: true` guarantees, disclosure process |
-| [Run safety](plans/run-safety.md) | Built: state and locking, resume, rollback, drift, policy checks, values handed between stages |
-| [Reporting](plans/reporting.md) | Built: streaming, report files, sinks, and the report server |
-| [Language expansion](plans/language-expansion.md) (accepted; phases 1, 2 and most of 6a built) | Expressions and functions, conditions, templating, configurations with inputs, endpoints and inventory, secrets, workflows |
-| [Decision records](decisions/README.md) | Design choices made while building, one record each, with whether the owner has accepted them |
+| [`CONTRIBUTING.md`](../CONTRIBUTING.md) | setup, checks, review |
+| [Writing a plugin](contributing/writing-a-plugin.md) | add a tool |
+| [How Meridian is tested](contributing/testing.md) | |
+| [Real-tool tests](contributing/real-tool-tests.md) | |
+| [Releasing](contributing/releasing.md) | |
+| [Documentation site](contributing/documentation-site.md) | publishing, pages, graphics |
+| [Code of Conduct](../CODE_OF_CONDUCT.md) | |
+| [`SECURITY.md`](../SECURITY.md) | reporting security issues |
 
-## Contributing
-
-| | |
+| Design | |
 |---|---|
-| [`CONTRIBUTING.md`](../CONTRIBUTING.md) | from a fresh clone to a merged pull request: set up, the checks, review, and the changes that need a second reviewer |
-| [Writing a plugin](contributing/writing-a-plugin.md) | add a tool to Meridian, step by step, starting from a template that already works |
-| [How Meridian is tested](contributing/testing.md) | unit tests and golden files, property tests, cross-target conformance, examples, coverage; and how to add to each |
-| [Real-tool tests](contributing/real-tool-tests.md) | what each target is tested against for real, what that proves and what it cannot, and the settings the Azure job needs |
-| [Releasing](contributing/releasing.md) | what the release pipeline builds and checks, the settings a release needs, and the steps to cut one |
-| [Code of Conduct](../CODE_OF_CONDUCT.md) | how we treat each other |
-
-Security reports go through [`SECURITY.md`](../SECURITY.md), not the issue tracker.
-
-[How the documentation is published](contributing/documentation-site.md) covers the
-pipeline, what a new page needs, and how the graphics and theme are made.
-
-## Reading order
-
-New to the project? Read the design plan's problem statement and principles (§1–§2), then
-the IR schema overview (§4). Everything else follows from those.
+| [Design plan](plans/design-plan.md) | IR, pipeline, SDK, architecture |
+| [Testing plan](plans/testing-plan.md) | |
+| [Documentation plan](plans/documentation-plan.md) | |
+| [Governance](plans/governance.md) | |
+| [Migration and adoption](plans/migration-and-adoption.md) | |
+| [Observability](plans/observability.md) | |
+| [Release and versioning](plans/release-and-versioning.md) | |
+| [Modules and versioning](plans/modules-and-versioning.md) | |
+| [Security](plans/security.md) | |
+| [Run safety](plans/run-safety.md) | |
+| [Reporting](plans/reporting.md) | |
+| [Language expansion](plans/language-expansion.md) | |
+| [Decision records](decisions/README.md) | |
