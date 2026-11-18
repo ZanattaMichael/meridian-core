@@ -45,10 +45,10 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use meridian_ir::Bundle;
 use meridian_orchestrator::{
-    describe_duration, lock, record, run_selected, selected, Backend, Decisions, Drift, Event,
-    ExecBackend, LocalBackend, LockInfo, Mode, Observer, OnFailure, Options, Outcome, Policy,
-    Reason, Refusal, Resume, RollbackOutcome, RollbackReport, RunRecord, RunReport, Selector,
-    StageId, StageReport, Stop, MASK,
+    describe_duration, lock, record, run_selected, selected, Analysis, Analyzer, Backend, Baseline,
+    Decisions, Drift, Event, ExecBackend, FailOn, LocalBackend, LockInfo, Mode, Observer,
+    OnFailure, Options, Outcome, Policy, Reason, Refusal, Resume, RollbackOutcome, RollbackReport,
+    RunRecord, RunReport, Selector, StageId, StageReport, Stop, MASK,
 };
 use meridian_plugin_host::{
     signature::signature_path, Policy as SignaturePolicy, PublicKey, Registry, SecretKey,

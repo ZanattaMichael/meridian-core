@@ -239,6 +239,10 @@ such as state and plan encryption, variables, local values and ephemeral resourc
 The build also produces `meridian-policy-opa`, which `--policy` uses to ask
 [a policy](../reference/policy.md) whether a change may be made. It needs
 `opa`, Open Policy Agent 1.0 or later, and only when you pass `--policy`.
+Likewise `meridian-analyze-checkov` and `meridian-analyze-trivy`, which
+`--analyze` uses to scan each stage's compiled files
+([analyzers](../reference/analyzers.md)); they need `checkov` and `trivy`,
+and only when you pass `--analyze`.
 
 Each tool keeps using its own credentials and configuration. Meridian does not
 store or pass any: if `aws sts get-caller-identity` or `kubectl get nodes` works

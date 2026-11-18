@@ -70,6 +70,9 @@ pub(crate) struct Journal {
     pub(crate) record: RunRecord,
     pub(crate) events: Vec<Event>,
     pub(crate) warnings: Vec<String>,
+    /// At what severity a finding fails a stage, for what the analysis
+    /// events say.
+    pub(crate) fail_on: FailOn,
 }
 
 impl Journal {
@@ -193,6 +196,80 @@ impl Journal {
                     ("warnings", Value::Int(policy.warn.len() as i64)),
                     ("asked", Value::Bool(policy.asked)),
                 ],
+            );
+        }
+        for analysis in &report.analyses {
+            // Every finding is an event of its own, so a report or a sink
+            // can say which rule fired where; the message is the analyzer's
+            // description of its rule, masked of every value the run knows
+            // to be sensitive.
+            for finding in &analysis.findings {
+                self.emit(
+                    observer,
+                    event::FINDING_REPORTED,
+                    at,
+                    vec![
+                        ("analyzer", Value::from(analysis.analyzer.as_str())),
+                        ("rule", Value::from(finding.rule.as_str())),
+                        ("severity", Value::from(finding.severity.as_str())),
+                        ("message", Value::from(finding.message.as_str())),
+                        ("file", Value::from(finding.file.as_str())),
+                        ("line", Value::Uint(finding.line)),
+                        ("resource", Value::from(finding.resource.as_str())),
+                        ("document", Value::from(finding.document.as_str())),
+                        ("documentLine", Value::Uint(finding.document_line)),
+                        ("url", Value::from(finding.url.as_str())),
+                        ("accepted", Value::Bool(finding.accepted)),
+                    ],
+                );
+            }
+            let counts = analysis.counts();
+            let threshold = self.fail_on.threshold();
+            let mut detail = vec![
+                ("analyzer", Value::from(analysis.analyzer.as_str())),
+                ("asked", Value::Bool(analysis.asked)),
+                ("findings", Value::Uint(counts.total())),
+                ("critical", Value::Uint(counts.critical)),
+                ("high", Value::Uint(counts.high)),
+                ("medium", Value::Uint(counts.medium)),
+                ("low", Value::Uint(counts.low)),
+                ("info", Value::Uint(counts.info)),
+                ("accepted", Value::Uint(counts.accepted)),
+                (
+                    "failing",
+                    Value::Uint(analysis.failing(threshold).len() as u64),
+                ),
+            ];
+            if !analysis.measures.is_empty() {
+                detail.push((
+                    "measures",
+                    Value::List(
+                        analysis
+                            .measures
+                            .iter()
+                            .map(|m| {
+                                Value::Map(
+                                    [
+                                        ("name".to_owned(), Value::from(m.name.as_str())),
+                                        ("value".to_owned(), Value::Float(m.value)),
+                                        ("unit".to_owned(), Value::from(m.unit.as_str())),
+                                    ]
+                                    .into(),
+                                )
+                            })
+                            .collect(),
+                    ),
+                ));
+            }
+            self.emit(
+                observer,
+                if analysis.passed(threshold) {
+                    event::ANALYSIS_PASSED
+                } else {
+                    event::ANALYSIS_FAILED
+                },
+                at,
+                detail,
             );
         }
         match &report.outcome {

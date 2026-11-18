@@ -170,6 +170,8 @@ A step's `reason`, when it failed:
 | `policy-denied` | the run's [policy](policy.md) does not allow the change, or could not be asked |
 | `interrupted` | the operator stopped the run with Ctrl-C (or a `SIGTERM`) while the step was going, or before its tool was started |
 | `timed-out` | the step's tool ran past `--stage-timeout` and was stopped |
+| `analysis-failed` | an [analyzer](analyzers.md) found something at or above the severity the run fails on (`--fail-on`) |
+| `analyzer-failed` | an analyzer could not be run, or did not answer, so the step was not analyzed |
 
 These words are fixed: a new kind of failure gets a new word, and a word is
 never reused. They are also listed with every other error code in
@@ -210,6 +212,9 @@ not change when workflows, fan-out and retries arrive.
 | `output.produced` | an apply produced an output | `kind`, `name`, `sensitive`. Never the value |
 | `policy.passed` | the run's [policy](policy.md) allowed the step | `kind`, `denials` (0), `warnings`, `asked`. Counts, never the messages |
 | `policy.denied` | the policy denied the step, or could not be asked | `kind`, `denials`, `warnings`, `asked`: `false` when the engine could not be asked |
+| `finding.reported` | an [analyzer](analyzers.md) reported one finding | `kind`, `analyzer`, `rule`, `severity`, `message`, `file`, `line`, `resource`, `document`, `documentLine`, `url`, `accepted`. The message is the analyzer's description of its rule, masked |
+| `analysis.passed` | an analyzer looked and nothing it found reaches `--fail-on` | `kind`, `analyzer`, `asked`, `findings`, `critical`, `high`, `medium`, `low`, `info`, `accepted`, `failing`, `measures` |
+| `analysis.failed` | a finding reaches `--fail-on`, or the analyzer could not look | the same; `asked` is `false` when it could not look |
 | `step.succeeded` | the step did what was asked | `kind`, `artifact`, `changes`; a plan also has `unknown` |
 | `step.failed` | the step failed | `kind`, `reason`, `artifact`, `changes` |
 | `step.skipped` | the step was not run | `kind`, `reason`: `already-applied` (with `artifact`, `appliedIn`) `earlier-step-failed` (with `becauseOf`), or `when-false`: the document's own `spec.when` left it out. The condition is not recorded |

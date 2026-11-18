@@ -1,0 +1,61 @@
+name: analyzers
+
+# The reference analyzers against real scanners. The rust workflow runs
+# their other tests against stand-ins; without Checkov and Trivy installed
+# these ones are ignored, so they are run here, where they are.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'crates/meridian-analyze*/**'
+      - 'crates/meridian-value/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/analyzers.yml'
+
+permissions:
+  contents: read
+
+# A newer push to the same pull request replaces the run in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  real:
+    name: analyzers with checkov and trivy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-rust
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Checkov
+        run: pip install --quiet checkov==3.2.477
+
+      - uses: aquasecurity/setup-trivy@v0.2.3
+        with:
+          version: v0.67.0
+
+      - name: Show the versions under test
+        run: |
+          checkov --version
+          trivy --version
+
+      - name: Test against checkov
+        env:
+          MERIDIAN_TEST_REAL_CHECKOV: checkov
+        run: cargo test -p meridian-analyze-checkov --locked --test real -- --ignored --nocapture
+
+      - name: Test against trivy
+        env:
+          MERIDIAN_TEST_REAL_TRIVY: trivy
+          TRIVY_DISABLE_VEX_NOTICE: "true"
+        run: cargo test -p meridian-analyze-trivy --locked --test real -- --ignored --nocapture

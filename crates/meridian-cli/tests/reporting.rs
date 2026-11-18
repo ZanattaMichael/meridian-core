@@ -297,7 +297,7 @@ fn a_bad_report_or_sink_is_refused_before_anything_runs() {
     for (args, error) in [
         (
             vec!["--report", "pdf=report.pdf"],
-            "error: \"pdf\" is not a report format; the formats are json, junit, markdown and html\n",
+            "error: \"pdf\" is not a report format; the formats are json, junit, markdown, html and sarif\n",
         ),
         (
             vec!["--report", "junit"],

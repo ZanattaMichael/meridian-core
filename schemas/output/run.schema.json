@@ -461,6 +461,177 @@
             "string",
             "null"
           ]
+        },
+        "analyses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "analyzer": {
+                "type": "string"
+              },
+              "asked": {
+                "type": "boolean"
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "counts": {
+                "type": "object",
+                "properties": {
+                  "critical": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "high": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "medium": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "low": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "info": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "accepted": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "critical",
+                  "high",
+                  "medium",
+                  "low",
+                  "info",
+                  "accepted"
+                ]
+              },
+              "findings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "rule": {
+                      "type": "string"
+                    },
+                    "severity": {
+                      "type": "string",
+                      "enum": [
+                        "critical",
+                        "high",
+                        "medium",
+                        "low",
+                        "info"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "file": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "line": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 1
+                    },
+                    "resource": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "document": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "documentLine": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 1
+                    },
+                    "url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "accepted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "rule",
+                    "severity",
+                    "message",
+                    "file",
+                    "line",
+                    "resource",
+                    "document",
+                    "documentLine",
+                    "url",
+                    "accepted"
+                  ]
+                }
+              },
+              "measures": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "number"
+                    },
+                    "unit": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "value",
+                    "unit"
+                  ]
+                }
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "analyzer",
+              "asked",
+              "error",
+              "counts",
+              "findings",
+              "measures"
+            ]
+          }
         }
       },
       "additionalProperties": false,
@@ -476,6 +647,7 @@
         "warnings",
         "removed",
         "policy",
+        "analyses",
         "previousGood"
       ]
     },

@@ -1205,6 +1205,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "meridian-analyze"
+version = "0.1.0"
+dependencies = [
+ "meridian-value",
+]
+
+[[package]]
+name = "meridian-analyze-checkov"
+version = "0.1.0"
+dependencies = [
+ "meridian-analyze",
+ "meridian-value",
+]
+
+[[package]]
+name = "meridian-analyze-trivy"
+version = "0.1.0"
+dependencies = [
+ "meridian-analyze",
+ "meridian-value",
+]
+
+[[package]]
 name = "meridian-ast"
 version = "0.1.0"
 dependencies = [

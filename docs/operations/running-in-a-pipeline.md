@@ -45,7 +45,7 @@ decides *what* happens and in what order, and keeps the record of it.
 | **Runners and their identity**: where the job runs, and the OIDC token or service connection it runs as | **Secrets delivery**: a secret reaches the tool by a [private channel](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) and is never on a command line, in a file the engine keeps, or in a log |
 | **Secret release**: which secrets a job may read, and when | **The record**: every run's [events](../reference/state.md#events) and run-state, in a backend the next job can reach |
 | **Environments, reviewers and approvals**: who may deploy to production, and the pause before it | **Resume and rollback**: `apply --resume` continues a failed apply from the step that failed; `--on-failure rollback` and `meridian rollback` put one back |
-| **Logs and artifacts**: the job's log, its summary page, and the files it keeps | **Drift and policy**: `meridian drift` says whether what was applied is still there; `--policy` asks a policy before anything is applied |
+| **Logs and artifacts**: the job's log, its summary page, and the files it keeps | **Drift, policy and analysis**: `meridian drift` says whether what was applied is still there; `--policy` asks a policy before anything is applied; `--analyze` scans the compiled files and annotates each finding on the document's line |
 
 The engine never sees a value Meridian holds, so there is nothing for it to
 mask: no secret is ever printed, by construction
@@ -684,7 +684,9 @@ for the engine as well as for the person reading the log:
 
 What is written comes from two places only. An annotation is a document's
 diagnostic, as `validate` reports it, or a step of the run's report, which is
-folded from the run's [events](../reference/state.md#events); the summary is
+folded from the run's [events](../reference/state.md#events), an
+[analyzer](../reference/analyzers.md)'s finding among them, at the line of
+the document the finding was traced to; the summary is
 the Markdown report that `--report markdown=FILE` writes, followed by where
 the record is kept. There is no third place that formats an error, so the
 annotation and the log never disagree

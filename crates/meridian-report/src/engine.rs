@@ -242,23 +242,54 @@ pub type Positions<'a> = dyn Fn(&str) -> Option<(String, usize)> + 'a;
 /// put back, or drifted, in the order the steps ran. Each points at the
 /// step's document when `positions` knows where it is.
 pub fn problems(report: &Report, positions: &Positions<'_>) -> Vec<Problem> {
-    report
-        .steps
-        .iter()
-        .filter(|step| step.is_problem())
-        .map(|step| {
-            let (level, what) = step_problem(step);
-            let (file, line) = positions(&step.name).unwrap_or_default();
-            Problem {
-                level,
-                title: format!("{} {}", step.title(), what),
-                message: step_message(step, &report.mode),
+    let mut problems = Vec::new();
+    for step in &report.steps {
+        // Every finding an analyzer reported and the baseline did not
+        // accept, at the line of the document it was traced to.
+        for finding in step.findings.iter().filter(|f| !f.accepted) {
+            let (file, line) = if finding.document.is_empty() {
+                positions(&step.name).unwrap_or_default()
+            } else {
+                (finding.document.clone(), finding.document_line as usize)
+            };
+            let mut message = finding.message.clone();
+            if !finding.resource.is_empty() {
+                let _ = write!(message, " (resource {})", finding.resource);
+            }
+            if !finding.file.is_empty() {
+                let _ = write!(message, " [{}", finding.file);
+                if finding.line > 0 {
+                    let _ = write!(message, ":{}", finding.line);
+                }
+                message.push(']');
+            }
+            problems.push(Problem {
+                level: match finding.severity.as_str() {
+                    "critical" | "high" => Level::Error,
+                    _ => Level::Warning,
+                },
+                title: format!("{} {} {}", step.title(), finding.severity, finding.rule),
+                message,
                 file,
                 line,
                 column: 0,
-            }
-        })
-        .collect()
+            });
+        }
+        if !step.is_problem() {
+            continue;
+        }
+        let (level, what) = step_problem(step);
+        let (file, line) = positions(&step.name).unwrap_or_default();
+        problems.push(Problem {
+            level,
+            title: format!("{} {}", step.title(), what),
+            message: step_message(step, &report.mode),
+            file,
+            line,
+            column: 0,
+        });
+    }
+    problems
 }
 
 fn step_problem(step: &Step) -> (Level, &'static str) {

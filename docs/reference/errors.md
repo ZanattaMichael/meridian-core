@@ -62,6 +62,8 @@ and in the `failure` element of a [JUnit report](reporting.md).
 | `policy-denied` | the run's [policy](policy.md) does not allow the change, or could not be asked |
 | `interrupted` | the operator stopped the run with Ctrl-C (or a `SIGTERM`) while the step was going, or before its tool was started |
 | `timed-out` | the step's tool ran past `--stage-timeout` and was stopped |
+| `analysis-failed` | an [analyzer](analyzers.md) found something at or above the severity the run fails on (`--fail-on`) |
+| `analyzer-failed` | an analyzer could not be run, or did not answer, so the step was not analyzed |
 
 A step's record can also hold words that are not a stage failure: a step that
 was skipped because an earlier one failed says `earlier-step-failed`, and a

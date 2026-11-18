@@ -111,7 +111,7 @@ meridian events RUN | curl --fail --data-binary @- \
 | `POST /v1/projects/{project}/runs/{run}/events` | adds events, one JSON object per line. `200` with `{"accepted":N,"ignored":M}`. Needs the write token |
 | `GET /v1/projects/{project}/runs` | the newest 200 runs as JSON: `run`, `mode`, `status`, `started`, `finished`, `steps`, `failed`, `changed`, `drifted` |
 | `GET /v1/projects/{project}/runs/{run}/events` | the run's events, one per line, in order |
-| `GET /v1/projects/{project}/runs/{run}/report/{format}` | the run's report: `json`, `junit`, `markdown` or `html` |
+| `GET /v1/projects/{project}/runs/{run}/report/{format}` | the run's report: `json`, `junit`, `markdown`, `html` or `sarif` |
 | `GET /healthz` | `ok`. Needs no token |
 
 Adding events is safe to repeat: an event the run already has, by its

@@ -83,11 +83,13 @@ continues an apply that failed from the stage that failed. `--on-failure rollbac
 `meridian rollback` put back what an apply changed, and `meridian drift` says whether what was
 applied is still what is there. With `--policy`, a `plan` or `apply` first asks a policy, written
 in Rego for Open Policy Agent, whether each change may be made, and an apply that is denied
-applies nothing ([policy checks](docs/reference/policy.md)). The record can be kept in a shared place with `--backend`. See
-[running safely](docs/concepts/run-safety.md).
+applies nothing ([policy checks](docs/reference/policy.md)). With `--analyze`, each stage's compiled
+files are first scanned by Checkov, Trivy or any scanner, and every finding is shown against the line of
+the document it came from ([analyzers](docs/reference/analyzers.md)). The record can be kept in a shared
+place with `--backend`. See [running safely](docs/concepts/run-safety.md).
 
 Every run can also leave a report and tell other systems what it did: `--report junit=FILE`
-(or `json`, `markdown`, `html`) writes one when the run ends, `meridian report` writes one for
+(or `json`, `markdown`, `html`, `sarif`) writes one when the run ends, `meridian report` writes one for
 any recorded run, and `--sink NAME` sends the run's events to a program that forwards them, as
 they happen. A report names steps, resources and outputs, and never holds a value. See
 [reports and sinks](docs/reference/reporting.md). To keep every project's runs in one place, the
@@ -163,6 +165,10 @@ The core is a Cargo workspace under `crates/`:
 - `meridian-cli` — the `meridian` command
 - `meridian-policy-opa` — the policy engine for Open Policy Agent, which `--policy` asks whether
   a change may be made
+- `meridian-analyze` — what an analyzer program shares: reading the input, running the scanner,
+  writing the findings
+- `meridian-analyze-checkov`, `meridian-analyze-trivy` — the analyzers `--analyze` runs over each
+  stage's compiled files, reporting each failed check against the line of the document
 - `meridian-target-fake` — a small, complete plugin whose tool is a directory, used by the tests
   and readable as a worked example of the SDK
 - `meridian-plugin-testkit` — what the first-party plugins' tests share

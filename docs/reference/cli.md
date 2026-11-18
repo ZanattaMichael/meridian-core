@@ -90,6 +90,13 @@ settle, and refuses the document if it cannot:
 
 `plan` and `apply` compile first, so the same holds for them.
 
+With `--analyze`, every document's compiled files are put through each
+[analyzer](analyzers.md) named, and its findings are shown against the line
+of the document each is about. A finding at or above `--fail-on` fails the
+document and the command exits `1`; the documents after it are still
+compiled, so one compile shows everything there is to find. Nothing is
+contacted, which makes this the cheapest check to run on a pull request.
+
 ### `plan`
 
 Compiles each document and asks its tool what an apply would change, using the
@@ -119,7 +126,10 @@ can read ([the run object](cli-json.md#compile-plan-apply-drift-rollback)).
 With `--policy`, every stage is put to the [policy](policy.md), and its
 warnings and its decision are shown above the plan. A stage the policy denies
 is reported as failed and the command exits `1`; the stages after it are
-still planned, so one plan shows every denial.
+still planned, so one plan shows every denial. With `--analyze`, each
+stage's compiled files are put through the [analyzers](analyzers.md) first,
+and a stage with a finding at `--fail-on` is reported as failed in the same
+way.
 
 ### `apply`
 
@@ -161,6 +171,10 @@ web (ResourceSet, target ansible)
   not run, because Infrastructure "network" failed
 run 2026-11-17T09-14-03Z-0cc7 was stopped by its policy before anything was applied
 ```
+
+With `--analyze`, every stage's compiled files are put through the
+[analyzers](analyzers.md) in that same first pass, and a finding at
+`--fail-on` stops the run before anything is applied in the same way.
 
 With `--on-failure rollback`, a failed apply instead
 [puts back](../concepts/run-safety.md#putting-a-run-back) every stage it
@@ -659,6 +673,10 @@ meridian signing verify --trusted-key acme.pub meridian-target-acme
 | `--run RUN` | | the last apply | `rollback` only: the apply to put back |
 | `--policy PATH` | | no policy | `plan`, `apply`: a [policy](policy.md) file or directory every stage is checked against before anything is applied; may be repeated |
 | `--policy-engine NAME` | `MERIDIAN_POLICY_ENGINE` | `opa` | `plan`, `apply`: the program `meridian-policy-<NAME>` that reads the policies |
+| `--analyze NAME` | `MERIDIAN_ANALYZERS` | none | `compile`, `plan`, `apply`: an [analyzer](analyzers.md), the program `meridian-analyze-<NAME>`, every stage's compiled files are put through; may be repeated, or `checkov,trivy` |
+| `--analyze-config NAME.KEY=VALUE` | | | a setting for one analyzer; may be repeated |
+| `--fail-on SEVERITY` | `MERIDIAN_FAIL_ON` | `high` | the severity at which an analyzer's finding fails its stage: `critical`, `high`, `medium`, `low`, `info` or `none` |
+| `--analyze-baseline FILE` | | none | a file of [accepted findings](analyzers.md#the-baseline) that fail nothing |
 | `--events json` | | | `compile`, `plan`, `apply`, `drift`, `rollback`: write every [event](state.md#events) to standard output as it happens, one JSON object per line. The report for people moves to standard error |
 | `--report FORMAT=FILE` | | | `compile`, `plan`, `apply`, `drift`, `rollback`: write a [report](reporting.md#--report) of the run when it ends, as `json`, `junit`, `markdown` or `html`; may be repeated |
 | `--sink NAME` | `MERIDIAN_SINKS` (separated by `,`) | | the same commands: send every event, as it happens, to a [sink](reporting.md#sinks); may be repeated |
@@ -803,7 +821,7 @@ No version is deprecated today.
 | Status | When |
 |---|---|
 | `0` | everything asked for succeeded. For `plan` without `--detailed-exitcode`, whether or not an apply would change anything; for `drift`, nothing drifted; for `import`, the documents were written, whatever was reported about them |
-| `1` | an error: a document was invalid or did not compile; a tool failed; a policy denied a change or could not be asked; a stage could not be rolled back; the run was refused because the state is locked or there was nothing to resume or roll back; a [sink](reporting.md#sinks) marked `required` failed; a run was stopped by `--stage-timeout`; `fmt --check` found a file that is not formatted; `lint` found an error, or a warning with `--strict`; `migrate --check` found a file that would change; `import` could not read the source, no plugin imports it, or, with `--strict`, something was changed or not translated; `module verify`, `signing verify`, `secret check` or `rules check` found something wrong; `test` had a case that failed or could not run, or ran none |
+| `1` | an error: a document was invalid or did not compile; a tool failed; a policy denied a change or could not be asked; an [analyzer](analyzers.md) found something at `--fail-on` or could not look; a stage could not be rolled back; the run was refused because the state is locked or there was nothing to resume or roll back; a [sink](reporting.md#sinks) marked `required` failed; a run was stopped by `--stage-timeout`; `fmt --check` found a file that is not formatted; `lint` found an error, or a warning with `--strict`; `migrate --check` found a file that would change; `import` could not read the source, no plugin imports it, or, with `--strict`, something was changed or not translated; `module verify`, `signing verify`, `secret check` or `rules check` found something wrong; `test` had a case that failed or could not run, or ran none |
 | `2` | `drift`: a stage has drifted. `plan --detailed-exitcode`: an apply would do something. Any command: a mistake in the command line itself |
 | `130` | the run was [stopped with Ctrl-C](../concepts/run-safety.md#stopping-a-run), as a shell reports a command ended that way |
 

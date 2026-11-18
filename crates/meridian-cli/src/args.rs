@@ -117,11 +117,11 @@ pub(crate) enum Command {
         state: State,
     },
     /// Write a report of a recorded run, or of a file of events: JSON,
-    /// JUnit XML, Markdown or HTML
+    /// JUnit XML, Markdown, HTML or SARIF
     Report {
         /// The run; the last one when not given
         run: Option<String>,
-        /// The report's format: json, junit, markdown or html
+        /// The report's format: json, junit, markdown, html or sarif
         #[arg(short, long, value_name = "FORMAT", default_value = "markdown", value_parser = Format::parse)]
         format: Format,
         /// Write the report to this file and not to standard output
@@ -610,7 +610,7 @@ pub(crate) struct Workflow {
     #[arg(long, value_name = "FORMAT")]
     pub(crate) events: Option<EventFormat>,
     /// Write a report of the run when it ends, as FORMAT=FILE; the formats
-    /// are json, junit, markdown and html; may be given more than once
+    /// are json, junit, markdown, html and sarif; may be given more than once
     #[arg(long, value_name = "FORMAT=FILE")]
     pub(crate) report: Vec<String>,
     /// Send every event of the run, as it happens, to this sink: `command`,
@@ -656,6 +656,31 @@ pub(crate) struct Workflow {
     /// meridian-policy-<NAME> in a plugin directory
     #[arg(long, value_name = "NAME", env = "MERIDIAN_POLICY_ENGINE", default_value = meridian_orchestrator::policy::DEFAULT_ENGINE)]
     pub(crate) policy_engine: String,
+    /// Put every stage's compiled files through this analyzer, the program
+    /// meridian-analyze-<NAME> in a plugin directory, as in `--analyze
+    /// checkov,trivy`; may be given more than once. A finding at or above
+    /// --fail-on fails the stage, and an analyzer that cannot be run fails
+    /// it too
+    #[arg(
+        long,
+        value_name = "NAME",
+        env = "MERIDIAN_ANALYZERS",
+        value_delimiter = ','
+    )]
+    pub(crate) analyze: Vec<String>,
+    /// A setting for an analyzer, as NAME.KEY=VALUE; may be given more
+    /// than once. The analyzer program reads it as MERIDIAN_ANALYZE_<KEY>
+    #[arg(long, value_name = "NAME.KEY=VALUE")]
+    pub(crate) analyze_config: Vec<String>,
+    /// The severity at which an analyzer's finding fails its stage:
+    /// critical, high, medium, low, info, or none to report findings and
+    /// fail on nothing
+    #[arg(long, value_name = "SEVERITY", env = "MERIDIAN_FAIL_ON", default_value = "high", value_parser = parse_fail_on)]
+    pub(crate) fail_on: FailOn,
+    /// A YAML or JSON file of findings this project accepts, under
+    /// `accepted`; an accepted finding is reported and fails nothing
+    #[arg(long, value_name = "FILE")]
+    pub(crate) analyze_baseline: Option<PathBuf>,
     /// One value for `when` conditions, as in `--set env=prod` or
     /// `--set region.name=eu-west-1`; may be given more than once. It is
     /// applied after every --data file, so it wins. The value is typed as
@@ -704,6 +729,10 @@ pub(crate) enum SecretCommand {
         )]
         state_dir: PathBuf,
     },
+}
+
+fn parse_fail_on(text: &str) -> Result<FailOn, String> {
+    text.parse()
 }
 
 /// A length of time as a person writes one: `90`, `30s`, `5m`, `1h`,

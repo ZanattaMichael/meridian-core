@@ -230,6 +230,52 @@ pub(crate) fn print_rollback(out: &mut dyn Write, report: &RollbackReport) -> st
     }
 }
 
+/// What one analyzer said: its counts, then each finding on a line of its
+/// own with where it is, in the document first.
+fn print_analysis(out: &mut dyn Write, analysis: &Analysis) -> std::io::Result<()> {
+    if !analysis.asked {
+        // The stage's failure says why; here only that it did not look.
+        writeln!(out, "  analysis ({}): could not look", analysis.analyzer)?;
+        return Ok(());
+    }
+    writeln!(
+        out,
+        "  analysis ({}): {}",
+        analysis.analyzer,
+        analysis.counts().describe()
+    )?;
+    for finding in &analysis.findings {
+        let place = finding.place();
+        writeln!(
+            out,
+            "    {}{} {}{}: {}",
+            if finding.accepted { "accepted " } else { "" },
+            finding.severity,
+            finding.rule,
+            if place.is_empty() {
+                String::new()
+            } else {
+                format!(" at {place}")
+            },
+            finding.message
+        )?;
+    }
+    for measure in &analysis.measures {
+        writeln!(
+            out,
+            "    {}: {}{}",
+            measure.name,
+            measure.value,
+            if measure.unit.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", measure.unit)
+            }
+        )?;
+    }
+    Ok(())
+}
+
 impl Printer<'_> {
     fn print(&self, out: &mut dyn Write, report: &StageReport) -> std::io::Result<()> {
         let on = if report.host.is_empty() {
@@ -258,6 +304,9 @@ impl Printer<'_> {
             if policy.allowed() {
                 writeln!(out, "  policy: allowed")?;
             }
+        }
+        for analysis in &report.analyses {
+            print_analysis(out, analysis)?;
         }
         // Every decision a condition made, so that something missing from
         // the compiled output is never a surprise.

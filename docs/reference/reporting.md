@@ -6,9 +6,10 @@ sink among it, is in [the reporting plan](../plans/reporting.md). The
 optional server that collects runs has [its own page](report-server.md).
 
 **Supported:** a live stream of events; report files in JSON, JUnit XML,
-Markdown and HTML, written by the run or afterwards; sinks that are sent the
-events as they happen; a [report server](report-server.md) fed by a sink.
-**Not supported yet:** SARIF (a policy result is reported as counts); sinks configured in a document (they are named
+Markdown, HTML and SARIF, written by the run or afterwards; sinks that are
+sent the events as they happen; a [report server](report-server.md) fed by a
+sink.
+**Not supported yet:** a policy result in SARIF (a policy result is reported as counts; an [analyzer](analyzers.md)'s findings are what SARIF carries); sinks configured in a document (they are named
 on the command line); `notification.*` events; a built-in HTTP client, so the
 webhook and server sinks shipped as examples need `curl`.
 
@@ -36,6 +37,7 @@ flowchart LR
 | test results in CI | `--report junit=meridian.xml` |
 | a summary on a pull request or a job page | `--report markdown=FILE` |
 | a page to keep with the build | `--report html=meridian.html` |
+| an [analyzer](analyzers.md)'s findings on the pull request, line by line | `--report sarif=findings.sarif`, uploaded to code scanning |
 | numbers for a script | `--report json=meridian.json` |
 | a report of a run that already happened | [`meridian report`](#meridian-report) |
 | runs in a chat channel, a pager, a dashboard | a [sink](#sinks) |
@@ -116,7 +118,10 @@ events alone do not.
 - **ResourceSet web** failed: the tool reported a failure
 ```
 
-Each step's resources and output names follow in a collapsed section. In
+With `--analyze`, a findings table follows: the step, the severity, the rule
+linked to its page, where (the document's line, then the compiled file's)
+and what. Each step's resources and output names follow in a collapsed
+section. In
 GitHub Actions, `--report markdown="$GITHUB_STEP_SUMMARY"` puts it on the
 job's page.
 
@@ -128,13 +133,14 @@ with its target as the class: `meridian.ansible`, `ResourceSet web`.
 | The step | Is reported as |
 |---|---|
 | succeeded, or was put back | a passed test case |
-| failed | `<failure type="REASON">`, the reason being the fixed word, such as `tool-failed` or `policy-denied` |
+| failed | `<failure type="REASON">`, the reason being the fixed word, such as `tool-failed`, `policy-denied` or `analysis-failed` |
 | drifted, in a `drift` run | `<failure type="drift">` |
 | could not be put back | `<failure type="rollback-failed">` |
 | skipped, deferred, or not run because an earlier step failed | `<skipped>` |
 | never finished, because the run died | `<error type="unfinished">` |
 
-The resources a step changed, and the names of its outputs, are its
+The resources a step changed, the names of its outputs, and each
+[analyzer](analyzers.md) finding on a line of its own, are its
 `<system-out>`. The run's id, mode, status and command are `<properties>`.
 
 ### `html`
@@ -142,6 +148,27 @@ The resources a step changed, and the names of its outputs, are its
 One page with no scripts and nothing fetched from anywhere, so it opens from
 a build's artifacts or an email. It follows the reader's light or dark
 setting.
+
+### `sarif`
+
+[SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html),
+the format code scanning reads, holding every [analyzer](analyzers.md)
+finding of the run and nothing else: one `run` per analyzer, its rules under
+the tool's `driver`, each finding a `result` whose location is the Meridian
+document and the line the resource starts on (the compiled file's when the
+finding could not be traced), with the severity, step, target, resource and
+compiled place under `properties`. The level is `error` for `critical` and
+`high`, `warning` for `medium` and `note` below. An accepted finding carries
+a `suppression`, which code scanning shows as dismissed. A run with no
+analyzer writes a log with no runs.
+
+```yaml
+- run: meridian plan site.yaml --analyze checkov --report sarif=findings.sarif
+- uses: github/codeql-action/upload-sarif@v3
+  if: always()
+  with:
+    sarif_file: findings.sarif
+```
 
 ### `json`
 
@@ -159,10 +186,12 @@ meaning.
 | `user`, `host`, `selector` | from the run's record; empty when the report was made with `--from` |
 | `events` | how many events the report was folded from |
 | `summary` | counts: `steps`, `succeeded`, `failed`, `skipped`, `notRun`, `deferred`, `rolledBack`, `running`, `planned`, `changed`, `drifted` |
-| `steps[]` | `name`, `kind`, `target`, `endpoint`, `status`, `reason`, `artifact`, `started`, `finished`, `durationMs`, `waitingOn`, `waitingFor`, `drift`, `rollback`, `resources[]`, `outputs[]` |
+| `steps[]` | `name`, `kind`, `target`, `endpoint`, `status`, `reason`, `artifact`, `started`, `finished`, `durationMs`, `waitingOn`, `waitingFor`, `drift`, `rollback`, `resources[]`, `outputs[]`, `findings[]` |
 | `steps[].status` | `running`, `succeeded`, `failed`, `skipped`, `deferred`, `not-run`, `rolled-back` |
 | `steps[].drift` | `none`, `detected`, `unknown`; empty when the run was not a drift check |
 | `steps[].policy`, `policyDenials`, `policyWarnings` | `passed` or `denied`, empty when no [policy](policy.md) was asked, and how many rules denied and warned. Counts only: a rule's message is not in an event |
+| `steps[].analysis`, `findingsReported`, `findingsAccepted`, `findingsFailing` | `passed` or `failed`, empty when no [analyzer](analyzers.md) looked; how many findings were not accepted, were accepted, and reached `--fail-on` |
+| `steps[].findings[]` | `analyzer`, `rule`, `severity`, `message`, `file`, `line`, `resource`, `document`, `documentLine`, `url`, `accepted` |
 | `steps[].rollback` | `succeeded`, `failed`, `unavailable`; empty when the step was not put back |
 | `steps[].resources[]` | `id`, `action`, and `phase`: `planned` or `changed` |
 | `steps[].outputs[]` | `name` and `sensitive`. Never a value |

@@ -172,8 +172,16 @@ The fields every stage has: `name`, `kind` (`Infrastructure` or
 `warnings` (each with `target`, `resource` and `message`), `removed` (what
 [conditions](dsl/conditions.md) left out: `subject` and `condition`),
 `policy` (`null` when no [policy](policy.md) was asked; otherwise `allowed`,
-`asked`, `deny` and `warn`) and `previousGood` (the artifact hash a rollback
-goes back to, or `null`).
+`asked`, `deny` and `warn`), `analyses` (one per [analyzer](analyzers.md)
+named with `--analyze`, in order; empty otherwise) and `previousGood` (the
+artifact hash a rollback goes back to, or `null`).
+
+Each of `analyses` has `analyzer`, `asked` (false when it could not look,
+with `error` saying why), `counts` (`critical`, `high`, `medium`, `low`,
+`info` of the findings the baseline did not accept, and `accepted`),
+`findings` (each with `rule`, `severity`, `message`, `file`, `line`,
+`resource`, `document`, `documentLine`, `url` and `accepted`; a place that is
+not known is `null`) and `measures` (each with `name`, `value` and `unit`).
 
 | `status` | What it means | Its own fields |
 |---|---|---|

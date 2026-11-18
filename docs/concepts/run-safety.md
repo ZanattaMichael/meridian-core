@@ -6,7 +6,7 @@ shared between people, picked up where it stopped, or put back, how to find
 out whether what was applied is still what is there, and how a policy is
 asked whether a change may be made before it is.
 
-<p align="center"><img src="../graphics/meridian-run-safety.svg" alt="Running safely: the lock, the policy check, the record of every event, the run-state, and what happens when a stage fails" width="100%"></p>
+<p align="center"><img src="../graphics/meridian-run-safety.svg" alt="Running safely: the lock, the analyzers and the policy check, the record of every event, the run-state, and what happens when a stage fails" width="100%"></p>
 
 Three rules hold throughout:
 
@@ -394,6 +394,42 @@ be asked about up front; it is asked about at its turn. `meridian plan
 merge. The [policy reference](../reference/policy.md) has the input field by
 field, the Rego conventions, and how to write an engine for another policy
 language.
+
+## Scanning the compiled files first
+
+A policy reasons over Meridian's own view of a stage. The scanners and cost
+tools written against each tool's native format, Checkov, Trivy, Infracost
+and the rest, reason over the files, and Meridian's output is those files.
+`--analyze` puts every stage's compiled files through one or more
+[analyzers](../reference/analyzers.md) as soon as the stage compiles, on
+`compile`, `plan` and `apply` alike:
+
+```sh
+meridian compile site.yaml --analyze checkov,trivy
+meridian apply   site.yaml --analyze checkov --fail-on critical
+```
+
+```mermaid
+flowchart LR
+    DOC["a stage's document"] --> COMPILE["compile"]
+    COMPILE --> FILES["the compiled files,<br/>in a directory of their own"]
+    FILES --> AN["analyzer<br/>meridian-analyze-checkov"]
+    AN --> FOUND["findings: rule, severity,<br/>compiled file and line"]
+    FOUND --> TRACE["traced to the resource,<br/>and the document's line"]
+    TRACE --> Q{"at --fail-on?"}
+    Q -->|"no"| GO["shown, recorded,<br/>reported"]
+    Q -->|"yes, or the analyzer<br/>could not look"| NO["the stage fails"]
+```
+
+The same three things hold. It fails closed: an analyzer that cannot be run
+has not passed anything. It looks at what will run: the files the tool would
+read, not the document's text. And a finding is shown where a person can act
+on it, against the line of the document the resource was written on, because
+the compiler knows which resource produced which part of each file. Every
+finding is an event, so it reaches the record, every report (SARIF among
+them) and the pipeline's annotations; a baseline file names the findings a
+project has looked at and accepts. An apply analyzes every stage it can
+before applying the first, as it asks the policy.
 
 ## Values between stages
 

@@ -67,7 +67,7 @@ byte. The reasons, the layout and the order of work are in
 | [Dependencies and notifications](concepts/dependencies.md) | `dependsOn` and `notifies`, and what each tool makes of them |
 | [The capability model](concepts/capability-model.md) | why a document either does what it says or does not compile |
 | [The two-stage architecture](concepts/two-stage-architecture.md) | Infrastructure, ResourceSet and the hand-off between them |
-| [Running safely](concepts/run-safety.md) | one run at a time, the record of every run, resuming a failed run, putting one back, finding drift, asking a policy first, sharing state |
+| [Running safely](concepts/run-safety.md) | one run at a time, the record of every run, resuming a failed run, putting one back, finding drift, asking a policy first, scanning the compiled files, sharing state |
 | [Compile rules](concepts/compile-rules.md) | policies over layered configuration: what a layer may and may not override, checked before anything is compiled |
 | [How a secret is held in memory](concepts/secrets-in-memory.md) | locked, wiped memory, the hardened process, how a secret reaches a tool, and what is not promised |
 
@@ -105,8 +105,9 @@ and checked against the file in every build, so none can fall behind the script 
 | [Lint rules](reference/lint.md) | every rule of `meridian lint`, with an example and what to do |
 | [Plugin signatures](reference/plugin-signatures.md) | how `meridian` decides a plugin may be started, trusting a plugin from elsewhere, and signing your own |
 | [Policy checks](reference/policy.md) | asking a policy before a change is made: the options, the input a policy sees, Rego with Open Policy Agent, and how to write an engine |
+| [Analyzers](reference/analyzers.md) | scanning the compiled files with Checkov, Trivy or any scanner before a tool sees them: `--analyze`, `--fail-on`, findings traced to the document, the baseline, SARIF, and how to write an analyzer |
 | [State, runs and backends](reference/state.md) | what Meridian keeps about its runs, the events, and how to write a state backend |
-| [Reports and sinks](reference/reporting.md) | report files in JSON, JUnit, Markdown and HTML, sending a run's events elsewhere as they happen, and how to write a sink |
+| [Reports and sinks](reference/reporting.md) | report files in JSON, JUnit, Markdown, HTML and SARIF, sending a run's events elsewhere as they happen, and how to write a sink |
 | [The report server](reference/report-server.md) | an optional server that collects the runs of every project and shows them; running it, securing it, its HTTP interface |
 | [The Meridian language](reference/dsl/index.md) | every field of a document, what it must hold, and which check happens when |
 | [How it fits together](reference/dsl/how-it-fits-together.md) | a document's path from file to running tool, with diagrams and a worked example |
