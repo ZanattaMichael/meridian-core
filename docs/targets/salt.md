@@ -739,25 +739,25 @@ Rules about what you wrote:
 | `shell-required` | A command holds shell syntax and does not say `shell: true` |
 | `unsupported-action` | The type cannot perform the notify action, or a stopped service is asked to restart or reload |
 | `invalid-runtime-condition` | `runtimeWhen` is blank, spans lines, or holds a Jinja delimiter |
-| `invalid-sls-name` | The document name holds something other than letters, digits, `_` and `-`; Salt reads a dot as a directory |
-| `reserved-sls-name` | The document is named `top` |
-| `missing-name` | The document has no name |
+| `invalid-name` | The document name holds something other than letters, digits, `_` and `-`; Salt reads a dot as a directory |
+| `reserved-name` | The document is named `top` |
+| `missing-param` | The document has no name |
 | `missing-host` | The document has no host |
 | `invalid-host` | The host holds a space or a comma and cannot be a minion ID |
-| `empty-id`, `multiline-id` | A resource's `id` is blank or spans lines |
-| `reserved-id` | A resource is named `include`, `extend` or `exclude`, which Salt reads for itself |
-| `duplicate-state-id` | A resource has the name a notification's state needs, such as `reload nginx_svc` |
+| `invalid-name`, `invalid-name` | A resource's `id` is blank or spans lines |
+| `reserved-name` | A resource is named `include`, `extend` or `exclude`, which Salt reads for itself |
+| `duplicate-resource` | A resource has the name a notification's state needs, such as `reload nginx_svc` |
 
 Rules that guard Meridian itself. The core checks these things before a plugin sees a
 document, so you should never meet them; if you do, it is a bug to report:
 
 | Rule | When |
 |---|---|
-| `cycle`, `ordering-violated` | The order the plugin was handed contradicts the document's own dependencies |
-| `unknown-dependency`, `unknown-notify-target`, `unknown-notifier` | A dependency or notification names a resource that is not in the document |
-| `missing-requisite`, `self-requisite` | A compiled state requires or watches a state that is not in the file, or itself |
-| `missing-function` | A compiled state has no function, or no `name` (also reported as `missing-name`) |
-| `conditional-reaction`, `unbound-reaction` | A notification's state carries a condition, or reacts to nothing |
+| `dependency-cycle`, `ordering-violated` | The order the plugin was handed contradicts the document's own dependencies |
+| `unknown-dependency`, `unknown-notify-target`, `unknown-notify-target` | A dependency or notification names a resource that is not in the document |
+| `unknown-dependency`, `dependency-cycle` | A compiled state requires or watches a state that is not in the file, or itself |
+| `missing-param` | A compiled state has no function, or no `name` (also reported as `missing-param`) |
+| `unsupported-runtime-condition`, `unknown-notify-target` | A notification's state carries a condition, or reacts to nothing |
 
 ## When a run fails
 

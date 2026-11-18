@@ -220,7 +220,7 @@ const CASES: &[Case] = &[
     case(
         "file",
         "state `directory` with `content`",
-        Varies,
+        Same,
         "    - id: a\n      type: file\n      state: directory\n      params:\n        path: /srv/app\n        content: \"x\\n\"\n",
     ),
     case(
@@ -656,8 +656,9 @@ How to read a cell:
 - **ok, warns**: it compiled, with a warning the plan shows. Nothing is dropped
   silently; the warning says what the tool will do differently.
 - a name such as `unsupported-state`: the target refused the document, and that
-  is the rule the refusal carries. The message that goes with it names the
-  resource, the line, and what the target does accept.
+  is the rule the refusal carries, one of the [refusal rules](refusal-rules.md).
+  The message that goes with it names the resource, the line, and what the
+  target does accept.
 
 The **same** column says whether the targets are allowed to differ. A row
 marked *yes* is a part of the dialect that must come out the same everywhere,
@@ -820,11 +821,19 @@ fn every_refusal_names_its_target_its_resource_and_a_line() {
             assert!(!refusal.rule.is_empty(), "{at}: no rule");
             assert!(!refusal.msg.is_empty(), "{at}: no message");
             assert!(
-                refusal
-                    .rule
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c == '-'),
+                meridian_sdk::rules::well_formed(&refusal.rule),
                 "{at}: rule {:?} is not lower-case words joined by hyphens",
+                refusal.rule
+            );
+            // The rule is one the reference page lists: general, or the
+            // target's own.
+            assert!(
+                meridian_sdk::rules::general(&refusal.rule).is_some()
+                    || emitter(target)
+                        .rules()
+                        .iter()
+                        .any(|r| r.name == refusal.rule),
+                "{at}: rule {:?} is neither a general rule nor one {target} declares",
                 refusal.rule
             );
             if !refusal.resource.is_empty() {

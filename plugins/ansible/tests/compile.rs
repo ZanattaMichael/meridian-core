@@ -107,10 +107,11 @@ fn literal_content_cannot_be_a_directory() {
     let err = refusal(
         "    - id: conf\n      type: file\n      state: directory\n      params:\n        path: /etc/app\n        content: hello\n",
     );
-    assert_eq!(err.rule, "unsupported-state");
+    assert_eq!(err.rule, "param-conflicts-with-state");
     assert_eq!(
         err.msg,
-        "resource type \"file\" cannot have state \"directory\" as compiled to ansible.builtin.copy on this target"
+        "param \"content\" cannot be used with state \"directory\": a file with content is \
+         written as it is given, and only a file in state \"file\" or \"present\" has content"
     );
 }
 

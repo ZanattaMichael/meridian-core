@@ -7,6 +7,7 @@
 //!
 //! `$${` is the escape for a literal `${`.
 
+use crate::rules;
 use std::collections::BTreeMap;
 
 use crate::{CompileError, Resource, ResourceGraph, Value};
@@ -128,7 +129,8 @@ pub fn resolve_declared(
             *value = resolve_value(value, &declared, &mut trail).map_err(|msg| CompileError {
                 target: target.to_owned(),
                 resource: id.clone(),
-                rule: "invalid-reference".to_owned(),
+                rule: rules::INVALID_REFERENCE.name.to_owned(),
+                hint: rules::INVALID_REFERENCE.hint.to_owned(),
                 msg: format!("param {name:?}: {msg}"),
                 pos: pos.clone(),
             })?;

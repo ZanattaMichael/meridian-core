@@ -326,7 +326,7 @@ fn the_stacks_settings_are_checked() {
     let err = refusal(
         "  resources:\n    - id: one\n      type: stack\n      params: {name: a}\n    - id: two\n      type: stack\n      params: {name: b}\n",
     );
-    assert_eq!(err.rule, "duplicate-stack");
+    assert_eq!(err.rule, "duplicate-resource");
     assert_eq!(err.resource, "two");
 
     let err = refusal(
@@ -383,7 +383,7 @@ fn names_that_pulumi_would_not_accept_are_refused() {
     let err = refusal(
         "  resources:\n    - id: size\n      type: config\n      params: {name: vm, type: string}\n    - id: vm\n      type: aws:ec2:Instance\n      params: {ami: ami-1}\n",
     );
-    assert_eq!(err.rule, "duplicate-name");
+    assert_eq!(err.rule, "duplicate-resource");
     assert_eq!(err.resource, "vm");
 
     let err = refusal(

@@ -39,6 +39,7 @@ mod validate;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
     holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter,
     PlacedEscape, Position, Resource, ResourceGraph, Value,
@@ -132,19 +133,41 @@ pub(crate) struct Template {
     pub outputs: Vec<(String, String, Position)>,
 }
 
+/// The refusal rules only this target has. Everything else it refuses carries
+/// a general rule from `meridian_sdk::rules`.
+pub(crate) mod own {
+    use meridian_sdk::rules::Rule;
+
+    pub(crate) const INVALID_EXPRESSION: Rule = Rule::new(
+        "invalid-expression",
+        "a value written as an ARM template expression, `[...]`, that Resource Manager could not parse",
+        "write a well-formed expression, or escape a literal bracket as `[[`",
+    );
+
+    pub(crate) const TEMPLATE_TOO_LARGE: Rule = Rule::new(
+        "template-too-large",
+        "the compiled template is larger than the 4 MB Resource Manager accepts",
+        "split the document into several deployments",
+    );
+
+    /// Every rule here, for `Emitter::rules` and the reference page.
+    pub(crate) const ALL: &[Rule] = &[INVALID_EXPRESSION, TEMPLATE_TOO_LARGE];
+}
+
 /// A refusal of one resource, stamped with this target.
-pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         ..CompileError::for_resource(r, rule, msg)
     }
 }
 
-pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         resource: resource.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         pos: pos.clone(),
     }
@@ -165,7 +188,7 @@ fn refuse_secret_in(graph: &ResourceGraph, types: &[&str], what: &str) -> Result
         if let Some((name, _)) = r.params.iter().find(|(_, value)| holds_secret(value)) {
             return Err(refuse(
                 r,
-                "unsupported-secret-place",
+                &rules::UNSUPPORTED_SECRET_PLACE,
                 format!(
                     "param {name:?} of the {} holds a secret, and {what}, where a secret cannot \
                      go. A secret goes in a resource's params, which the tool is handed by a \
@@ -199,6 +222,9 @@ impl Emitter for Arm {
             secrets: true,
             ..Capabilities::default()
         }
+    }
+    fn rules(&self) -> Vec<Rule> {
+        own::ALL.to_vec()
     }
 
     /// A template string that starts with `[` and ends with `]` is an

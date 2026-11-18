@@ -224,9 +224,23 @@ message Warning {
 // two apart.
 message CompileError {
   string resource = 1;
+  // rule is the name of the refusal rule: one of the SDK's general rules, or
+  // one the plugin declared in DescribeResponse.rules.
   string rule = 2;
   string msg = 3;
   Position pos = 4;
+  // hint is what to write instead, as data; empty when the message is the
+  // only guide. Added without a new protocol version: an older plugin sends
+  // none, and the host shows what it has.
+  string hint = 5;
+}
+
+// Rule is a refusal rule a plugin has of its own, beside the SDK's general
+// ones: the name a CompileError carries, what it refuses, what to do instead.
+message Rule {
+  string name = 1;
+  string meaning = 2;
+  string hint = 3;
 }
 
 // Category is the kind of tool a plugin drives. The core routes on it, to
@@ -321,6 +335,10 @@ message DescribeResponse {
   // built before this field lists none, so such a document never reaches it
   // with settings silently dropped.
   repeated string settings_keys = 24;
+  // rules is every refusal rule this plugin has of its own, beside the SDK's
+  // general ones. A plugin built before this field lists none, which the
+  // host reads as "only general rules".
+  repeated Rule rules = 25;
 }
 
 // Setting is one thing an operator can configure about a runner.

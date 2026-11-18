@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::CompileError;
 
 use crate::{Reference, Sls, State, NAME};
@@ -14,20 +15,22 @@ const RESERVED_IDS: &[&str] = &["exclude", "extend", "include"];
 /// `if` tag, so anything that opens or closes a tag would end it early.
 const JINJA_DELIMITERS: &[&str] = &["{%", "%}", "{{", "}}", "{#", "#}"];
 
-fn fail(state: &State, rule: &str, msg: String) -> CompileError {
+fn fail(state: &State, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         resource: state.resource_id.clone(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         pos: state.pos.clone(),
     }
 }
 
-fn fail_document(rule: &str, msg: String) -> CompileError {
+fn fail_document(rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         ..CompileError::default()
     }
@@ -48,7 +51,7 @@ pub(crate) fn validate(sls: &Sls) -> Result<(), CompileError> {
         if let Some(previous) = ids.insert(&state.id, state) {
             return Err(fail(
                 state,
-                "duplicate-state-id",
+                &rules::DUPLICATE_RESOURCE,
                 format!(
                     "state ID {:?} is already used by resource {:?}",
                     state.id, previous.resource_id
@@ -61,14 +64,14 @@ pub(crate) fn validate(sls: &Sls) -> Result<(), CompileError> {
         if state.module.is_empty() || state.function.is_empty() {
             return Err(fail(
                 state,
-                "missing-function",
+                &rules::MISSING_PARAM,
                 "state has no function".to_owned(),
             ));
         }
         if !state.args.iter().any(|(name, _)| name == "name") {
             return Err(fail(
                 state,
-                "missing-name",
+                &rules::MISSING_PARAM,
                 format!("{}.{} was given no name", state.module, state.function),
             ));
         }
@@ -88,7 +91,7 @@ pub(crate) fn validate(sls: &Sls) -> Result<(), CompileError> {
         if !reaction.when.is_empty() {
             return Err(fail(
                 reaction,
-                "conditional-reaction",
+                &rules::UNSUPPORTED_RUNTIME_CONDITION,
                 format!(
                     "state {:?} carries a condition; it runs because something \
                      changed, not because a condition holds",
@@ -99,7 +102,7 @@ pub(crate) fn validate(sls: &Sls) -> Result<(), CompileError> {
         if reaction.watch.is_empty() && reaction.onchanges.is_empty() {
             return Err(fail(
                 reaction,
-                "unbound-reaction",
+                &rules::UNKNOWN_NOTIFY_TARGET,
                 format!("state {:?} reacts to nothing", reaction.id),
             ));
         }
@@ -112,7 +115,7 @@ pub(crate) fn validate(sls: &Sls) -> Result<(), CompileError> {
 fn check_name(name: &str) -> Result<(), CompileError> {
     if name.is_empty() {
         return Err(fail_document(
-            "missing-name",
+            &rules::MISSING_PARAM,
             "the document has no name to call its state file by".to_owned(),
         ));
     }
@@ -121,7 +124,7 @@ fn check_name(name: &str) -> Result<(), CompileError> {
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
         return Err(fail_document(
-            "invalid-sls-name",
+            &rules::INVALID_NAME,
             format!(
                 "document name {name:?} cannot name a state file; Salt applies a state by name \
                  and allows letters, digits, \"_\" and \"-\" there (a dot means a directory)"
@@ -130,7 +133,7 @@ fn check_name(name: &str) -> Result<(), CompileError> {
     }
     if name == "top" {
         return Err(fail_document(
-            "reserved-sls-name",
+            &rules::RESERVED_NAME,
             "a document named \"top\" would compile to top.sls, which Salt reads as the top file"
                 .to_owned(),
         ));
@@ -143,13 +146,13 @@ fn check_name(name: &str) -> Result<(), CompileError> {
 fn check_host(host: &str) -> Result<(), CompileError> {
     if host.is_empty() {
         return Err(fail_document(
-            "missing-host",
+            &rules::MISSING_HOST,
             "state file has no target host".to_owned(),
         ));
     }
     if host.contains(|c: char| c.is_whitespace() || c == ',') {
         return Err(fail_document(
-            "invalid-host",
+            &rules::INVALID_HOST,
             format!("host {host:?} cannot be a minion ID: it holds a space or a comma"),
         ));
     }
@@ -158,19 +161,23 @@ fn check_host(host: &str) -> Result<(), CompileError> {
 
 fn check_id(state: &State) -> Result<(), CompileError> {
     if state.id.trim().is_empty() {
-        return Err(fail(state, "empty-id", "state has an empty ID".to_owned()));
+        return Err(fail(
+            state,
+            &rules::INVALID_NAME,
+            "state has an empty ID".to_owned(),
+        ));
     }
     if state.id.contains(['\n', '\r']) {
         return Err(fail(
             state,
-            "multiline-id",
+            &rules::INVALID_NAME,
             format!("state ID {:?} spans more than one line", state.id),
         ));
     }
     if RESERVED_IDS.contains(&state.id.as_str()) {
         return Err(fail(
             state,
-            "reserved-id",
+            &rules::RESERVED_NAME,
             format!(
                 "state ID {:?} is a declaration Salt reads for itself (reserved: {})",
                 state.id,
@@ -192,7 +199,7 @@ fn check_reference(
         _ => {
             return Err(fail(
                 state,
-                "missing-requisite",
+                &rules::UNKNOWN_DEPENDENCY,
                 format!(
                     "{kind} names {}: {:?}, which no state in the file is",
                     reference.module, reference.id
@@ -203,7 +210,7 @@ fn check_reference(
     if reference.id == state.id {
         return Err(fail(
             state,
-            "self-requisite",
+            &rules::DEPENDENCY_CYCLE,
             format!("state {:?} names itself in its {kind}", state.id),
         ));
     }
@@ -218,21 +225,21 @@ fn check_condition(state: &State) -> Result<(), CompileError> {
     if when.trim().is_empty() {
         return Err(fail(
             state,
-            "invalid-runtime-condition",
+            &rules::INVALID_RUNTIME_CONDITION,
             "runtimeWhen is blank".to_owned(),
         ));
     }
     if when.contains(['\n', '\r']) {
         return Err(fail(
             state,
-            "invalid-runtime-condition",
+            &rules::INVALID_RUNTIME_CONDITION,
             "runtimeWhen spans more than one line".to_owned(),
         ));
     }
     if let Some(found) = JINJA_DELIMITERS.iter().find(|d| when.contains(*d)) {
         return Err(fail(
             state,
-            "invalid-runtime-condition",
+            &rules::INVALID_RUNTIME_CONDITION,
             format!(
                 "runtimeWhen {when:?} holds {found:?}; on this target it is a bare Jinja \
                  expression such as grains['os_family'] == 'Debian', written without tag delimiters"
@@ -292,54 +299,54 @@ mod tests {
     fn each_rule_refuses_the_one_mistake_it_is_for() {
         type Break = fn(&mut Sls);
         let table: &[(&str, &str, Break)] = &[
-            ("missing-name", "", |s| s.name.clear()),
-            ("invalid-sls-name", "", |s| s.name = "web.prod".to_owned()),
-            ("invalid-sls-name", "", |s| s.name = "web prod".to_owned()),
-            ("invalid-sls-name", "", |s| s.name = "web/prod".to_owned()),
-            ("reserved-sls-name", "", |s| s.name = "top".to_owned()),
+            ("missing-param", "", |s| s.name.clear()),
+            ("invalid-name", "", |s| s.name = "web.prod".to_owned()),
+            ("invalid-name", "", |s| s.name = "web prod".to_owned()),
+            ("invalid-name", "", |s| s.name = "web/prod".to_owned()),
+            ("reserved-name", "", |s| s.name = "top".to_owned()),
             ("missing-host", "", |s| s.host.clear()),
             ("invalid-host", "", |s| s.host = "web01,web02".to_owned()),
             ("invalid-host", "", |s| s.host = "web 01".to_owned()),
             ("invalid-host", "", |s| s.host = "web01\n".to_owned()),
-            ("empty-id", "pkg", |s| s.states[0].id = " ".to_owned()),
-            ("multiline-id", "pkg", |s| {
+            ("invalid-name", "pkg", |s| s.states[0].id = " ".to_owned()),
+            ("invalid-name", "pkg", |s| {
                 s.states[0].id = "a\nb".to_owned()
             }),
-            ("reserved-id", "pkg", |s| {
+            ("reserved-name", "pkg", |s| {
                 s.states[0].id = "include".to_owned()
             }),
-            ("reserved-id", "pkg", |s| {
+            ("reserved-name", "pkg", |s| {
                 s.states[0].id = "extend".to_owned()
             }),
-            ("reserved-id", "pkg", |s| {
+            ("reserved-name", "pkg", |s| {
                 s.states[0].id = "exclude".to_owned()
             }),
-            ("duplicate-state-id", "again", |s| {
+            ("duplicate-resource", "again", |s| {
                 let mut twin = state("pkg", "installed", "again");
                 twin.id = "pkg".to_owned();
                 s.states.push(twin);
             }),
             // A state and a reaction share one set of IDs.
-            ("duplicate-state-id", "svc", |s| {
+            ("duplicate-resource", "svc", |s| {
                 s.reactions[0].id = "conf".to_owned()
             }),
-            ("missing-function", "pkg", |s| s.states[0].function = ""),
-            ("missing-function", "pkg", |s| s.states[0].module = ""),
-            ("missing-name", "pkg", |s| s.states[0].args.clear()),
-            ("missing-requisite", "conf", |s| {
+            ("missing-param", "pkg", |s| s.states[0].function = ""),
+            ("missing-param", "pkg", |s| s.states[0].module = ""),
+            ("missing-param", "pkg", |s| s.states[0].args.clear()),
+            ("unknown-dependency", "conf", |s| {
                 s.states[1].require = vec![to("pkg", "gone")];
             }),
             // The ID exists, but as a state of another module.
-            ("missing-requisite", "conf", |s| {
+            ("unknown-dependency", "conf", |s| {
                 s.states[1].require = vec![to("service", "pkg")];
             }),
-            ("missing-requisite", "svc", |s| {
+            ("unknown-dependency", "svc", |s| {
                 s.reactions[0].watch = vec![to("file", "gone")];
             }),
-            ("missing-requisite", "conf", |s| {
+            ("unknown-dependency", "conf", |s| {
                 s.states[1].onchanges = vec![to("cmd", "gone")];
             }),
-            ("self-requisite", "conf", |s| {
+            ("dependency-cycle", "conf", |s| {
                 s.states[1].require = vec![to("file", "conf")];
             }),
             ("invalid-runtime-condition", "pkg", |s| {
@@ -348,10 +355,12 @@ mod tests {
             ("invalid-runtime-condition", "pkg", |s| {
                 s.states[0].when = "a\nb".to_owned();
             }),
-            ("conditional-reaction", "svc", |s| {
+            ("unsupported-runtime-condition", "svc", |s| {
                 s.reactions[0].when = "grains['os'] == 'Debian'".to_owned();
             }),
-            ("unbound-reaction", "svc", |s| s.reactions[0].watch.clear()),
+            ("unknown-notify-target", "svc", |s| {
+                s.reactions[0].watch.clear()
+            }),
         ];
 
         assert_eq!(validate(&sls()), Ok(()));

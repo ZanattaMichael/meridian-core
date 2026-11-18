@@ -320,7 +320,7 @@ Three things hold wherever a secret is handed over:
 - **A token is Meridian's.** Where a target writes a secret's place as text
   the runner fills in (`${meridian_secret_<name>}` on `kubernetes` and
   `helm`), a document that writes that text itself is refused at compile
-  (`reserved-text`), so nothing can make the runner put a value where the
+  (`reserved-name`), so nothing can make the runner put a value where the
   document asked for it.
 
 `compile` writes the same reference, so what it produces is what `plan` and

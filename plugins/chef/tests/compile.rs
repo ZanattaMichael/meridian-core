@@ -84,7 +84,7 @@ fn a_directory_is_its_own_resource_and_has_no_content() {
     let err = refusal(
         "    - id: root\n      type: file\n      state: directory\n      params: {path: /srv/app, content: x}\n",
     );
-    assert_eq!(err.rule, "invalid-param");
+    assert_eq!(err.rule, "param-conflicts-with-state");
 }
 
 #[test]
@@ -183,7 +183,7 @@ fn a_document_name_that_cannot_be_a_cookbook_is_refused() {
         "    - id: a\n      type: package\n      params: {name: nginx}\n",
     )
     .unwrap_err();
-    assert_eq!(err.rule, "invalid-cookbook-name");
+    assert_eq!(err.rule, "invalid-name");
 }
 
 #[test]

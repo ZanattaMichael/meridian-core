@@ -3,9 +3,10 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, EdgeKind, Resource, ResourceGraph, Value, Warning};
 
-use crate::{refuse, Reference, Sls, State, NAME};
+use crate::{own, refuse, Reference, Sls, State, NAME};
 
 /// What one IR state of a resource type compiles to.
 struct Shape {
@@ -321,7 +322,7 @@ fn keys<T>(pairs: &[(&str, T)]) -> String {
 fn unsupported_type(r: &Resource) -> CompileError {
     refuse(
         r,
-        "unsupported-resource-type",
+        &rules::UNSUPPORTED_RESOURCE_TYPE,
         format!(
             "unsupported resource type {:?} on this target (supported: {})",
             r.r#type,
@@ -351,8 +352,10 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<(Sls, Vec<Warning>), Co
         // The shared types are checked the same way on every configuration
         // management target, so a document moves between tools without the
         // type rules changing under it.
-        meridian_sdk::schema::check_shared(resource)
-            .map_err(|e| refuse(resource, &e.rule, e.msg))?;
+        meridian_sdk::schema::check_shared(resource).map_err(|e| CompileError {
+            target: NAME.to_owned(),
+            ..e
+        })?;
         states.push(state_for(resource, &resource.state, Some(&mut warnings))?);
     }
     let reactions = notifications(graph, &mut states)?;
@@ -407,7 +410,7 @@ fn state_for(
         if *value == Value::Null {
             return Err(refuse(
                 r,
-                "empty-param",
+                &rules::EMPTY_PARAM,
                 format!(
                     "param {:?} on resource type {:?} has no value",
                     name, r.r#type
@@ -421,7 +424,7 @@ fn state_for(
         if !r.params.contains_key(*need) {
             return Err(refuse(
                 r,
-                "missing-param",
+                &rules::MISSING_PARAM,
                 format!(
                     "resource type {:?} requires param {:?} on this target",
                     r.r#type, need
@@ -458,7 +461,7 @@ fn state_for(
             "cmd" => {
                 return Err(refuse(
                     r,
-                    "unsupported-secret-place",
+                    &rules::UNSUPPORTED_SECRET_PLACE,
                     "a secret cannot be used in an exec on this target: Salt prints the \
                      command line in its report, and nothing turns that off. Put the \
                      secret in a file the command reads, or in a runtimeWhen"
@@ -498,7 +501,7 @@ fn shape_for<'m>(r: &Resource, state: &str, m: &'m Mapping) -> Result<&'m Shape,
         if !state.is_empty() {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!(
                     "resource type {:?} accepts no state on this target, got {:?}",
                     r.r#type, state
@@ -519,7 +522,7 @@ fn shape_for<'m>(r: &Resource, state: &str, m: &'m Mapping) -> Result<&'m Shape,
         .ok_or_else(|| {
             refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!(
                     "resource type {:?} does not accept state {:?} on this target (accepted: {})",
                     r.r#type,
@@ -555,7 +558,7 @@ fn unaccepted_param(
         accepted.dedup();
         return refuse(
             r,
-            "unsupported-param",
+            &rules::UNSUPPORTED_PARAM,
             format!(
                 "resource type {:?} does not accept param {:?} on this target (accepted: {})",
                 r.r#type,
@@ -566,7 +569,7 @@ fn unaccepted_param(
     }
     refuse(
         r,
-        "param-conflicts-with-state",
+        &rules::PARAM_CONFLICTS_WITH_STATE,
         format!(
             "param {:?} cannot be used with state {:?}, which compiles to {}.{} \
              (it is accepted with state: {})",
@@ -595,7 +598,7 @@ fn exec_details(r: &Resource, args: &mut BTreeMap<String, Value>) -> Result<(), 
             if let Some(found) = command.chars().find(|c| SHELL_SYNTAX.contains(c)) {
                 return Err(refuse(
                     r,
-                    "shell-required",
+                    &own::SHELL_REQUIRED,
                     format!(
                         "the command contains {found:?}, which a shell gives a meaning to, and \
                          Salt always runs a command through a shell; set param \"shell\" to true \
@@ -644,14 +647,14 @@ fn notifications(graph: &ResourceGraph, states: &mut [State]) -> Result<Vec<Stat
             let from = graph.resource(&edge.from).cloned().unwrap_or_default();
             return Err(refuse(
                 &from,
-                "unknown-notify-target",
+                &rules::UNKNOWN_NOTIFY_TARGET,
                 format!("notifies an unknown resource {:?}", edge.to),
             ));
         };
         let Some(&from_at) = index.get(&edge.from) else {
             return Err(refuse(
                 to,
-                "unknown-notifier",
+                &rules::UNKNOWN_NOTIFY_TARGET,
                 format!("is notified by an unknown resource {:?}", edge.from),
             ));
         };
@@ -673,7 +676,7 @@ fn notifications(graph: &ResourceGraph, states: &mut [State]) -> Result<Vec<Stat
                     keys(m.actions)
                 )
             };
-            return Err(refuse(to, "unsupported-action", msg));
+            return Err(refuse(to, &rules::UNSUPPORTED_ACTION, msg));
         };
 
         if matches!(reaction, Reaction::Watch | Reaction::WatchingState(..)) {
@@ -686,7 +689,7 @@ fn notifications(graph: &ResourceGraph, states: &mut [State]) -> Result<Vec<Stat
                     };
                     return Err(refuse(
                         to,
-                        "unsupported-action",
+                        &rules::UNSUPPORTED_ACTION,
                         format!(
                             "cannot be notified with action {:?} while its state is {:?}: {why}",
                             edge.action, state

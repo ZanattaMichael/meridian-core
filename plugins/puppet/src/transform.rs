@@ -2,9 +2,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{CompileError, Edge, EdgeKind, Resource, ResourceGraph, Value};
 
-use crate::{refuse, Attr, Declaration, Manifest, Reference, NAME};
+use crate::{own, refuse, Attr, Declaration, Manifest, Reference, NAME};
 
 /// How one IR resource type becomes a native Puppet declaration.
 ///
@@ -223,8 +224,10 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Manifest, CompileError>
         // The shared types are checked the same way on every configuration
         // management target, so a document moves between tools without the
         // type rules changing under it.
-        meridian_sdk::schema::check_shared(resource)
-            .map_err(|e| refuse(resource, &e.rule, e.msg))?;
+        meridian_sdk::schema::check_shared(resource).map_err(|e| CompileError {
+            target: NAME.to_owned(),
+            ..e
+        })?;
         resources.push(declaration_for(resource, &graph.secrets)?);
     }
     let mut notify = notifications(graph, &resources)?;
@@ -238,7 +241,8 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Manifest, CompileError>
         meridian_sdk::check_host(&graph.host).map_err(|why| CompileError {
             target: NAME.to_owned(),
             resource: String::new(),
-            rule: "invalid-host".to_owned(),
+            rule: rules::INVALID_HOST.name.to_owned(),
+            hint: rules::INVALID_HOST.hint.to_owned(),
             msg: format!("the target host cannot be written into site.pp: {why}"),
             pos: Default::default(),
         })?;
@@ -257,7 +261,7 @@ fn declaration_for(
     let Some(m) = mapping(&r.r#type) else {
         return Err(refuse(
             r,
-            "unsupported-resource-type",
+            &rules::UNSUPPORTED_RESOURCE_TYPE,
             format!(
                 "unsupported resource type {:?} on this target (supported: {})",
                 r.r#type,
@@ -273,7 +277,7 @@ fn declaration_for(
     if !r.runtime_when.is_empty() {
         return Err(refuse(
             r,
-            "unsupported-runtime-condition",
+            &rules::UNSUPPORTED_RUNTIME_CONDITION,
             format!(
                 "resource carries runtimeWhen {:?}, which this target cannot express: \
                  a Puppet catalog is compiled before it reaches the node, so there is \
@@ -288,7 +292,7 @@ fn declaration_for(
     if r.r#type == "file" && r.state == "directory" && r.params.contains_key("content") {
         return Err(refuse(
             r,
-            "param-conflicts-with-state",
+            &rules::PARAM_CONFLICTS_WITH_STATE,
             "param \"content\" cannot be used with state \"directory\": a directory has no \
              content; remove the param or the state"
                 .to_owned(),
@@ -300,7 +304,7 @@ fn declaration_for(
         let Some(native) = lookup(m.params, name) else {
             return Err(refuse(
                 r,
-                "unsupported-param",
+                &rules::UNSUPPORTED_PARAM,
                 format!(
                     "resource type {:?} does not accept param {:?} on this target (accepted: {})",
                     r.r#type,
@@ -312,7 +316,7 @@ fn declaration_for(
         if *value == Value::Null {
             return Err(refuse(
                 r,
-                "empty-param",
+                &rules::EMPTY_PARAM,
                 format!(
                     "param {:?} on resource type {:?} has no value",
                     name, r.r#type
@@ -337,7 +341,7 @@ fn declaration_for(
                 let Some(secret) = secrets.iter().find(|s| s.secret == *at) else {
                     return Err(refuse(
                         r,
-                        "unnamed-secret",
+                        &own::UNNAMED_SECRET,
                         format!("param {name:?} holds a secret the graph does not name"),
                     ));
                 };
@@ -346,7 +350,7 @@ fn declaration_for(
             value if holds_secret(value) => {
                 return Err(refuse(
                     r,
-                    "unsupported-secret-place",
+                    &rules::UNSUPPORTED_SECRET_PLACE,
                     format!(
                         "param {name:?} holds a secret inside a list or a map; on this target \
                          a secret is a whole param, looked up as one Sensitive value"
@@ -362,7 +366,7 @@ fn declaration_for(
         if !r.params.contains_key(*need) {
             return Err(refuse(
                 r,
-                "missing-param",
+                &rules::MISSING_PARAM,
                 format!(
                     "resource type {:?} requires param {:?} on this target",
                     r.r#type, need
@@ -375,7 +379,7 @@ fn declaration_for(
         if !r.state.is_empty() {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!(
                     "resource type {:?} accepts no state on this target, got {:?}",
                     r.r#type, r.state
@@ -391,7 +395,7 @@ fn declaration_for(
         let Some(native) = lookup(m.ensure, state) else {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!(
                     "resource type {:?} does not accept state {:?} on this target (accepted: {})",
                     r.r#type,
@@ -432,7 +436,7 @@ fn notifications(
             let from = graph.resource(&edge.from).cloned().unwrap_or_default();
             return Err(refuse(
                 &from,
-                "unknown-notify-target",
+                &rules::UNKNOWN_NOTIFY_TARGET,
                 format!("notifies an unknown resource {:?}", edge.to),
             ));
         };
@@ -440,7 +444,8 @@ fn notifications(
             return Err(CompileError {
                 target: NAME.to_owned(),
                 resource: edge.from.clone(),
-                rule: "unknown-notifier".to_owned(),
+                rule: rules::UNKNOWN_NOTIFY_TARGET.name.to_owned(),
+                hint: rules::UNKNOWN_NOTIFY_TARGET.hint.to_owned(),
                 pos: edge.pos.clone(),
                 msg: format!(
                     "a notifies edge starts at resource {:?}, which this document does not declare",
@@ -479,11 +484,12 @@ fn notifications(
 /// notified. The author wrote the action on the notifier, so that is the line
 /// they have to change.
 fn check_action(from: &Resource, to: &Resource, edge: &Edge) -> Result<(), CompileError> {
-    let fail = |rule: &str, msg: String| {
+    let fail = |rule: &Rule, msg: String| {
         Err(CompileError {
             target: NAME.to_owned(),
             resource: from.id.clone(),
-            rule: rule.to_owned(),
+            rule: rule.name.to_owned(),
+            hint: rule.hint.to_owned(),
             msg,
             pos: if edge.pos.known() {
                 edge.pos.clone()
@@ -495,7 +501,7 @@ fn check_action(from: &Resource, to: &Resource, edge: &Edge) -> Result<(), Compi
 
     let Some(m) = mapping(&to.r#type) else {
         return fail(
-            "unsupported-resource-type",
+            &rules::UNSUPPORTED_RESOURCE_TYPE,
             format!(
                 "notifies resource {:?}, whose type {:?} this target does not support (supported: {})",
                 to.id,
@@ -506,7 +512,7 @@ fn check_action(from: &Resource, to: &Resource, edge: &Edge) -> Result<(), Compi
     };
     if !m.refreshable {
         return fail(
-            "unsupported-action",
+            &rules::UNSUPPORTED_ACTION,
             format!(
                 "notifies resource {:?}, which this target cannot refresh: Puppet refreshes \
                  only the types that define a refresh, and {} is not one of them",
@@ -519,7 +525,7 @@ fn check_action(from: &Resource, to: &Resource, edge: &Edge) -> Result<(), Compi
     }
     if let Some(why) = lookup(m.refused_actions, &edge.action) {
         return fail(
-            "unsupported-action",
+            &rules::UNSUPPORTED_ACTION,
             format!(
                 "notifies resource {:?} with action {:?}, which this target cannot express: {}",
                 to.id, edge.action, why
@@ -527,7 +533,7 @@ fn check_action(from: &Resource, to: &Resource, edge: &Edge) -> Result<(), Compi
         );
     }
     fail(
-        "unsupported-action",
+        &rules::UNSUPPORTED_ACTION,
         format!(
             "notifies resource {:?} with action {:?}, which resource type {:?} does not support \
              on this target (supported: {})",
@@ -550,7 +556,8 @@ pub(crate) fn class_name(document: &str) -> Result<String, CompileError> {
         if !ok {
             return Err(CompileError {
                 target: NAME.to_owned(),
-                rule: "invalid-class-name".to_owned(),
+                rule: rules::INVALID_NAME.name.to_owned(),
+                hint: rules::INVALID_NAME.hint.to_owned(),
                 msg: format!(
                     "document name {:?} cannot become a Puppet class name: \
                      {:?} is not allowed, and a class name may hold only lower-case \

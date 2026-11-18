@@ -226,6 +226,7 @@ impl Client {
             category: wire::category_from_wire(reply.category),
             target_versions: reply.target_versions,
             settings_keys: reply.settings_keys,
+            rules: wire::rules_from_wire(reply.rules),
             resource_schemas: reply
                 .resource_schemas
                 .into_iter()

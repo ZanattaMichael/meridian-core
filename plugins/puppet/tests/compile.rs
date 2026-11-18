@@ -121,7 +121,7 @@ fn two_resources_managing_one_thing_are_refused_here_not_on_the_node() {
     let err = refusal(
         "    - id: a\n      type: package\n      params: {name: nginx}\n    - id: b\n      type: package\n      state: latest\n      params: {name: nginx}\n",
     );
-    assert_eq!(err.rule, "duplicate-namevar");
+    assert_eq!(err.rule, "duplicate-resource");
     assert_eq!(err.resource, "b");
     assert!(err
         .msg
@@ -135,7 +135,7 @@ fn a_document_name_that_cannot_be_a_class_is_refused() {
         "    - id: a\n      type: package\n      params: {name: nginx}\n",
     )
     .unwrap_err();
-    assert_eq!(err.rule, "invalid-class-name");
+    assert_eq!(err.rule, "invalid-name");
     assert_eq!(
         err.msg,
         "document name \"web-server\" cannot become a Puppet class name: \"-\" is not allowed, \
@@ -178,7 +178,7 @@ fn a_title_with_a_quote_is_refused() {
     let mut graph = fixture("accounts", "puppet");
     graph.resources[0].id = "it's".to_owned();
     graph.edges.clear();
-    assert_eq!(emit(&graph).unwrap_err().rule, "quoted-title");
+    assert_eq!(emit(&graph).unwrap_err().rule, "invalid-name");
 }
 
 #[test]

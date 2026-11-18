@@ -362,7 +362,7 @@ fn state_can_only_be_read_where_arm_allows_reference() {
         "{VNET}{}",
         nic("        name: web-nic\n        tags: {space: \"${vnet.properties.addressSpace}\"}\n")
     ));
-    assert_eq!(err.rule, "unsupported-reference");
+    assert_eq!(err.rule, "invalid-reference");
     assert!(
         err.msg.starts_with(
             "param \"tags\": ${vnet.properties.addressSpace} reads the state of \"vnet\""
@@ -375,7 +375,7 @@ fn state_can_only_be_read_where_arm_allows_reference() {
         "{VNET}{}",
         nic("        name: ${vnet.properties.addressSpace}\n")
     ));
-    assert_eq!(err.rule, "unsupported-reference");
+    assert_eq!(err.rule, "invalid-reference");
 }
 
 #[test]
@@ -383,7 +383,7 @@ fn a_resource_cannot_read_its_own_state() {
     let err = refusal(&nic(
         "        name: web-nic\n        properties: {mac: \"${nic.properties.macAddress}\"}\n",
     ));
-    assert_eq!(err.rule, "self-reference");
+    assert_eq!(err.rule, "invalid-reference");
     // Its own name is known without asking Azure, so that is fine.
     let text = template(&nic(
         "        name: web-nic\n        properties: {label: \"${nic.name}\"}\n",
@@ -426,7 +426,7 @@ fn names_defined_by_each_other_are_refused() {
     let err = refusal(
         "    - id: a\n      type: Microsoft.Storage/storageAccounts\n      params: {apiVersion: \"2023-01-01\", name: \"${b.name}x\"}\n    - id: b\n      type: Microsoft.Storage/storageAccounts\n      params: {apiVersion: \"2023-01-01\", name: \"${a.name}y\"}\n",
     );
-    assert_eq!(err.rule, "reference-cycle");
+    assert_eq!(err.rule, "dependency-cycle");
     assert_eq!(
         err.msg,
         "param \"name\": the name of resource \"a\" is defined in terms of itself"
@@ -510,7 +510,7 @@ fn params_meridian_writes_itself_are_reserved() {
         let err = refusal(&format!(
             "    - id: logs\n      type: Microsoft.Storage/storageAccounts\n      params: {{apiVersion: \"2023-01-01\", {key}: x}}\n"
         ));
-        assert_eq!(err.rule, "reserved-param", "{key}");
+        assert_eq!(err.rule, "reserved-name", "{key}");
     }
 }
 
@@ -586,7 +586,7 @@ fn a_deployment_is_named_by_the_document_unless_told() {
     // The core refuses a name that is not a file name (issue 133), so what
     // is left for ARM is a name Azure cannot take: longer than 64 characters.
     let err = compile_named(&"a".repeat(65), &spec(VNET)).unwrap_err();
-    assert_eq!(err.rule, "invalid-deployment-name");
+    assert_eq!(err.rule, "invalid-name");
 }
 
 #[test]
@@ -624,10 +624,7 @@ fn deployment_settings_are_checked() {
             "{scope: subscription, location: westus, mode: Complete}",
             "invalid-param",
         ),
-        (
-            "{resourceGroup: rg, name: \"a/b\"}",
-            "invalid-deployment-name",
-        ),
+        ("{resourceGroup: rg, name: \"a/b\"}", "invalid-name"),
     ] {
         let err = with_settings(settings).expect_err(settings);
         assert_eq!(err.rule, rule, "{settings}: {}", err.msg);
@@ -650,13 +647,13 @@ fn deployment_settings_are_checked() {
 fn a_document_is_one_deployment() {
     let err =
         refusal("    - id: second\n      type: deployment\n      params: {resourceGroup: other}\n");
-    assert_eq!(err.rule, "duplicate-deployment");
+    assert_eq!(err.rule, "duplicate-resource");
 }
 
 #[test]
 fn a_template_needs_a_resource() {
     let err = refusal("    - id: size\n      type: parameter\n      params: {type: string}\n");
-    assert_eq!(err.rule, "empty-template");
+    assert_eq!(err.rule, "empty-document");
 }
 
 // ---- parameters and outputs ----

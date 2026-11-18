@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, Position};
 
 use crate::transform::PULUMI_NAMESPACE;
@@ -56,7 +57,7 @@ pub(crate) fn validate(program: &Program) -> Result<(), CompileError> {
         return Err(refuse_at(
             "",
             &Position::default(),
-            "invalid-name",
+            &rules::INVALID_NAME,
             format!(
                 "the document's name {:?} cannot be a Pulumi project name: a project name holds \
                  only letters, digits, underscores, hyphens and periods",
@@ -70,7 +71,7 @@ pub(crate) fn validate(program: &Program) -> Result<(), CompileError> {
             return Err(refuse_at(
                 id,
                 pos,
-                "invalid-name",
+                &rules::INVALID_NAME,
                 format!(
                     "{:?} cannot be a Pulumi stack name: a stack name holds only letters, \
                      digits, underscores, hyphens and periods, with an organisation and \
@@ -99,7 +100,7 @@ pub(crate) fn validate(program: &Program) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &entry.id,
                 &entry.pos,
-                "invalid-name",
+                &rules::INVALID_NAME,
                 format!(
                     "{what} cannot be a name in a Pulumi program: a name starts with a letter \
                      or underscore and holds only letters, digits, underscores and hyphens"
@@ -110,7 +111,7 @@ pub(crate) fn validate(program: &Program) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &entry.id,
                 &entry.pos,
-                "invalid-name",
+                &rules::INVALID_NAME,
                 "the name \"pulumi\" is Pulumi's own: ${pulumi.stack} and its like would no \
                  longer be readable"
                     .to_owned(),
@@ -120,7 +121,7 @@ pub(crate) fn validate(program: &Program) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &entry.id,
                 &entry.pos,
-                "duplicate-name",
+                &rules::DUPLICATE_RESOURCE,
                 format!(
                     "the name {:?} is already taken by resource {first:?}; resources, function \
                      calls and configuration values share one set of names in a Pulumi program",
@@ -136,7 +137,7 @@ pub(crate) fn validate(program: &Program) -> Result<(), CompileError> {
             return Err(refuse_at(
                 "",
                 pos,
-                "invalid-name",
+                &rules::INVALID_NAME,
                 "an output needs a name".to_owned(),
             ));
         }
@@ -144,7 +145,7 @@ pub(crate) fn validate(program: &Program) -> Result<(), CompileError> {
             return Err(refuse_at(
                 "",
                 pos,
-                "duplicate-output",
+                &rules::DUPLICATE_OUTPUT,
                 format!("output {name:?} is declared twice"),
             ));
         }
@@ -264,13 +265,13 @@ mod rule_tables {
             ("invalid-name", "bucket", |p| {
                 p.entries[3].name = "pulumi".to_owned();
             }),
-            ("duplicate-name", "bucket", |p| {
+            ("duplicate-resource", "bucket", |p| {
                 p.entries[3].name = "ami".to_owned();
             }),
-            ("duplicate-name", "again", |p| {
+            ("duplicate-resource", "again", |p| {
                 p.entries.push(entry(Kind::Config, "again", "aws:region"));
             }),
-            ("duplicate-name", "bucket", |p| {
+            ("duplicate-resource", "bucket", |p| {
                 p.entries[3].name = "size".to_owned();
             }),
             ("invalid-name", "", |p| p.outputs[0].0.clear()),

@@ -109,6 +109,7 @@ and checked against the file in every build, so none can fall behind the script 
 | [Capability matrix](reference/capability-matrix.md) | generated from the plugins |
 | [Plugin settings](reference/plugin-settings.md) | every setting of every target's runner, how a value is found, how argument lists are split; generated from the plugins |
 | [Conformance matrix](reference/conformance-matrix.md) | the same document on every configuration management target, cell by cell; generated from the plugins |
+| [Refusal rules](reference/refusal-rules.md) | every rule a compile-time refusal can carry, what it refuses and what to write instead; generated from the registry and the plugins |
 | [Compatibility](reference/compatibility.md) | which language versions a build reads, and which plugins it loads; generated from the code |
 | [Compile rules](reference/compile-rules.md) | the rules file, every rule and every refusal, and `meridian rules check` |
 | [Error kinds and codes](reference/errors.md) | every kind of error the crates produce, with its fixed code: expressions, stages of a run, modules, compile rules, layered data, keys and signatures |

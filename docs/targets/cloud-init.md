@@ -555,19 +555,20 @@ Each of these stops the compile with the resource, the rule and the line.
 | `runtimeWhen` on any resource | `unsupported-runtime-condition` | cloud-init evaluates nothing per resource. Put the test inside an `exec` command. |
 | a `dependsOn` that points backwards through the five steps | `unsatisfiable-order` | The order of a first boot cannot be changed. |
 | a `file` with no `content` | `missing-param` | It would empty the file. |
-| a relative `path` | `relative-path` | A first boot has no working directory. |
-| removing `/` | `unsafe-path` | |
-| `mode: 644` without quotes, or a mode that is not octal | `invalid-param`, `invalid-mode` | cloud-init takes the mode as a string of octal digits. |
-| two files with one `path`, the second without `append: true` | `duplicate-file-path` | The second would silently replace the first. |
-| two users, groups or packages with one name | `duplicate-user`, `duplicate-group`, `duplicate-package` | |
-| a command with an unclosed quote and no `shell: true` | `invalid-command` | It cannot be split into words. |
+| a relative `path` | `invalid-path` | A first boot has no working directory. |
+| removing `/` | `invalid-path` | |
+| `mode: 644` without quotes, or a mode that is not octal | `invalid-param` | cloud-init takes the mode as a string of octal digits. |
+| two files with one `path`, the second without `append: true` | `duplicate-resource` | The second would silently replace the first. |
+| two users, groups or packages with one name | `duplicate-resource` | |
+| a command with an unclosed quote and no `shell: true` | `invalid-param` | It cannot be split into words. |
 | a param the type does not take here, such as `gid` on a `group`; `mode`, `owner` or `group` on a file in state `absent` | `unsupported-param` | The message lists the ones accepted. |
+| `content`, `append` or `encoding` on a file in state `directory` or `absent` | `param-conflicts-with-state` | Only a file that is written has content. |
 | a resource type other than the six | `unsupported-resource-type` | The message lists the six. |
 | a required param left out, such as `name` or `path` | `missing-param` | |
 | a param that is there and empty, such as `command: ""` | `empty-param` | An empty name or command is a mistake, not a request for nothing. |
 | a param of the wrong kind, such as a list where one string is expected | `invalid-param` | The message says what was expected and what was found. |
-| an `encoding` cloud-init does not read | `invalid-encoding` | The message lists the ones accepted. |
-| an `owner` or `group` on a file that holds a colon | `invalid-owner` | cloud-init joins the two with a colon. Give them as separate params. |
+| an `encoding` cloud-init does not read | `invalid-param` | The message lists the ones accepted. |
+| an `owner` or `group` on a file that holds a colon | `invalid-param` | cloud-init joins the two with a colon. Give them as separate params. |
 | a user or group name with a space or a colon; a package name with a space | `invalid-name` | It would be read as two values. |
 | notifying a `file`, `package`, `user` or `group`, or an action the type does not have | `unsupported-action` | Only a service or an exec can react. |
 | notifying an id that is not in the document | `unknown-notify-target` | |

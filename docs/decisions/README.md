@@ -54,4 +54,5 @@ page it affects. The pull request template asks for it.
 | [A secret has one place on each containers target](0022-a-secret-has-one-place-on-each-containers-target.md) | Targets | proposed |
 | [An error's kind is a fixed code that is never reused](0026-error-codes-are-fixed-words-and-never-reused.md) | Core | proposed |
 | [A command's JSON result is one object, and a plan with changes exits 2 only when asked](0030-json-output-is-one-object-and-plan-exits-2-only-when-asked.md) | Core | proposed |
+| [A refusal's rule is one of a registry, and the same mistake has the same name on every target](0033-a-refusal-rule-is-one-of-a-registry.md) | Core | proposed |
 | [A key reaches a host through an agent Meridian starts](0028-a-key-reaches-a-host-through-an-agent-meridian-starts.md) | Targets | proposed |

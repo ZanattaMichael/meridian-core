@@ -402,7 +402,7 @@ fn the_error_cleanup_provisioner_is_one_and_nothing_follows_it() {
     let err = refusal(&with_source(&format!(
         "{cleanup}    - id: again\n      type: error-cleanup-provisioner.shell-local\n      params: {{inline: [\"true\"]}}\n"
     )));
-    assert_eq!(err.rule, "duplicate-error-cleanup");
+    assert_eq!(err.rule, "duplicate-resource");
     assert_eq!(err.resource, "again");
 
     let err = refusal(&with_source(&format!(
@@ -524,7 +524,7 @@ fn a_build_without_a_source_is_refused() {
     let err = refusal(
         "  resources:\n    - id: say\n      type: provisioner.shell-local\n      params: {inline: [\"true\"]}\n",
     );
-    assert_eq!(err.rule, "missing-source");
+    assert_eq!(err.rule, "missing-param");
     assert!(err.msg.starts_with("a build needs at least one source"));
     assert_eq!(err.pos.file, "image.yaml");
 }

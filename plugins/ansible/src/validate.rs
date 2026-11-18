@@ -2,15 +2,17 @@
 
 use std::collections::{HashMap, HashSet};
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::CompileError;
 
 use crate::{Playbook, Task, NAME};
 
-fn fail(task: &Task, rule: &str, msg: String) -> CompileError {
+fn fail(task: &Task, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         resource: task.resource_id.clone(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         pos: task.pos.clone(),
     }
@@ -23,7 +25,8 @@ pub(crate) fn validate(playbook: &Playbook) -> Result<(), CompileError> {
     if playbook.hosts.is_empty() {
         return Err(CompileError {
             target: NAME.to_owned(),
-            rule: "missing-host".to_owned(),
+            rule: rules::MISSING_HOST.name.to_owned(),
+            hint: rules::MISSING_HOST.hint.to_owned(),
             msg: "play has no target host".to_owned(),
             ..CompileError::default()
         });
@@ -37,7 +40,7 @@ pub(crate) fn validate(playbook: &Playbook) -> Result<(), CompileError> {
         if let Some(previous) = names.insert(&task.name, &task.resource_id) {
             return Err(fail(
                 task,
-                "duplicate-task-name",
+                &rules::DUPLICATE_RESOURCE,
                 format!(
                     "task name {:?} is already used by resource {:?}",
                     task.name, previous
@@ -52,14 +55,14 @@ pub(crate) fn validate(playbook: &Playbook) -> Result<(), CompileError> {
         if !handler_names.insert(handler.name.as_str()) {
             return Err(fail(
                 handler,
-                "duplicate-handler-name",
+                &rules::DUPLICATE_RESOURCE,
                 format!("handler name {:?} is declared twice", handler.name),
             ));
         }
         if !handler.when.is_empty() {
             return Err(fail(
                 handler,
-                "conditional-handler",
+                &rules::UNSUPPORTED_RUNTIME_CONDITION,
                 format!(
                     "handler {:?} carries a condition; a handler runs because \
                      something changed, not because a condition holds",
@@ -74,7 +77,7 @@ pub(crate) fn validate(playbook: &Playbook) -> Result<(), CompileError> {
             if !handler_names.contains(notified.as_str()) {
                 return Err(fail(
                     task,
-                    "missing-handler",
+                    &rules::UNKNOWN_NOTIFY_TARGET,
                     format!("notifies handler {notified:?}, which no handler block defines"),
                 ));
             }
@@ -82,14 +85,14 @@ pub(crate) fn validate(playbook: &Playbook) -> Result<(), CompileError> {
         if task.module.is_empty() {
             return Err(fail(
                 task,
-                "missing-module",
+                &rules::MISSING_PARAM,
                 "task has no module".to_owned(),
             ));
         }
         if task.args.is_empty() {
             return Err(fail(
                 task,
-                "empty-module-args",
+                &rules::EMPTY_PARAM,
                 format!("module {} was given no arguments", task.module),
             ));
         }
@@ -101,14 +104,14 @@ fn check_name(task: &Task, what: &str) -> Result<(), CompileError> {
     if task.name.trim().is_empty() {
         return Err(fail(
             task,
-            "empty-name",
+            &rules::INVALID_NAME,
             format!("{what} has an empty name"),
         ));
     }
     if task.name.contains(['\n', '\r']) {
         return Err(fail(
             task,
-            "multiline-name",
+            &rules::INVALID_NAME,
             format!("{what} name {:?} spans more than one line", task.name),
         ));
     }
@@ -154,32 +157,32 @@ mod tests {
         type Break = fn(&mut Playbook);
         let table: &[(&str, &str, Break)] = &[
             ("missing-host", "", |p| p.hosts.clear()),
-            ("empty-name", "pkg", |p| p.tasks[0].name = "  ".to_owned()),
-            ("multiline-name", "pkg", |p| {
+            ("invalid-name", "pkg", |p| p.tasks[0].name = "  ".to_owned()),
+            ("invalid-name", "pkg", |p| {
                 p.tasks[0].name = "install\nnginx".to_owned();
             }),
-            ("multiline-name", "pkg", |p| {
+            ("invalid-name", "pkg", |p| {
                 p.tasks[0].name = "install\rnginx".to_owned();
             }),
-            ("duplicate-task-name", "again", |p| {
+            ("duplicate-resource", "again", |p| {
                 p.tasks.push(task("again", "install nginx"));
             }),
-            ("empty-name", "svc", |p| p.handlers[0].name.clear()),
-            ("multiline-name", "svc", |p| {
+            ("invalid-name", "svc", |p| p.handlers[0].name.clear()),
+            ("invalid-name", "svc", |p| {
                 p.handlers[0].name = "restart\nnginx".to_owned();
             }),
-            ("duplicate-handler-name", "twin", |p| {
+            ("duplicate-resource", "twin", |p| {
                 p.handlers.push(task("twin", "restart nginx"));
             }),
-            ("conditional-handler", "svc", |p| {
+            ("unsupported-runtime-condition", "svc", |p| {
                 p.handlers[0].when = "ansible_os_family == 'Debian'".to_owned();
             }),
-            ("missing-handler", "pkg", |p| {
+            ("unknown-notify-target", "pkg", |p| {
                 p.tasks[0].notify.push("reload nginx".to_owned());
             }),
-            ("missing-handler", "pkg", |p| p.handlers.clear()),
-            ("missing-module", "pkg", |p| p.tasks[0].module.clear()),
-            ("empty-module-args", "pkg", |p| p.tasks[0].args.clear()),
+            ("unknown-notify-target", "pkg", |p| p.handlers.clear()),
+            ("missing-param", "pkg", |p| p.tasks[0].module.clear()),
+            ("empty-param", "pkg", |p| p.tasks[0].args.clear()),
         ];
 
         assert_eq!(validate(&play()), Ok(()));
@@ -234,6 +237,6 @@ mod tests {
         let mut p = play();
         p.tasks[0].module.clear();
         p.tasks.push(task("late", ""));
-        assert_eq!(validate(&p).unwrap_err().rule, "empty-name");
+        assert_eq!(validate(&p).unwrap_err().rule, "invalid-name");
     }
 }

@@ -96,7 +96,7 @@ impl Emitter for Fake {
             if resource.r#type != "file" {
                 return Err(CompileError::for_resource(
                     resource,
-                    "unsupported-resource-type",
+                    &meridian_sdk::rules::UNSUPPORTED_RESOURCE_TYPE,
                     format!(
                         "the fake target has no mapping for type {:?}",
                         resource.r#type

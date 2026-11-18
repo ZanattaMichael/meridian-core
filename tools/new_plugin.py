@@ -72,8 +72,9 @@ plan` and `meridian apply` print.
 
 ## Refusals
 
-TODO(plugin): every rule name the plugin can refuse with, what triggers it,
-and what the author should do instead.
+TODO(plugin): what the plugin refuses, under which rule, what triggers it,
+and what the author should do instead. The rules are the general ones in
+docs/reference/refusal-rules.md unless the plugin declares its own.
 """
 
 

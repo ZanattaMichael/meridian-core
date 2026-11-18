@@ -378,7 +378,7 @@ fn a_key_in_the_wrong_capitalisation_is_refused_with_the_right_one() {
     let err = refusal(
         "  resources:\n    - id: web\n      type: container\n      params: {image: quay.io/x/web:1}\n",
     );
-    assert_eq!(err.rule, "unknown-param");
+    assert_eq!(err.rule, "unsupported-param");
     assert_eq!(
         err.msg,
         "param \"image\" is Quadlet's \"Image\" in another capitalisation; Quadlet reads keys \
@@ -386,7 +386,7 @@ fn a_key_in_the_wrong_capitalisation_is_refused_with_the_right_one() {
     );
 
     let err = refusal(&format!("  resources:\n{WEB}        ports: [80]\n"));
-    assert_eq!(err.rule, "unknown-param");
+    assert_eq!(err.rule, "unsupported-param");
     assert_eq!(
         err.msg,
         "param \"ports\" is not a Quadlet key of a container unit, which all start with a \
@@ -479,7 +479,7 @@ fn two_units_cannot_run_as_one_service() {
     let err = refusal(
         "  resources:\n    - id: db-volume\n      type: container\n      params: {Image: quay.io/x/db:1}\n    - id: db\n      type: volume\n",
     );
-    assert_eq!(err.rule, "duplicate-service");
+    assert_eq!(err.rule, "duplicate-resource");
     assert_eq!(
         err.msg,
         "db-volume.container and db.volume would both run as db-volume.service; rename one of \

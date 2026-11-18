@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 use meridian_sdk::expr::{self, Part};
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{CompileError, Position, ResourceGraph, Value, Warning};
 
 use crate::{refuse, refuse_at, Configuration, Instance, Settings, NAME};
@@ -70,7 +71,7 @@ pub(crate) fn transform(
             return Err(refuse_at(
                 "",
                 &Position::default(),
-                "conflicting-engine",
+                &rules::CONFLICTING_SETTINGS,
                 format!(
                     "the document's targetVersion {:?} means the engine {engine}, and \
                      spec.settings.engine asks for {}. Say it once: drop one of the two",
@@ -92,7 +93,7 @@ pub(crate) fn transform(
             if runner_seen {
                 return Err(refuse(
                     r,
-                    "duplicate-runner",
+                    &rules::DUPLICATE_RESOURCE,
                     "a document is run one way; this one has two resources of type \"runner\". \
                      Write the settings once, under spec.settings"
                         .to_owned(),
@@ -104,7 +105,7 @@ pub(crate) fn transform(
             if !r.runtime_when.is_empty() {
                 return Err(refuse(
                     r,
-                    "unsupported-runtime-condition",
+                    &rules::UNSUPPORTED_RUNTIME_CONDITION,
                     format!(
                         "resource carries runtimeWhen {:?}, which a \"runner\" cannot express: \
                          it says how the configuration is run and is not applied to the node. \
@@ -136,7 +137,7 @@ pub(crate) fn transform(
                     if !earlier.eq_ignore_ascii_case(text) {
                         return Err(refuse(
                             r,
-                            "conflicting-settings",
+                            &rules::CONFLICTING_SETTINGS,
                             format!(
                                 "spec.settings.{name} is {earlier:?} and the \"runner\" \
                                  resource says {text:?}. Say it once, under spec.settings"
@@ -150,7 +151,7 @@ pub(crate) fn transform(
                 if configuration.settings.engine != engine {
                     return Err(refuse(
                         r,
-                        "conflicting-engine",
+                        &rules::CONFLICTING_SETTINGS,
                         format!(
                             "the document's targetVersion {:?} means the engine {engine}, and \
                              the runner asks for {}. Say it once: drop one of the two",
@@ -164,7 +165,7 @@ pub(crate) fn transform(
         if !is_dsc_type(&r.r#type) {
             return Err(refuse(
                 r,
-                "unsupported-resource-type",
+                &rules::UNSUPPORTED_RESOURCE_TYPE,
                 format!(
                     "{:?} is not a DSC resource. Write the module and the resource, such as \
                      PSDscResources/Service or Microsoft.Windows/Registry. How the \
@@ -176,7 +177,7 @@ pub(crate) fn transform(
         if !r.state.is_empty() {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!(
                     "state {:?} is not written on this target: a DSC resource carries its \
                      desired state in its own properties, such as Ensure or _exist, so set it \
@@ -189,8 +190,13 @@ pub(crate) fn transform(
         let mut reads = Vec::new();
         let mut properties = BTreeMap::new();
         for (key, value) in &r.params {
-            let rewritten = rewrite(value, &ids, &r.id, &mut reads)
-                .map_err(|msg| refuse(r, "invalid-reference", format!("param {key:?}: {msg}")))?;
+            let rewritten = rewrite(value, &ids, &r.id, &mut reads).map_err(|msg| {
+                refuse(
+                    r,
+                    &rules::INVALID_REFERENCE,
+                    format!("param {key:?}: {msg}"),
+                )
+            })?;
             properties.insert(key.clone(), rewritten);
         }
         reads.sort();
@@ -211,7 +217,7 @@ pub(crate) fn transform(
         return Err(refuse_at(
             "",
             &output.pos,
-            "unsupported-output",
+            &rules::UNSUPPORTED_OUTPUT,
             format!(
                 "output {:?}: this target reports no outputs. DscPipelineRunner keeps what a \
                  resource returns inside its own run",
@@ -227,7 +233,8 @@ pub(crate) fn transform(
         if !local {
             return Err(CompileError {
                 target: NAME.to_owned(),
-                rule: "missing-param".to_owned(),
+                rule: rules::MISSING_PARAM.name.to_owned(),
+                hint: rules::MISSING_PARAM.hint.to_owned(),
                 msg: format!(
                     "the document's host is {:?}, and nothing says how the runner reaches it. \
                      Set spec.settings.target to WinRM or SSH, or to Local when Meridian runs \
@@ -249,11 +256,11 @@ fn read_setting<'v>(
     name: &str,
     value: &'v Value,
     settings: &mut Settings,
-    refuse: impl Fn(&str, String) -> CompileError,
+    refuse: impl Fn(&Rule, String) -> CompileError,
 ) -> Result<&'v str, CompileError> {
     let Value::String(text) = value else {
         return Err(refuse(
-            "invalid-setting",
+            &rules::INVALID_SETTING,
             format!("setting {name:?} must be a string"),
         ));
     };
@@ -264,7 +271,7 @@ fn read_setting<'v>(
             .map(|c| (*c).to_owned())
             .ok_or_else(|| {
                 refuse(
-                    "invalid-setting",
+                    &rules::INVALID_SETTING,
                     format!(
                         "setting {name:?} cannot be {text:?} (accepted: {})",
                         choices.join(", ")
@@ -278,7 +285,7 @@ fn read_setting<'v>(
         "credential" => settings.credential = text.clone(),
         _ => {
             return Err(refuse(
-                "unsupported-setting",
+                &rules::UNSUPPORTED_SETTING,
                 format!(
                     "this target does not take a setting named {name:?} (accepted: {})",
                     SETTINGS_KEYS.join(", ")

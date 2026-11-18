@@ -46,6 +46,7 @@ mod validate;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use meridian_sdk::rules::Rule;
 use meridian_sdk::{
     Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
     ResourceGraph, Value,
@@ -171,7 +172,7 @@ impl Config {
 }
 
 /// A refusal of one resource, stamped with this target.
-pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         ..CompileError::for_resource(r, rule, msg)
@@ -179,11 +180,12 @@ pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
 }
 
 /// A refusal that is about the document and not one resource.
-pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         resource: resource.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         pos: pos.clone(),
     }

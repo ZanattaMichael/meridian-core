@@ -379,7 +379,8 @@ fn a_refusal_to_compile_fails_the_stage_at_the_authors_line() {
     assert_eq!(
         why,
         "workflow.yaml:11:7: fake: resource \"motd\" [unsupported-resource-type]: \
-         the fake target has no mapping for type \"firewall_rule\""
+         the fake target has no mapping for type \"firewall_rule\" (hint: use a type from \
+         the target's resource types; `meridian plugins` lists them)"
     );
 }
 

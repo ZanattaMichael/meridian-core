@@ -199,7 +199,11 @@ fn main() -> ExitCode {
                 strict,
             },
         ),
-        Command::Plugins { settings, plugins } => list_plugins(&plugins, settings),
+        Command::Plugins {
+            settings,
+            rules,
+            plugins,
+        } => list_plugins(&plugins, settings, rules),
         Command::Rules {
             command:
                 RulesCommand::Check {

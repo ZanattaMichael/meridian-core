@@ -14,8 +14,9 @@ How to read a cell:
 - **ok, warns**: it compiled, with a warning the plan shows. Nothing is dropped
   silently; the warning says what the tool will do differently.
 - a name such as `unsupported-state`: the target refused the document, and that
-  is the rule the refusal carries. The message that goes with it names the
-  resource, the line, and what the target does accept.
+  is the rule the refusal carries, one of the [refusal rules](refusal-rules.md).
+  The message that goes with it names the resource, the line, and what the
+  target does accept.
 
 The **same** column says whether the targets are allowed to differ. A row
 marked *yes* is a part of the dialect that must come out the same everywhere,
@@ -62,7 +63,7 @@ where the tools themselves differ; the cells say how, and the
 | content, owner, group and mode | yes | ok | ok | ok | ok | ok | ok |
 | state `file` | yes | ok | ok | ok | ok | ok | ok |
 | state `directory` | yes | ok | ok | ok | ok | ok | ok |
-| state `directory` with `content` | no | `unsupported-state` | `invalid-param` | `unsupported-param` | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` |
+| state `directory` with `content` | yes | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` |
 | state `absent` | yes | ok | ok | ok | ok | ok | ok |
 | state `absent` with owner and mode | no | ok | ok | `unsupported-param` | ok | ok | ok, warns |
 | no `content` | no | ok | ok | `missing-param` | ok | ok | ok |

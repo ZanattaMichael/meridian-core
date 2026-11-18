@@ -255,6 +255,7 @@ impl EmitterService for EmitterHandler {
             exports_schemas: self.exports_schemas,
             settings: wire::settings_to_wire(self.settings.clone()),
             settings_keys: self.emitter.settings_keys(),
+            rules: wire::rules_to_wire(&self.emitter.rules()),
         }))
     }
 

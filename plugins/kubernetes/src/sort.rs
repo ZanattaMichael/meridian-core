@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, EdgeKind, ResourceGraph, Value, Warning};
 
 use crate::{refuse_at, Manifests, NAME};
@@ -32,7 +33,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.to,
                 &edge.pos,
-                "unsupported-dependency",
+                &rules::UNSUPPORTED_DEPENDENCY,
                 "a dependency must be between two objects; the cluster's own settings are not one"
                     .to_owned(),
             ));
@@ -46,7 +47,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.from,
                 &edge.pos,
-                "unsupported-action",
+                &rules::UNSUPPORTED_ACTION,
                 format!(
                     "notifies resource {:?} with action {:?}, which this target cannot express: \
                      the one reaction Kubernetes can be given is to roll a workload's pods \
@@ -59,7 +60,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.from,
                 &edge.pos,
-                "unsupported-action",
+                &rules::UNSUPPORTED_ACTION,
                 format!(
                     "notifies resource {:?}, a {}, which has no pods to restart (supported: {})",
                     edge.to,
@@ -92,7 +93,7 @@ pub(crate) fn apply_ordering(
                 return Err(refuse_at(
                     &edge.to,
                     &edge.pos,
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     format!("{step} of the notified workload must be a map"),
                 ));
             };

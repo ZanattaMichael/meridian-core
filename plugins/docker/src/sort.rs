@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, EdgeKind, ResourceGraph, Value, Warning};
 
 use crate::{refuse_at, Composition, Section, NAME};
@@ -24,7 +25,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.to,
                 &edge.pos,
-                "unsupported-dependency",
+                &rules::UNSUPPORTED_DEPENDENCY,
                 "a dependency must be between two elements of the Compose file; the project's own \
                  settings are not one"
                     .to_owned(),
@@ -36,8 +37,9 @@ pub(crate) fn apply_ordering(
         if edge.kind == EdgeKind::HardOrder {
             match (from_section, to_section) {
                 (Section::Service, Section::Service) => {
-                    depend(composition, to, &edge.from, false)
-                        .map_err(|msg| refuse_at(&edge.to, &edge.pos, "invalid-param", msg))?;
+                    depend(composition, to, &edge.from, false).map_err(|msg| {
+                        refuse_at(&edge.to, &edge.pos, &rules::INVALID_PARAM, msg)
+                    })?;
                 }
                 // Already true of every Compose project.
                 (_, Section::Service) => {}
@@ -59,7 +61,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.from,
                 &edge.pos,
-                "unsupported-action",
+                &rules::UNSUPPORTED_ACTION,
                 format!(
                     "notifies resource {:?} with action {:?}, which this target cannot express: \
                      the one reaction Compose can be given is to restart a service (supported: \
@@ -72,7 +74,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.from,
                 &edge.pos,
-                "unsupported-action",
+                &rules::UNSUPPORTED_ACTION,
                 format!(
                     "notifies resource {:?}, a {}, which is not something that can restart \
                      (supported: a service)",
@@ -84,7 +86,7 @@ pub(crate) fn apply_ordering(
 
         if from_section == Section::Service {
             depend(composition, to, &edge.from, true)
-                .map_err(|msg| refuse_at(&edge.to, &edge.pos, "invalid-param", msg))?;
+                .map_err(|msg| refuse_at(&edge.to, &edge.pos, &rules::INVALID_PARAM, msg))?;
             continue;
         }
 
@@ -113,7 +115,7 @@ pub(crate) fn apply_ordering(
                 return Err(refuse_at(
                     &edge.to,
                     &edge.pos,
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     "labels of the notified service must be a map or a list".to_owned(),
                 ))
             }

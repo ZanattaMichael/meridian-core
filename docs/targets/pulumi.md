@@ -475,8 +475,8 @@ Every refusal carries a rule and, where it is about one resource, that resource 
 | `invalid-param` | `resourceOptions` or `invokeOptions` is not a map, an unknown setting on a `stack` or `config`, or a `stack` setting that is not plain text. | |
 | `missing-param` | A `config` with neither `type` nor `default`. | |
 | `invalid-name` | An id, a `config` name, the stack's name or the document's name that Pulumi would not accept, or an id of `pulumi`. | Ids start with a letter or underscore and hold letters, digits, underscores and hyphens. |
-| `duplicate-name` | A `config` renamed to a name another resource already has. | |
-| `duplicate-stack`, `duplicate-output` | Two `stack` resources, or two outputs with one name. | |
+| `duplicate-resource` | A `config` renamed to a name another resource already has. | |
+| `duplicate-resource`, `duplicate-output` | Two `stack` resources, or two outputs with one name. | |
 
 ## Environment
 

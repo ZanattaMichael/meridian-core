@@ -4,6 +4,7 @@ use std::fmt::{self, Write as _};
 use meridian_value::{canonical_map, PlacedEscape, SecretRef, Value};
 
 use crate::credential::Credential;
+use crate::rules::{self, Rule};
 use crate::run::Category;
 use crate::schema::ResourceSchema;
 use crate::secrets::SecretName;
@@ -335,22 +336,47 @@ pub struct CompileError {
     /// The offending resource id.
     pub resource: String,
     /// A stable, machine-readable name for what was violated, for example
-    /// `unsupported-resource-type`.
+    /// `unsupported-resource-type`: the name of a [`rules::Rule`], general
+    /// or the target's own.
     pub rule: String,
     pub msg: String,
     pub pos: Position,
+    /// What to write instead, as data: the rule's own hint unless the
+    /// refusal gave a more specific one with [`CompileError::with_hint`].
+    /// Empty when there is nothing general to say.
+    pub hint: String,
 }
 
 impl CompileError {
     /// A refusal of one resource.
-    pub fn for_resource(r: &Resource, rule: &str, msg: impl Into<String>) -> Self {
+    pub fn for_resource(r: &Resource, rule: &Rule, msg: impl Into<String>) -> Self {
         CompileError {
             target: String::new(),
             resource: r.id.clone(),
-            rule: rule.to_owned(),
+            rule: rule.name.to_owned(),
             msg: msg.into(),
             pos: r.pos.clone(),
+            hint: rule.hint.to_owned(),
         }
+    }
+
+    /// A refusal of something that is not a resource, or of a resource that
+    /// has already been transformed: a notify edge, an output, the document.
+    pub fn at(resource: &str, pos: &Position, rule: &Rule, msg: impl Into<String>) -> Self {
+        CompileError {
+            target: String::new(),
+            resource: resource.to_owned(),
+            rule: rule.name.to_owned(),
+            msg: msg.into(),
+            pos: pos.clone(),
+            hint: rule.hint.to_owned(),
+        }
+    }
+
+    /// The same refusal with a hint of its own in place of the rule's.
+    pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = hint.into();
+        self
     }
 }
 
@@ -366,7 +392,11 @@ impl fmt::Display for CompileError {
         if !self.rule.is_empty() {
             write!(f, " [{}]", self.rule)?;
         }
-        write!(f, ": {}", self.msg)
+        write!(f, ": {}", self.msg)?;
+        if !self.hint.is_empty() {
+            write!(f, " (hint: {})", self.hint)?;
+        }
+        Ok(())
     }
 }
 
@@ -408,9 +438,7 @@ pub fn check_settings(
     };
     Err(CompileError {
         target: graph.target.clone(),
-        rule: "unsupported-setting".to_owned(),
-        msg,
-        ..CompileError::default()
+        ..CompileError::at("", &Position::default(), &rules::UNSUPPORTED_SETTING, msg)
     })
 }
 
@@ -467,6 +495,16 @@ pub trait Emitter {
     /// is called, and a key outside the list is refused the same way, so a
     /// misspelt key never becomes a silent loss.
     fn settings_keys(&self) -> Vec<String> {
+        Vec::new()
+    }
+    /// The refusal rules only this target has, beside the general ones in
+    /// [`rules`]: a mistake that exists on one tool, such as a command that
+    /// needs a shell. Each is listed on the refusal rules reference page
+    /// under the target, and `meridian plugins` prints their names.
+    ///
+    /// The default, an empty list, means every refusal the target makes
+    /// carries a general rule, which is right for most targets.
+    fn rules(&self) -> Vec<Rule> {
         Vec::new()
     }
     /// What each resource type takes, for editors: its params, states and

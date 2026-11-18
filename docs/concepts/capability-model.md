@@ -60,7 +60,9 @@ Puppet's refresh restarts a service; it takes no argument and cannot be told to
 reload instead. ...
 ```
 
-Each refusal has a rule name in brackets. The common ones:
+Each refusal has a rule name in brackets, and a hint in parentheses after the
+message. The rule is one of the [refusal rules](../reference/refusal-rules.md),
+the same for the same mistake on every target. The common ones:
 
 | Rule | Meaning |
 |---|---|

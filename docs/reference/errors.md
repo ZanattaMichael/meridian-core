@@ -12,9 +12,10 @@ reserved. The tests check that every code in the code is listed here.
 
 This page lists the kinds by the crate that produces them. The messages
 themselves are not listed: they are many, and each says what it needs to
-where it appears. The [lint rules](lint.md) and the
-[compile-rule refusals](compile-rules.md#refusals) have their own pages,
-because each of those is a rule with a name of its own.
+where it appears. The [lint rules](lint.md), the
+[compile-rule refusals](compile-rules.md#refusals) and the
+[refusal rules](refusal-rules.md) a target refuses a document under have their
+own pages, because each of those is a rule with a name of its own.
 
 ## Expressions (`meridian-expr`)
 

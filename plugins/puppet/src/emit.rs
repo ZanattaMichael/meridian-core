@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, Value};
 
 use crate::{refuse_declaration, Attr, Declaration, Manifest, Reference};
@@ -110,7 +111,7 @@ fn literal(value: &Value, d: &Declaration) -> Result<String, CompileError> {
         Value::Null => {
             return Err(refuse_declaration(
                 d,
-                "unrepresentable-value",
+                &rules::INVALID_PARAM,
                 "a null value cannot be written as Puppet source".to_owned(),
             ))
         }

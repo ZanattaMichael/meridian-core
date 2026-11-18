@@ -408,7 +408,7 @@ be on `helm`'s command line; in an object's params it would be written into a te
 file as it stands. A document with a [Kustomize overlay](#kustomize-overlays) takes no
 secret in its values either: Kustomize reads the rendered manifests from a file in the
 work directory, where a secret cannot go. Text that reads as a token,
-`${meridian_secret_`, is refused too, rule `reserved-text`, so a document cannot make the
+`${meridian_secret_`, is refused too, rule `reserved-name`, so a document cannot make the
 runner fill a value in where the document wrote the token itself.
 
 The handover is tested against a stand-in `helm` that keeps what it reads
@@ -559,16 +559,16 @@ kubeconfig, or `KUBECONFIG`. Point both at the same cluster.
 | `invalid-param` | A setting has the wrong type or form, or `apiVersion` or `kind` is among the params. | The message names the param. |
 | `unsupported-param` | A settings resource has a param the target does not know, an overlay names a file, or an overlay sets `apiVersion` or `kind`, which Meridian writes. | The message lists what is accepted. |
 | `invalid-name` | An id cannot name a template, or a name cannot be a Kubernetes name. | Use letters, digits, `_` and `-` in ids; set `metadata.name`. |
-| `invalid-release-name`, `invalid-chart-name` | The document's name cannot be used as it is. | Add a `release` or `chart` resource with a `name`. |
-| `duplicate-settings` | Two resources of one settings type. | Keep one. |
-| `duplicate-object` | Two resources are the same object. | Give one a different `metadata.name`. |
+| `invalid-name` | The document's name cannot be used as it is. | Add a `release` or `chart` resource with a `name`. |
+| `duplicate-resource` | Two resources of one settings type. | Keep one. |
+| `duplicate-resource` | Two resources are the same object. | Give one a different `metadata.name`. |
 | `duplicate-output` | Two outputs share a name. | Rename one. |
-| `empty-chart` | The document has no Kubernetes object. | Add one. |
+| `empty-document` | The document has no Kubernetes object. | Add one. |
 | `unsupported-dependency` | A `dependsOn` Helm's install order does not honour, or one on a settings resource. | Remove it; see [Ordering](#ordering). |
 | `unsupported-action` | A notification other than a restart of a workload, or two objects that notify each other. | See [Notifications](#notifications). |
 | `unsupported-state`, `unsupported-runtime-condition` | `state: absent` or `runtimeWhen`. | Remove the resource or the condition. |
 | `unsupported-secret-place` | A secret anywhere but the `values`, or in the values of a document with a Kustomize overlay. | See [Secrets](#secrets). |
-| `reserved-text` | A value holds the text `${meridian_secret_`, which is how a secret's place is written. | Write the secret as `${{ secret.<name> }}`, or choose other text. |
+| `reserved-name` | A value holds the text `${meridian_secret_`, which is how a secret's place is written. | Write the secret as `${{ secret.<name> }}`, or choose other text. |
 
 ## Run errors
 

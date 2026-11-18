@@ -354,7 +354,7 @@ document with none uses the defaults in the table.
 Rules:
 
 - A document has at most one `project`. A second is refused
-  (`duplicate-project`).
+  (`duplicate-resource`).
 - Any other param is refused (`unsupported-param`), and a value of the wrong
   kind is refused (`invalid-param`).
 - A `project` cannot depend on anything or be depended on
@@ -455,7 +455,7 @@ wrote.
 | `runtimeWhen` | refused (`unsupported-runtime-condition`): a Compose file is declared state, with no condition for Docker to evaluate |
 
 A document must declare at least one service, or there is nothing to run
-(`empty-project`).
+(`empty-document`).
 
 ## What is checked at compile time
 
@@ -467,12 +467,12 @@ nothing is written and nothing runs.
 | The document | Is refused with |
 |---|---|
 | has a resource of a type other than the six | `unsupported-resource-type` |
-| has two resources of type `project` | `duplicate-project` |
+| has two resources of type `project` | `duplicate-resource` |
 | gives the project a param it does not take | `unsupported-param`, listing the ones it does |
 | gives a project param a value of the wrong kind, a relative `directory`, or a `wait_timeout` of zero | `invalid-param` |
 | names both a `host` and a `context` | `invalid-param` |
 | has a project name Compose would not accept | `invalid-name` |
-| declares no service | `empty-project` |
+| declares no service | `empty-document` |
 | has a service with none of `image`, `build`, `extends`, `provider` | `missing-param` |
 | uses an attribute Compose does not know, such as `enviroment` | `unsupported-param`, naming the attribute that was probably meant. An extension field, which starts with `x-`, is yours to name |
 | has a service that uses a network, named volume, config or secret it does not declare | `invalid-reference`. The network `default` needs no declaration, and neither does a bind mount or an anonymous volume |

@@ -84,6 +84,10 @@ pub struct Info {
     /// The keys the target reads in a document's `spec.settings`; empty when
     /// it takes none, which is also what a plugin built before the field says.
     pub settings_keys: Vec<String>,
+    /// The refusal rules the target has of its own, beside the general ones
+    /// in `meridian_sdk::rules`; empty when every refusal it makes carries a
+    /// general rule, which is also what a plugin built before the field says.
+    pub rules: Vec<meridian_sdk::DescribedRule>,
     /// The binary the plugin was loaded from; empty for an in-process emitter.
     pub path: String,
     /// What checking the binary's signature found, before it was started.
