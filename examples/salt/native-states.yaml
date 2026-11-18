@@ -19,11 +19,11 @@ spec:
   resources:
     - id: nginx_repo
       type: pkgrepo.managed
+      runtimeWhen: grains['os_family'] == 'Debian'
       params:
         name: deb http://nginx.org/packages/debian bookworm nginx
         file: /etc/apt/sources.list.d/nginx.list
         key_url: https://nginx.org/keys/nginx_signing.key
-      runtimeWhen: grains['os_family'] == 'Debian'
     - id: nginx_pkg
       type: package
       params:
