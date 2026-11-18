@@ -45,7 +45,7 @@ spec:
         name: app
         system: true
         shell: /usr/sbin/nologin
-        groups: ops
+        groups: [ops]
         sudo: ALL=(ALL) NOPASSWD:ALL
     - id: plain_package
       type: package

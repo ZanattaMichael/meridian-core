@@ -460,7 +460,7 @@ fn adding_a_user_keeps_the_images_own_login_user() {
 fn a_user_carries_its_params_under_cloud_inits_names() {
     let text = user_data(
         "    - id: usr\n      type: user\n      params:\n        name: deploy\n        uid: 1200\n        home: /srv/deploy\n        \
-         shell: /bin/bash\n        system: true\n        lock_passwd: false\n        primary_group: ops\n        groups: sudo\n        \
+         shell: /bin/bash\n        system: true\n        lock_passwd: false\n        primary_group: ops\n        groups: [sudo]\n        \
          gecos: Deploy\n        sudo: [\"ALL=(ALL) NOPASSWD:ALL\"]\n        ssh_authorized_keys:\n          - ssh-ed25519 AAAA one\n          - ssh-ed25519 BBBB two\n",
     );
     let doc = parsed(&text);
@@ -509,13 +509,12 @@ fn a_user_param_of_the_wrong_shape_is_refused() {
     assert_eq!(err.rule, "invalid-param");
     assert_eq!(
         err.msg,
-        "param \"uid\" on resource type \"user\" must be a whole number, got a string"
+        "param \"uid\" of a user must be a whole number, not a string"
     );
     let err = user("shell: true");
     assert_eq!(
         err.msg,
-        "param \"shell\" on resource type \"user\" must be a string, got a boolean; \
-         quote it if it is meant as text"
+        "param \"shell\" of a user must be text, not a boolean"
     );
     let err = user("groups: [sudo, 4]");
     assert_eq!(
@@ -525,7 +524,8 @@ fn a_user_param_of_the_wrong_shape_is_refused() {
     let err = user("system: \"yes\"");
     assert_eq!(
         err.msg,
-        "param \"system\" on resource type \"user\" must be true or false, got a string"
+        "param \"system\" of a user must be true or false, not a string; write true or false \
+         without quotes"
     );
     assert_eq!(user("password: hunter2").rule, "unsupported-param");
 }
@@ -587,8 +587,7 @@ fn a_package_is_its_name_or_a_name_and_version_pair() {
         refusal("    - id: b\n      type: package\n      params: {name: nginx, version: 1.2}\n");
     assert_eq!(
         err.msg,
-        "param \"version\" on resource type \"package\" must be a string, got a number; \
-         quote it if it is meant as text"
+        "param \"version\" of a package must be text, not a number"
     );
 }
 
@@ -723,7 +722,8 @@ fn a_mode_or_encoding_cloud_init_would_not_read_is_refused() {
     let err = file("mode: 644");
     assert_eq!(err.rule, "invalid-param");
     assert!(
-        err.msg.ends_with("quote it if it is meant as text"),
+        err.msg
+            .ends_with("write it quoted, so it is not read as a number: \"644\""),
         "{}",
         err.msg
     );

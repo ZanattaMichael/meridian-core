@@ -18,6 +18,9 @@ reason that has nothing to do with Chef. The strict reading was chosen on
 purpose: a number or a list where a name is wanted, or `yes` where true is
 wanted, is refused rather than passed to the tool to interpret
 ([decision 0024](../decisions/0024-shared-param-kinds-are-checked-once-strictly.md)).
+A secret passes wherever text would. A param with no value, and a secret inside
+a list or a map, are refused by the target itself under the rule that names the
+problem (`empty-param`, `unsupported-secret-place`).
 
 How the rest of a configuration management document is written is in
 [the configuration management flavour](dsl/configuration-management.md).

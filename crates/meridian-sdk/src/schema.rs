@@ -677,6 +677,13 @@ pub fn check_shared(resource: &Resource) -> Result<(), CompileError> {
         else {
             continue;
         };
+        // A value with nothing in it, and a secret inside a list or a map,
+        // are each refused by the target under a rule that names the real
+        // problem (`empty-param`, `unsupported-secret-place`), so the kind
+        // check stands aside for them.
+        if matches!(value, Value::Null) || holds_secret(value) {
+            continue;
+        }
         let fits = match kind {
             ParamKind::Any => true,
             ParamKind::String => matches!(value, Value::String(_) | Value::Secret(_)),
@@ -726,6 +733,19 @@ pub fn check_shared(resource: &Resource) -> Result<(), CompileError> {
         return Err(CompileError::for_resource(resource, "invalid-param", msg));
     }
     Ok(())
+}
+
+/// Whether a secret sits somewhere inside a list or a map.
+fn holds_secret(value: &Value) -> bool {
+    match value {
+        Value::List(items) => items
+            .iter()
+            .any(|v| matches!(v, Value::Secret(_)) || holds_secret(v)),
+        Value::Map(map) => map
+            .values()
+            .any(|v| matches!(v, Value::Secret(_)) || holds_secret(v)),
+        _ => false,
+    }
 }
 
 /// Describes one of the shared configuration management types (`package`,
@@ -814,6 +834,16 @@ mod tests {
             (
                 "file",
                 vec![("content", Value::Secret(meridian_value::SecretRef::new(1)))],
+            ),
+            // Nothing at all, and a secret inside a list: the target's own
+            // rules name those.
+            ("package", vec![("name", Value::Null)]),
+            (
+                "file",
+                vec![(
+                    "content",
+                    Value::List(vec![Value::Secret(meridian_value::SecretRef::new(1))]),
+                )],
             ),
             // A type and a param the table does not know are not this check's.
             ("firewall", vec![("name", Value::Int(1))]),
