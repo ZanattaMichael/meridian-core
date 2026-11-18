@@ -2,10 +2,8 @@
 
 <img src="../branding/logos/meridian-bicep.svg" width="72" alt="Meridian Bicep plugin logo">
 
-Compiles an Infrastructure document into an Azure Bicep file and deploys it to
-a resource group with the `az` command line. Bicep and Azure still do the
-work: Meridian writes the file a person would have written, and `az` builds
-it, previews it with `what-if` and deploys it.
+Compiles an Infrastructure document into a Bicep file, deployed to a resource group with
+`az` (`what-if`, then `create`).
 
 ## What it does and does not support
 
@@ -25,32 +23,13 @@ it, previews it with `what-if` and deploys it.
 | Compiles to | `main.bicep` and `deployment.json` |
 | Runs with | `az deployment group` |
 
-What it does not do:
+Not supported:
 
-- **No Bicep parameters, variables or modules.** Values come from the
-  document, through Meridian's own `--data`, `--set` and data layers, and are
-  written into the file settled. The compiled file takes no parameters.
-- **Resource group scope only.** A document deploys to one resource group;
-  subscription, management group and tenant deployments are not written.
-- **No per-type checking at compile time.** The compile checks the shape of
-  the document; the Bicep compiler checks each resource against Azure's
-  published types when `az` builds the file, and a file it rejects fails the
-  plan with its reason.
-- **It deletes nothing.** An empty document is refused; delete a resource in
-  Azure yourself.
-
-Contents: [Requirements](#requirements) ·
-[A first document](#a-first-document) ·
-[Resources and the deployment](#resources-and-the-deployment) ·
-[References and expressions](#references-and-expressions) ·
-[Ordering](#ordering) ·
-[What a compile writes](#what-a-compile-writes) ·
-[Editor schemas](#editor-schemas) ·
-[Running](#running) ·
-[Settings](#settings) ·
-[What is refused](#what-is-refused) ·
-[Troubleshooting](#troubleshooting) ·
-[How it is tested](#how-it-is-tested)
+- **Bicep parameters, variables and modules.** Values are settled from `--data`, `--set`
+  and data layers.
+- **Scopes other than a resource group.**
+- **Per-type checks at compile.** The Bicep compiler checks types when `az` builds.
+- **Deleting.** An empty document is refused.
 
 ## Requirements
 
@@ -62,9 +41,8 @@ Contents: [Requirements](#requirements) ·
 
 ## A first document
 
-[`examples/bicep/web-vm.yaml`](../../examples/bicep/web-vm.yaml) deploys a
-public address, a network, an interface and a lock. The part that shows what
-is particular to Bicep:
+[`examples/bicep/web-vm.yaml`](../../examples/bicep/web-vm.yaml) deploys an address, a
+network, an interface and a lock:
 
 ```yaml
 apiVersion: meridian/v1
@@ -145,18 +123,13 @@ output web_url string = 'http://${web_ip.properties.dnsSettings.fqdn}/'
 
 ## Resources and the deployment
 
-A resource's `type` is the Azure resource type with its API version, and its
-`params` are the resource's body exactly as Azure documents it: `name`,
-`location`, `sku`, `properties`, `tags`, `scope` and the rest. A type without
-its API version is refused, and so is a resource without a `name`: the name
-is what the resource is called in Azure, and Bicep requires it.
+`type` is the Azure type with API version; `params` are the body as Azure documents it.
+The API version and `name` are required.
 
-A resource's id is its symbolic name in the Bicep file, so it starts with a
-letter and holds only letters, digits and underscores. An output's name is a
-Bicep name too, and shares one namespace with the resources.
+Ids are Bicep symbolic names (a letter, then letters, digits, `_`), sharing a namespace
+with outputs.
 
-One resource **must** have the type `deployment`. It is not part of the Bicep
-file. It says where the file goes:
+Exactly one `deployment` resource says where the file goes:
 
 | Param | Meaning | Default |
 |---|---|---|
@@ -164,8 +137,8 @@ file. It says where the file goes:
 | `name` | the deployment's name in Azure: letters, digits, hyphens, underscores, periods and parentheses | the document's name |
 | `subscription` | the subscription, when it is not the `az` command's current one | the current one |
 
-A second `deployment` resource is refused (`duplicate-resource`), and a
-`deployment` may not take part in `dependsOn` (`unsupported-dependency`).
+A second is refused (`duplicate-resource`), as is `dependsOn` on it
+(`unsupported-dependency`).
 
 ## References and expressions
 
@@ -177,23 +150,16 @@ A second `deployment` resource is refused (`duplicate-resource`), and a
 | `${resourceGroup().location}`, `${uniqueString(...)}` | Bicep's own expression language, handed over as written |
 | `$${` | a literal `${` |
 
-Anything between `${` and `}` that is not a path into a resource of the
-document is Bicep's, and is checked by the Bicep compiler, not by Meridian. A
-function call that mentions a resource, such as `${toUpper(store.name)}`,
-still orders the two. Values from `--data`, `--set` and data layers are
-settled before the file is written and never become expressions
-([values from data are literal](../reference/dsl/interpolation.md#a-tools-own-expressions)).
+Other `${...}` is Bicep's, checked by its compiler; `${toUpper(store.name)}` still orders.
+Values from data never become expressions
+([see](../reference/dsl/interpolation.md#a-tools-own-expressions)).
 
-An output is always declared `string`; a value that is not already a string
-is wrapped in `string(...)`.
+Outputs are `string`, wrapped in `string(...)` when needed.
 
 ## Ordering
 
-A reference already orders two resources, so a `dependsOn` that a reference
-implies is left out of the file; Bicep's own linter would flag it. Only an
-order nothing in the body says becomes `dependsOn`, as the lock on the
-interface does above. The resources are written in the order Meridian
-decided, which Bicep does not need but a reader does.
+A `dependsOn` a reference implies is left out. Others become `dependsOn`, as for the lock
+above. Resources are written in Meridian's order.
 
 ## What a compile writes
 
@@ -202,29 +168,18 @@ main.bicep
 deployment.json
 ```
 
-`main.bicep` is an ordinary Bicep file, so you can build it with `az bicep
-build` or deploy it from a pipeline of your own. `deployment.json` holds what
-the runner needs and the file does not say: the resource group, the
-deployment's name and subscription, and the map from each resource's Azure
-type and name back to the id you wrote, so a what-if row is reported by your
-name.
+`main.bicep` is an ordinary Bicep file. `deployment.json` holds the resource group, name,
+subscription and the map back to your ids.
 
-Strings are written as single-quoted Bicep strings, with `\\`, `\'`, `\n`,
-`\r` and `\t` escaped and a `${` in literal text written `\${`, so only
-what the document meant as an expression is one. A key that is not a plain
-identifier, such as `cost-center`, is quoted.
+Strings are single-quoted with `\\`, `\'`, `\n`, `\r`, `\t` and `\${` escaped. Keys such
+as `cost-center` are quoted.
 
 ## Editor schemas
 
-`meridian schema sync` reads the type definitions the Bicep compiler itself
-compiles against, so an editor completes and checks a resource's properties
-at its API version ([Tool schemas](../tooling/schema-sync.md)). They are
-published as files in
-[Azure/bicep-types-az](https://github.com/Azure/bicep-types-az), generated
-from the Azure REST API specifications: an index of every
-`Namespace/type@api-version`, and a `types.json` per provider and version
-holding the type graph. The sync fetches the index and the files the
-documents' types live in; no account and no compiler is needed.
+`meridian schema sync` fetches the Bicep compiler's type definitions from
+[Azure/bicep-types-az](https://github.com/Azure/bicep-types-az): the index and the
+`types.json` files the documents need. No account or compiler is needed
+([Tool schemas](../tooling/schema-sync.md)).
 
 | | |
 |---|---|
@@ -232,15 +187,11 @@ documents' types live in; no account and no compiler is needed.
 | Listed by name | every other API version of a used type, and the newest stable API version of every other type in the index |
 | Pinned | the index and each `types.json` read, to their SHA-256 |
 
-A type is matched without regard to case, as Azure matches resource types.
-An extensible enum, literals beside a plain string, is a string with no
-values listed, because Azure takes values beyond the known ones. A
-discriminated object, whose properties depend on a `kind`, takes the base
-properties and every variant's, open. The files are kept in the work
-directory and fetched again only when they changed; when GitHub cannot be
-reached, the last copy is used and the sync says so. The source is tested
-against the real files in the `azure` workflow. The [ARM target](arm.md)
-reads the same files.
+- Types match case-insensitively.
+- Extensible enums are plain strings.
+- Discriminated objects take every variant's properties.
+- Files are cached and refetched when changed; offline, the cache is used with a note.
+- The [ARM target](arm.md) reads the same files.
 
 ## Running
 
@@ -250,25 +201,17 @@ reads the same files.
 | Apply | the same preview, so the changes can be reported, then `az deployment group create --resource-group <rg> --name <name> --template-file main.bicep --output json` |
 | Outputs later | `az deployment group show --resource-group <rg> --name <name> --output json` |
 
-`--subscription` is added when the `deployment` resource names one. `az`
-builds the Bicep file itself on every call, so a file the Bicep compiler
-rejects fails the plan with the compiler's own diagnostics.
+`--subscription` is added when named. A file the compiler rejects fails the plan with its
+diagnostics.
 
-Changes are read from what-if's JSON, resource by resource: `Create`,
-`Delete` and `Modify` are reported under the id you wrote. A row Azure marks
-`Deploy` (it will deploy the resource but cannot say whether that changes it)
-or `Unsupported` (it cannot analyse the type) makes the plan **unknown**, not
-empty, so a run never says "nothing to do" on no evidence. `NoChange` and
-`Ignore` rows are left out.
-
-An apply reports the preview's changes and the deployment's outputs. An
-output of a secure type is reported as sensitive and never printed.
+What-if `Create`, `Delete` and `Modify` rows are reported by id. `Deploy` or `Unsupported`
+makes the plan **unknown**. `NoChange` and `Ignore` are left out. Secure outputs are never
+printed.
 
 ## Secrets
 
-A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a resource's
-params reaches Azure as a `@secure()` parameter whose value is read from a private
-file, and through nothing else.
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) becomes a `@secure()`
+parameter read from a private file.
 
 ```yaml
 spec:
@@ -286,43 +229,27 @@ spec:
           value: ${{ secret.db_password }}
 ```
 
-**What the compile writes.** The param becomes the parameter's name,
-`meridian_secret_db_password`, and the file declares the parameter at the top:
+The param becomes `meridian_secret_db_password`, declared at the top:
 
 ```bicep
 @secure()
 param meridian_secret_db_password string
 ```
 
-The compiler makes a `securestring` parameter of it, so Resource Manager keeps the
-value out of the deployment's record and its logs. The compiled file holds the
-parameter's name and never its value.
+It becomes a `securestring`, kept out of the deployment record.
 
-**How the value reaches the tool.** When a stage runs, the runner writes every secret
-into one Resource Manager parameters file (`"parameters": {"<name>": {"value": ...}}`)
-in a directory only the user can enter (mode `0700`, the file `0600`, on a memory
-filesystem where the system has one), and passes it as `--parameters @<path>` to both
-`what-if` and `create`. The file is overwritten and removed when the stage ends. The
-command line names the file's path and nothing more, and `az`'s environment holds
-nothing of the value.
+The runner writes a parameters file (mode `0600`, in a `0700` directory, in memory where
+possible), passed as `--parameters @<path>` to `what-if` and `create`, removed after.
 
-**What Azure keeps.** A secure parameter's value is not in the deployment's record and
-not returned by `show`. A resource property given the value is kept by the resource
-provider the way it keeps that property: a Key Vault secret is encrypted at rest; a
-tag is not. The plugin reads only each change's resource id and kind from the preview,
-never a property's value. Whether Azure's what-if prints a secure parameter's value
-inside a property diff is not something the tests have checked: the job that runs
-against a real subscription is switched on by the repository's settings, see
-[Real-tool tests](../contributing/real-tool-tests.md#azure).
+A property keeps the value as its provider does (a tag is not encrypted). The plugin reads
+only ids and kinds from what-if. Whether what-if prints secure values in a diff is
+unchecked against a real subscription
+([Real-tool tests](../contributing/real-tool-tests.md#azure)).
 
-**What is refused.** A secret in the `deployment` resource's settings is refused at
-compile, rule `unsupported-secret-place`: the settings are the command line `az` is
-given.
+A secret in `deployment` settings is refused (`unsupported-secret-place`).
 
-The handover is tested against a stand-in `az` that keeps a copy of the parameters
-file, its mode, its arguments and its environment (`plugins/bicep/tests/run.rs`), and
-the compiled parameter is built by the real Bicep compiler in CI
-(`plugins/bicep/tests/real.rs`), which makes a `securestring` of it.
+Tested against a stand-in `az` (`plugins/bicep/tests/run.rs`) and the real compiler in CI
+(`plugins/bicep/tests/real.rs`).
 
 ## Settings
 
@@ -331,17 +258,13 @@ the compiled parameter is built by the real Bicep compiler in CI
 | `MERIDIAN_AZ` | the program to run, when it is not `az` on `PATH` |
 | `MERIDIAN_AZ_ARGS` | arguments added to every call, split like a shell command line (quotes hold a word together): `--only-show-errors`, or `--subscription <id>` for every document |
 
-Every setting can also be written in the project's `meridian.yaml` under
-`spec.settings.bicep`, by its short name; the environment variable still wins.
-The names, defaults and the splitting rule for argument lists are in the
-[plugin settings reference](../reference/plugin-settings.md#bicep).
-
-Credentials are the `az` command's own (`az login`).
+Settings can also go in `meridian.yaml` under `spec.settings.bicep`; the environment wins.
+See the [plugin settings reference](../reference/plugin-settings.md#bicep). Credentials are
+`az login`'s.
 
 ## What is refused
 
-Every refusal names the resource, the line and the rule. The rules this
-target can raise, and what to do:
+Each names the resource, line and rule:
 
 | Rule | Meaning | What to do |
 |---|---|---|
@@ -376,21 +299,10 @@ target can raise, and what to do:
 
 ## How it is tested
 
-- **Golden files** under `plugins/bicep/testdata/` record what the example
-  compiles to, `main.bicep` and `deployment.json`, byte for byte, and what
-  each refusal says.
-- **Run tests** (`plugins/bicep/tests/run.rs`) drive the runner against a
-  stand-in for `az`: the exact calls, a what-if read back with every change
-  type, the rows that make a plan unknown, and the outputs.
-- **Real-tool tests** (`plugins/bicep/tests/real.rs`, workflow `azure.yml`)
-  have two parts. On every pull request that touches the plugin, the real
-  Bicep compiler builds what the plugin writes, the example and every kind of
-  value, and checks each resource against Azure's published types; a file the
-  compiler rejects is reported by the compiler. The runner itself (`what-if`,
-  `create` and `show`) is tested in a real subscription by a job that is
-  switched on by four repository settings, listed under
-  [Real-tool tests](../contributing/real-tool-tests.md#azure). Both are
-  marked `#[ignore]` and run with
+- **Golden files** in `plugins/bicep/testdata/`, refusals included.
+- **Run tests** (`plugins/bicep/tests/run.rs`) against a stand-in `az`.
+- **Real-tool tests** (`plugins/bicep/tests/real.rs`, `azure.yml`): the real compiler builds
+  every output on each pull request. The runner's subscription job needs four repository
+  settings ([Real-tool tests](../contributing/real-tool-tests.md#azure)). Run with
   `MERIDIAN_TEST_REAL_BICEP=1 cargo test -p meridian-target-bicep --test real -- --ignored`.
-  Until the subscription job has run, treat the runner as untested against
-  Azure.
+  Treat the runner as untested against Azure until that job has run.
