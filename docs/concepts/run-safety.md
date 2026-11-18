@@ -1,29 +1,18 @@
 # Running safely
 
-A run that reaches a tool changes real things, takes time, and can fail half
-way. This page covers how Meridian lets a run be repeated, shared, resumed or
-put back, how to detect drift, and how a policy approves changes before they
-happen.
+Locks, run records, resuming, stopping, sharing, rollback, drift and policy checks.
 
 <p align="center"><img src="../graphics/meridian-run-safety.svg" alt="Running safely: the lock, the policy check, the record of every event, the run-state, and what happens when a stage fails" width="100%"></p>
 
-Three rules hold throughout:
-
-- **Each tool owns its own state.** Meridian's record says what Meridian did,
-  not what your infrastructure is. Outputs are never stored; they are read back
-  from the tool that produced them.
-- **Nothing kept holds a secret value.** The record names a step, a resource
-  id, an output, an artifact hash. It never holds a param, an output value, or
-  tool output.
-- **`compile` and `validate` are outside all of this.** They contact nothing,
-  take no lock and leave no record.
+- Each tool owns its state. Meridian records what it did; outputs are read back from the
+  tool, never stored.
+- The record holds steps, resource ids, output names and artifact hashes, never a param,
+  output value or tool output.
+- `compile` and `validate` take no lock and leave no record.
 
 ## One run at a time
 
-Two runs against the same state collide in ways no tool can untangle: two
-`terraform apply`s in one directory, or a plan read mid-apply. So every command
-that runs a tool (`plan`, `apply`, `drift`, `rollback`) first takes the state's
-lock.
+`plan`, `apply`, `drift` and `rollback` take the state's lock first.
 
 ```
 $ meridian apply site.yaml
@@ -33,16 +22,10 @@ Wait for it to finish, or wait here with --lock-timeout. If that run is gone and
 
 - `--lock-timeout 5m` waits for the other run instead of failing at once.
 - The lock is released when the run ends, success or failure.
-- **Meridian never breaks a lock itself.** It cannot tell whether a process on
-  another machine is dead, and guessing wrong causes the collision the lock
-  prevents. If a killed run left its lock, check the holder with
-  `meridian status`, make sure that run is gone, and remove it with
-  `meridian unlock <id>`. The id is required, so you remove the lock you
-  checked.
+- Meridian never breaks a lock. If a killed run left one, check it with
+  `meridian status` and remove it with `meridian unlock <id>`.
 
-The lock covers one state: one `--state-dir` or one shared
-[backend](#sharing-the-record). Put workflows that should not block each other
-in different states.
+The lock covers one `--state-dir` or one shared [backend](#sharing-the-record).
 
 ## The record
 
@@ -70,17 +53,15 @@ not locked
 A killed run never records how it ended. `status` shows it as `interrupted`,
 with the last step it started.
 
-A failed step records a fixed word for the kind of failure (`tool-failed`,
-`plugin-failed`, `compile-refused` and so on), never the tool's message, which
-might quote a value. The tool's output is on the terminal of the failed run.
+A failed step records a fixed reason (`tool-failed`, `plugin-failed`, `compile-refused`,
+...), never the tool's message.
 
 The newest 50 runs are kept; change with `--keep-runs N`. Every file and field
 is in [the state reference](../reference/state.md).
 
 ## Picking up where a run stopped
 
-A run stops at the first failed stage and skips the rest. Once fixed, you do
-not need to start again:
+A run stops at the first failed stage. After a fix:
 
 ```
 $ meridian apply site.yaml --resume
@@ -108,30 +89,24 @@ flowchart LR
   document is applied again.
 - A skipped stage still passes on its outputs, read from its tool as a `plan`
   of existing infrastructure would.
-- If the tool cannot report them, the stage is applied again. Repeating an
-  apply is safe; guessing an address is not.
+- If the tool cannot report them, the stage is applied again.
 - A killed run can be resumed the same way after `meridian unlock`.
-- Resuming a successful run is refused: there is nothing to continue.
-
-Resuming saves time; it does not change the result. A plain `meridian apply` of
-the same documents ends in the same place by asking every tool again.
+- Resuming a successful run is refused.
 
 ### Applying a saved plan
 
-The same comparison, an artifact by its hash, ties a plan to the apply that
-follows it. `meridian plan --out plan.mplan` writes what was planned, and
-`meridian apply --plan plan.mplan` applies that plan or nothing: it refuses
-before it runs anything if a stage has been applied since the plan was
-taken, by any run, or if the plan names other stages; and it fails a stage
-with `plan-differs` if its document no longer compiles to the artifact the
-plan recorded. Where the tool saves a plan of its own, it is handed that
-plan back. [A saved plan, and applying it from a pull
-request](../operations/pull-requests.md) has the file, the checks and the
-pull request automation built on it.
+`meridian plan --out plan.mplan` writes the plan. `meridian apply --plan plan.mplan`
+applies it or nothing:
+
+- it refuses before running if a stage was applied since, or the plan names other stages
+- it fails a stage with `plan-differs` if the document no longer compiles to the recorded
+  artifact
+- a tool that saves its own plan is handed that plan back
+
+ [A saved plan, and applying it from a pull
+request](../operations/pull-requests.md) has the details.
 
 ## Stopping a run
-
-A run can be stopped before its tool finishes, and the record shows it.
 
 **Ctrl-C.** The first interrupt asks the run to stop:
 
@@ -158,30 +133,22 @@ stopping: waiting for the tool to stop so the run can be recorded; press Ctrl-C 
 run 2026-11-17T09-14-03Z-0cc7 was interrupted. `meridian apply --resume site.yaml` continues from the stage that was stopped
 ```
 
-An interrupted apply is not rolled back, even with `--on-failure rollback`:
-the operator asked for nothing more to happen, and a rollback runs more
-tools. `meridian rollback` puts it back when that is what is wanted. A
-`SIGTERM` from a supervisor is handled the same way as Ctrl-C.
+An interrupted apply is not rolled back, even with `--on-failure rollback`; run
+`meridian rollback` if wanted. `SIGTERM` is handled like Ctrl-C.
 
-**A time limit.** `--stage-timeout 30m` stops a stage whose tool runs that long,
-so a prompt, dead connection or stuck cloud operation cannot hold the run and
-lock forever. The stage is recorded as failed with reason `timed-out`, and the
-run continues as after any failure: later stages do not run, and
-`--on-failure rollback` rolls back. There is no limit unless you set one.
+**A time limit.** `--stage-timeout 30m` stops a stage that runs that long. It is recorded
+as failed with reason `timed-out` and handled like any failure. There is no default
+limit.
 
-Either way, `--resume` continues from the stopped stage as from a failed one:
-the stage is applied again. What the tool did before stopping is listed above
-the failure, as far as the tool reported it, and counted in the record's
-`changes`.
+`--resume` applies a stopped stage again. What the tool reported doing before it stopped
+is listed and counted in the record's `changes`.
 
-A plugin built on an SDK without cancellation cannot be stopped this way.
-`meridian` then abandons the run, warns that the tool may still be running, and
-releases the lock. Every plugin in this repository supports cancellation.
+A plugin without cancellation support is abandoned with a warning that its tool may still
+be running. Every plugin in this repository supports cancellation.
 
 ## Sharing the record
 
-By default the record is in the state directory, which suits one person or one
-CI job. A team needs one lock and one history wherever a run happens:
+The record is in the state directory by default. `--backend` shares the lock and history:
 
 ```
 meridian apply site.yaml --backend dir --backend-config path=/mnt/team/meridian
@@ -199,38 +166,23 @@ flowchart LR
     MB <-->|"lock, state.json, runs/"| S
 ```
 
-`local` is built in. Any other backend is a small program named
-`meridian-backend-<name>` in a plugin directory; a shell script around a cloud
-CLI works. A shared-directory backend ships in
+`local` is built in. Any other backend is a program named `meridian-backend-<name>` in a
+plugin directory. A shared-directory backend ships in
 [`examples/backends`](../../examples/backends), and
 [the state reference](../reference/state.md#writing-a-backend) has the full
 contract.
 
-**What a backend does not hold.** Each tool's working directory stays on the
-machine running Meridian. A tool's own state belongs in its own remote backend
-(a Terraform `backend` block, a Pulumi backend), set in the document. A shared
-Meridian backend gives a team one lock, one history, and one answer to "what
-was applied last, and did it work?"
+A backend does not hold tool working directories or tool state. Set a tool's own remote
+state (a Terraform `backend` block, a Pulumi backend) in the document.
 
-**Between pipeline jobs.** A job's runner disappears when the job ends, so a
-pipeline that plans in one job and applies in the next must put the record
-where the second job can reach it:
-
-- as an artifact passed between jobs, which is enough when one pipeline owns
-  the documents and runs one job at a time; or
-- in a shared backend, which also holds the lock against another pipeline or a
-  laptop.
-
-To continue a failed apply, rerun the job with `apply --resume`; it finds the
-failed run in the record and continues from the failed step.
+**Between pipeline jobs**, pass the record as a job artifact, or use a shared backend,
+which also holds the lock. Rerun a failed job with `apply --resume`.
 [Running Meridian in a pipeline](../operations/running-in-a-pipeline.md#sharing-the-record-between-jobs)
 shows both for each engine.
 
 ## Putting a run back
 
-Sometimes it is better to go back to what worked than to fix forward. Meridian
-knows no tool, so it undoes a stage one way: re-applying the artifact of that
-stage's last successful apply.
+A rollback re-applies the artifact of each stage's last successful apply.
 
 ```
 $ meridian apply site.yaml --on-failure rollback
@@ -275,7 +227,7 @@ sequenceDiagram
   configures.
 - A rollback is a run: it holds the lock, is recorded, and shows in `status`.
 
-Anything it cannot do is reported stage by stage, never skipped silently:
+What it cannot do is reported per stage:
 
 | The stage | What happens | Why |
 |---|---|---|
@@ -290,14 +242,12 @@ Anything it cannot do is reported stage by stage, never skipped silently:
 one just applied and the previous good one. A snapshot that no longer matches
 its hash is refused.
 
-**What a rollback cannot promise.** Re-applying an old artifact restores what
-the tool manages, not data it destroyed: a replaced database comes back empty.
-That is why `plan` marks a replacement with `!`. Read the plan before applying.
+**Limits.** A rollback restores what the tool manages, not destroyed data: a replaced
+database comes back empty. `plan` marks a replacement with `!`.
 
 ## Finding drift
 
-Drift is an unrequested difference: the document still compiles to exactly what
-was applied, but the tool says reality has changed.
+Drift: the document compiles to what was applied, but the tool reports a difference.
 
 ```
 $ meridian drift site.yaml
@@ -333,19 +283,13 @@ flowchart TB
 | `unknown` | the tool cannot preview, so it cannot say. Never read as in sync | no |
 | `never applied` | there is nothing to compare with | no |
 
-It exits `0` for no drift, `2` for drift, and `1` if the check failed, so a
-scheduled job can tell them apart. Run it from CI or cron. To fix drift, run
-`meridian apply`.
-
-The tools still differ. Terraform compares against real infrastructure. Ansible's
-check mode is a dry run of the play. A tool with no real preview reports
-`unknown`. The [capability matrix](../reference/capability-matrix.md) shows which
-targets can plan.
+Exit status: `0` no drift, `2` drift, `1` the check failed. `meridian apply` fixes
+drift. A tool with no preview reports `unknown`
+([capability matrix](../reference/capability-matrix.md)).
 
 ## Asking a policy first
 
-Everything above deals with changes already made. A policy is asked first: may
-this change be made at all?
+`--policy` asks a policy whether each change may be made.
 
 ```sh
 meridian plan  site.yaml --policy policies/
@@ -365,10 +309,9 @@ flowchart LR
     ANSWER -->|"yes, or the engine<br/>could not be asked"| NO["the run fails"]
 ```
 
-An apply asks about every stage it can before applying the first, so a
-forbidden change stops the run while there is nothing to undo. The policy gets
-the stage, its resources, its compiled files and the tool's preview, and
-answers with denials and warnings:
+An apply checks every stage it can before applying the first. The policy gets the stage,
+its resources, its compiled files and the tool's preview, and returns denials and
+warnings:
 
 ```rego
 package meridian
@@ -383,41 +326,25 @@ deny contains msg if {
 }
 ```
 
-Three properties make it dependable:
+- A missing or crashing engine, or an unreadable answer, is a denial.
+- The input is the compiled artifact and the tool's preview, not the document text.
+- The input goes to the engine on stdin and is never written. The record keeps the
+  verdict, not the messages.
+- A stage waiting on an output is checked when its turn comes.
+- `meridian plan --policy` shows every denial and exits `1`.
 
-- **It fails closed.** A missing or crashing engine, or an unreadable answer,
-  is a denial.
-- **It judges what will run.** The input is the compiled artifact and the
-  tool's preview, not the document text, so a rule about what Terraform would
-  destroy uses what Terraform says it would destroy.
-- **It leaves no secret behind.** The input goes to the engine on stdin and is
-  never written down. The record keeps that a policy was asked and its verdict,
-  never the messages, which can quote the input.
-
-A stage waiting on an output this run has yet to produce is checked when its
-turn comes. `meridian plan --policy` shows every denial and exits `1`, which is
-how a pipeline blocks a merge. The [policy reference](../reference/policy.md)
-has the input field by field, the Rego conventions, and how to write an engine
-for another policy language.
+See the [policy reference](../reference/policy.md).
 
 ## Values between stages
 
-A stage often needs something from another: a machine needs the user-data a
-bootstrap document compiles to; an application needs a network another
-document created. A document asks with
-[`spec.imports`](../reference/dsl/outputs-and-hand-offs.md#imports). For run
-safety this means:
+With [`spec.imports`](../reference/dsl/outputs-and-hand-offs.md#imports):
 
-- **Order is derived, not written.** A document runs after every document it
-  needs. Documents that wait on each other are refused by `validate`.
-- **A missing value defers the stage.** A plan made before the network exists
-  reports the application as deferred, never planned against a guess.
-- **The value goes only to the tool**, as the tool's own variable. It is not
-  written into compiled files or recorded. If `sensitive`, it is masked
-  wherever Meridian prints.
-
-A rollback uses the imports a stage would get now. A stage whose imports can no
-longer be resolved is reported as unavailable, not guessed.
+- A document runs after every document it imports from. A cycle is refused by `validate`.
+- A missing value defers the stage.
+- The value goes only to the tool, as its own variable, and is not written to compiled
+  files or the record. `sensitive` values are masked.
+- A rollback uses current imports. A stage whose imports cannot be resolved is reported as
+  unavailable.
 
 ## What this does not do yet
 
