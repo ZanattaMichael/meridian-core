@@ -58,7 +58,7 @@ fn the_plugin_describes_itself_as_openvox() {
             synthetic_notify: false,
             runtime_condition: false,
             secrets: true,
-            credentials: false,
+            credentials: true,
         }
     );
     assert_eq!(
@@ -231,4 +231,29 @@ fn a_secret_compiles_to_the_same_sensitive_lookup_as_puppet() {
         "{}",
         ours.artifact.files[MANIFEST_PATH]
     );
+}
+
+#[test]
+fn a_credential_bolt_cannot_take_is_refused_as_openvox() {
+    let text = "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: openvox\n  targetHost:\n    from: inline\n    host: web01.example.com\n    credential: deploy\n  secrets:\n    - {name: deploy_key, from: env, key: DEPLOY_KEY}\n  credentials:\n    - {name: deploy, type: ssh, user: deploy, privateKey: \"${{ secret.deploy_key }}\", certificate: cert.pub}\n  resources:\n    - id: app_pkg\n      type: package\n      params: {name: nginx}\n";
+    let err = emit(&meridian_plugin_testkit::graph_from_text(
+        "site.yaml",
+        text,
+        NAME,
+    ))
+    .unwrap_err();
+    assert_eq!(err.target, "openvox");
+    assert_eq!(err.rule, "unsupported-credential");
+    assert!(err.msg.contains("bolt takes no certificate"), "{err}");
+    // Without the certificate the same document compiles, and the manifest
+    // holds nothing of the credential.
+    let emitted = emit(&meridian_plugin_testkit::graph_from_text(
+        "site.yaml",
+        &text.replace(", certificate: cert.pub", ""),
+        NAME,
+    ))
+    .unwrap();
+    for (file, body) in &emitted.artifact.files {
+        assert!(!body.contains("deploy"), "{file} names the credential");
+    }
 }

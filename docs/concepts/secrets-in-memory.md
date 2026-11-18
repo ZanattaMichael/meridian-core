@@ -196,6 +196,19 @@ nothing more is added to the model:
 A credential's secret fields are counted among the stage's secrets for
 masking what the tool prints, since they are the same slots.
 
+A private key for a host over SSH takes the plan's rank 1 by way of an agent
+(`meridian-sdk/src/agent.rs`): the plugin starts `ssh-agent -D -a <socket>`,
+the socket in a directory only the user can enter, and runs `ssh-add -` with
+the key on its standard input (`Tool::stdin_secret`), so the key goes from
+protected memory into the agent's and is on no disk. A passphrase is written
+to a `SecretFile` beside the socket and answered through an askpass program
+that does nothing but print that file. The tool (`ssh`, `salt-ssh`, `bolt`,
+`chef-run`) is told the socket in `SSH_AUTH_SOCK`, and nothing else of the
+credential reaches its environment or command line. Dropping the agent kills
+the process and removes the directory, so the key lives in the agent for one
+stage. The agent's own memory is as protected as `ssh-agent` makes it, which
+is the same promise the user's own agent gives.
+
 ## Handing a secret to a tool
 
 In order of preference: the tool's standard input or a file descriptor, then a
@@ -307,6 +320,8 @@ Across the other crates:
 | `meridian-cli/tests/secret_stores.rs` | through the real command: `secret set` stores a value from standard input and a run reads it back from the keyring and the Secret Service; the value reaches the store's tool on its standard input and never as an argument; a store this machine does not have is passed over for the next place and every reason is given when none has it; the value is in nothing printed or written |
 | `meridian-cli/tests/secrets.rs` | through the real command: the value is in nothing `plan` and `apply` print and in no file of the state directory or of `compile --out`; a failed fetch repeats neither the value, a command's output nor its arguments; a secret read from the environment is not inherited by a program started afterwards; a secret that cannot be locked is warned about once, or refused with `--strict-secrets`; `secret check` reads no value and runs no command; a secret in a param is compiled as a reference and handed to the tool in a file only the user can read, which the tool reads back whole, and is in nothing else the run prints, applies or keeps; a target that takes none stops the stage and names the ones that do |
 | `meridian-sdk/src/wire.rs`, `src/secrets.rs`, `src/tool.rs` | a secret in a param crosses the wire as a place and a slot and never a value, and a place that does not hold the mask is refused; a run context carries its values into protected memory and `outputs` carries none; `Secrets` prints only names; a JSON variables file holds every value escaped under its key and refuses a secret that is not text; a secret on standard input reaches the tool and is not on its command line |
+| `plugins/podman/tests/run.rs`, `plugins/salt/tests/run.rs`, `plugins/puppet/tests/run.rs`, `plugins/chef/tests/run.rs` | against stand-ins for the tool, `ssh-agent` and `ssh-add`: a credential's key reaches `ssh-add` on standard input and its passphrase through the askpass program, the tool is told the socket and the user and nothing else, a password is in a `0600` roster or inventory and in nothing else, the agent's directory is gone when the stage ends, and a credential for this machine is refused before the tool starts |
+| `plugins/salt/tests/real_salt.rs` | against the real `salt-ssh` in CI: a machine is configured over SSH as a credential whose key is read into a secret and reaches `salt-ssh` only through the agent Meridian starts |
 | `meridian-plugin-host/tests/runner.rs` | through the real plugin process: a secret in a param reaches the plugin by name at compile and by value when it runs, and the tool is handed it in a private file; a plugin that takes no secrets says so |
 | `plugins/ansible/tests/run.rs`, `plugins/terraform/tests/run.rs`, `plugins/opentofu/tests/run.rs` | against a stand-in for the tool: the value reaches it in a file of mode `0600`, under the variable's name; the command line names the file and nothing more; the environment holds nothing; the file is gone when the run is over; Terraform's saved plan, which holds every variable, is scrubbed |
 | `plugins/ansible/tests/real.rs`, `plugins/terraform/tests/real.rs`, `plugins/opentofu/tests/real.rs` | against the real tools in CI: the value reaches the play and the configuration and is in nothing the tool prints, in check mode with diff included, and in no file the plugin wrote |

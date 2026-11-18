@@ -322,3 +322,57 @@ fn a_secret_the_graph_does_not_name_is_refused_not_masked() {
     let err = emit(&graph).unwrap_err();
     assert_eq!(err.rule, "unnamed-secret");
 }
+
+// ---- the credential a host is reached with -----------------------------
+
+/// A document reaching its host as the credential `entry` (a YAML mapping
+/// on one line), with the secrets it may read declared.
+fn with_credential(entry: &str) -> Result<Emitted, CompileError> {
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: puppet\n  targetHost:\n    from: inline\n    host: web01.example.com\n    credential: deploy\n  secrets:\n    - {{name: deploy_key, from: env, key: DEPLOY_KEY}}\n    - {{name: deploy_password, from: env, key: DEPLOY_PASSWORD}}\n  credentials:\n    - {entry}\n  resources:\n    - id: app_pkg\n      type: package\n      params: {{name: nginx}}\n"
+    );
+    emit(&graph_from_text("site.yaml", &text, "puppet"))
+}
+
+#[test]
+fn a_credential_bolt_can_take_is_accepted_and_leaves_nothing_in_the_manifest() {
+    for entry in [
+        "{name: deploy, type: ssh, user: deploy, privateKey: \"${{ secret.deploy_key }}\"}",
+        "{name: deploy, type: ssh, user: deploy, privateKey: \"${{ secret.deploy_key }}\", passphrase: \"${{ secret.deploy_password }}\"}",
+        "{name: deploy, type: ssh, user: deploy, password: \"${{ secret.deploy_password }}\"}",
+        "{name: deploy, type: usernamePassword, user: deploy, password: \"${{ secret.deploy_password }}\"}",
+        "{name: deploy, type: ssh, agent: true}",
+        "{name: deploy, type: ssh, from: ambient, user: ops}",
+    ] {
+        let emitted = with_credential(entry).unwrap_or_else(|e| panic!("{entry}: {e}"));
+        // The runner writes the credential into Bolt's inventory; the
+        // manifest holds nothing of it.
+        for (file, text) in &emitted.artifact.files {
+            assert!(!text.contains("deploy"), "{file} names the credential:\n{text}");
+        }
+    }
+}
+
+#[test]
+fn what_bolt_cannot_take_of_a_credential_is_refused_with_the_reason() {
+    for (entry, reason) in [
+        (
+            "{name: deploy, type: ssh, user: deploy, privateKey: \"${{ secret.deploy_key }}\", certificate: cert.pub}",
+            "bolt takes no certificate for a key from Meridian",
+        ),
+        (
+            "{name: deploy, type: usernamePassword, user: admin, password: \"${{ secret.deploy_password }}\", domain: CORP}",
+            "bolt over SSH takes no domain",
+        ),
+        (
+            "{name: deploy, type: ssh, user: \"dep loy\", privateKey: \"${{ secret.deploy_key }}\"}",
+            "cannot be given to bolt",
+        ),
+    ] {
+        let err = with_credential(entry).expect_err(entry);
+        assert_eq!(err.rule, "unsupported-credential", "{entry}: {err}");
+        assert!(err.msg.contains(reason), "{entry}: {err}");
+        assert_eq!(err.target, "puppet");
+        assert!(err.msg.starts_with("the credential \"deploy\""), "{err}");
+    }
+}

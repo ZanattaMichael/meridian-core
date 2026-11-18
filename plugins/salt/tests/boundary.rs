@@ -47,7 +47,7 @@ fn the_plugin_describes_itself() {
             synthetic_notify: false,
             runtime_condition: true,
             secrets: true,
-            credentials: false,
+            credentials: true,
         }
     );
     assert_eq!(

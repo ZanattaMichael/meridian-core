@@ -247,3 +247,60 @@ fn a_secret_in_a_param_is_read_from_the_node_and_the_resource_is_sensitive() {
     );
     assert!(Chef.capabilities().secrets);
 }
+
+// ---- the credential a host is reached with -----------------------------
+
+/// A document reaching its host as the credential `entry` (a YAML mapping
+/// on one line), with the secrets it may read declared.
+fn with_credential(entry: &str) -> Result<Emitted, CompileError> {
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: chef\n  targetHost:\n    from: inline\n    host: web01.example.com\n    credential: deploy\n  secrets:\n    - {{name: deploy_key, from: env, key: DEPLOY_KEY}}\n    - {{name: deploy_password, from: env, key: DEPLOY_PASSWORD}}\n  credentials:\n    - {entry}\n  resources:\n    - id: nginx_pkg\n      type: package\n      params: {{name: nginx}}\n"
+    );
+    emit(&meridian_plugin_testkit::graph_from_text(
+        "site.yaml",
+        &text,
+        "chef",
+    ))
+}
+
+#[test]
+fn a_credential_with_a_key_is_taken_and_leaves_nothing_in_the_cookbook() {
+    for entry in [
+        "{name: deploy, type: ssh, user: deploy, privateKey: \"${{ secret.deploy_key }}\"}",
+        "{name: deploy, type: ssh, user: deploy, privateKey: \"${{ secret.deploy_key }}\", passphrase: \"${{ secret.deploy_password }}\"}",
+        "{name: deploy, type: ssh, agent: true}",
+        "{name: deploy, type: ssh, from: ambient, user: ops}",
+    ] {
+        let emitted = with_credential(entry).unwrap_or_else(|e| panic!("{entry}: {e}"));
+        for (file, text) in &emitted.artifact.files {
+            assert!(!text.contains("deploy"), "{file} names the credential:\n{text}");
+        }
+    }
+}
+
+#[test]
+fn what_chef_run_cannot_take_of_a_credential_is_refused_with_the_reason() {
+    for (entry, reason) in [
+        (
+            "{name: deploy, type: usernamePassword, user: admin, password: \"${{ secret.deploy_password }}\"}",
+            "chef-run takes no password for a host: chef-run takes a password on its command line only",
+        ),
+        (
+            "{name: deploy, type: ssh, user: deploy, password: \"${{ secret.deploy_password }}\"}",
+            "chef-run takes no password for a host",
+        ),
+        (
+            "{name: deploy, type: ssh, user: deploy, privateKey: \"${{ secret.deploy_key }}\", certificate: cert.pub}",
+            "takes no certificate for a key from Meridian",
+        ),
+        (
+            "{name: deploy, type: ssh, user: \"dep loy\", privateKey: \"${{ secret.deploy_key }}\"}",
+            "cannot be given to chef-run",
+        ),
+    ] {
+        let err = with_credential(entry).expect_err(entry);
+        assert_eq!(err.rule, "unsupported-credential", "{entry}: {err}");
+        assert!(err.msg.contains(reason), "{entry}: {err}");
+        assert!(err.msg.starts_with("the credential \"deploy\""), "{err}");
+    }
+}

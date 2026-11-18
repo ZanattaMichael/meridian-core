@@ -40,8 +40,30 @@ use std::collections::BTreeMap;
 
 use meridian_sdk::{
     Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, Value,
+    ResourceGraph, SshTakes, Value,
 };
+
+/// What `bolt` can take of the credential a document reaches its host as:
+/// the user and a password in an inventory file, which the runner writes
+/// where only the user can read it, and a key through an agent Meridian
+/// starts for the run. Nothing of the credential is in the manifest.
+pub(crate) const SSH_TAKES: SshTakes = SshTakes {
+    tool: "bolt",
+    password: Ok(()),
+};
+
+fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
+    let Some(credential) = &graph.credential else {
+        return Ok(());
+    };
+    meridian_sdk::check_ssh_credential(credential, &SSH_TAKES).map_err(|msg| CompileError {
+        target: NAME.to_owned(),
+        resource: String::new(),
+        rule: "unsupported-credential".to_owned(),
+        msg: format!("the credential {:?}: {msg}", credential.name),
+        pos: Position::default(),
+    })
+}
 
 pub use emit::{MANIFEST_PATH, SITE_PATH};
 pub use runner::{PuppetRunner, Transport};
@@ -169,7 +191,7 @@ impl Emitter for Puppet {
             synthetic_notify: false,
             runtime_condition: false,
             secrets: true,
-            credentials: false,
+            credentials: true,
         }
     }
 
@@ -178,6 +200,7 @@ impl Emitter for Puppet {
     }
 
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        check_credential(graph)?;
         // A resource here has nothing to read at apply time, so a reference
         // is settled now, from what the document declares, or refused.
         let graph = &meridian_sdk::expr::resolve_declared(graph, NAME)?;

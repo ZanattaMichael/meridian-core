@@ -3,8 +3,10 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
-use meridian_sdk::{Artifact, RunContext, Runner, SecretRef};
+use meridian_plugin_testkit::{
+    agent_stand_ins, artifact, credential, scratch, secrets, stand_in, KeptLog,
+};
+use meridian_sdk::{AgentPrograms, Artifact, RunContext, Runner, SecretRef};
 use meridian_target_chef::{ChefRunner, Transport};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -44,6 +46,7 @@ fn runner(dir: &Path, client: &str, run: &str) -> ChefRunner {
         run: record("chef-run", run),
         transport: None,
         extra_args: Vec::new(),
+        agent: AgentPrograms::default(),
     }
 }
 
@@ -317,4 +320,106 @@ fn chef_run_is_refused_a_secret_because_it_would_put_it_on_the_command_line() {
         )
         .unwrap();
     assert!(plan.unknown);
+}
+
+// ---- credentials ----------------------------------------------------------
+
+const KEY: &str =
+    "-----BEGIN OPENSSH PRIVATE KEY-----\nnot-a-real-key-9fXw\n-----END OPENSSH PRIVATE KEY-----";
+
+fn with_credential(dir: &Path, host: &str, fields: &[(&str, &str)]) -> RunContext {
+    let mut context = context(dir, host);
+    context.credential = Some(credential("ssh", "deploy", fields));
+    context
+}
+
+#[test]
+fn a_credentials_key_reaches_chef_run_through_an_agent_and_its_user_as_an_option() {
+    let dir = scratch(TMP, "credential-agent");
+    let mut chef = runner(
+        &dir,
+        "exit 9",
+        &format!("env > \"{}/env\"\necho converged", dir.display()),
+    );
+    chef.agent = agent_stand_ins(&dir);
+    let log = KeptLog::default();
+    chef.apply(
+        &with_credential(
+            &dir,
+            "web01.example.com",
+            &[("privateKey", KEY), ("passphrase", "open sesame")],
+        ),
+        &compiled(),
+        &log,
+    )
+    .unwrap();
+    assert_eq!(
+        args(&dir, "chef-run"),
+        "--user deploy web01.example.com cookbooks/meridian_web"
+    );
+    // chef-run was told the agent's socket and nothing else of the credential.
+    let agent_args = fs::read_to_string(dir.join("ssh-agent.args")).unwrap();
+    let socket = agent_args
+        .trim()
+        .strip_prefix("-D -a ")
+        .expect("ssh-agent -D -a <socket>");
+    let env = fs::read_to_string(dir.join("env")).unwrap();
+    assert!(env.contains(&format!("SSH_AUTH_SOCK={socket}")), "{env}");
+    assert!(
+        !env.contains("not-a-real-key") && !env.contains("sesame"),
+        "{env}"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("added-key")).unwrap(),
+        format!("{KEY}\n")
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("added-passphrase")).unwrap(),
+        "open sesame\n"
+    );
+    assert!(!Path::new(socket).parent().unwrap().exists());
+    assert!(!log
+        .text()
+        .iter()
+        .any(|l| l.contains("not-a-real-key") || l.contains("sesame")));
+}
+
+#[test]
+fn a_plan_for_another_machine_with_a_credential_starts_no_agent() {
+    let dir = scratch(TMP, "credential-plan");
+    let mut chef = runner(&dir, "exit 9", "exit 9");
+    chef.agent = agent_stand_ins(&dir);
+    let plan = chef
+        .plan(
+            &with_credential(&dir, "web01.example.com", &[("privateKey", KEY)]),
+            &compiled(),
+            &KeptLog::default(),
+        )
+        .unwrap();
+    assert!(plan.unknown);
+    assert!(!dir.join("ssh-agent.args").exists());
+    assert!(!dir.join("chef-run.args").exists());
+}
+
+#[test]
+fn a_credential_for_this_machine_is_refused() {
+    let dir = scratch(TMP, "credential-local");
+    let err = runner(&dir, REPORT, "exit 9")
+        .apply(
+            &with_credential(&dir, "localhost", &[("privateKey", KEY)]),
+            &compiled(),
+            &KeptLog::default(),
+        )
+        .unwrap_err();
+    assert!(
+        err.msg.contains(
+            "the host is this machine, which chef-client configures as the user running Meridian"
+        ),
+        "{}",
+        err.msg
+    );
+    assert!(
+        !dir.join("chef-client.args").exists(),
+        "chef-client was started"
+    );
 }

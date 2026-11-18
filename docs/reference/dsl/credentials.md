@@ -213,14 +213,25 @@ The core refuses, before anything runs, a document that names a credential
 for a target that does not:
 
 ```
-spec.targetHost names the credential "deploy", and target "chef" does not take one: it has no way to reach its host as that identity, so the document would be applied as whoever the tool is configured to be. Leave the credential out to use the tool's own; targets that do: ansible
+spec.targetHost names the credential "deploy", and target "dsc" does not take one: it has no way to reach its host as that identity, so the document would be applied as whoever the tool is configured to be. Leave the credential out to use the tool's own; targets that do: ansible, chef, openvox, podman, puppet, salt
 ```
 
 | Target | What the artifact holds | How the secret fields reach the tool | What it refuses |
 |---|---|---|---|
 | `ansible` | `ansible_user=<user>` after the host in `inventory.ini`, when the credential has a user | a `privateKey` in a file only the user can read, passed as `--private-key <path>`; a `password` as `ansible_password` in the same extra-vars file that carries the document's [secrets](secrets.md#handing-a-secret-to-a-tool), passed as `--extra-vars @<path>`. Both are removed when the run ends. Password authentication over SSH needs `sshpass` on the machine that runs `ansible-playbook`, as it does for Ansible itself | a `passphrase` (add the key to an agent and set `agent: true`), a `certificate` (put it beside the key in the agent), a `domain` (for WinRM hosts, which the plugin does not reach), a user name that cannot be written on an inventory line; rule `unsupported-credential` |
+| `chef` | nothing: `chef-run` is given the user as `--user` at run time | a `privateKey` through an SSH agent Meridian starts for the stage (`ssh-agent -D -a <socket>`, loaded with `ssh-add -` from standard input, the `passphrase` answered from a file only the user can read), the tool told the socket in `SSH_AUTH_SOCK` and nothing else; stopped and removed when the stage ends | a `password` (`chef-run` takes one on its command line only), a `certificate`, a `domain`, a user name with a space or line break; rule `unsupported-credential`. A credential for this machine is refused at run time: `chef-client` runs as you |
+| `openvox` | nothing: OpenBolt reads an inventory written for the run | the user and a `password` in a Bolt inventory only the user can read, passed as `--inventoryfile <path>` and removed when the run ends; a `privateKey` through an SSH agent Meridian starts for the stage (`ssh-agent -D -a <socket>`, loaded with `ssh-add -` from standard input, the `passphrase` answered from a file only the user can read), the tool told the socket in `SSH_AUTH_SOCK` and nothing else; stopped and removed when the stage ends | a `certificate`, a `domain`, a user name with a space or line break; rule `unsupported-credential`. A credential for this machine is refused at run time: `puppet apply` runs as you |
+| `podman` | nothing: `ssh` is given the user as `-l` at run time | a `privateKey` through an SSH agent Meridian starts for the stage (`ssh-agent -D -a <socket>`, loaded with `ssh-add -` from standard input, the `passphrase` answered from a file only the user can read), the tool told the socket in `SSH_AUTH_SOCK` and nothing else; stopped and removed when the stage ends | a `password` (`ssh` asks for one on a terminal, which a run has not), a `certificate`, a `domain`, a user name with a space or line break; rule `unsupported-credential`. A credential for this machine is refused at run time: the scripts run as you |
+| `puppet` | nothing: Bolt reads an inventory written for the run | as `openvox` | as `openvox` |
+| `salt` | nothing: `salt-ssh` reads a roster written for the run | the user as the roster's `user:`; a `password` as its `passwd:`, the roster then written to a file only the user can read, passed as `--roster-file <path>` and removed when the run ends; a `privateKey` as `priv: agent-forwarding` in the roster, the key itself through an SSH agent Meridian starts for the stage (`ssh-agent -D -a <socket>`, loaded with `ssh-add -` from standard input, the `passphrase` answered from a file only the user can read), the tool told the socket in `SSH_AUTH_SOCK` and nothing else; stopped and removed when the stage ends | a `certificate`, a `domain`, a user name with a space or line break; rule `unsupported-credential`. A credential for this machine is refused at run time: `salt-call` runs as you |
 | `fake`, the test target | `credential.txt`: the name, type, user and the names of the secret fields | one JSON file only the user can read, and a record of the delivery that names the fields and never a value | nothing |
-| any other target | the document is refused, as above | | |
+| any other target (`cloud-init`, `dsc`, and the infrastructure and containers targets but `podman`) | the document is refused, as above | | |
+
+On every target but `ansible` the compiled artifact holds nothing of the
+credential, not even the user: the tool is handed the identity at run time,
+so the same artifact can be applied as another identity, and a file nobody
+expected to be sensitive names no account. Each target's page has a
+`Credentials` section with the details.
 
 A credential is delivered the way the tool takes it, so what the tool keeps
 is the tool's own: Ansible keeps nothing, and a tool that caches a login is
@@ -237,7 +248,11 @@ same three promises:
   run record. The record of a run names the credential, as `deploy`, and
   nothing of it.
 - **Never on the command line, never in the environment.** The command line
-  names a private file's path and nothing more.
+  names a private file's path and nothing more. A key for a host over SSH is
+  not even in a file: it goes into an SSH agent Meridian starts for the
+  stage, through `ssh-add`'s standard input, and the tool is told only the
+  agent's socket in `SSH_AUTH_SOCK`. See
+  [0028](../../decisions/0028-a-key-reaches-a-host-through-an-agent-meridian-starts.md).
 - **For the length of the stage.** The values are fetched at the stage's turn
   and wiped when it ends. A rollback fetches them again at its own turn.
 
@@ -284,8 +299,12 @@ How the values are protected in memory, and what crosses to a plugin, is in
 | `no credential named "deploy" is declared in spec.credentials` | `targetHost.credential` names no declaration |
 | `a host takes an ssh or usernamePassword credential; "cloud" is aws` | the wrong type for a host |
 | `a credential is named as written ... it is not interpolated` | an interpolation in `targetHost.credential` |
-| `spec.targetHost names the credential "deploy", and target "chef" does not take one` | a target without the capability, at `compile`, `plan` and `apply` |
+| `spec.targetHost names the credential "deploy", and target "dsc" does not take one` | a target without the capability, at `compile`, `plan` and `apply` |
 | `the credential "deploy": ansible-playbook takes no passphrase for a private key` | the Ansible plugin's refusals, rule `unsupported-credential` |
+| `the credential "deploy": ssh takes no password for a host: ssh asks for a password on a terminal, which a run has not; give the credential a privateKey instead` | a plugin whose tool has no private way to take a password (`podman`, `chef`), rule `unsupported-credential` |
+| `the credential "deploy": salt-ssh takes no certificate for a key from Meridian; put it beside the key in an SSH agent of your own and set agent: true` | a certificate, on any target reached over SSH |
+| `the document names the credential "deploy" for its host, and the host is this machine, which salt-call configures as the user running Meridian; leave the credential out, or name another host` | a credential for `localhost`, at `plan` and `apply` |
+| `ssh-add could not add the credential's key to the agent` | the key is not one `ssh-add` reads, or its passphrase is wrong; what `ssh-add` said follows |
 
 ## Examples
 

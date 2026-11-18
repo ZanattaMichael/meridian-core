@@ -148,7 +148,7 @@ fn the_plugin_says_what_it_is() {
             synthetic_notify: false,
             runtime_condition: true,
             secrets: true,
-            credentials: false,
+            credentials: true,
         }
     );
     assert_eq!(
@@ -844,4 +844,57 @@ fn a_secret_the_graph_does_not_name_is_written_as_its_mask() {
     graph.secrets.clear();
     let text = emit(&graph).unwrap().artifact.files[SLS].clone();
     assert!(!text.contains("pillar["), "{text}");
+}
+
+// ---- the credential a host is reached with -----------------------------
+
+/// A document reaching its host as the credential `entry` (a YAML mapping
+/// on one line), with the secrets it may read declared.
+fn with_credential(entry: &str) -> Result<Emitted, CompileError> {
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: salt\n  targetHost:\n    from: inline\n    host: web01.example.com\n    credential: deploy\n  secrets:\n    - {{name: deploy_key, from: env, key: DEPLOY_KEY}}\n    - {{name: deploy_password, from: env, key: DEPLOY_PASSWORD}}\n  credentials:\n    - {entry}\n  resources:\n    - id: nginx_pkg\n      type: package\n      params: {{name: nginx}}\n"
+    );
+    emit(&graph_from_text("site.yaml", &text, "salt"))
+}
+
+#[test]
+fn a_credential_salt_ssh_can_take_is_accepted_and_leaves_nothing_in_the_states() {
+    for entry in [
+        "{name: deploy, type: ssh, user: deploy, privateKey: \"${{ secret.deploy_key }}\"}",
+        "{name: deploy, type: ssh, user: deploy, privateKey: \"${{ secret.deploy_key }}\", passphrase: \"${{ secret.deploy_password }}\"}",
+        "{name: deploy, type: ssh, user: deploy, password: \"${{ secret.deploy_password }}\"}",
+        "{name: deploy, type: usernamePassword, user: deploy, password: \"${{ secret.deploy_password }}\"}",
+        "{name: deploy, type: ssh, agent: true}",
+        "{name: deploy, type: ssh, from: ambient, user: ops}",
+    ] {
+        let emitted = with_credential(entry).unwrap_or_else(|e| panic!("{entry}: {e}"));
+        // The runner writes the credential into salt-ssh's roster; the
+        // state files hold nothing of it.
+        for (file, text) in &emitted.artifact.files {
+            assert!(!text.contains("deploy"), "{file} names the credential:\n{text}");
+        }
+    }
+}
+
+#[test]
+fn what_salt_ssh_cannot_take_of_a_credential_is_refused_with_the_reason() {
+    for (entry, reason) in [
+        (
+            "{name: deploy, type: ssh, user: deploy, privateKey: \"${{ secret.deploy_key }}\", certificate: cert.pub}",
+            "salt-ssh takes no certificate for a key from Meridian",
+        ),
+        (
+            "{name: deploy, type: usernamePassword, user: admin, password: \"${{ secret.deploy_password }}\", domain: CORP}",
+            "salt-ssh over SSH takes no domain",
+        ),
+        (
+            "{name: deploy, type: ssh, user: \"dep loy\", privateKey: \"${{ secret.deploy_key }}\"}",
+            "cannot be given to salt-ssh",
+        ),
+    ] {
+        let err = with_credential(entry).expect_err(entry);
+        assert_eq!(err.rule, "unsupported-credential", "{entry}: {err}");
+        assert!(err.msg.contains(reason), "{entry}: {err}");
+        assert!(err.msg.starts_with("the credential \"deploy\""), "{err}");
+    }
 }
