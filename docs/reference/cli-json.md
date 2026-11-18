@@ -1,11 +1,10 @@
 # Machine-readable output: `--output json`
 
-Every `meridian` command prints text for a person. With `--output json`, or
-`MERIDIAN_OUTPUT=json` in the environment, a command instead prints **one JSON
-object** on standard output, at its end, and the report for people moves to
-standard error, as it does with `--events json`. A pipeline or a tool that
-wraps Meridian reads the object; the wording of the text can then change
-without breaking anything.
+Every `meridian` command prints text for people. With `--output json` (or
+`MERIDIAN_OUTPUT=json`), it instead prints **one JSON object** on stdout at the
+end, and the human-readable report moves to stderr, as with `--events json`.
+Pipelines and wrappers read the object, so the text wording can change without
+breaking them.
 
 ```
 $ meridian plan site.yaml --output json --detailed-exitcode > plan.json; echo $?
@@ -27,12 +26,11 @@ $ jq .summary plan.json
 }
 ```
 
-The objects are described here, one per command, and each has a JSON Schema
-(draft 7) under [`schemas/output/`](../../schemas/output/) in the repository.
-A test runs every command and checks its output against its schema, so the
-schemas are the contract: a field is added only with its schema, and a field
-is never removed or renamed within a language version. Added fields are the
-one change to expect, so a reader should ignore fields it does not know.
+Each command's object is described here and has a JSON Schema (draft 7) under
+[`schemas/output/`](../../schemas/output/). A test checks every command's output
+against its schema, so the schemas are the contract: fields are added only with
+their schema, and never removed or renamed within a language version. Expect
+new fields, and ignore ones you do not know.
 
 ## What every object has
 
@@ -46,10 +44,9 @@ The rest is the command's own. Text that the records keep as "none" is
 
 ### When the command fails before it has a result
 
-A command that stops before it could do its work, because a file is missing,
-a selector matches nothing, or the command line asks for something it cannot
-have, prints the error as an object too, so that a reader never has to fall
-back to standard error:
+A command that stops early (a missing file, a selector matching nothing, an
+impossible request) prints the error as an object too, so readers never need to
+parse stderr:
 
 ```json
 {
@@ -75,14 +72,12 @@ format is settled.
 
 ### What does not change
 
-- `--events json` and `meridian events` write one JSON object per line, one
-  per event, as they always did; `--output json` cannot be combined with
-  `--events json`, since both want standard output. Use `--report json=FILE`
-  for the run as a file beside the result.
-- `meridian report --format json` writes the [report](reporting.md#json),
-  which is a different shape from the run object below: the report is a fold
-  over the events of a recorded run, and the run object is what the command
-  that just ran saw.
+- `--events json` and `meridian events` write one JSON object per event, per
+  line. `--output json` cannot be combined with `--events json`, since both use
+  stdout; use `--report json=FILE` for the run as a file.
+- `meridian report --format json` writes the [report](reporting.md#json), a
+  different shape from the run object below: the report folds a recorded run's
+  events; the run object is what the command just saw.
 - `meridian lint --json` and `meridian schema status --json` keep their line
   per finding or target. `--output json` on `lint` gives the whole result as
   one object instead, below.
@@ -197,17 +192,15 @@ A `change` is `resource`, `action` (`create`, `update`, `delete` or
 
 ### `plan --detailed-exitcode`
 
-A `plan` exits `0` whether or not an apply would change anything. With
-`--detailed-exitcode` it exits `2` when an apply would do something, `0` when
-every stage is in sync, and `1` on an error, which is what `drift` already does
-and what Terraform users expect of the flag of the same name. A pipeline can
-then ask "is there anything to apply?" without reading the plan, and decide
-whether to ask for an approval.
+A `plan` exits `0` whether or not there are changes. With `--detailed-exitcode`
+it exits `2` when an apply would do something, `0` when everything is in sync,
+and `1` on error, as `drift` does and as Terraform users expect. A pipeline can
+then ask "anything to apply?" without reading the plan, and decide whether to
+request approval.
 
-A stage counts as having changes when its tool listed any, when its tool
-cannot preview (`unknown`), or when it is `deferred`: it waits on an output
-that only an apply produces, so there is an apply to do. The same test is the
-`summary.hasChanges` flag of the object.
+A stage has changes when its tool listed any, when the tool cannot preview
+(`unknown`), or when it is `deferred` (waiting on an output only an apply
+produces). The object's `summary.hasChanges` uses the same test.
 
 ### `status`
 

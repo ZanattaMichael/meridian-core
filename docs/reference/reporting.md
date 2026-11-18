@@ -43,12 +43,11 @@ flowchart LR
 
 ### No value is ever in a report
 
-An event names things: a step, a resource id, an output. It never holds a
-value from a document or a tool, sensitive or not, and a failure is a fixed
-word such as `tool-failed`, never the tool's own message, because a tool can
-quote a secret in one. Reports and sinks are made from events and nothing
-else, so there is nothing to mask and nothing to leak. The tool's own
-output is on the terminal of the run, masked, and nowhere else.
+An event names things: a step, a resource id, an output. It never holds a value
+from a document or tool, sensitive or not. A failure is a fixed word such as
+`tool-failed`, never the tool's message, which might quote a secret. Reports and
+sinks are built only from events, so there is nothing to mask or leak. Tool
+output appears only on the run's terminal, masked.
 
 ## `--report`
 
@@ -238,11 +237,10 @@ sequenceDiagram
     Note over O,P: still running after --sink-timeout: stopped, and reported as failed
 ```
 
-- Each sink has its own queue. A sink too slow to keep up misses events
-  rather than slowing a step; how many is reported as a warning.
-- A sink that cannot be started is an error before anything runs.
-- What a sink printed on its standard error is shown, its last line, when it
-  fails.
+- Each sink has its own queue. A sink that falls behind drops events rather
+  than slowing a step, with a warning saying how many.
+- A sink that cannot start is an error before anything runs.
+- When a sink fails, the last line of its stderr is shown.
 
 ### Writing a sink
 

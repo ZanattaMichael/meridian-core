@@ -44,9 +44,9 @@ string:
   mode: "0644"
 ```
 
-Compilation refuses the unquoted mode as well (`invalid-param`; see
-[the resource types](resource-types.md)), so `lint` reports the line twice:
-once as the plugin's refusal and once as this rule, which carries the fix.
+Compilation also refuses the unquoted mode (`invalid-param`; see
+[the resource types](resource-types.md)), so `lint` reports the line twice: as
+the plugin's refusal and as this rule, which carries the fix.
 
 `meridian lint --fix`, and the quick fix in an editor, add the quotes around
 exactly what was typed.
@@ -64,24 +64,21 @@ params:
   build: 1_000        # read as the number 1000
 ```
 
-YAML reads a plain `1.10` as the floating point number 1.1, `3.0` as 3,
-`1_000` as 1000 and `+7` as 7, and the text the author typed is gone before
-any tool sees it. For a version, an image tag or a build number that is the
-wrong value. Write it as a quoted string:
+YAML reads a plain `1.10` as 1.1, `3.0` as 3, `1_000` as 1000 and `+7` as 7,
+losing the typed text before any tool sees it. For a version, image tag or
+build number, that is wrong. Quote it:
 
 ```yaml
   version: "1.10"
 ```
 
-The rule reports only a number whose canonical spelling differs from the
-text: `42`, `-3` and `1.5` are left alone, as is anything quoted and any
-`${{ ... }}` interpolation. A `mode` param is left to
-[`unquoted-mode`](#unquoted-mode), which knows what a mode is. A param the
-target declares as a number (such as `uid` on the configuration management
-types) is never reported, because the tool gets the number and the spelling
-does not matter. Values inside block lists and nested mappings are checked
-too; a number inside a `[...]` or `{...}` flow collection is not, because the
-rule cannot point at it.
+The rule reports only numbers whose canonical form differs from the text:
+`42`, `-3` and `1.5` are fine, as is anything quoted and any `${{ ... }}`
+interpolation. `mode` params are left to [`unquoted-mode`](#unquoted-mode).
+Params the target declares as numbers (such as `uid` on configuration
+management types) are never reported, since the spelling does not matter.
+Values in block lists and nested mappings are checked; numbers inside `[...]`
+or `{...}` flow collections are not, because the rule cannot point at them.
 
 `meridian lint --fix`, and the quick fix in an editor, add the quotes around
 exactly what was typed.

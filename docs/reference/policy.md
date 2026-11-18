@@ -48,30 +48,26 @@ flowchart TB
     DO --> APPLY
 ```
 
-- **`apply`** makes a first pass over every stage before it applies any of
-  them. Each stage that can be compiled is compiled, previewed by its tool
-  when the tool can preview, and put to the policy. If any stage is denied,
-  the run fails with nothing applied, and the stages that were not denied are
-  reported as not run.
-- A stage **cannot be asked about in the first pass** when it waits on an
-  output of a stage that has not been applied yet (a ResourceSet whose host
-  is the address of a machine this run creates), or when its tool cannot
-  preview it yet. It is asked about at its turn, just before its own apply.
-  If it is denied then, the stages before it have been applied: the run stops
-  as it does for any failed stage, and `--on-failure rollback` puts them
-  back.
-- A document that reads [secrets](dsl/secrets.md) is not asked about in the
-  first pass either. A secret is fetched once, at the turn of the stage that
-  reads it, and the document cannot be decided without it. The policy is
-  asked at that turn, before the stage's apply.
-- A document its own `spec.when` leaves out is not a stage of the run, so it
-  is not asked about.
+- **`apply`** first checks every stage before applying any. Each compilable
+  stage is compiled, previewed (if the tool can), and put to the policy. If any
+  is denied, the run fails with nothing applied, and the others are reported as
+  not run.
+- A stage **is checked later** if it waits on an output not yet applied (a
+  ResourceSet whose host is a machine this run creates) or its tool cannot
+  preview it yet. It is checked just before its own apply. If denied then,
+  earlier stages are already applied: the run stops as for any failed stage,
+  and `--on-failure rollback` puts them back.
+- A document that reads [secrets](dsl/secrets.md) is also checked at its turn,
+  since its secret is fetched only then and the document cannot be decided
+  without it.
+- A document excluded by its own `spec.when` is not a stage, so it is not
+  checked.
 - A stage a [resumed run](../concepts/run-safety.md#picking-up-where-a-run-stopped)
-  leaves alone is not asked about: nothing is done to it.
-- **`plan`** asks about every stage and shows every denial. A denied stage
-  is reported as failed and the command exits `1`, so a pipeline can refuse a
-  merge on it. Unlike a tool's failure, a denial does not stop the plan: the
-  stages after it are still planned and asked about.
+  skips is not checked.
+- **`plan`** checks every stage and shows every denial. A denied stage is
+  reported as failed and the command exits `1`, so a pipeline can block a
+  merge. Unlike a tool failure, a denial does not stop the plan: later stages
+  are still planned and checked.
 
 Each stage is asked about once, and separately. An engine never sees two
 stages at a time.
@@ -177,17 +173,14 @@ Two things to keep in mind when writing a rule:
 The input holds what the document holds, so it can hold a secret: a param, a
 line of a compiled file.
 
-- It is handed to the engine on its standard input and nowhere else.
-  Meridian never writes it to disk, and the OPA engine passes it to `opa` on
-  standard input too.
-- It is not recorded. Neither are the engine's messages, because a message
-  can quote the input. The [run's record](state.md#events) keeps that a
-  policy was asked, whether it allowed the stage, and how many denials and
-  warnings there were.
-- Messages are shown on the terminal, with every value a tool marked
-  sensitive replaced by `(sensitive)`. A value Meridian does not know to be
-  sensitive is shown as the policy wrote it, so prefer naming a resource to
-  quoting its params.
+- It goes to the engine on stdin only. Meridian never writes it to disk, and
+  the OPA engine passes it to `opa` on stdin too.
+- It is not recorded, nor are the engine's messages, which can quote it. The
+  [run's record](state.md#events) keeps only that a policy was asked, whether
+  it allowed the stage, and the counts of denials and warnings.
+- Messages appear on the terminal, with values a tool marked sensitive replaced
+  by `(sensitive)`. Other values appear as the policy wrote them, so name
+  resources rather than quoting their params.
 
 ## Events
 
@@ -298,9 +291,8 @@ on anything it does not understand.
 
 ## What this does not do yet
 
-- A policy is asked about one stage at a time, so it cannot compare two
-  stages of a run.
-- There is no way to mark a denial as overridden for one run. Change the
-  policy, or run without it.
-- The engine is started once per stage. For a workflow with very many
-  stages and a large policy set, that is `opa` started once per stage.
+- A policy sees one stage at a time, so it cannot compare stages.
+- A denial cannot be overridden for one run. Change the policy or run without
+  it.
+- The engine starts once per stage, which adds up for workflows with many
+  stages and a large policy set.

@@ -1,9 +1,9 @@
 # The report server
 
-`meridian-report-server` is an optional place to send the events of your
-runs and look at them afterwards: every project's runs in one list, each
-run's report as a page, and every [report format](reporting.md#the-formats)
-over HTTP. Meridian never needs it in order to run.
+`meridian-report-server` is an optional place to send your runs' events and
+view them later: every project's runs in one list, each run's report as a page,
+and every [report format](reporting.md#the-formats) over HTTP. Meridian runs
+fine without it.
 
 **Does:** receive events from the `server` [sink](reporting.md#sinks); keep
 them; show runs per project, a run's report, a run in progress; serve a
@@ -28,10 +28,10 @@ flowchart LR
     API --> TOOLS["a dashboard, a script"]
 ```
 
-The server keeps events and nothing else, in the same layout a run's own
-[record](state.md) has. Everything it shows is folded from them when it is
-asked for, by the same code `meridian report` uses, so the server, the
-command and the run's own report always say the same thing.
+The server stores only events, in the same layout as a run's
+[record](state.md). Everything it shows is built from them on request by the
+same code as `meridian report`, so the server, the command and the run's own
+report always agree.
 
 ## Running it
 
@@ -83,9 +83,9 @@ meridian apply site.yaml --sink server \
 | `token` | the write token. Required. Set it as `MERIDIAN_NOTIFY_TOKEN` in the environment, not with `--sink-config`, which would leave it in your shell history |
 | `timeout` | seconds to allow each request; `10` by default |
 
-Like every sink it is sent everything unless `server.on` narrows it, never
-holds a step up, and a server that is down is a warning and not a failed
-run, unless you set `server.required=true`.
+Like every sink, it gets every event unless `server.on` narrows it, and never
+delays a step. A server that is down is a warning, not a failed run, unless you
+set `server.required=true`.
 
 A run that was never sent can be sent later from its record, with nothing
 but `curl`:
@@ -114,10 +114,9 @@ meridian events RUN | curl --fail --data-binary @- \
 | `GET /v1/projects/{project}/runs/{run}/report/{format}` | the run's report: `json`, `junit`, `markdown` or `html` |
 | `GET /healthz` | `ok`. Needs no token |
 
-Adding events is safe to repeat: an event the run already has, by its
-sequence number, is counted as ignored and not stored twice, so a sender
-that is unsure can send again. Events may arrive in any order and are served
-in the order they happened.
+Sending events is idempotent: an event the run already has (by sequence number)
+is ignored, so an unsure sender can resend. Events may arrive in any order and
+are served in the order they happened.
 
 | Status | Means |
 |---|---|
@@ -140,7 +139,7 @@ back the directory up, move it, or read a run with
 `meridian report --from <data>/projects/shop/runs/<run>/events.jsonl`.
 Removing a run's directory removes the run.
 
-The server reads nothing outside the data directory. A project or run named
-in a request is only ever matched against what the directory lists, and a
-directory is read only when it resolves to a place inside the data
-directory, so a link planted in it that points elsewhere is not followed.
+The server reads nothing outside the data directory. Requested projects and
+runs are matched only against the directory's listing, and a directory is read
+only if it resolves inside the data directory, so planted links pointing
+elsewhere are not followed.

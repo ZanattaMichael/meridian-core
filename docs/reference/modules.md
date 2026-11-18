@@ -135,11 +135,10 @@ Content is found by directory. Nothing has to be listed in the manifest.
 | `README.md` | What the module is for and how to use it |
 
 The directory names are a convention: `@<module>:<path>` reaches any file in
-the module. A module cannot hold a symbolic link, or a file whose name has a
-control character (such as a line break) in it: packing, fetching, verifying
-and copying all refuse one, because the [content hash](#integrity) is taken
-over a listing with one line per file. `.git` and `.meridian` at the top of a
-module are never part of it.
+the module. A module cannot contain symbolic links or file names with control
+characters (such as a line break): packing, fetching, verifying and copying
+refuse them, because the [content hash](#integrity) uses a one-line-per-file
+listing. Top-level `.git` and `.meridian` are never included.
 
 ## Requiring a module
 
@@ -221,9 +220,9 @@ registry.example.com` (or `podman login`, `oras login`) is how you give access.
 Only logins stored in the file's `auths` section are read; credential helpers
 are not run. Token and basic authentication are supported.
 
-When the login should come from somewhere else, such as a variable your CI
-sets or a password manager, declare a credential in the manifest and name it
-on the requirement with `credential`. See [registry logins](#registry-logins).
+For a login from elsewhere (a CI variable, a password manager), declare a
+credential in the manifest and name it on the requirement with `credential`.
+See [registry logins](#registry-logins).
 
 ## Registry logins
 
@@ -286,21 +285,21 @@ The rules, each of which is checked:
   repeat it. `user` and `server` are plain text.
 - **`credential` must name a credential declared in the same file**, and only
   goes with `oci`. Git sources use git's own credentials.
-- **Only the project's own manifest is acted on.** A module you fetch may
-  declare credentials and name them, for when it is a project itself; when it
-  is fetched as a dependency they are ignored, so a published module cannot
-  have your logins sent anywhere. To give a login to a module that one of your
-  modules requires, require it in your own `meridian.yaml` with `credential`.
-- **A named credential is the only login tried** for that module. The Docker
-  configuration is not also looked in.
-- **A secret is fetched only when a registry is about to be contacted** for a
-  module that names it: by `module install`, `module update` and
-  `module push --credential`. A run, `module verify` and `module list` never
-  fetch one. It is fetched once per command, however many modules name it.
-- **Nothing of a login is written down.** Not in `meridian.lock`, not in the
-  module store, not in output. The password is held in
-  [locked memory](../concepts/secrets-in-memory.md) and wiped when the command
-  ends. An error names the credential and the provider, never a value.
+- **Only the project's own manifest counts.** A fetched module may declare
+  credentials (for use as a project itself), but as a dependency they are
+  ignored, so a published module cannot send your logins anywhere. To give a
+  login to a transitive dependency, require it in your own `meridian.yaml`
+  with `credential`.
+- **A named credential is the only login tried** for that module; the Docker
+  configuration is not checked.
+- **A secret is fetched only just before contacting a registry** for a module
+  that names it: by `module install`, `module update` and
+  `module push --credential`. Runs, `module verify` and `module list` never
+  fetch one. It is fetched once per command, however many modules use it.
+- **No part of a login is written down**: not in `meridian.lock`, the module
+  store or output. The password lives in
+  [locked memory](../concepts/secrets-in-memory.md) and is wiped when the
+  command ends. Errors name the credential and provider, never a value.
 
 To publish with a declared credential, name it on the command; the module
 being pushed declares it:
@@ -311,12 +310,11 @@ $ meridian module push registry.example.com/acme/meridian-nginx --credential int
 
 ## Plugin settings
 
-A runner needs an operator's choices that no document should carry: where its
-tool is installed, which profile or context to use, extra arguments for every
-call. Each plugin declares these as named settings, each read from an
-environment variable; the [plugin settings reference](plugin-settings.md)
-lists every one, and `meridian plugins --settings` prints them for the plugins
-it finds.
+A runner needs operator choices that no document should carry: where the tool
+is installed, which profile or context to use, extra arguments for every call.
+Each plugin declares these as named settings, each read from an environment
+variable. The [plugin settings reference](plugin-settings.md) lists them all,
+and `meridian plugins --settings` prints them for installed plugins.
 
 `spec.settings` writes them down with the project, so they travel with it
 instead of having to be exported in every shell and CI job that runs it:
@@ -333,25 +331,24 @@ spec:
       program: tofu
 ```
 
-The first key is the target, as `spec.target` names it in a document; the
-second is the setting's short name from the reference, such as `args` or
-`program`. A value is text, a number or true/false, and is read as the
-environment variable would be: an argument list is split like a shell command
-line, so quotes hold an argument with a space together.
+The first key is the target (as in `spec.target`); the second is the setting's
+short name from the reference, such as `args` or `program`. Values are text,
+numbers or true/false, read as the environment variable would be: argument
+lists split like a shell command line, so quotes keep an argument with a space
+together.
 
 Three rules keep this simple:
 
-- **The environment wins.** A setting's variable, when set and not blank,
-  overrides the project's value, so a shell or a CI job can change one
-  without editing the file.
-- **A name the plugin does not declare is refused.** Every command that starts
-  plugins reads the manifest in the current directory and hands each target
-  its map before the plugin starts; a plugin that does not declare one of the
-  names is not started, and the message lists the names it does declare. A
-  typo cannot silently do nothing.
-- **No secrets.** A token or a password does not belong here, and the file is
-  committed with the project. Declare it under `spec.secrets` in the document,
-  and the target hands it to its tool by a private channel; see
+- **The environment wins.** A non-blank environment variable overrides the
+  project's value, so a shell or CI job can change it without editing the
+  file.
+- **Undeclared names are refused.** Every command that starts plugins reads
+  the manifest in the current directory and passes each target its map first;
+  a plugin given an undeclared name does not start, and the message lists the
+  names it accepts. A typo cannot silently do nothing.
+- **No secrets.** Tokens and passwords do not belong here; the file is
+  committed. Declare them under `spec.secrets` in the document, and the target
+  passes them to its tool privately; see
   [Secrets](dsl/secrets.md#handing-a-secret-to-a-tool).
 
 Only the project's own manifest is read for settings: a fetched module's
@@ -381,8 +378,8 @@ pre-release.
 - **One version of each module per project.** If two modules require
   `acme/base`, one version serves both.
 - **The newest version that satisfies every requirement on it** is chosen.
-- **A version already in `meridian.lock` is kept** for as long as it still
-  satisfies every requirement. Adding a module never moves another.
+- **A version already in `meridian.lock` is kept** while it still satisfies
+  every requirement. Adding a module never moves another.
 - **A conflict is an error.** Meridian does not pick a compromise:
 
 ```
@@ -441,11 +438,10 @@ every machine and every CI run uses the same commit of every module.
 
 Every fetched module is pinned by a hash of its files.
 
-`integrity` is `h1:` followed by a SHA-256. It is the hash of a listing with one
-line per file in the module, `<SHA-256 of the file>  <path>`, sorted by path. It
-is a hash of the files and not of an archive, so the same module has the same
-hash whether it came from git or from a registry, and you can move a module to
-a mirror without its pin changing.
+`integrity` is `h1:` plus a SHA-256 of a listing with one line per file,
+`<SHA-256 of the file>  <path>`, sorted by path. It hashes files, not an
+archive, so a module has the same hash from git or a registry, and moving it to
+a mirror keeps its pin.
 
 One file is left out of the listing: `meridian.sig`, the module's
 [signature](#signatures), which is made over this hash and so cannot be part
@@ -468,9 +464,9 @@ What each kind of change looks like:
 | The source now serves content that does not match the pin | `what git+… now serves does not match meridian.lock`. If the change is expected, run `meridian module update <name>` |
 | The module is pinned but not fetched | `acme/nginx 1.4.2 is not installed; run meridian module install` |
 
-An archive from a registry is unpacked with care: an entry that is not a plain
-file, a path that would land outside the module, a duplicate path, and an
-archive that unpacks to more than 256 MiB are all refused.
+Registry archives are unpacked defensively: non-plain-file entries, paths
+outside the module, duplicate paths, and archives over 256 MiB unpacked are
+refused.
 
 ## Signatures
 
@@ -509,15 +505,13 @@ including the ones other modules require:
 A `path` module is your own working copy and is never checked.
 
 **What a signature covers.** The signature is over a short statement: the
-module's name, its version and its [content hash](#integrity). So it vouches
-for exactly one content of one version of one module, and a signature lifted
-from another module, or from another version with the same files, does not
-pass. Nor does a module's signature pass as a plugin's, or a plugin's as a
-module's, although the same key can make both: each names its own kind in what
-is signed. `meridian.sig` itself is the one file the content hash leaves out, which
-has two useful consequences: signing a module does not change what it is pinned
-as, and the signature travels with the module unchanged through git, a
-registry or a mirror.
+module's name, version and [content hash](#integrity). It vouches for exactly
+one content of one version of one module; a signature copied from another
+module, or another version with the same files, fails. A module signature
+cannot pass as a plugin's or vice versa, even from the same key, because each
+names its kind in the signed statement. `meridian.sig` is the one file the
+content hash excludes, so signing does not change the pin, and the signature
+travels unchanged through git, a registry or a mirror.
 
 | What you see | What it means |
 |---|---|

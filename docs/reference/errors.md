@@ -1,18 +1,16 @@
 # Error kinds and codes
 
-Most of what Meridian refuses comes with a sentence that says what was wrong
-and what to write instead. Behind each sentence is a *kind*: a fixed word that
-says which sort of thing went wrong, so that a program using Meridian's crates
-can act on the failure without reading its text, and so that this page can
-list every sort there is.
+Most Meridian refusals come with a sentence saying what was wrong and what to
+write instead. Behind each is a *kind*: a fixed word for the sort of failure,
+so programs using Meridian's crates can act on it without parsing text, and
+this page can list them all.
 
 A kind's code never changes and is never reused for another meaning. A new
 sort of failure gets a new code; a code that stops being produced stays
 reserved. The tests check that every code in the code is listed here.
 
-This page lists the kinds by the crate that produces them. The messages
-themselves are not listed: they are many, and each says what it needs to
-where it appears. The [lint rules](lint.md), the
+Kinds are listed by the crate that produces them. Messages are not listed;
+there are many, and each explains itself. The [lint rules](lint.md), the
 [compile-rule refusals](compile-rules.md#refusals) and the
 [refusal rules](refusal-rules.md) a target refuses a document under have their
 own pages, because each of those is a rule with a name of its own.
@@ -63,9 +61,9 @@ and in the `failure` element of a [JUnit report](reporting.md).
 | `interrupted` | the operator stopped the run with Ctrl-C (or a `SIGTERM`) while the step was going, or before its tool was started |
 | `timed-out` | the step's tool ran past `--stage-timeout` and was stopped |
 
-A step's record can also hold words that are not a stage failure: a step that
-was skipped because an earlier one failed says `earlier-step-failed`, and a
-rollback that could not put a step back has its own reasons, listed with the
+A step's record can also hold words that are not stage failures: a step skipped
+after an earlier failure says `earlier-step-failed`, and a rollback that could
+not restore a step has its own reasons, listed with the
 [rollback events](state.md#events).
 
 ## Modules (`meridian-module`)

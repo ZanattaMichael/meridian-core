@@ -1,30 +1,27 @@
 # The configuration management resource types
 
 The `ansible`, `puppet`, `openvox`, `chef`, `salt` and `cloud-init` targets share
-six resource types. A resource written with them compiles for any of the six,
-within what each tool can do. OpenVox reads the language Puppet reads, so wherever
-this page says Puppet, the same holds for `openvox`.
-Anything outside these tables is refused, never dropped: a param a target does
-not take, a state it cannot express, an action it cannot perform. What the six
-do not cover is reached as the tool's own type beside them, written as the
-tool writes it (`ansible.builtin.lineinfile`); its params are then the tool's,
-and the document compiles for that one target. See
+six resource types. A resource using them compiles for any of the six, within
+each tool's limits. OpenVox reads Puppet's language, so whatever this page says
+about Puppet also holds for `openvox`.
+Anything outside these tables is refused, never dropped: an unsupported param,
+state or action. For anything the six do not cover, use the tool's own type as
+the tool writes it (`ansible.builtin.lineinfile`), with the tool's params; the
+document then compiles for that one target. See
 [native types beside the six](dsl/configuration-management.md#native-types-beside-the-six).
 
-The kind of value each param takes is checked in one place, the same way on all
-six targets, before a plugin applies its own rules: text where a name is wanted
-(`name`, `path`, `mode`, `shell`), true or false where a flag is wanted
-(`enabled`, `system`, `append`), a whole number for `uid` and `gid`, a list for
-`groups`, `members` and `ssh_authorized_keys`. A value of the wrong kind is
-refused as `invalid-param` with the same message whichever target the document
-names, so a document that compiles for Ansible does not fail on Chef for a
-reason that has nothing to do with Chef. The strict reading was chosen on
-purpose: a number or a list where a name is wanted, or `yes` where true is
-wanted, is refused rather than passed to the tool to interpret
+Each param's value kind is checked once, identically for all six targets, before
+plugin-specific rules: text for names (`name`, `path`, `mode`, `shell`),
+true/false for flags (`enabled`, `system`, `append`), whole numbers for `uid`
+and `gid`, lists for `groups`, `members` and `ssh_authorized_keys`. A wrong kind
+is refused as `invalid-param` with the same message on every target, so a
+document that compiles for Ansible never fails on Chef for a non-Chef reason.
+The check is deliberately strict: a number or list where a name is expected, or
+`yes` for true, is refused rather than left to the tool
 ([decision 0024](../decisions/0024-shared-param-kinds-are-checked-once-strictly.md)).
-A secret passes wherever text would. A param with no value, and a secret inside
-a list or a map, are refused by the target itself under the rule that names the
-problem (`empty-param`, `unsupported-secret-place`).
+A secret passes wherever text would. An empty param, or a secret inside a list
+or map, is refused by the target under the matching rule (`empty-param`,
+`unsupported-secret-place`).
 
 How the rest of a configuration management document is written is in
 [the configuration management flavour](dsl/configuration-management.md).
@@ -86,10 +83,10 @@ must use systemd.
 | States | `present` (default) or `file`, `directory`, `absent` |
 | Can be notified | no |
 
-Write `mode` as a quoted string (`"0644"`), so it is not read as a number. A
-directory has no `content`: every target refuses the two together. On Salt a `file` with no `content` creates the file
-if it is missing, a directory is created with its parents, and the attributes of
-an absent file are left out with a warning.
+Quote `mode` (`"0644"`) so it is not read as a number. A directory has no
+`content`; every target refuses both together. On Salt, a `file` without
+`content` is created if missing, a directory is created with its parents, and
+attributes of an absent file are dropped with a warning.
 
 On cloud-init a file in state `present` must have `content`, because cloud-init
 writes whole files, and the `directory` and `absent` states compile to commands
@@ -182,11 +179,11 @@ so `groups: ${app_user.groups}` is a list. Inside longer text it must read a
 single value. A reference does not order the two resources; use `dependsOn` for
 that.
 
-A reference that cannot be settled is refused with the rule `invalid-reference`:
-a resource the document does not declare, a param that resource does not set, a
-bare `${id}`, or anything that is not `${id.param}`. Write `$${` for a literal
-`${`, as a shell script in a file's `content` may need. `runtimeWhen` is not
-touched: it is the tool's own language.
+An unresolvable reference is refused as `invalid-reference`: an undeclared
+resource, a param that resource does not set, a bare `${id}`, or anything other
+than `${id.param}`. Write `$${` for a literal `${` (as a shell script in a
+file's `content` may need). `runtimeWhen` is left untouched: it is the tool's
+own language.
 
 ## What every resource can carry
 

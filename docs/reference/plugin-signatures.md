@@ -63,11 +63,11 @@ The other values are `unsigned`, `invalid: <why>` and `not checked`.
 
 ## Which keys are trusted
 
-**The release's own key.** Each release build makes a new key pair, signs its
-plugins, compiles the public key into its `meridian`, and deletes the secret
-key before the build ends. So a released `meridian` trusts exactly the plugins
-that were built with it, and no signing secret exists afterwards to be stolen.
-The public key is also in the archive, as `release-key.pub`.
+**The release's own key.** Each release build creates a key pair, signs its
+plugins, compiles the public key into its `meridian`, and deletes the secret key
+before finishing. A released `meridian` trusts exactly the plugins built with
+it, and no signing secret survives to be stolen. The public key is also in the
+archive as `release-key.pub`.
 
 The consequence: plugins and `meridian` from one release go together. A
 plugin copied from another release, or another platform's archive, was signed
@@ -157,26 +157,24 @@ changed; the check uses the digest of the file as it is.
 
 ## What this does not cover
 
-- Whoever can replace both `meridian` and a plugin can replace the key too.
-  The signature protects a plugin directory from being tampered with on its
-  own; the install-time checks protect the installation as a whole.
-- The check is made when the plugin is started. A binary replaced between the
-  check and the start, by someone who can already write to your plugin
-  directory, is not caught.
+- Anyone who can replace both `meridian` and a plugin can replace the key too.
+  Signatures protect a plugin directory from tampering on its own; install-time
+  checks protect the whole installation.
+- The check happens when the plugin starts. A binary swapped between check and
+  start, by someone who can already write to your plugin directory, is not
+  caught.
 - A target compiled into `meridian` itself is part of that binary and has no
   signature of its own.
 
 ## Using the check from other code
 
-The signing and checking code is the `meridian-signing` crate
-(`crates/meridian-signing`). It is not about plugins: `SecretKey::sign_file`
-signs any file, `verify_file` checks a file and its `.sig` against a list of
-`PublicKey`s, and `Verification::check` applies a `Policy` (off, warn or
-require) to the result. `SecretKey::sign_bytes` and `verify_bytes` do the same
-for bytes that are not a file, which is how
-[modules are signed](modules.md#signatures): with the same keys, trusted
-through the same `--trusted-key`. Such a signature starts with
-`meridian-statement-signature-v1`, and that name is part of what is signed, so
-a signature over a statement never passes as a plugin's and a plugin's never
-passes as a statement's. The plugin host re-exports it as
+The signing code is the general-purpose `meridian-signing` crate
+(`crates/meridian-signing`). `SecretKey::sign_file` signs any file,
+`verify_file` checks a file and its `.sig` against a list of `PublicKey`s, and
+`Verification::check` applies a `Policy` (off, warn or require).
+`SecretKey::sign_bytes` and `verify_bytes` do the same for in-memory bytes, which
+is how [modules are signed](modules.md#signatures), with the same keys and
+`--trusted-key`. Such a signature starts with `meridian-statement-signature-v1`,
+which is part of what is signed, so statement and plugin signatures can never
+pass as each other. The plugin host re-exports the crate as
 `meridian_plugin_host::signature`.

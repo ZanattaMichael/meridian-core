@@ -135,18 +135,18 @@ rules:
 | `use` | no | the [shipped rule sets](#shipped-rule-sets) in force. Left out: the three default ones. `use: []`: none |
 | `rules` | no | your own [rules](#rules) |
 
-**A rules file is a deny list out of the box.** Everything is allowed
-except what the file forbids, and a file that says nothing else already
-forbids three things, through the [default rule sets](#shipped-rule-sets):
+**A rules file is a deny list by default.** Everything is allowed except what it
+forbids, and even an otherwise empty file forbids three things through the
+[default rule sets](#shipped-rule-sets):
 
 - changing a variable a less specific layer set;
 - changing a secret or a credential a less specific layer set;
 - a secret or a credential that is empty or a placeholder.
 
-So `rulesVersion: 1` alone is a working policy. From there the file has two
-parts that work together: **groups with capabilities** say what each layer
-may set at all (and with `default: deny` turn the file into an allow list),
-and **rules** say what a layer may do to a value another layer set.
+So `rulesVersion: 1` alone is a working policy. The file then has two parts:
+**groups with capabilities** say what each layer may set at all (with
+`default: deny`, an allow list), and **rules** say what a layer may do to a
+value another layer set.
 
 | You want | Write |
 |---|---|
@@ -168,9 +168,9 @@ Every rule has these fields, and then its own:
 | `keys` | yes | the [key patterns](#key-patterns) the rule is about |
 | `message` | no | your own words, added to every refusal the rule produces: who to ask, where the policy is written down |
 
-The file is read strictly. An unknown field, a field a rule's kind does not
-take, a group nobody declared: each is an error and not something to ignore,
-because a rule that silently does nothing is worse than no rule. See
+The file is read strictly. An unknown field, a field the rule kind does not
+take, or an undeclared group is an error, because a rule that silently does
+nothing is worse than none. See
 [mistakes in the rules file](#mistakes-in-the-rules-file).
 
 ## Groups
@@ -247,21 +247,19 @@ and `default` decides everything it does not list.
 [meridian/capabilities] layer "Projects/x.yaml" (teams) sets "b", which teams is not allowed to set: it lists no `capabilities.keys`, and the default is deny
 ```
 
-- **Each layer is held to its own group.** A value several layers
-  contribute to must be allowed to every one of them, so a team that sets a
-  key under a mapping the organization owns is judged as the team.
+- **Each layer is held to its own group.** A value several layers contribute
+  to must be allowed for each, so a team setting a key under an
+  organization-owned mapping is judged as the team.
 - **Writing above an allowed key is not writing the allowed key.** A group
   that may set `variables.Owner` may not write `variables: null`.
 - **A layer no group claims may set nothing, whatever `default` says.**
 - **`default: deny` needs groups.** With none, no layer could set anything,
   so the file is refused.
-- Capabilities are checked before the rules and reported first. Being
-  allowed to set a key does not excuse breaking a rule about it: a team that
-  may set `variables` still may not change the organization's, under
-  `protect-variables`.
-- Values given on the command line belong to whoever runs the command and
-  not to a group, so capabilities do not apply to them. Every rule still
-  does; see [the command line as a layer](#the-command-line-as-a-layer).
+- Capabilities are checked and reported before rules. Permission to set a key
+  does not excuse breaking a rule: a team that may set `variables` still may
+  not change the organization's under `protect-variables`.
+- Command-line values belong to whoever runs the command, not a group, so
+  capabilities do not apply. Every rule still does; see [the command line as a layer](#the-command-line-as-a-layer).
 
 `keys` is the capability there is today, because data is what is layered
 today. Which targets a layer's documents may compile for is the same idea,
@@ -459,10 +457,9 @@ A key that is `null` is not set.
 [team-layers-name-an-owner] layer "node/web01.yaml" (team) does not set "variables.Owner", which every layer of team must set
 ```
 
-The first form looks at the merged result, so a value the merge throws away
-does not satisfy it. A layer file that does not exist is not a layer, so the
-second form has nothing to say about it; use both when the value must exist
-one way or another.
+The first form checks the merged result, so a value the merge discards does
+not count. A missing layer file is not a layer, so the second form ignores it;
+use both when the value must exist regardless.
 
 ### `forbidden-value`
 
@@ -636,18 +633,16 @@ error: compile rules: 10 violations; nothing was compiled
   - [no-floating-tags] layer "node/rogue.yaml" (team) sets "web.image" to a value the rule forbids (matches[0])
 ```
 
-Each line is `[rule id]`, the layer at fault and its group, the key, and what
-the rule holds against it, followed by the rule's own `message` when it has
-one.
+Each line gives `[rule id]`, the layer and its group, the key, and the
+violation, then the rule's own `message` if it has one.
 
 - **Every violation is listed**, not only the first.
-- **The order is fixed**: rules in the order the file lists them (shipped
-  sets first), then layers from least to most specific, then keys. The same
-  files always print the same text.
-- **No value is ever printed.** Not the value that was set, not the one it
-  replaced.
+- **The order is fixed**: rules in file order (shipped sets first), then
+  layers least to most specific, then keys. The same files always print the
+  same text.
+- **No value is ever printed**, neither the new one nor the one it replaced.
 - **Nothing is handed over.** A hierarchy that breaks a rule produces no
-  merged data at all.
+  merged data.
 
 ## Mistakes in the rules file
 
@@ -681,10 +676,10 @@ decides what every layer may do.
 
 - Give `rules.yaml` and `hierarchy.yaml` to your most trusted owners, with
   CODEOWNERS and branch protection.
-- Pass `--require-rules` in the pipeline, so that deleting the file is an
-  error and not a way to switch the rules off.
-- If that is not enough, keep the rules somewhere contributors cannot write
-  and pass `--rules FILE`. It is used instead of the file in the repository.
+- Pass `--require-rules` in the pipeline, so deleting the file is an error,
+  not a way to switch the rules off.
+- For more, keep the rules where contributors cannot write and pass
+  `--rules FILE`, which replaces the repository's file.
 - Give every folder of layers to a group. A layer outside every group is
   refused, so a new folder cannot appear outside the policy.
 
@@ -764,14 +759,12 @@ layers:
 | `-PolicyPath`, `-RequirePolicy` | `--rules`, `--require-rules` | yes |
 | `<node>.provenance.json` lists each layer and its owner | `meridian rules check` prints each layer and its group | printed, not written to a file |
 
-**What differs, and why.** `Policy.yml`'s capabilities are about what a
-layer's *resources* may use: which Target they run through, which engine, and
-whether they may carry scripts. A DscPipelineRunner layer file holds
-resources, so those are what there is to govern. A Meridian hierarchy layer
-holds *data*, and documents (which carry the target and the resources) are
-not layered, so the capability there is to govern is which keys a layer may
-set. Targets and engines per layer have nothing to attach to yet. They belong
-in `capabilities` beside `keys` when documents can be layered.
+**What differs, and why.** `Policy.yml` governs what a layer's *resources* may
+use (Target, engine, scripts), because a DscPipelineRunner layer holds
+resources. A Meridian hierarchy layer holds *data*; documents (with the target
+and resources) are not layered, so the capability to govern is which keys a
+layer may set. Per-layer targets and engines will join `keys` under
+`capabilities` once documents can be layered.
 
 `Policy.yml` does not stop a team's file from changing a variable the
 platform set: DscPipelineRunner merges `variables` deeply and the most

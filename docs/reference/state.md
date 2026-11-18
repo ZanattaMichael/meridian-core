@@ -30,9 +30,9 @@ flowchart TB
 A working directory belongs to the plugin. Meridian creates it, hands it to
 the plugin, keeps it between runs, and never reads it.
 
-With the local backend, files are written beside the target and renamed over
-it, so a crash never leaves half a file, and are readable only by their owner
-(mode `0600`).
+With the local backend, files are written alongside and renamed into place, so
+a crash never leaves half a file. They are readable only by their owner (mode
+`0600`).
 
 **No secret value is kept in the record, in any form.** The record holds
 names, ids, hashes of artifacts, counts and times. It does not hold a param,
@@ -46,12 +46,11 @@ artifact of a stage's last successful apply, so that artifact is kept:
 files by path. Two are kept per stage, the one just applied and the last good
 one before it.
 
-Unlike the record, a snapshot holds content: an artifact contains whatever
-its document contains. It is therefore kept **only in the state directory, on
-the machine that applied**, readable only by its owner, beside the working
-directory where the plugin has already written the same files. It is never
-sent to a backend. A machine without the snapshot cannot roll that stage
-back, and says so.
+Unlike the record, a snapshot holds content: whatever its document contains. So
+it is kept **only in the state directory of the machine that applied**,
+readable only by its owner, beside the working directory that already holds the
+same files. It is never sent to a backend. A machine without the snapshot cannot
+roll that stage back, and says so.
 
 A snapshot is loaded by its hash and checked against it. One that has been
 changed is refused.
@@ -286,12 +285,11 @@ Meridian looks for plugins in. Meridian runs it once per operation.
   climbs out of the store, and a backend should refuse one anyway.
 - `put` replaces the blob whole. A reader must see the old blob or the new
   one, never part of each.
-- **`create` must be atomic.** Of two callers, exactly one may be told `0`.
-  The lock stands on this and on nothing else. Use what your store gives you
-  for it: `O_EXCL` on a file system, `If-None-Match: *` on an object store
-  that supports conditional writes, a conditional put on a key-value store. A
-  store with no such operation cannot hold a lock, and should not be used as
-  a backend.
+- **`create` must be atomic.** Of two callers, exactly one may get `0`. The
+  lock depends on this alone. Use your store's primitive: `O_EXCL` on a file
+  system, `If-None-Match: *` on an object store with conditional writes, a
+  conditional put on a key-value store. A store without one cannot hold a lock
+  and must not be a backend.
 
 The reference implementation is
 [`examples/backends/meridian-backend-dir`](../../examples/backends/meridian-backend-dir),
