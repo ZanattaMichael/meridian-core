@@ -22,6 +22,7 @@ previewed.
 | Plan | Yes: a change set, described and then discarded |
 | Apply | Yes: the same change set, executed |
 | Outputs | Yes: the template's `Outputs`, read back from the stack |
+| Editor schemas | Yes: `meridian schema sync` reads the resource provider schemas CloudFormation publishes for the stack's region, with no account and no `aws`. See [Editor schemas](#editor-schemas) |
 | Compiles to | `template.yaml` and `stack.json` |
 | Runs with | `aws cloudformation` |
 
@@ -44,6 +45,7 @@ Contents: [Requirements](#requirements) ·
 [References](#references) ·
 [Ordering](#ordering) ·
 [What a compile writes](#what-a-compile-writes) ·
+[Editor schemas](#editor-schemas) ·
 [Running](#running) ·
 [Settings](#settings) ·
 [What is refused](#what-is-refused) ·
@@ -219,6 +221,33 @@ deploy it with the console or a pipeline of your own. `stack.json` holds what
 the runner needs and the template does not say: the stack's name, region and
 capabilities, and the map from logical ids back to the ids you wrote, so a
 change set's rows are reported by your names.
+
+## Editor schemas
+
+`meridian schema sync` reads the registry of resource types CloudFormation
+publishes for a region, so an editor completes and checks `AWS::S3::Bucket`'s
+properties as it does a plugin's own types
+([Tool schemas](../tooling/schema-sync.md)). The registry is one zip per
+region of resource provider schemas, the JSON Schema CloudFormation itself
+validates a template against, at
+`https://schema.cloudformation.<region>.amazonaws.com/CloudformationSchema.zip`.
+No account and no `aws` command is needed to read it. The region is the
+`stack` resource's `region`, else `--region` in `MERIDIAN_AWS_ARGS`, else
+`AWS_REGION` or `AWS_DEFAULT_REGION`, else `us-east-1`.
+
+| | |
+|---|---|
+| Described in full | the `Vendor::Service::Type` types the documents use: every property with its kind, whether it is required, the values it allows and its nested properties; the `readOnlyProperties` as set by CloudFormation (read with `${id.Arn}`, never written); the `createOnlyProperties` marked as replacing the resource when changed; the `writeOnlyProperties` as sensitive |
+| Listed by name | every other type of the region's registry, with the first paragraph of its description |
+| Pinned | the region, to the SHA-256 of the zip it was read from |
+
+A type that is not in the public registry, a private or third-party type
+the account activated, is asked of `aws cloudformation describe-type`, which
+needs the command and credentials; a type neither has is a note. The zip is
+kept in the work directory and fetched again only when the registry says it
+changed; when the registry cannot be reached, the last copy is used and the
+sync says so. The source is tested against the real registry in the
+`cloudformation` workflow.
 
 ## Running
 

@@ -1419,11 +1419,13 @@ dependencies = [
  "protox",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-stream",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+ "ureq",
 ]
 
 [[package]]
@@ -1462,6 +1464,7 @@ dependencies = [
  "meridian-plugin-host",
  "meridian-plugin-testkit",
  "meridian-sdk",
+ "meridian-target-bicep",
 ]
 
 [[package]]
@@ -1497,6 +1500,7 @@ dependencies = [
 name = "meridian-target-cloudformation"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "meridian-plugin-testkit",
  "meridian-sdk",
  "meridian-yaml",
@@ -1536,6 +1540,7 @@ version = "0.1.0"
 dependencies = [
  "meridian-plugin-testkit",
  "meridian-sdk",
+ "meridian-target-kubernetes",
  "meridian-yaml",
 ]
 

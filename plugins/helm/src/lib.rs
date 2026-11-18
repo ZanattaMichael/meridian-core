@@ -39,6 +39,7 @@ mod manifest;
 mod order;
 mod path;
 mod runner;
+mod schemas;
 mod template;
 mod transform;
 mod validate;
@@ -146,6 +147,7 @@ pub use runner::{
     HelmRunner, HELM_ARGS_VARIABLE, HELM_VARIABLE, KUBECTL_ARGS_VARIABLE, KUBECTL_VARIABLE,
     KUSTOMIZE_VARIABLE,
 };
+pub use schemas::HelmSchemas;
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "helm";

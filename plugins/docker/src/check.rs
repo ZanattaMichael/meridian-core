@@ -43,7 +43,6 @@ const SERVICE_KEYS: &[&str] = &[
     "dns_opt",
     "dns_search",
     "domainname",
-    "driver_opts",
     "entrypoint",
     "env_file",
     "environment",
@@ -142,6 +141,18 @@ const SECRET_KEYS: &[&str] = &[
     "name",
     "template_driver",
 ];
+
+/// The attribute names the compile checks a section's params against,
+/// for the real-tool test that holds them against the Compose schema.
+pub fn known_keys(section: Section) -> &'static [&'static str] {
+    match section {
+        Section::Service => SERVICE_KEYS,
+        Section::Network => NETWORK_KEYS,
+        Section::Volume => VOLUME_KEYS,
+        Section::Config => CONFIG_KEYS,
+        Section::Secret => SECRET_KEYS,
+    }
+}
 
 /// What a dependency can wait for.
 const CONDITIONS: &[&str] = &[

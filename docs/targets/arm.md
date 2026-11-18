@@ -25,7 +25,7 @@ and deploys it to a resource group or a subscription with the `az` command line.
 | Outputs | Yes, always as strings |
 | Template `variables` and `functions` | No. Write the expression where it is used |
 | Typed outputs | No. A Meridian output has no type |
-| Checking a resource's properties against its type | No. The plugin checks the template's structure, references and expressions; Azure checks the properties, and a plan reports what it says |
+| Checking a resource's properties against its type | Not at compile time: the plugin checks the template's structure, references and expressions; Azure checks the properties, and a plan reports what it says. An editor checks them once the type definitions are synced; see [Editor schemas](#editor-schemas) |
 
 ![How the ARM plugin compiles and deploys a document](images/arm-flow.svg)
 
@@ -426,15 +426,37 @@ names the resource, the line it was written on and a rule:
 | `unsupported-state` | `state: absent`: a template only says what should exist. Remove the resource, and use mode `Complete` if it should be deleted. |
 | `unsupported-runtime-condition` | `runtimeWhen`: an ARM `condition` is decided before anything is deployed |
 
+## Editor schemas
+
+`meridian schema sync` reads the same Azure type definitions as the
+[Bicep target](bicep.md#editor-schemas), published in
+[Azure/bicep-types-az](https://github.com/Azure/bicep-types-az), so an
+editor completes and checks a resource's properties
+([Tool schemas](../tooling/schema-sync.md)). The difference is how a
+document writes a type: `Namespace/type` with the API version in the
+`apiVersion` param.
+
+| | |
+|---|---|
+| Described in full | the `Namespace/type` types the documents use, at the API version the resource's `apiVersion` names, or the newest stable one when it names none: every property as for Bicep, plus `apiVersion` itself, required, with every API version the index has as its values |
+| Listed by name | every other type in the index, once, with its `apiVersion` values |
+| Pinned | the index and each `types.json` read, to their SHA-256 |
+
+A document whose resources of one type use two API versions is described at
+the first; the properties rarely differ between neighbouring versions, and
+Azure is the judge of what deploys. The source is tested against the real
+files in the `azure` workflow.
+
 ## Not covered yet
 
 - Deployments to a management group or a tenant.
 - Template `variables` and user-defined `functions`. An expression can be written where it
   is used instead.
 - Typed outputs: every output is a string.
-- Checking a resource's properties against its type's schema. The plugin checks the
-  template's structure and its expressions; Azure checks the properties, and a plan
-  reports what it says.
+- Checking a resource's properties against its type's schema at compile time. The
+  plugin checks the template's structure and its expressions; Azure checks the
+  properties, and a plan reports what it says. The editor checks them once the
+  schemas are synced ([Editor schemas](#editor-schemas)).
 
 ## Examples
 

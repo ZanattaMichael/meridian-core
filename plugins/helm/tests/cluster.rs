@@ -348,3 +348,45 @@ spec:
 
     uninstall("meridian-overlay-test", "meridian-overlay-test");
 }
+
+/// The schema source against the cluster: a chart's objects are described
+/// by the API server, through this target's kubectl.
+#[test]
+#[ignore = "needs kubectl and a cluster"]
+fn the_clusters_kinds_are_exported_for_a_chart() {
+    use meridian_sdk::{SchemaRequest, SchemaSource};
+    use meridian_target_helm::HelmSchemas;
+    let dir = scratch(TMP, "real-schemas");
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: site\nspec:\n  target: helm\n  resources:\n    - id: chart\n      type: chart\n      params:\n        name: site\n        version: 0.1.0\n    - id: release\n      type: release\n      params:\n        name: site\n        namespace: default\n    - id: config\n      type: v1/ConfigMap\n      params:\n        metadata:\n          name: site\n        data:\n          mode: test\n";
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_text("site.yaml", text, "helm")],
+    );
+    let log = KeptLog::default();
+    let export = HelmSchemas::from_env()
+        .export(&request, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(export.tool, "kubectl");
+    assert!(export.pins.contains_key("server"), "{:?}", export.pins);
+    let config = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "v1/ConfigMap")
+        .unwrap_or_else(|| panic!("the ConfigMap is described: {:?}", export.notes));
+    assert!(config.find_param("data").is_some());
+    assert!(config.find_param("metadata").is_some());
+    // Meridian's own types are not asked of the cluster, so they are not
+    // noted as unknown to it.
+    assert!(
+        !export
+            .notes
+            .iter()
+            .any(|n| n.contains("chart") || n.contains("release")),
+        "{:?}",
+        export.notes
+    );
+    assert!(export
+        .schemas
+        .iter()
+        .any(|s| s.r#type == "apps/v1/Deployment"));
+}
