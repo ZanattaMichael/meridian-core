@@ -26,6 +26,13 @@ use meridian_sdk::{AgentPrograms, Artifact, Data, Emitter, RunContext, Runner};
 use meridian_target_salt::{Salt, SaltRunner, Transport};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
+
+/// `salt-ssh` keeps one deployment of itself per user on the host
+/// (`/var/tmp/.<user>_<hash>_salt`), and two runs against the same host at
+/// once race over it: one removes and redeploys it while the other is
+/// using it. The tests that reach the host over SSH take this lock, so they
+/// run one at a time.
+static SSH_HOST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 const VARIABLE: &str = "MERIDIAN_TEST_REAL_SALT_CALL";
 
 /// The output of `id` with one flag: who the tests run as.
@@ -368,6 +375,7 @@ fn another_host_is_configured_over_ssh() {
     else {
         return;
     };
+    let _one_at_a_time = SSH_HOST.lock().unwrap_or_else(|e| e.into_inner());
     let dir = scratch(TMP, "real-ssh");
     let runner = SaltRunner {
         salt_call: "salt-call".into(),
@@ -441,6 +449,7 @@ fn another_host_is_reached_as_a_credential_whose_key_is_in_an_agent() {
             .trim()
             .to_owned()
         });
+    let _one_at_a_time = SSH_HOST.lock().unwrap_or_else(|e| e.into_inner());
     let dir = scratch(TMP, "real-ssh-credential");
     let runner = SaltRunner {
         salt_call: "salt-call".into(),
