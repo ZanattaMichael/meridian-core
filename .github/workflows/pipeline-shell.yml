@@ -69,12 +69,15 @@ jobs:
         run: |
           mkdir -p events
           meridian plan site.yaml --events json > events/plan.jsonl
+          # Every step gets a summary file of its own, so the next step
+          # reads this step's copy.
+          cp "$GITHUB_STEP_SUMMARY" events/plan-summary.md
 
       - name: The job page shows the plan
         run: |
           grep -q '"type":"run.succeeded"' events/plan.jsonl
-          grep -q '## ✓ Meridian plan succeeded' "$GITHUB_STEP_SUMMARY"
-          ! grep -r "$SITE_DB_PASSWORD" events "$GITHUB_STEP_SUMMARY"
+          grep -q '## ✓ Meridian plan succeeded' events/plan-summary.md
+          ! grep -r "$SITE_DB_PASSWORD" events
 
       - name: Keep the events and the record
         if: always()
@@ -137,7 +140,11 @@ jobs:
       - name: Apply
         id: apply
         continue-on-error: true
-        run: meridian apply site.yaml --events json > events/apply.jsonl 2> >(tee apply.log >&2)
+        run: |
+          status=0
+          meridian apply site.yaml --events json > events/apply.jsonl 2> >(tee apply.log >&2) || status=$?
+          cp "$GITHUB_STEP_SUMMARY" events/apply-summary.md
+          exit $status
 
       - name: The failure was annotated at its document, and summarised
         run: |
@@ -145,21 +152,23 @@ jobs:
           grep -q '"type":"step.failed"' events/apply.jsonl
           grep -q '^::error file=site.yaml,line=' apply.log
           grep -q 'title=Meridian%3A ResourceSet web failed' apply.log
-          grep -q '## ✗ Meridian apply failed' "$GITHUB_STEP_SUMMARY"
-          ! grep -r "$SITE_DB_PASSWORD" events apply.log "$GITHUB_STEP_SUMMARY"
+          grep -q '## ✗ Meridian apply failed' events/apply-summary.md
+          ! grep -r "$SITE_DB_PASSWORD" events apply.log
 
       - name: Fix the cause
         run: sed -i 's/welcome FAIL/welcome/' site.yaml
 
       - name: Continue the apply that failed
-        run: meridian apply site.yaml --resume --events json > events/resume.jsonl
+        run: |
+          meridian apply site.yaml --resume --events json > events/resume.jsonl
+          cp "$GITHUB_STEP_SUMMARY" events/resume-summary.md
 
       - name: The resume picked up where the apply failed
         run: |
           grep -q '"type":"run.succeeded"' events/resume.jsonl
           grep -q '"reason":"already-applied"' events/resume.jsonl
-          grep -q '## ✓ Meridian apply succeeded' "$GITHUB_STEP_SUMMARY"
-          ! grep -r "$SITE_DB_PASSWORD" events "$GITHUB_STEP_SUMMARY"
+          grep -q '## ✓ Meridian apply succeeded' events/resume-summary.md
+          ! grep -r "$SITE_DB_PASSWORD" events
           meridian status
 
       - name: Keep the events and the record
