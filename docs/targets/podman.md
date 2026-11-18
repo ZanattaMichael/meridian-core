@@ -576,20 +576,15 @@ spec:
 ```
 
 - **The user** is `ssh`'s `-l`, before the arguments of `MERIDIAN_PODMAN_SSH_ARGS`.
-- **A key is never on disk.** It goes into an SSH agent Meridian starts for the stage:
-  `ssh-agent -D -a <socket>`, its socket in a directory only you can enter, loaded with
-  `ssh-add -` from standard input. `ssh` is told the socket in `SSH_AUTH_SOCK` and
-  nothing else. A `passphrase` is answered to `ssh-add` from a file only you can read. The
-  agent is stopped and its directory removed when the stage ends. Nothing of the key is on
-  the command line, in the environment, in the compiled files or in a file Meridian keeps.
-- **`agent: true`** names a key in your own agent: `ssh` reads `SSH_AUTH_SOCK` as it is,
-  and Meridian starts nothing. **`from: ambient`** leaves signing in to the tool's own
-  configuration, as with no credential at all.
+- **A key** goes into an SSH agent Meridian starts for the stage, loaded through `ssh-add`'s
+  stdin; `ssh` gets only `SSH_AUTH_SOCK`. A `passphrase` is answered from a private file.
+  See [0028](../decisions/0028-a-key-reaches-a-host-through-an-agent-meridian-starts.md).
+- **`agent: true`** uses your own agent. **`from: ambient`** leaves signing in to the tool.
 - **Refused at compile**, rule `unsupported-credential`: a `password` (`ssh` asks for one on a terminal, which a run has not; reach the host as an `ssh` credential with a `privateKey`); a `certificate` (put it
   beside the key in an agent of your own and set `agent: true`); a `domain` (for WinRM
   hosts, which this plugin does not reach); a user name with a space or a line break.
 - **Refused at run time:** a credential for this machine (`localhost`, `127.0.0.1`, `::1`
-  or no host). The scripts run here as the user running Meridian, whoever the document names. Leave the credential out, or name another host.
+  or no host). Leave the credential out, or name another host.
 
 The plan line names the identity, `web (podman) on edge01.example.com as deploy (ssh,
 user deploy)`, and never a value. `ssh-agent` and `ssh-add` are run from `PATH`, or from
