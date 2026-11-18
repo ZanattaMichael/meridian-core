@@ -43,6 +43,10 @@ string:
   mode: "0644"
 ```
 
+Compilation refuses the unquoted mode as well (`invalid-param`; see
+[the resource types](resource-types.md)), so `lint` reports the line twice:
+once as the plugin's refusal and once as this rule, which carries the fix.
+
 `meridian lint --fix`, and the quick fix in an editor, add the quotes around
 exactly what was typed.
 

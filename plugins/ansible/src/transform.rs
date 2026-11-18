@@ -244,6 +244,11 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Playbook, CompileError>
     let mut notify = handler_names(graph)?;
     let mut tasks = Vec::with_capacity(graph.resources.len());
     for resource in &graph.resources {
+        // The shared types are checked the same way on every configuration
+        // management target, so a document moves between tools without the
+        // type rules changing under it.
+        meridian_sdk::schema::check_shared(resource)
+            .map_err(|e| refuse(resource, &e.rule, e.msg))?;
         let mut task = task_for(resource, &resource.state)?;
         task.notify = notify.remove(&resource.id).unwrap_or_default();
         tasks.push(task);

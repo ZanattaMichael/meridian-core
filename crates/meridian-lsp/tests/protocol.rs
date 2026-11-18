@@ -161,18 +161,23 @@ impl Editor {
 fn an_editing_session() {
     let mut editor = Editor::start();
 
-    // Opening publishes the lint about the unquoted mode.
+    // Opening publishes the plugin's refusal of the unquoted mode and the
+    // lint about it, which carries the fix.
     let published = editor.open(DOC);
     assert_eq!(published["uri"], URI);
     let found = published["diagnostics"].as_array().unwrap();
-    assert_eq!(found.len(), 1, "{found:#?}");
-    assert_eq!(found[0]["code"], "unquoted-mode");
-    assert_eq!(found[0]["source"], "meridian-lint");
-    assert_eq!(found[0]["severity"], 2);
+    assert_eq!(found.len(), 2, "{found:#?}");
+    assert_eq!(found[0]["code"], "invalid-param");
+    assert_eq!(found[0]["source"], "ansible");
+    assert_eq!(found[0]["severity"], 1);
+    assert_eq!(found[1]["code"], "unquoted-mode");
+    assert_eq!(found[1]["source"], "meridian-lint");
+    assert_eq!(found[1]["severity"], 2);
     assert_eq!(
-        found[0]["range"]["start"],
+        found[1]["range"]["start"],
         json!({ "line": 19, "character": 14 })
     );
+    let found = &found[1..];
 
     // The quick fix quotes it.
     let actions = editor.request(
@@ -186,7 +191,7 @@ fn an_editing_session() {
     assert_eq!(actions[0]["title"], "Quote the mode: \"0644\"");
     assert_eq!(actions[0]["edit"]["changes"][URI][0]["newText"], "\"0644\"");
 
-    // A compile error replaces it once the text changes.
+    // Another compile error replaces them once the text changes.
     editor.change(&DOC.replace("mode: 0644", "mode: \"0644\"\n        colour: blue"));
     let found = editor.diagnostics()["diagnostics"].clone();
     assert_eq!(found.as_array().unwrap().len(), 1, "{found:#?}");

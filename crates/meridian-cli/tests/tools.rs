@@ -184,21 +184,29 @@ fn lint_reports_what_the_compiler_the_plugin_and_the_rules_say() {
     assert!(!out.status.success());
     assert_eq!(
         stdout(&out),
-        "web.yaml:20:15: warning: mode 0644 is read as a number, not as permissions; write it as a quoted string [unquoted-mode]\n\
+        "web.yaml:20:9: error: param \"mode\" of a file must be text, not a number; write it quoted, so it is not read as a number: \"420\" [invalid-param]\n\
+         web.yaml:20:15: warning: mode 0644 is read as a number, not as permissions; write it as a quoted string [unquoted-mode]\n\
          web.yaml:21:9: error: resource type \"file\" does not take param \"colour\" on target \"ansible\" (it takes: content, group, mode, owner, path) [unsupported-param]\n\
          web.yaml:24:21: info: \"nginx_pkg\" is already listed [redundant-dependency]\n\
-         1 error, 1 warning, 1 note\n"
+         2 errors, 1 warning, 1 note\n"
     );
 
-    // One JSON object per line for tools.
+    // One JSON object per line for tools. The plugin's refusal comes first,
+    // then the lint rule that explains the same mistake.
     let out = meridian(&dir, &["lint", "--json", "web.yaml"]);
-    let first: Value = serde_json::from_str(stdout(&out).lines().next().unwrap()).unwrap();
-    assert_eq!(first["code"], "unquoted-mode");
+    let text = stdout(&out);
+    let mut lines = text
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap());
+    let first = lines.next().unwrap();
+    assert_eq!(first["code"], "invalid-param");
+    let second = lines.next().unwrap();
+    assert_eq!(second["code"], "unquoted-mode");
     assert_eq!(
-        (first["line"].as_u64(), first["column"].as_u64()),
+        (second["line"].as_u64(), second["column"].as_u64()),
         (Some(20), Some(15))
     );
-    assert_eq!(first["fixable"], true);
+    assert_eq!(second["fixable"], true);
 
     // --fix applies what is safe; the error is still the author's to fix.
     let out = meridian(&dir, &["lint", "--fix", "web.yaml"]);
@@ -209,10 +217,14 @@ fn lint_reports_what_the_compiler_the_plugin_and_the_rules_say() {
         .unwrap()
         .contains("mode: \"0644\""));
 
-    // Warnings fail only when asked to.
+    // Warnings fail only when asked to. Two packages that manage the same
+    // thing compile, with a warning.
     fs::write(
         dir.join("web.yaml"),
-        WEB.replace("mode: \"0644\"", "mode: 0644"),
+        WEB.replace(
+            "    - id: nginx_conf",
+            "    - id: nginx_again\n      type: package\n      params:\n        name: nginx\n    - id: nginx_conf",
+        ),
     )
     .unwrap();
     assert!(meridian(&dir, &["lint", "web.yaml"]).status.success());

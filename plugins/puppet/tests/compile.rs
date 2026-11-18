@@ -166,7 +166,7 @@ fn strings_are_quoted_so_puppet_reads_what_was_written() {
 #[test]
 fn numbers_lists_and_maps_are_written_as_puppet_source() {
     let text = manifest(
-        "    - id: u\n      type: user\n      params:\n        name: app\n        uid: 1200.0\n        system: true\n        groups: [a, b]\n",
+        "    - id: u\n      type: user\n      params:\n        name: app\n        uid: 1200\n        system: true\n        groups: [a, b]\n",
     );
     assert!(text.contains("uid    => 1200,"), "{text}");
     assert!(text.contains("system => true,"), "{text}");
