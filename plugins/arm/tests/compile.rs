@@ -7,7 +7,7 @@ mod common;
 use std::path::{Path, PathBuf};
 
 use common::assert_valid_template;
-use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text};
+use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text, secret_in_param};
 use meridian_sdk::{CompileError, Data, Emitted, Emitter, ResourceGraph};
 use meridian_target_arm::Arm;
 
@@ -748,9 +748,76 @@ fn the_plugin_declares_what_it_is() {
     use meridian_sdk::{Capabilities, Category};
     assert_eq!(Arm.name(), "arm");
     assert_eq!(Arm.category(), Category::InfrastructureAsCode);
-    assert_eq!(Arm.capabilities(), Capabilities::default());
+    assert_eq!(
+        Arm.capabilities(),
+        Capabilities {
+            secrets: true,
+            ..Capabilities::default()
+        }
+    );
     assert_eq!(
         Arm.supported_resource_types(),
         ["<Namespace>/<type>", "deployment", "parameter"]
     );
+}
+
+// ---- secrets ------------------------------------------------------------
+
+#[test]
+fn a_secret_in_a_param_is_a_securestring_parameter_the_runner_fills_from_a_file() {
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: net\nspec:\n  target: arm\n{}",
+        spec(&format!("{VNET}        tags: placeholder\n"))
+    );
+    let mut graph = graph_from_text("infra.yaml", &text, "arm");
+    secret_in_param(&mut graph, "vnet", "tags", "db_password");
+    let emitted = emit(&graph).unwrap();
+    let template = &emitted.artifact.files["template.json"];
+    assert_valid_template(template);
+    assert!(
+        template.contains("\"tags\": \"[parameters('meridian_secret_db_password')]\""),
+        "{template}"
+    );
+    assert!(
+        template.contains(
+            "\"meridian_secret_db_password\": {\n      \"type\": \"securestring\"\n    }"
+        ),
+        "{template}"
+    );
+    assert!(!template.contains("(secret "), "{template}");
+    assert!(!template.contains("dependsOn"), "{template}");
+    // The runner's record of the deployment knows the parameter is secure.
+    let deployment = &emitted.artifact.files["deployment.json"];
+    assert!(
+        deployment.contains("\"meridian_secret_db_password\": \"securestring\""),
+        "{deployment}"
+    );
+    assert_eq!(
+        meridian_target_arm::secret_parameter("db_password"),
+        "meridian_secret_db_password"
+    );
+    assert_eq!(
+        meridian_target_arm::secret_reference("db_password"),
+        "${meridian_secret_db_password}"
+    );
+    assert!(Arm.capabilities().secrets);
+}
+
+#[test]
+fn a_secret_in_the_deployments_settings_or_a_parameters_declaration_is_refused() {
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: net\nspec:\n  target: arm\n{}",
+        spec(&format!("{VNET}    - id: owner\n      type: parameter\n      params:\n        type: string\n        defaultValue: ops\n"))
+    );
+    for (id, param) in [("deployment", "resourceGroup"), ("owner", "defaultValue")] {
+        let mut graph = graph_from_text("infra.yaml", &text, "arm");
+        secret_in_param(&mut graph, id, param, "db_password");
+        let err = emit(&graph).unwrap_err();
+        assert_eq!(err.rule, "unsupported-secret-place", "{id}");
+        assert!(
+            err.msg.starts_with(&format!("param {param:?} of the")),
+            "{}",
+            err.msg
+        );
+    }
 }

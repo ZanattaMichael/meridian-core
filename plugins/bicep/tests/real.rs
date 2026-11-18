@@ -28,7 +28,9 @@
 
 use std::path::Path;
 
-use meridian_plugin_testkit::{graph_from_file, graph_from_text, scratch, KeptLog};
+use meridian_plugin_testkit::{
+    graph_from_file, graph_from_text, scratch, secret_in_param, KeptLog,
+};
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Data, Emitter, NoLog, Output, Plan,
@@ -414,4 +416,53 @@ fn a_deployment_is_previewed_made_read_back_and_changed_in_azure() {
     apply(&dir, &second);
     let again = plan(&dir, &second);
     assert!(again.changes.is_empty(), "{:?}", again.changes);
+}
+
+#[ignore = "needs a real az and the Bicep compiler; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_secret_is_a_secure_parameter_the_compiler_accepts() {
+    if !asked_for_the_compiler() {
+        return;
+    }
+    let dir = scratch(TMP, "real-build-secret");
+    // A Key Vault secret whose value is a Meridian secret: the way a value
+    // reaches the vault without being written anywhere on the way.
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: vault\nspec:\n  target: bicep\n  resources:\n    - id: target\n      type: deployment\n      params:\n        resourceGroup: any-rg\n    - id: token\n      type: Microsoft.KeyVault/vaults/secrets@2023-07-01\n      params:\n        name: app-vault/token\n        properties:\n          value: placeholder\n";
+    let mut graph = graph_from_text("vault.yaml", text, "bicep");
+    let slot = secret_in_param(&mut graph, "token", "properties", "token");
+    // The secret is inside the properties map, as the type wants it.
+    let token = graph
+        .resources
+        .iter_mut()
+        .find(|r| r.id == "token")
+        .unwrap();
+    token.params.insert(
+        "properties".to_owned(),
+        Value::Map([("value".to_owned(), Value::Secret(slot))].into()),
+    );
+    let artifact = compile(&graph);
+    let bicep = &artifact.files[TEMPLATE_PATH];
+    assert!(
+        bicep.contains("@secure()\nparam meridian_secret_token string\n"),
+        "{bicep}"
+    );
+    assert!(bicep.contains("value: meridian_secret_token\n"), "{bicep}");
+    let template = build(&dir, &artifact);
+    // The compiler made a securestring parameter of it.
+    let parameter = template
+        .as_map()
+        .and_then(|t| t.get("parameters"))
+        .and_then(Value::as_map)
+        .and_then(|p| p.get("meridian_secret_token"))
+        .and_then(Value::as_map)
+        .and_then(|p| p.get("type"))
+        .and_then(Value::as_str);
+    assert_eq!(parameter, Some("securestring"), "{}", template.canonical());
+    assert!(
+        template
+            .canonical()
+            .contains("[parameters('meridian_secret_token')]"),
+        "{}",
+        template.canonical()
+    );
 }

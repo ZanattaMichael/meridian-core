@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use meridian_sdk::tool::{write_artifact, Finished, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
-    RunContext, RunError, Runner, Value,
+    RunContext, RunError, Runner, SecretFile, Value,
 };
 
 use crate::{STACK_PATH, TEMPLATE_PATH};
@@ -164,6 +164,12 @@ impl CloudFormationRunner {
         };
         let stack = Stack::read(settings)?;
         write_artifact(&context.work_dir, artifact)?;
+        // Secrets reach CloudFormation as the values of NoEcho parameters,
+        // read from a file only the user can read and named on the command
+        // line by its path alone. The file lives until the change set has
+        // been created; the change set keeps the values, as CloudFormation
+        // keeps every parameter, and shows `****` for them.
+        let secrets = secrets_file(context)?;
 
         let existing = self.status(context, &stack)?;
         let status = existing
@@ -192,12 +198,17 @@ impl CloudFormationRunner {
                 if new_stack { "CREATE" } else { "UPDATE" },
             ])
             .args(["--template-body", &format!("file://{TEMPLATE_PATH}")]);
+        if let Some(file) = &secrets {
+            create = create.args(["--parameters", &format!("file://{}", file.path().display())]);
+        }
         if !stack.capabilities.is_empty() {
             create = create
                 .arg("--capabilities")
                 .args(stack.capabilities.iter().cloned());
         }
-        if let Err(refused) = create.run_ok("aws could not create a change set", log) {
+        let created = create.run_ok("aws could not create a change set", log);
+        drop(secrets);
+        if let Err(refused) = created {
             // A refusal can still leave the shell of a stack that was never
             // created. One that exists only in review is ours to remove.
             if new_stack && self.in_review(context, &stack) {
@@ -282,6 +293,28 @@ impl CloudFormationRunner {
             })
             .collect())
     }
+}
+
+/// The run's secrets as a CloudFormation parameters file, `[{"ParameterKey":
+/// ..., "ParameterValue": ...}]`, in a private file; nothing when the run
+/// has none.
+fn secrets_file(context: &RunContext) -> Result<Option<SecretFile>, RunError> {
+    if context.secrets.is_empty() {
+        return Ok(None);
+    }
+    context
+        .secrets
+        .json_file_shaped("[", ",", "]\n", "parameters.json", |name| {
+            (
+                format!(
+                    "{{\"ParameterKey\":{},\"ParameterValue\":\"",
+                    Value::String(crate::secret_parameter(name).unwrap_or_default()).canonical()
+                ),
+                "\"}".to_owned(),
+            )
+        })
+        .map(Some)
+        .map_err(|e| RunError::new(format!("writing the parameters file: {e}")))
 }
 
 fn parse(finished: &Finished, what: &str) -> Result<Value, RunError> {

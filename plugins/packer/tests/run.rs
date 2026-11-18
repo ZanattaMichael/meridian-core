@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{artifact, graph_from_file, scratch, stand_in, KeptLog};
-use meridian_sdk::{Artifact, Data, Emitter, RunContext, Runner, Value};
+use meridian_plugin_testkit::{artifact, graph_from_file, scratch, secrets, stand_in, KeptLog};
+use meridian_sdk::{Artifact, Data, Emitter, RunContext, Runner, SecretRef, Value};
 use meridian_target_packer::{Packer, PackerRunner};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -266,4 +266,91 @@ fn an_artifact_from_another_plugin_is_refused() {
         );
     }
     assert!(calls(&dir).is_empty());
+}
+
+// ---- secrets ------------------------------------------------------------
+
+/// A stand-in that also keeps a copy of the variables file it is given and
+/// records its mode and the environment, so the test can see what reached
+/// Packer and where it was.
+fn runner_keeping_vars(dir: &Path, cases: &str) -> PackerRunner {
+    let program = stand_in(
+        dir,
+        "packer",
+        &format!(
+            "for a in \"$@\"; do case \"$a\" in -var-file=*) f=\"${{a#-var-file=}}\"; echo \"$f\" > \"{dir}/secrets-path\"; cp \"$f\" \"{dir}/secrets.json\"; stat -c %a \"$f\" > \"{dir}/mode\" 2>/dev/null || stat -f %Lp \"$f\" > \"{dir}/mode\";; esac; done\nenv > \"{dir}/environment\"\necho \"$@\" >> \"{dir}/calls\"\ncase \"$1\" in\n{cases}\nesac",
+            dir = dir.display()
+        ),
+    );
+    PackerRunner {
+        program: program.to_str().unwrap().to_owned(),
+    }
+}
+
+fn with_secret(dir: &Path) -> RunContext {
+    let mut context = context(dir);
+    context.secrets = secrets(&[(SecretRef::new(1), "db_password", "hunter2\"\\")]);
+    context
+}
+
+#[test]
+fn secrets_reach_packer_as_a_private_variables_file_and_nowhere_else() {
+    let dir = scratch(TMP, "secrets");
+    let log = KeptLog::default();
+    runner_keeping_vars(&dir, HAPPY)
+        .apply(&with_secret(&dir), &compiled(), &log)
+        .unwrap();
+    // validate and build read the file; init has no use for it.
+    let calls = calls(&dir);
+    assert_eq!(calls.len(), 3, "{calls:?}");
+    assert_eq!(calls[0], "init .");
+    assert!(
+        calls[1].starts_with("validate -var-file=") && calls[1].ends_with(" ."),
+        "{}",
+        calls[1]
+    );
+    assert!(
+        calls[2].starts_with("build -color=false -var-file=") && calls[2].ends_with(" ."),
+        "{}",
+        calls[2]
+    );
+    // The file held the value under the variable's name, as JSON.
+    assert_eq!(
+        fs::read_to_string(dir.join("secrets.json")).unwrap(),
+        "{\"meridian_secret_db_password\":\"hunter2\\\"\\\\\"}\n"
+    );
+    #[cfg(unix)]
+    assert_eq!(fs::read_to_string(dir.join("mode")).unwrap().trim(), "600");
+    // Nothing else held it: not the command line, not the environment, not
+    // the log, not the work directory, and the private file is gone.
+    for call in &calls {
+        assert!(!call.contains("hunter2"), "{call}");
+    }
+    assert!(!fs::read_to_string(dir.join("environment"))
+        .unwrap()
+        .contains("hunter2"));
+    assert!(!log.text().iter().any(|l| l.contains("hunter2")));
+    for entry in fs::read_dir(dir.join("work")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() {
+            assert!(
+                !fs::read_to_string(&path).unwrap().contains("hunter2"),
+                "{}",
+                path.display()
+            );
+        }
+    }
+    let path = fs::read_to_string(dir.join("secrets-path")).unwrap();
+    assert!(!Path::new(path.trim()).exists(), "{path} was left behind");
+    assert!(!Path::new(path.trim()).parent().unwrap().exists());
+}
+
+#[test]
+fn a_run_without_secrets_names_no_variables_file() {
+    let dir = scratch(TMP, "no-secrets");
+    runner_keeping_vars(&dir, HAPPY)
+        .plan(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(calls(&dir), ["init .", "validate ."]);
+    assert!(!dir.join("secrets.json").exists());
 }

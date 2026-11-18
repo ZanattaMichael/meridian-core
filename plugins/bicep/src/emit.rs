@@ -19,6 +19,11 @@ pub(crate) fn serialise(template: &Template) -> BTreeMap<String, String> {
         "// Compiled by Meridian from the document {}. Do not edit.\n",
         template.document
     );
+    // A secret's parameter: secure, so Azure keeps its value out of the
+    // deployment's record and its logs.
+    for parameter in &template.parameters {
+        let _ = write!(out, "\n@secure()\nparam {parameter} string\n");
+    }
     for statement in &template.statements {
         let mut body = statement.body.clone();
         if !statement.depends_on.is_empty() {

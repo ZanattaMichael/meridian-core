@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use meridian_sdk::expr::{self, Part};
 use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
 
-use crate::{refuse, refuse_at, Deployment, Expr, Piece, Statement, Template};
+use crate::{refuse, refuse_at, secret_parameter, Deployment, Expr, Piece, Statement, Template};
 
 /// `Namespace/type@api-version`, with nested types allowed.
 fn is_resource_type(t: &str) -> bool {
@@ -70,6 +70,16 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
         }
     }
 
+    // Each secret is a parameter: a name a param may refer to, but not a
+    // resource to order after.
+    let parameters: BTreeSet<String> = graph
+        .secrets
+        .iter()
+        .map(|secret| secret_parameter(&secret.name))
+        .collect();
+    symbols.extend(parameters.iter().cloned());
+    template.parameters = parameters.iter().cloned().collect();
+
     for r in graph.resources.iter().filter(|r| r.r#type != "deployment") {
         let mut refs = BTreeSet::new();
         let mut body = Vec::with_capacity(r.params.len());
@@ -79,6 +89,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
             body.push((name.clone(), rewritten));
         }
         refs.remove(&r.id);
+        refs.retain(|r| !parameters.contains(r));
         // Bicep convention: name first, then location, then the rest in
         // sorted order, which is how the params arrive.
         body.sort_by_key(|(name, _)| match name.as_str() {

@@ -122,6 +122,7 @@ mod tests {
                 region: "eu-west-1".to_owned(),
                 capabilities: vec!["CAPABILITY_IAM".to_owned()],
             },
+            parameters: Vec::new(),
             entries: vec![entry("web_vm", "WebVm"), entry("logs", "Logs")],
             outputs: vec![output("bucket_name", "BucketName")],
         }

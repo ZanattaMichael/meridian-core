@@ -4,10 +4,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::expr::{self, Part};
-use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
+use meridian_sdk::{CompileError, Position, Resource, ResourceGraph, Value};
 use meridian_yaml::Yaml;
 
-use crate::{logical_id, plain, refuse, refuse_at, Entry, Settings, Template};
+use crate::{
+    logical_id, plain, refuse, refuse_at, secret_key, secret_parameter, Entry, Settings, Template,
+};
 
 /// Keys that are attributes of a resource and not properties of its type.
 const ATTRIBUTES: &[&str] = &[
@@ -80,6 +82,40 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
         logical.insert(r.id.clone(), id);
     }
 
+    // Each secret is a parameter, referred to in a param by its key. A
+    // parameter's name is letters and digits, so two secrets, or a secret and
+    // a resource, can come down to the same one; that is refused rather than
+    // silently merged.
+    let mut parameters = BTreeSet::new();
+    for secret in &graph.secrets {
+        let Some(parameter) = secret_parameter(&secret.name) else {
+            return Err(refuse_at(
+                "",
+                &Position::default(),
+                "invalid-name",
+                format!(
+                    "secret {:?} has no letters or digits to make a parameter name from",
+                    secret.name
+                ),
+            ));
+        };
+        if let Some((id, _)) = logical.iter().find(|(_, l)| **l == parameter) {
+            return Err(refuse_at(
+                "",
+                &Position::default(),
+                "invalid-name",
+                format!(
+                    "secret {:?} would be the parameter {parameter}, which is also what {id:?} \
+                     is called in the template; rename one of them",
+                    secret.name
+                ),
+            ));
+        }
+        logical.insert(secret_key(&secret.name), parameter.clone());
+        parameters.insert(secret_key(&secret.name));
+        template.parameters.push(parameter);
+    }
+
     for r in graph.resources.iter().filter(|r| r.r#type != "stack") {
         let mut refs = BTreeSet::new();
         let mut properties = Vec::new();
@@ -94,6 +130,8 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
             }
         }
         refs.remove(&r.id);
+        // A parameter is not a resource to order after.
+        refs.retain(|r| !parameters.contains(r));
         template.entries.push(Entry {
             id: r.id.clone(),
             logical: logical[&r.id].clone(),

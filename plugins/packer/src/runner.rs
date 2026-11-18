@@ -7,7 +7,7 @@ use std::path::Path;
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, Operations, Output, Plan,
-    RunContext, RunError, Runner, Value,
+    RunContext, RunError, Runner, SecretFile, Value,
 };
 
 use crate::outputs::{self, Built};
@@ -64,12 +64,45 @@ impl PackerRunner {
         tool
     }
 
+    /// The secrets of the run as a variables file only the user can read,
+    /// held in memory where the system allows, for `-var-file`; nothing when
+    /// the run has none. The command line names the file's path and nothing
+    /// more, and the variables are declared sensitive, so Packer masks their
+    /// values in everything it prints.
+    fn secrets(context: &RunContext) -> Result<Option<SecretFile>, RunError> {
+        if context.secrets.is_empty() {
+            return Ok(None);
+        }
+        context
+            .secrets
+            .json_file("secrets.pkrvars.json", crate::secret_variable)
+            .map(Some)
+            .map_err(|e| RunError::new(format!("writing the variables file: {e}")))
+    }
+
+    /// A call of `command` that reads the template, given the variables file
+    /// when there is one; the template's directory comes last.
+    fn reading(
+        &self,
+        context: &RunContext,
+        command: &[&str],
+        secrets: Option<&SecretFile>,
+    ) -> Tool {
+        let tool = self.tool(context).args(command.iter().copied());
+        match secrets {
+            Some(file) => tool.arg(format!("-var-file={}", file.path().display())),
+            None => tool,
+        }
+        .arg(".")
+    }
+
     /// Writes the template, installs the plugins it requires and has Packer
     /// check it. Nothing is built.
     fn prepare(
         &self,
         context: &RunContext,
         artifact: &Artifact,
+        secrets: Option<&SecretFile>,
         log: &dyn Log,
     ) -> Result<Described, RunError> {
         let (Some(_), Some(described)) = (
@@ -87,8 +120,7 @@ impl PackerRunner {
         self.tool(context)
             .args(["init", "."])
             .run_ok("packer init failed", log)?;
-        self.tool(context)
-            .args(["validate", "."])
+        self.reading(context, &["validate"], secrets)
             .run_ok("packer validate failed", log)?;
         Ok(described)
     }
@@ -113,7 +145,8 @@ impl Runner for PackerRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
-        let described = self.prepare(context, artifact, log)?;
+        let secrets = Self::secrets(context)?;
+        let described = self.prepare(context, artifact, secrets.as_ref(), log)?;
         Ok(Plan {
             changes: described
                 .sources
@@ -130,10 +163,13 @@ impl Runner for PackerRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
-        let described = self.prepare(context, artifact, log)?;
-        self.tool(context)
-            .args(["build", "-color=false", "."])
-            .run_ok("packer build failed", log)?;
+        let secrets = Self::secrets(context)?;
+        let described = self.prepare(context, artifact, secrets.as_ref(), log)?;
+        let built = self
+            .reading(context, &["build", "-color=false"], secrets.as_ref())
+            .run_ok("packer build failed", log);
+        drop(secrets);
+        built?;
         let built = read_manifest(&context.work_dir)?;
         Ok(Applied {
             changes: described

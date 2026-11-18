@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use meridian_sdk::tool::{write_artifact, Finished, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
-    RunContext, RunError, Runner, Value,
+    RunContext, RunError, Runner, SecretFile, Value,
 };
 
 use crate::validate::is_secure;
@@ -139,8 +139,20 @@ impl ArmRunner {
 
     /// The arguments a preview and a deployment share: the template, where it
     /// goes and the values of its parameters.
-    fn with_template(&self, mut tool: Tool, context: &RunContext, deployment: &Deployment) -> Tool {
+    fn with_template(
+        &self,
+        mut tool: Tool,
+        context: &RunContext,
+        deployment: &Deployment,
+        secrets: Option<&SecretFile>,
+    ) -> Tool {
         tool = tool.args(["--template-file", TEMPLATE_PATH]);
+        // The run's secrets are the values of securestring parameters, read
+        // from a file only the user can read and named on the command line
+        // by its path alone.
+        if let Some(file) = secrets {
+            tool = tool.args(["--parameters", &format!("@{}", file.path().display())]);
+        }
         tool = if deployment.subscription_scope {
             tool.args(["--location", &deployment.location])
         } else {
@@ -185,6 +197,7 @@ impl ArmRunner {
         &self,
         context: &RunContext,
         deployment: &Deployment,
+        secrets: Option<&SecretFile>,
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
         log.out(&format!(
@@ -193,7 +206,12 @@ impl ArmRunner {
             deployment.destination()
         ));
         let what_if = self
-            .with_template(self.az(context, deployment, "what-if"), context, deployment)
+            .with_template(
+                self.az(context, deployment, "what-if"),
+                context,
+                deployment,
+                secrets,
+            )
             .arg("--no-pretty-print")
             .run_ok("az could not preview the deployment", log)?;
         let result = parse(&what_if, "the preview")?;
@@ -207,6 +225,34 @@ impl ArmRunner {
         }
         Ok(read_changes(&result, &deployment.resources))
     }
+}
+
+/// The run's secrets as a Resource Manager parameters file in a private
+/// file, held in memory where the system allows and removed when dropped;
+/// nothing when the run has none.
+fn secrets_file(context: &RunContext) -> Result<Option<SecretFile>, RunError> {
+    if context.secrets.is_empty() {
+        return Ok(None);
+    }
+    context
+        .secrets
+        .json_file_shaped(
+            "{\"$schema\":\"https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#\",\"contentVersion\":\"1.0.0.0\",\"parameters\":{",
+            ",",
+            "}}\n",
+            "parameters.json",
+            |name| {
+                (
+                    format!(
+                        "{}:{{\"value\":\"",
+                        Value::String(crate::secret_parameter(name)).canonical()
+                    ),
+                    "\"}".to_owned(),
+                )
+            },
+        )
+        .map(Some)
+        .map_err(|e| RunError::new(format!("writing the parameters file: {e}")))
 }
 
 fn parse(finished: &Finished, what: &str) -> Result<Value, RunError> {
@@ -373,7 +419,8 @@ impl Runner for ArmRunner {
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
         let deployment = self.load(context, artifact)?;
-        self.preview(context, &deployment, log)
+        let secrets = secrets_file(context)?;
+        self.preview(context, &deployment, secrets.as_ref(), log)
     }
 
     fn apply(
@@ -383,7 +430,8 @@ impl Runner for ArmRunner {
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
         let deployment = self.load(context, artifact)?;
-        let plan = self.preview(context, &deployment, log)?;
+        let secrets = secrets_file(context)?;
+        let plan = self.preview(context, &deployment, secrets.as_ref(), log)?;
         log.out(&format!(
             "deployment {}: deploying {} changes to {}",
             deployment.name,
@@ -395,11 +443,14 @@ impl Runner for ArmRunner {
                 self.az(context, &deployment, "create"),
                 context,
                 &deployment,
+                secrets.as_ref(),
             )
             .run_ok(
                 "the deployment failed; its operations say which resource failed and why",
                 log,
-            )?;
+            );
+        drop(secrets);
+        let created = created?;
         Ok(Applied {
             changes: plan.changes,
             outputs: read_outputs(&parse(&created, "the deployment's record")?),

@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{artifact, scratch, stand_in, KeptLog};
-use meridian_sdk::{Artifact, RunContext, Runner, Value};
+use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
+use meridian_sdk::{Artifact, RunContext, Runner, SecretRef, Value};
 use meridian_target_pulumi::PulumiRunner;
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -373,5 +373,80 @@ fn pulumi_not_being_installed_is_said_plainly() {
             .starts_with("could not run meridian-no-such-pulumi: it is not installed"),
         "{}",
         err.msg
+    );
+}
+
+// ---- secrets ------------------------------------------------------------
+
+/// The happy stand-in that also keeps what `config set` reads from standard
+/// input, under the key it was given.
+fn keeping_config(dir: &Path) -> String {
+    format!(
+        "\"config set\") cat > \"{dir}/config-$4\" ;;\n\"config rm\") ;;\n{HAPPY}",
+        dir = dir.display()
+    )
+}
+
+fn with_secret(dir: &Path) -> RunContext {
+    let mut context = context(dir);
+    context.inputs.clear();
+    context.secrets = secrets(&[(SecretRef::new(1), "db_password", "hunter2\"\\")]);
+    context
+}
+
+#[test]
+fn secrets_reach_pulumi_as_secret_configuration_set_from_stdin_and_nowhere_else() {
+    let dir = scratch(TMP, "secrets");
+    let log = KeptLog::default();
+    runner(&dir, &keeping_config(&dir))
+        .apply(&with_secret(&dir), &compiled(), &log)
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        [
+            "stack select prod --create",
+            // The key alone is on the command line; the value went in by
+            // standard input, and Pulumi encrypts it before it is written.
+            "config set --secret meridian_secret_db_password --stack prod",
+            "preview --stack prod --json",
+            "up --stack prod --yes --skip-preview",
+            // Taken out again once the stage is over.
+            "config rm meridian_secret_db_password --stack prod",
+            "stack output --stack prod --json",
+            "stack output --stack prod --json --show-secrets",
+        ]
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("config-meridian_secret_db_password")).unwrap(),
+        "hunter2\"\\"
+    );
+    assert!(!fs::read_to_string(dir.join("env"))
+        .unwrap()
+        .contains("hunter2"));
+    assert!(!log.text().iter().any(|l| l.contains("hunter2")));
+    assert!(!fs::read_to_string(dir.join("work/Pulumi.yaml"))
+        .unwrap()
+        .contains("hunter2"));
+}
+
+#[test]
+fn a_plan_forgets_the_secrets_it_set_even_when_the_preview_fails() {
+    let dir = scratch(TMP, "secrets-failed");
+    let cases = keeping_config(&dir).replace(
+        "\"preview \"*) echo '{\"steps\":[",
+        "\"preview \"*) echo '{\"diagnostics\":[{\"message\":\"no\",\"severity\":\"error\"}]}'; exit 255 ;;\n\"never \"*) echo '{\"steps\":[",
+    );
+    let err = runner(&dir, &cases)
+        .plan(&with_secret(&dir), &compiled(), &KeptLog::default())
+        .unwrap_err();
+    assert_eq!(err.msg, "pulumi preview failed");
+    assert_eq!(
+        calls(&dir),
+        [
+            "stack select prod --create",
+            "config set --secret meridian_secret_db_password --stack prod",
+            "preview --stack prod --json",
+            "config rm meridian_secret_db_password --stack prod",
+        ]
     );
 }

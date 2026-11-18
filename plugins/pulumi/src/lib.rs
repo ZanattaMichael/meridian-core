@@ -50,8 +50,8 @@ mod validate;
 use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, Value,
+    holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph, Value,
 };
 
 pub use emit::{PROGRAM_PATH, STACK_PATH};
@@ -183,8 +183,45 @@ pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &str, msg: String)
     }
 }
 
+/// The configuration key the secret `name` is handed over as:
+/// `meridian_secret_<name>`.
+pub fn secret_key(name: &str) -> String {
+    format!("meridian_secret_{name}")
+}
+
+/// How a secret is written in a param: a reference to its configuration
+/// value, which Pulumi YAML reads by name.
+pub fn secret_reference(name: &str) -> String {
+    format!("${{{}}}", secret_key(name))
+}
+
 /// The Pulumi emitter.
 pub struct Pulumi;
+
+/// Refuses a secret in a resource of one of `types`: their params are not
+/// handed to the tool by a private channel but become `what`, so a secret
+/// there would be written in the open.
+fn refuse_secret_in(graph: &ResourceGraph, types: &[&str], what: &str) -> Result<(), CompileError> {
+    for r in graph
+        .resources
+        .iter()
+        .filter(|r| types.contains(&r.r#type.as_str()))
+    {
+        if let Some((name, _)) = r.params.iter().find(|(_, value)| holds_secret(value)) {
+            return Err(refuse(
+                r,
+                "unsupported-secret-place",
+                format!(
+                    "param {name:?} of the {} holds a secret, and {what}, where a secret cannot \
+                     go. A secret goes in a resource's params, which the tool is handed by a \
+                     private channel",
+                    r.r#type
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
 
 impl Emitter for Pulumi {
     fn name(&self) -> &str {
@@ -209,8 +246,14 @@ impl Emitter for Pulumi {
     ///
     /// There is no apply-time conditional either: Pulumi YAML has no way to
     /// leave a resource out depending on what it finds.
+    ///
+    /// A secret is taken: it reaches the program as a secret configuration
+    /// value, set from the tool's standard input.
     fn capabilities(&self) -> Capabilities {
-        Capabilities::default()
+        Capabilities {
+            secrets: true,
+            ..Capabilities::default()
+        }
     }
 
     fn category(&self) -> Category {
@@ -218,6 +261,10 @@ impl Emitter for Pulumi {
     }
 
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        // A secret in a param is written as a reference to a secret
+        // configuration value, which the runner sets from standard input.
+        refuse_secret_in(graph, &["stack", "config"], "the stack's settings are the command line `pulumi` is given and a configuration value's declaration is written into the program")?;
+        let graph = &graph.secrets_written_as(secret_reference);
         let mut program = transform::transform(graph)?;
         sort::apply_ordering(graph, &mut program)?;
         validate::validate(&program)?;

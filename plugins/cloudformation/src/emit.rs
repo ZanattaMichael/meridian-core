@@ -45,8 +45,31 @@ pub(crate) fn serialise(template: &Template) -> Files {
                 template.document
             )),
         ),
-        ("Resources".to_owned(), Yaml::Map(resources)),
     ];
+    if !template.parameters.is_empty() {
+        // A secret's parameter: NoEcho, so CloudFormation shows `****` in
+        // place of its value wherever it describes the stack or its change
+        // sets.
+        root.push((
+            "Parameters".to_owned(),
+            Yaml::Map(
+                template
+                    .parameters
+                    .iter()
+                    .map(|name| {
+                        (
+                            name.clone(),
+                            Yaml::Map(vec![
+                                ("Type".to_owned(), Yaml::str("String")),
+                                ("NoEcho".to_owned(), Yaml::Bool(true)),
+                            ]),
+                        )
+                    })
+                    .collect(),
+            ),
+        ));
+    }
+    root.push(("Resources".to_owned(), Yaml::Map(resources)));
     if !template.outputs.is_empty() {
         root.push((
             "Outputs".to_owned(),

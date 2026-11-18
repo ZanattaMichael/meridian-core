@@ -33,9 +33,20 @@ mod validate;
 use std::collections::BTreeSet;
 
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph,
+    holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph,
 };
+
+/// The parameter the secret `name` is handed over as: `meridian_secret_<name>`.
+pub fn secret_parameter(name: &str) -> String {
+    format!("meridian_secret_{name}")
+}
+
+/// How a secret is written in a param: a reference to its parameter, which
+/// Bicep reads by name.
+pub fn secret_reference(name: &str) -> String {
+    format!("${{{}}}", secret_parameter(name))
+}
 
 pub use emit::{DEPLOYMENT_PATH, TEMPLATE_PATH};
 pub use runner::BicepRunner;
@@ -91,6 +102,8 @@ pub(crate) struct Deployment {
 pub(crate) struct Template {
     pub document: String,
     pub deployment: Deployment,
+    /// The `@secure()` parameters the secrets are handed over as.
+    pub parameters: Vec<String>,
     pub statements: Vec<Statement>,
     pub outputs: Vec<(String, Expr, Position)>,
 }
@@ -125,6 +138,31 @@ pub(crate) fn is_identifier(name: &str) -> bool {
 /// The Bicep emitter.
 pub struct Bicep;
 
+/// Refuses a secret in a resource of one of `types`: their params are not
+/// handed to the tool by a private channel but become `what`, so a secret
+/// there would be written in the open.
+fn refuse_secret_in(graph: &ResourceGraph, types: &[&str], what: &str) -> Result<(), CompileError> {
+    for r in graph
+        .resources
+        .iter()
+        .filter(|r| types.contains(&r.r#type.as_str()))
+    {
+        if let Some((name, _)) = r.params.iter().find(|(_, value)| holds_secret(value)) {
+            return Err(refuse(
+                r,
+                "unsupported-secret-place",
+                format!(
+                    "param {name:?} of the {} holds a secret, and {what}, where a secret cannot \
+                     go. A secret goes in a resource's params, which the tool is handed by a \
+                     private channel",
+                    r.r#type
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl Emitter for Bicep {
     fn name(&self) -> &str {
         NAME
@@ -137,9 +175,14 @@ impl Emitter for Bicep {
     }
 
     /// A deployment cannot act on one resource because another changed, and
-    /// it has no conditional that reads the state of what it deploys to.
+    /// it has no conditional that reads the state of what it deploys to. A
+    /// secret is taken: it reaches Azure as a `@secure()` parameter whose
+    /// value is read from a private file.
     fn capabilities(&self) -> Capabilities {
-        Capabilities::default()
+        Capabilities {
+            secrets: true,
+            ..Capabilities::default()
+        }
     }
 
     fn category(&self) -> Category {
@@ -147,6 +190,14 @@ impl Emitter for Bicep {
     }
 
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        // A secret in a param is written as a reference to a secure
+        // parameter, which the runner gives its value from a private file.
+        refuse_secret_in(
+            graph,
+            &["deployment"],
+            "the deployment's settings are the command line `az` is given",
+        )?;
+        let graph = &graph.secrets_written_as(secret_reference);
         let mut template = transform::transform(graph)?;
         sort::apply_ordering(graph, &mut template)?;
         validate::validate(&template)?;

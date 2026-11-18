@@ -7,7 +7,7 @@ use meridian_sdk::expr::{self, Part};
 use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
 
 use crate::expression::{self, quote};
-use crate::{refuse, refuse_at, Entry, Parameter, Scope, Settings, Template};
+use crate::{refuse, refuse_at, secret_parameter, Entry, Parameter, Scope, Settings, Template};
 
 /// The type of the resource that holds the deployment's own settings.
 pub(crate) const DEPLOYMENT: &str = "deployment";
@@ -480,6 +480,22 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
                 ));
             }
         }
+    }
+
+    // Each secret is a securestring parameter, which a param refers to as
+    // any parameter: `[parameters('meridian_secret_<name>')]`.
+    let secret_parameters: Vec<String> = graph
+        .secrets
+        .iter()
+        .map(|secret| secret_parameter(&secret.name))
+        .collect();
+    for name in &secret_parameters {
+        symbols.insert(name.as_str(), Symbol::Parameter);
+        template.parameters.push(Parameter {
+            name: name.clone(),
+            definition: BTreeMap::from([("type".to_owned(), Value::from("securestring"))]),
+            pos: meridian_sdk::Position::default(),
+        });
     }
 
     let mut resolver = Resolver {

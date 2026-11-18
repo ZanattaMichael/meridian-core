@@ -16,10 +16,12 @@
 
 use std::path::Path;
 
-use meridian_plugin_testkit::{graph_from_file, graph_from_text, scratch, KeptLog};
+use meridian_plugin_testkit::{
+    graph_from_file, graph_from_text, scratch, secret_in_param, secrets, KeptLog,
+};
 use meridian_sdk::{
     Artifact, ChangeAction, Data, Emitter, Output, ParamKind, Plan, RunContext, Runner,
-    SchemaRequest, SchemaSource, Value,
+    SchemaRequest, SchemaSource, SecretRef, Value,
 };
 use meridian_target_pulumi::{Pulumi, PulumiRunner, PulumiSchemas};
 
@@ -335,4 +337,82 @@ fn the_packages_schemas_are_exported_for_an_editor() {
         .find(|s| s.r#type == "random:index/randomUuid:RandomUuid")
         .unwrap();
     assert!(other.open && other.params.is_empty());
+}
+
+/// Unlike anything the program or Pulumi prints, so that finding it is
+/// finding a leak.
+const SECRET: &str = "zzq-Vt9-not-a-real-token-4kLm";
+
+#[ignore = "needs a real pulumi; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_secret_reaches_the_program_as_secret_configuration_and_is_in_nothing_kept_in_the_open() {
+    if !enabled(
+        "a_secret_reaches_the_program_as_secret_configuration_and_is_in_nothing_kept_in_the_open",
+    ) {
+        return;
+    }
+    let dir = scratch(TMP, "real-secret");
+    let runner = runner();
+    // The secret is a pet's prefix, so the name Pulumi makes carries it:
+    // what is made from a secret is a secret to Pulumi too.
+    let document = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: pets\nspec:\n  target: pulumi\n  resources:\n    - id: pet\n      type: random:index:RandomPet\n      params:\n        prefix: placeholder\n        length: 1\n  outputs:\n    - name: pet_name\n      value: ${pet.id}\n";
+    let mut graph = graph_from_text("infra.yaml", document, "pulumi");
+    secret_in_param(&mut graph, "pet", "prefix", "token");
+    let artifact = Pulumi.emit(&graph, &Data::new()).unwrap().artifact;
+    assert!(!artifact.files["Pulumi.yaml"].contains(SECRET));
+
+    let mut context = context(&dir, &[]);
+    context.secrets = secrets(&[(SecretRef::new(1), "token", SECRET)]);
+    let log = KeptLog::default();
+    let fail = |what: &str, err: meridian_sdk::RunError| -> ! {
+        panic!("{what}: {err}\n--- log ---\n{}", log.text().join("\n"))
+    };
+    let plan = runner
+        .plan(&context, &artifact, &log)
+        .unwrap_or_else(|e| fail("the plan", e));
+    assert_eq!(changes(&plan), ["create pet"]);
+    let applied = runner
+        .apply(&context, &artifact, &log)
+        .unwrap_or_else(|e| fail("the apply", e));
+    // The program was given the value, and Pulumi treats what it made from
+    // it as a secret.
+    let pet_name = output(&applied.outputs, "pet_name");
+    assert!(pet_name.sensitive, "a name made from a secret is a secret");
+    assert!(
+        text(pet_name).starts_with(&format!("{SECRET}-")),
+        "the pet's name does not start with the prefix"
+    );
+    // Nothing printed holds it, and nothing left in the open: the stack's
+    // settings file no longer names the key, and the state holds the value
+    // encrypted, as Pulumi keeps every secret.
+    assert!(
+        !log.text().iter().any(|l| l.contains(SECRET)),
+        "the secret reached the log:\n{}",
+        log.text().join("\n")
+    );
+    let mut pending = vec![dir.join("work")];
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                let bytes = std::fs::read(&path).unwrap();
+                assert!(
+                    !String::from_utf8_lossy(&bytes).contains(SECRET),
+                    "{} holds the secret in the open",
+                    path.display()
+                );
+                if path.file_name().is_some_and(|n| {
+                    n.to_string_lossy().starts_with("Pulumi.") && n != "Pulumi.yaml"
+                }) {
+                    assert!(
+                        !String::from_utf8_lossy(&bytes).contains("meridian_secret_token"),
+                        "{} still names the secret after the run",
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
 }

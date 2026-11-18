@@ -133,23 +133,45 @@ impl Secrets {
         file_name: &str,
         key: impl Fn(&str) -> String,
     ) -> std::io::Result<SecretFile> {
-        let keys: Vec<String> = self
-            .held
-            .values
-            .keys()
-            .map(|name| Value::String(key(name)).canonical())
-            .collect();
-        let mut parts = vec![Part::Text("{")];
-        for (i, (key, value)) in keys.iter().zip(self.held.values.values()).enumerate() {
+        self.json_file_shaped("{", ",", "}\n", file_name, |name| {
+            (
+                format!("{}:\"", Value::String(key(name)).canonical()),
+                "\"".to_owned(),
+            )
+        })
+    }
+
+    /// Writes every secret into one private file in the shape a tool reads:
+    /// `head`, then one entry per secret with `between` separating them,
+    /// then `tail`. An entry is what `entry(name)` gives before and after
+    /// the value, which is written between them as the inside of a JSON
+    /// string: for a CloudFormation parameters file the entry is
+    /// `{"ParameterKey":"X","ParameterValue":"` and `"}`. The text around
+    /// the value is the caller's; the value itself goes straight from
+    /// protected memory into the file. [`Secrets::json_file`] is the plain
+    /// object written this way.
+    pub fn json_file_shaped(
+        &self,
+        head: &str,
+        between: &str,
+        tail: &str,
+        file_name: &str,
+        entry: impl Fn(&str) -> (String, String),
+    ) -> std::io::Result<SecretFile> {
+        let around: Vec<(String, String)> =
+            self.held.values.keys().map(|name| entry(name)).collect();
+        let mut parts = vec![Part::Text(head)];
+        for (i, ((before, after), value)) in
+            around.iter().zip(self.held.values.values()).enumerate()
+        {
             if i > 0 {
-                parts.push(Part::Text(","));
+                parts.push(Part::Text(between));
             }
-            parts.push(Part::Text(key));
-            parts.push(Part::Text(":\""));
+            parts.push(Part::Text(before));
             parts.push(Part::JsonString(value));
-            parts.push(Part::Text("\""));
+            parts.push(Part::Text(after));
         }
-        parts.push(Part::Text("}\n"));
+        parts.push(Part::Text(tail));
         SecretFile::create(file_name, &parts)
     }
 }
@@ -168,6 +190,16 @@ impl PartialEq for Secrets {
 
 /// Replaces every [`Value::Secret`] in `value` with the text `write` gives
 /// for its name. A slot the graph does not name is written as its mask.
+/// Whether a value is a secret or holds one anywhere inside it.
+pub fn holds_secret(value: &Value) -> bool {
+    match value {
+        Value::Secret(_) => true,
+        Value::List(items) => items.iter().any(holds_secret),
+        Value::Map(map) => map.values().any(holds_secret),
+        _ => false,
+    }
+}
+
 pub(crate) fn written_as(
     value: &Value,
     names: &[SecretName],

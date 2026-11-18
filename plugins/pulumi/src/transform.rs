@@ -6,7 +6,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use meridian_sdk::expr::{self, Part};
 use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
 
-use crate::{refuse, refuse_at, Entry, Kind, Program, Settings, INVOKE_OPTIONS, RESOURCE_OPTIONS};
+use crate::{
+    refuse, refuse_at, secret_key, Entry, Kind, Program, Settings, INVOKE_OPTIONS, RESOURCE_OPTIONS,
+};
 
 /// The one name Pulumi YAML itself gives meaning to at the start of a
 /// reference: `${pulumi.stack}`, `${pulumi.project}`, `${pulumi.cwd}`.
@@ -76,6 +78,9 @@ fn is_token(t: &str) -> bool {
 /// program, or why it cannot be read.
 enum Address {
     Name(String),
+    /// A secret's configuration value: read by name like any other, but not
+    /// a resource to order after.
+    Secret(String),
     /// A provider setting, read by the provider alone.
     ProviderSetting(String),
     Stack,
@@ -127,6 +132,25 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Program, CompileError> 
         project: graph.name.clone(),
         ..Program::default()
     };
+    // Each secret is a configuration value declared secret, so Pulumi keeps
+    // it encrypted in the stack's state and prints `[secret]` in its place.
+    for secret in &graph.secrets {
+        let key = secret_key(&secret.name);
+        addresses.insert(key.clone(), Address::Secret(key.clone()));
+        program.entries.push(Entry {
+            kind: Kind::Config,
+            id: key.clone(),
+            name: key,
+            token: String::new(),
+            body: BTreeMap::from([
+                ("type".to_owned(), Value::from("String")),
+                ("secret".to_owned(), Value::Bool(true)),
+            ]),
+            options: BTreeMap::new(),
+            refs: BTreeSet::new(),
+            pos: meridian_sdk::Position::default(),
+        });
+    }
     for (r, class) in graph.resources.iter().zip(classes) {
         check_meta(r)?;
         match class {
@@ -407,6 +431,9 @@ fn rewrite_string(
                 match addresses.get(name) {
                     Some(Address::Name(written)) => {
                         refs.insert(name.to_owned());
+                        out.push_str(&format!("${{{written}{rest}}}"));
+                    }
+                    Some(Address::Secret(written)) => {
                         out.push_str(&format!("${{{written}{rest}}}"));
                     }
                     Some(Address::ProviderSetting(setting)) => {

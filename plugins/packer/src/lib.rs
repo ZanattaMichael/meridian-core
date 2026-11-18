@@ -55,8 +55,8 @@ mod validate;
 use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, Value,
+    holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph, Value,
 };
 
 pub use emit::{BUILD_PATH, CONFIG_PATH, MANIFEST_PATH};
@@ -64,6 +64,36 @@ pub use runner::{PackerRunner, PROGRAM_VARIABLE};
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "packer";
+
+/// The name of the input variable the secret `name` is handed over as:
+/// `meridian_secret_<name>`.
+pub fn secret_variable(name: &str) -> String {
+    format!("meridian_secret_{name}")
+}
+
+/// How a secret is written in the template: a reference to its variable.
+pub fn secret_reference(name: &str) -> String {
+    format!("${{var.{}}}", secret_variable(name))
+}
+
+/// Declares the sensitive input variable each of the graph's secrets is
+/// handed over as, so the template is complete on its own and Packer masks
+/// the value wherever it would print it.
+fn secret_variables(graph: &ResourceGraph, template: &mut Template) {
+    for secret in &graph.secrets {
+        template.blocks.push(Block {
+            kind: Kind::Variable,
+            r#type: String::new(),
+            name: secret_variable(&secret.name),
+            body: BTreeMap::from([
+                ("type".to_owned(), Value::from("string")),
+                ("sensitive".to_owned(), Value::Bool(true)),
+            ]),
+            refs: BTreeSet::new(),
+            pos: Position::default(),
+        });
+    }
+}
 
 /// What part of a template a resource became.
 ///
@@ -188,6 +218,31 @@ pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &str, msg: String)
 /// The Packer emitter.
 pub struct Packer;
 
+/// Refuses a secret in a resource of one of `types`: their params are not
+/// handed to the tool by a private channel but become `what`, so a secret
+/// there would be written in the open.
+fn refuse_secret_in(graph: &ResourceGraph, types: &[&str], what: &str) -> Result<(), CompileError> {
+    for r in graph
+        .resources
+        .iter()
+        .filter(|r| types.contains(&r.r#type.as_str()))
+    {
+        if let Some((name, _)) = r.params.iter().find(|(_, value)| holds_secret(value)) {
+            return Err(refuse(
+                r,
+                "unsupported-secret-place",
+                format!(
+                    "param {name:?} of the {} holds a secret, and {what}, where a secret cannot \
+                     go. A secret goes in a resource's params, which the tool is handed by a \
+                     private channel",
+                    r.r#type
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl Emitter for Packer {
     fn name(&self) -> &str {
         NAME
@@ -210,13 +265,14 @@ impl Emitter for Packer {
 
     /// A build runs its provisioners once, in order, on a machine it throws
     /// away. Nothing in it reacts to a change, and nothing in it is decided on
-    /// the machine at apply time, so no capability is declared.
+    /// the machine at apply time. A secret is taken: it reaches Packer as a
+    /// sensitive input variable read from a private file.
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             native_notify: false,
             synthetic_notify: false,
             runtime_condition: false,
-            secrets: false,
+            secrets: true,
             credentials: false,
         }
     }
@@ -230,7 +286,16 @@ impl Emitter for Packer {
     }
 
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        // A secret in a param is written as a reference to a sensitive input
+        // variable, which the runner gives its value from a private file.
+        refuse_secret_in(
+            graph,
+            &["variable", "plugin"],
+            "its declaration is written into the template as it stands",
+        )?;
+        let graph = &graph.secrets_written_as(secret_reference);
         let mut template = transform::transform(graph)?;
+        secret_variables(graph, &mut template);
         order::apply_ordering(graph, &mut template)?;
         validate::validate(&template)?;
         Ok(Emitted {

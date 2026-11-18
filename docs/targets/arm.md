@@ -337,6 +337,69 @@ There are two ways, and they can be combined.
 Operator values are never shown in a log or an error, and neither is the value of a
 `securestring` or `secureObject` parameter.
 
+## Secrets
+
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a resource's params
+reaches Resource Manager as a `securestring` parameter whose value is read from a private
+file, and through nothing else.
+
+```yaml
+spec:
+  target: arm
+  secrets:
+    - name: db_password
+      from: env
+      key: APP_DB_PASSWORD
+  resources:
+    - id: db_password_secret
+      type: Microsoft.KeyVault/vaults/secrets
+      params:
+        apiVersion: "2023-07-01"
+        name: app-vault/db-password
+        properties:
+          value: ${{ secret.db_password }}
+```
+
+**What the compile writes.** The param becomes
+`[parameters('meridian_secret_db_password')]`, or a `format()` of it inside longer text,
+and the template declares the parameter beside the document's own:
+
+```json
+"parameters": {
+  "meridian_secret_db_password": { "type": "securestring" }
+}
+```
+
+The compiled template holds the parameter's name and never its value. `deployment.json`
+records the parameter as secure, so the runner never shows a value given under that
+name.
+
+**How the value reaches the tool.** When a stage runs, the runner writes every secret into
+one Resource Manager parameters file (`"parameters": {"<name>": {"value": ...}}`) in a
+directory only the user can enter (mode `0700`, the file `0600`, on a memory filesystem
+where the system has one), and passes it as `--parameters @<path>` to both `what-if` and
+`create`, before any value from `MERIDIAN_AZ_PARAMETERS` or an earlier stage. The file is
+overwritten and removed when the stage ends. The command line names the file's path and
+nothing more, and `az`'s environment holds nothing of the value.
+
+**What Azure keeps.** A `securestring` parameter's value is not in the deployment's
+record and not returned by `show`. A property given the value is kept by the resource
+provider the way it keeps that property. The plugin reads each change's resource id,
+kind and the names of up to five changed properties from the preview, never a value.
+Whether what-if prints a secure value inside a property diff has not been checked
+against a real subscription; see the note under [Plan, apply and
+outputs](#plan-apply-and-outputs).
+
+**What is refused.** A secret in the `deployment` resource's settings, or in a
+`parameter`'s declaration (`defaultValue`, `allowedValues`), is refused at compile, rule
+`unsupported-secret-place`: the settings are the command line `az` is given, and a
+declaration is written into the template as it stands.
+
+The handover is tested against a stand-in `az` that keeps a copy of the parameters file,
+its mode, its arguments and its environment (`plugins/arm/tests/run.rs`), and the
+compiled template is read by the real Bicep reader in CI (`plugins/arm/tests/real.rs`),
+which reads the parameter back as `@secure()`.
+
 ## What is refused
 
 The plugin refuses at compile time what it could not compile faithfully. Each refusal

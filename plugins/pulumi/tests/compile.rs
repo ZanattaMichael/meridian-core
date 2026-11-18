@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text};
+use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text, secret_in_param};
 use meridian_sdk::{Capabilities, Category, CompileError, Data, Emitted, Emitter, ResourceGraph};
 use meridian_target_pulumi::Pulumi;
 
@@ -45,8 +45,14 @@ fn the_plugin_says_what_it_is() {
     assert_eq!(Pulumi.name(), "pulumi");
     assert_eq!(Pulumi.category(), Category::InfrastructureAsCode);
     // No notify and no apply-time conditional is claimed, so the core never
-    // promises either on this target.
-    assert_eq!(Pulumi.capabilities(), Capabilities::default());
+    // promises either on this target; a secret is taken.
+    assert_eq!(
+        Pulumi.capabilities(),
+        Capabilities {
+            secrets: true,
+            ..Capabilities::default()
+        }
+    );
     assert_eq!(
         Pulumi.supported_resource_types(),
         [
@@ -482,4 +488,52 @@ fn the_documentation_shows_the_real_example_and_its_real_output() {
         page.contains(&format!("```yaml\n{example}```")),
         "docs/targets/pulumi.md does not show examples/pulumi/pets.yaml as it is"
     );
+}
+
+// ---- secrets ------------------------------------------------------------
+
+#[test]
+fn a_secret_in_a_param_is_a_secret_configuration_value_the_runner_sets_from_stdin() {
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: pets\nspec:\n  target: pulumi\n  resources:\n    - id: pet\n      type: random:index:RandomPet\n      params:\n        prefix: placeholder\n        length: 2\n";
+    let mut graph = graph_from_text("pets.yaml", text, "pulumi");
+    secret_in_param(&mut graph, "pet", "prefix", "db_password");
+    let emitted = emit(&graph).unwrap();
+    let program = &emitted.artifact.files["Pulumi.yaml"];
+    assert!(
+        program.contains(
+            "config:\n  meridian_secret_db_password:\n    secret: true\n    type: String\n"
+        ),
+        "{program}"
+    );
+    assert!(
+        program.contains("prefix: ${meridian_secret_db_password}"),
+        "{program}"
+    );
+    assert!(!program.contains("(secret "), "{program}");
+    assert!(!program.contains("dependsOn"), "{program}");
+    assert_eq!(
+        meridian_target_pulumi::secret_key("db_password"),
+        "meridian_secret_db_password"
+    );
+    assert_eq!(
+        meridian_target_pulumi::secret_reference("db_password"),
+        "${meridian_secret_db_password}"
+    );
+    assert!(Pulumi.capabilities().secrets);
+}
+
+#[test]
+fn a_secret_in_the_stacks_settings_or_a_configuration_declaration_is_refused() {
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: pets\nspec:\n  target: pulumi\n  resources:\n    - id: deployment\n      type: stack\n      params:\n        name: prod\n    - id: prefix\n      type: config\n      params:\n        type: string\n        default: web\n    - id: pet\n      type: random:index:RandomPet\n      params:\n        prefix: ${prefix}\n";
+    for (id, param) in [("deployment", "name"), ("prefix", "default")] {
+        let mut graph = graph_from_text("pets.yaml", text, "pulumi");
+        secret_in_param(&mut graph, id, param, "db_password");
+        let err = emit(&graph).unwrap_err();
+        assert_eq!(err.rule, "unsupported-secret-place", "{id}");
+        assert!(
+            err.msg.starts_with(&format!("param {param:?} of the")),
+            "{}",
+            err.msg
+        );
+    }
 }

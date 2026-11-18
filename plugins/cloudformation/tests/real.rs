@@ -25,10 +25,13 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{graph_from_text, repo_root, scratch, KeptLog};
+use meridian_plugin_testkit::{
+    graph_from_text, repo_root, scratch, secret_in_param, secrets, KeptLog,
+};
 use meridian_sdk::tool::Tool;
 use meridian_sdk::{
-    Applied, Artifact, Change, ChangeAction, Data, Emitter, NoLog, Output, Plan, RunContext, Runner,
+    Applied, Artifact, Change, ChangeAction, Data, Emitter, NoLog, Output, Plan, RunContext,
+    Runner, SecretRef,
 };
 use meridian_target_cloudformation::{CloudFormation, CloudFormationRunner};
 
@@ -287,4 +290,80 @@ fn a_template_cloudformation_rejects_fails_the_plan_and_leaves_no_stack() {
         "{error:?}"
     );
     assert!(!stack_exists(REJECTED), "a refused plan leaves no stack");
+}
+
+/// Unlike anything the stack or the service prints, so that finding it is
+/// finding a leak.
+const SECRET: &str = "zzq-Vt9-not-a-real-token-4kLm";
+const SECRET_STACK: &str = "meridian-real-secret";
+
+#[ignore = "needs a real aws and CloudFormation; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_secret_reaches_the_stack_as_a_noecho_parameter_and_is_in_nothing_shown() {
+    if !service() {
+        return;
+    }
+    delete_stack(SECRET_STACK);
+    let _tear_down = TearDown(SECRET_STACK);
+    let dir = scratch(TMP, "real-secret");
+    // A parameter in Systems Manager whose value is the secret: the way a
+    // value reaches what reads it from there.
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: secret\nspec:\n  target: cloudformation\n  resources:\n    - id: deployment\n      type: stack\n      params:\n        name: {SECRET_STACK}\n        region: us-east-1\n    - id: token\n      type: AWS::SSM::Parameter\n      params:\n        Name: /{SECRET_STACK}/token\n        Type: String\n        Value: placeholder\n"
+    );
+    let mut graph = graph_from_text(DOCUMENT, &text, "cloudformation");
+    secret_in_param(&mut graph, "token", "Value", "token");
+    let artifact = CloudFormation
+        .emit(&graph, &Data::new())
+        .unwrap_or_else(|e| panic!("{e}"))
+        .artifact;
+    assert!(!artifact.files["template.yaml"].contains(SECRET));
+
+    let mut context = context(&dir);
+    context.secrets = secrets(&[(SecretRef::new(1), "token", SECRET)]);
+    let runner = CloudFormationRunner::from_env();
+    let log = KeptLog::default();
+    let preview = runner
+        .plan(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(changes(&preview.changes), [(ChangeAction::Create, "token")]);
+    let applied = runner
+        .apply(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(changes(&applied.changes), [(ChangeAction::Create, "token")]);
+    // The service was given the value: the parameter holds it.
+    let stored = aws(&[
+        "ssm",
+        "get-parameter",
+        "--name",
+        &format!("/{SECRET_STACK}/token"),
+        "--query",
+        "Parameter.Value",
+        "--output",
+        "text",
+    ])
+    .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(stored.trim(), SECRET);
+    // The stack's own description does not show it: NoEcho.
+    let described = aws(&[
+        "cloudformation",
+        "describe-stacks",
+        "--stack-name",
+        SECRET_STACK,
+    ])
+    .unwrap_or_else(|e| panic!("{e}"));
+    assert!(described.contains("MeridianSecretToken"), "{described}");
+    assert!(
+        !described.contains(SECRET),
+        "describe-stacks shows the secret"
+    );
+    // Nothing the plugin printed or wrote holds it.
+    assert!(
+        !log.text().iter().any(|l| l.contains(SECRET)),
+        "the secret reached the log:\n{}",
+        log.text().join("\n")
+    );
+    assert!(!fs::read_to_string(dir.join("work/template.yaml"))
+        .unwrap()
+        .contains(SECRET));
 }

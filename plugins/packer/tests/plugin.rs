@@ -38,7 +38,13 @@ fn the_binary_describes_itself_to_the_host() {
     assert_eq!(info.name, "packer");
     assert_eq!(info.category, Category::InfrastructureAsCode);
     assert_eq!(info.operations, Operations::ALL);
-    assert_eq!(info.capabilities, Capabilities::default());
+    assert_eq!(
+        info.capabilities,
+        Capabilities {
+            secrets: true,
+            ..Capabilities::default()
+        }
+    );
     assert_eq!(
         info.resource_types,
         [

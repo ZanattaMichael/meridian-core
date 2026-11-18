@@ -33,12 +33,17 @@ const KEY: &str = "zzq-not-a-real-private-key-7Hq2\n";
 /// channel, and the reference each compiles in its place.
 const TAKE_A_SECRET: &[(&str, &str)] = &[
     ("ansible", "meridian_secret_db_password"),
+    ("arm", "[parameters('meridian_secret_db_password')]"),
+    ("bicep", "meridian_secret_db_password"),
     ("chef", "node['meridian_secret_db_password']"),
+    ("cloudformation", "MeridianSecretDbPassword"),
     (
         "openvox",
         "Sensitive(lookup('meridian_secret_db_password'))",
     ),
     ("opentofu", "var.meridian_secret_db_password"),
+    ("packer", "var.meridian_secret_db_password"),
+    ("pulumi", "${meridian_secret_db_password}"),
     ("puppet", "Sensitive(lookup('meridian_secret_db_password'))"),
     (
         "salt",
@@ -271,7 +276,11 @@ fn secret_in_a_param(target: &str, file: &Path) -> Vec<String> {
         (
             "derived",
             derived.as_str(),
-            reference.map(|r| r.replace("db_password", "derived_1")),
+            // CloudFormation spells the name without its underscores.
+            reference.map(|r| {
+                r.replace("db_password", "derived_1")
+                    .replace("DbPassword", "Derived1")
+            }),
         ),
     ] {
         // The first text param the target accepts the secret in. A name or

@@ -39,6 +39,7 @@ images: an AMI, an Azure or Google Cloud image, a VMware template, a Docker imag
 - [Notifications](#notifications)
 - [Outputs](#outputs)
 - [Running a build](#running-a-build)
+- [Secrets](#secrets)
 - [What the plugin refuses](#what-the-plugin-refuses)
 - [Examples](#examples)
 - [Why this category](#why-this-category)
@@ -406,14 +407,64 @@ for. Variables can also be set the usual way, with `PKR_VAR_<name>` in the envir
 Meridian runs in.
 
 **Credentials.** The plugin passes its environment through to Packer. Sign in the way the
-builder expects, for example `AWS_PROFILE` or `ARM_CLIENT_ID`. Do not write a secret into a
-document: declare a `variable` with `sensitive: true` and set it from the environment.
+builder expects, for example `AWS_PROFILE` or `ARM_CLIENT_ID`. A value a step needs that
+must not be written into the template is a [secret](#secrets).
 
 **A different `packer`.** Set `MERIDIAN_PACKER` to the program to run when it is not
 `packer` on `PATH`.
 
 When Packer fails, Meridian reports which step failed, the command that was run, the exit
 status and the end of what Packer printed.
+
+## Secrets
+
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a resource's params
+reaches Packer as an input variable read from a private file, and through nothing else.
+
+```yaml
+spec:
+  target: packer
+  secrets:
+    - name: token
+      from: env
+      key: REGISTRY_TOKEN
+  resources:
+    - id: token
+      type: local
+      params:
+        value: ${{ secret.token }}
+    - id: login
+      type: provisioner.shell-local
+      params:
+        inline:
+          - printf '%s' "${token}" | docker login --password-stdin -u ci registry.example.com
+```
+
+**What the compile writes.** The param becomes `${var.meridian_secret_<name>}`, and the
+template declares that variable with `type = string` and `sensitive = true`, so Packer
+prints `<sensitive>` wherever the value would appear in its output. The compiled template
+holds the variable's name and never its value, so it can be reviewed and kept.
+
+**How the value reaches the tool.** When a stage runs, the runner writes every secret into
+one variables file, `secrets.pkrvars.json`, in a directory only the user can enter (mode
+`0700`, the file `0600`, on a memory filesystem where the system has one), and passes it as
+`-var-file=<path>` to `packer validate` and `packer build`. `packer init` has no use for
+it and is not given it. The file is overwritten and removed when the build ends. The
+command line names the file's path and nothing more, and Packer's environment holds
+nothing of the value. A step that uses the value is run by Packer as Packer runs every
+step: a `shell-local` step's commands are written to a script Packer keeps in its own
+temporary directory for the length of the step.
+
+**What is refused.** A secret in the declaration of a `variable` or a `plugin` is refused
+at compile, rule `unsupported-secret-place`: a declaration is written into the template
+as it stands. Put the secret in a `local`, a provisioner, a post-processor or a source,
+which are compiled to a reference.
+
+The handover is tested against a stand-in `packer` that keeps a copy of the variables
+file, its mode, its arguments and its environment
+(`plugins/packer/tests/run.rs`), and against the real `packer` in CI
+(`plugins/packer/tests/packer.rs`), where a step writes the value to a file and the value
+is in nothing Packer printed and in no other file the plugin wrote.
 
 ## What the plugin refuses
 
