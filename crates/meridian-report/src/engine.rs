@@ -132,12 +132,17 @@ impl Engine {
                 })
             }
             Engine::AzurePipelines => {
+                // Joined as text, not as a path, so that the line reads
+                // the same on every platform; Windows takes either slash.
                 let dir = env
                     .get("AGENT_TEMPDIRECTORY")
                     .filter(|p| !p.is_empty())
-                    .map(PathBuf::from)
-                    .unwrap_or_else(std::env::temp_dir);
-                let path = dir.join("meridian-summary.md");
+                    .cloned()
+                    .unwrap_or_else(|| std::env::temp_dir().display().to_string());
+                let path = PathBuf::from(format!(
+                    "{}/meridian-summary.md",
+                    dir.trim_end_matches(['/', '\\'])
+                ));
                 Some(Summary::FileThenLine {
                     content: markdown.to_owned(),
                     line: format!(
