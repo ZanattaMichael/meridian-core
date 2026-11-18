@@ -184,12 +184,14 @@ fn meridian(dir: &Path, args: &[&str]) -> Output {
         .expect("meridian runs")
 }
 
+/// What was printed, with a found file's path written with `/` wherever
+/// the test runs, since Windows finds `tests\\site.test.yaml`.
 fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
+    String::from_utf8_lossy(&output.stdout).replace('\\', "/")
 }
 
 fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
+    String::from_utf8_lossy(&output.stderr).replace('\\', "/")
 }
 
 #[test]
