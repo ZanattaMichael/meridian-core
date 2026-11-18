@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text};
+use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text, secret_in_param};
 use meridian_sdk::{CompileError, Data, Emitted, Emitter, ResourceGraph};
 use meridian_target_bicep::Bicep;
 
@@ -122,4 +122,54 @@ fn notify_absent_and_runtime_conditions_are_refused() {
     ));
     assert_eq!(err.rule, "unsupported-state");
     assert!(err.msg.contains("never deletes one"), "{}", err.msg);
+}
+
+// ---- secrets ------------------------------------------------------------
+
+#[test]
+fn a_secret_in_a_param_is_a_secure_parameter_the_runner_fills_from_a_file() {
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: net\nspec:\n  target: bicep\n  resources:\n{TARGET}{STORAGE}        tags: placeholder\n"
+    );
+    let mut graph = graph_from_text("infra.yaml", &text, "bicep");
+    secret_in_param(&mut graph, "store", "tags", "db_password");
+    let emitted = emit(&graph).unwrap();
+    let bicep = &emitted.artifact.files["main.bicep"];
+    assert!(
+        bicep.contains("\n@secure()\nparam meridian_secret_db_password string\n"),
+        "{bicep}"
+    );
+    assert!(
+        bicep.contains("tags: meridian_secret_db_password\n"),
+        "{bicep}"
+    );
+    assert!(!bicep.contains("(secret "), "{bicep}");
+    // A parameter is nothing to order after.
+    assert!(!bicep.contains("dependsOn"), "{bicep}");
+    assert_eq!(
+        meridian_target_bicep::secret_parameter("db_password"),
+        "meridian_secret_db_password"
+    );
+    assert_eq!(
+        meridian_target_bicep::secret_reference("db_password"),
+        "${meridian_secret_db_password}"
+    );
+    assert!(Bicep.capabilities().secrets);
+}
+
+#[test]
+fn a_secret_in_the_deployments_settings_is_refused_because_they_are_the_command_line() {
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: net\nspec:\n  target: bicep\n  resources:\n{TARGET}{STORAGE}"
+    );
+    let mut graph = graph_from_text("infra.yaml", &text, "bicep");
+    secret_in_param(&mut graph, "target", "resourceGroup", "db_password");
+    let err = emit(&graph).unwrap_err();
+    assert_eq!(err.rule, "unsupported-secret-place");
+    assert!(
+        err.msg
+            .starts_with("param \"resourceGroup\" of the deployment holds a secret"),
+        "{}",
+        err.msg
+    );
 }

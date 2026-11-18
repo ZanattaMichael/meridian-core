@@ -19,8 +19,10 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use meridian_plugin_testkit::{graph_from_file, graph_from_text, scratch, KeptLog};
-use meridian_sdk::{Artifact, Data, Emitter, RunContext, Runner, Value};
+use meridian_plugin_testkit::{
+    graph_from_file, graph_from_text, scratch, secret_in_param, secrets, KeptLog,
+};
+use meridian_sdk::{Artifact, Data, Emitter, RunContext, Runner, SecretRef, Value};
 use meridian_target_packer::{Packer, PackerRunner, PROGRAM_VARIABLE};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -180,4 +182,63 @@ fn a_failing_provisioner_fails_the_apply_and_runs_the_error_cleanup() {
     );
     // Nothing was built, so there is nothing to read back.
     assert!(PackerRunner::from_env().outputs(&context).is_err());
+}
+
+/// Unlike anything the build or Packer prints, so that finding it is finding
+/// a leak.
+const SECRET: &str = "zzq-Vt9-not-a-real-token-4kLm";
+
+#[test]
+#[ignore = "needs packer installed"]
+fn a_secret_reaches_a_step_through_the_variables_file_and_is_in_nothing_packer_printed() {
+    let dir = scratch(TMP, "real-secret");
+    let runner = PackerRunner::from_env();
+    // The secret is the value of a local, which a step writes to a file: the
+    // way a token reaches a step that needs it.
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: img\nspec:\n  target: packer\n  resources:\n    - id: token\n      type: local\n      params:\n        value: placeholder\n    - id: box\n      type: source.null\n      params:\n        communicator: none\n    - id: write\n      type: provisioner.shell-local\n      params:\n        inline:\n          - printf '%s' \"${token}\" > token.txt\n";
+    let mut graph = graph_from_text("image.yaml", text, "packer");
+    secret_in_param(&mut graph, "token", "value", "token");
+    let artifact = Packer.emit(&graph, &Data::new()).unwrap().artifact;
+    let template = &artifact.files[meridian_target_packer::CONFIG_PATH];
+    assert!(
+        template.contains("${var.meridian_secret_token}"),
+        "{template}"
+    );
+    assert!(!template.contains(SECRET));
+
+    let mut context = context(&dir, &[]);
+    context.secrets = secrets(&[(SecretRef::new(1), "token", SECRET)]);
+    let log = KeptLog::default();
+    runner
+        .plan(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    runner
+        .apply(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    // The step was given the value.
+    assert_eq!(
+        fs::read_to_string(dir.join("work/token.txt")).unwrap(),
+        SECRET
+    );
+    // Nothing Packer printed holds it: the variable is sensitive, so Packer
+    // masks it in its output.
+    assert!(
+        !log.text().iter().any(|l| l.contains(SECRET)),
+        "the secret reached the log:\n{}",
+        log.text().join("\n")
+    );
+    // Nothing the plugin wrote holds it either, token.txt apart, which the
+    // document asked for.
+    for entry in fs::read_dir(dir.join("work")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() && path.file_name().is_some_and(|n| n != "token.txt") {
+            assert!(
+                !fs::read_to_string(&path)
+                    .unwrap_or_default()
+                    .contains(SECRET),
+                "{} holds the secret",
+                path.display()
+            );
+        }
+    }
 }

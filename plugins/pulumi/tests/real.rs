@@ -16,7 +16,9 @@
 
 use std::path::Path;
 
-use meridian_plugin_testkit::{graph_from_file, graph_from_text, scratch, KeptLog};
+use meridian_plugin_testkit::{
+    graph_from_file, graph_from_text, scratch, secret_in_param, secrets, KeptLog,
+};
 use meridian_sdk::{
     Artifact, ChangeAction, Data, Emitter, Output, ParamKind, Plan, RunContext, Runner,
     SchemaRequest, SchemaSource, Value,
@@ -335,4 +337,97 @@ fn the_packages_schemas_are_exported_for_an_editor() {
         .find(|s| s.r#type == "random:index/randomUuid:RandomUuid")
         .unwrap();
     assert!(other.open && other.params.is_empty());
+}
+
+/// Unlike anything the program or Pulumi prints, so that finding it is
+/// finding a leak.
+const SECRET: &str = "zzq-Vt9-not-a-real-token-4kLm";
+
+#[ignore = "needs a real pulumi; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_secret_reaches_the_program_as_secret_configuration_and_is_in_nothing_kept_in_the_open() {
+    if !enabled(
+        "a_secret_reaches_the_program_as_secret_configuration_and_is_in_nothing_kept_in_the_open",
+    ) {
+        return;
+    }
+    let dir = scratch(TMP, "real-secret");
+    let runner = runner();
+    // The secret is a random string's `overrideSpecial`, a plain string
+    // input the provider hands back as an output of the same name, which
+    // Pulumi keeps secret as it kept the input; the string itself is
+    // nothing secret, and with `special: false` is not shaped by it. A
+    // resource whose ID is made from the secret, such as a pet with a
+    // secret prefix, would put it in the open, as Pulumi never keeps an ID
+    // secret; and a secret inside a map is not followed into the map that
+    // comes back.
+    let document = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: pets\nspec:\n  target: pulumi\n  resources:\n    - id: tag\n      type: random:index:RandomString\n      params:\n        length: 8\n        special: false\n        overrideSpecial: placeholder\n  outputs:\n    - name: given\n      value: ${tag.overrideSpecial}\n    - name: tag\n      value: ${tag.result}\n";
+    let mut graph = graph_from_text("infra.yaml", document, "pulumi");
+    let slot = secret_in_param(&mut graph, "tag", "overrideSpecial", "token");
+    let artifact = Pulumi.emit(&graph, &Data::new()).unwrap().artifact;
+    assert!(!artifact.files["Pulumi.yaml"].contains(SECRET));
+
+    let mut context = context(&dir, &[]);
+    context.secrets = secrets(&[(slot, "token", SECRET)]);
+    let log = KeptLog::default();
+    let fail = |what: &str, err: meridian_sdk::RunError| -> ! {
+        panic!("{what}: {err}\n--- log ---\n{}", log.text().join("\n"))
+    };
+    let plan = runner
+        .plan(&context, &artifact, &log)
+        .unwrap_or_else(|e| fail("the plan", e));
+    assert_eq!(changes(&plan), ["create tag"]);
+    let applied = runner
+        .apply(&context, &artifact, &log)
+        .unwrap_or_else(|e| fail("the apply", e));
+    // The program was given the value: it comes back as the secret output
+    // of the same name. The string is nothing secret, so the masking tells
+    // the two apart.
+    let masking: Vec<String> = applied
+        .outputs
+        .iter()
+        .map(|o| format!("{} sensitive={}", o.name, o.sensitive))
+        .collect();
+    let given = output(&applied.outputs, "given");
+    assert!(
+        given.sensitive,
+        "the secret input is a secret output; the outputs: {masking:?}"
+    );
+    assert_eq!(text(given), SECRET);
+    let tag = output(&applied.outputs, "tag");
+    assert!(!tag.sensitive, "the outputs: {masking:?}");
+    assert_eq!(text(tag).len(), 8);
+    // Nothing printed holds it, and nothing left in the open: the stack's
+    // settings file no longer names the key, and the state holds the value
+    // encrypted, as Pulumi keeps every secret.
+    assert!(
+        !log.text().iter().any(|l| l.contains(SECRET)),
+        "the secret reached the log:\n{}",
+        log.text().join("\n")
+    );
+    let mut pending = vec![dir.join("work")];
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                let bytes = std::fs::read(&path).unwrap();
+                assert!(
+                    !String::from_utf8_lossy(&bytes).contains(SECRET),
+                    "{} holds the secret in the open",
+                    path.display()
+                );
+                if path.file_name().is_some_and(|n| {
+                    n.to_string_lossy().starts_with("Pulumi.") && n != "Pulumi.yaml"
+                }) {
+                    assert!(
+                        !String::from_utf8_lossy(&bytes).contains("meridian_secret_token"),
+                        "{} still names the secret after the run",
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
 }

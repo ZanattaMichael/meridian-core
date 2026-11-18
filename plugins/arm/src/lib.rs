@@ -40,8 +40,8 @@ mod validate;
 use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, PlacedEscape, Position,
-    Resource, ResourceGraph, Value,
+    holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter,
+    PlacedEscape, Position, Resource, ResourceGraph, Value,
 };
 
 pub use emit::{DEPLOYMENT_PATH, TEMPLATE_PATH};
@@ -49,6 +49,18 @@ pub use runner::{ArmRunner, ARGS_VARIABLE, PARAMETERS_VARIABLE, PROGRAM_VARIABLE
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "arm";
+
+/// The template parameter the secret `name` is handed over as:
+/// `meridian_secret_<name>`.
+pub fn secret_parameter(name: &str) -> String {
+    format!("meridian_secret_{name}")
+}
+
+/// How a secret is written in a param: a reference to its parameter, which
+/// the transform writes as `[parameters('meridian_secret_<name>')]`.
+pub fn secret_reference(name: &str) -> String {
+    format!("${{{}}}", secret_parameter(name))
+}
 
 /// What a deployment is made into.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -112,6 +124,8 @@ pub(crate) struct Settings {
 pub(crate) struct Template {
     pub document: String,
     pub settings: Settings,
+    /// The document's parameters, then one `securestring` parameter per
+    /// secret.
     pub parameters: Vec<Parameter>,
     pub entries: Vec<Entry>,
     /// Output name and its value as the template writes it.
@@ -139,6 +153,31 @@ pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &str, msg: String)
 /// The ARM plugin's emitter.
 pub struct Arm;
 
+/// Refuses a secret in a resource of one of `types`: their params are not
+/// handed to the tool by a private channel but become `what`, so a secret
+/// there would be written in the open.
+fn refuse_secret_in(graph: &ResourceGraph, types: &[&str], what: &str) -> Result<(), CompileError> {
+    for r in graph
+        .resources
+        .iter()
+        .filter(|r| types.contains(&r.r#type.as_str()))
+    {
+        if let Some((name, _)) = r.params.iter().find(|(_, value)| holds_secret(value)) {
+            return Err(refuse(
+                r,
+                "unsupported-secret-place",
+                format!(
+                    "param {name:?} of the {} holds a secret, and {what}, where a secret cannot \
+                     go. A secret goes in a resource's params, which the tool is handed by a \
+                     private channel",
+                    r.r#type
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl Emitter for Arm {
     fn name(&self) -> &str {
         NAME
@@ -154,7 +193,12 @@ impl Emitter for Arm {
     /// and a template's `condition` is decided before anything is deployed,
     /// not from the state of what it deploys to.
     fn capabilities(&self) -> Capabilities {
-        Capabilities::default()
+        Capabilities {
+            // A secret reaches Resource Manager as a securestring parameter
+            // whose value is read from a private file.
+            secrets: true,
+            ..Capabilities::default()
+        }
     }
 
     /// A template string that starts with `[` and ends with `]` is an
@@ -172,6 +216,10 @@ impl Emitter for Arm {
     }
 
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        // A secret in a param is written as a reference to a securestring
+        // parameter, which the runner gives its value from a private file.
+        refuse_secret_in(graph, &["deployment", "parameter"], "the deployment's settings are the command line `az` is given and a parameter's declaration is written into the template")?;
+        let graph = &graph.secrets_written_as(secret_reference);
         let mut template = transform::transform(graph)?;
         sort::apply_ordering(graph, &mut template)?;
         let warnings = validate::validate(&template)?;

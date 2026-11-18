@@ -244,6 +244,72 @@ created, with the reason, and leaves no stack behind. A deployment that fails
 part way is rolled back by CloudFormation itself; the stage fails and says
 to read the stack's events for which resource failed.
 
+## Secrets
+
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a resource's
+params reaches CloudFormation as a template parameter marked `NoEcho`, whose value
+is read from a private file, and through nothing else.
+
+```yaml
+spec:
+  target: cloudformation
+  secrets:
+    - name: db_password
+      from: env
+      key: APP_DB_PASSWORD
+  resources:
+    - id: db_password_parameter
+      type: AWS::SSM::Parameter
+      params:
+        Name: /app/db-password
+        Type: String
+        Value: ${{ secret.db_password }}
+```
+
+**What the compile writes.** The param becomes `Ref: MeridianSecretDbPassword`, or
+`${MeridianSecretDbPassword}` inside an `Fn::Sub` when the secret sits in longer
+text, and the template declares the parameter:
+
+```yaml
+Parameters:
+  MeridianSecretDbPassword:
+    Type: String
+    NoEcho: true
+```
+
+A parameter's name is letters and digits only, so the secret's name is spelled the
+way a resource id is spelled as a logical id: `db_password` is
+`MeridianSecretDbPassword`. Two secrets, or a secret and a resource, that come down to
+the same name are refused (`invalid-name`) rather than merged. The compiled template
+holds the parameter's name and never its value.
+
+**How the value reaches the tool.** When a stage runs, the runner writes every secret
+into one parameters file, `[{"ParameterKey": ..., "ParameterValue": ...}]`, in a
+directory only the user can enter (mode `0700`, the file `0600`, on a memory
+filesystem where the system has one), and passes it as `--parameters file://<path>`
+to `create-change-set`. The file is overwritten and removed as soon as the change set
+exists. Executing the change set names nothing more: the change set carries the
+values, as every change set carries its parameters, and CloudFormation shows `****`
+for a `NoEcho` parameter wherever it describes the stack or the change set. The
+command line names the file's path and nothing more, and `aws`'s environment holds
+nothing of the value.
+
+**What CloudFormation keeps.** The stack keeps the parameter's value, masked in every
+description, as it keeps every parameter. A resource property given the value is kept
+by the service that owns the resource, the way that service keeps it: a
+`AWS::SSM::Parameter` of type `String` is readable by anyone who can read parameters.
+Choose a type or a resource that protects what it holds.
+
+**What is refused.** A secret in the `stack` resource's settings is refused at compile,
+rule `unsupported-secret-place`: the settings are the command line `aws` is given.
+
+The handover is tested against a stand-in `aws` that keeps a copy of the parameters
+file, its mode, its arguments and its environment
+(`plugins/cloudformation/tests/run.rs`), and against the real `aws` and LocalStack in
+CI (`plugins/cloudformation/tests/real.rs`), where the value reaches a Systems Manager
+parameter and is in nothing the plugin printed or wrote and not in the stack's
+description.
+
 ## Settings
 
 | Variable | Meaning |

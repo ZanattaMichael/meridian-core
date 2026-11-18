@@ -384,6 +384,82 @@ of its default. Text is passed as it is and anything else as JSON. The values ne
 appear in a log or an error message, since one may be a secret another tool produced.
 Pulumi saves them in the stack's settings file in the work directory.
 
+## Secrets
+
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a resource's params
+reaches the program as a secret configuration value, set from the tool's standard input,
+and through nothing else.
+
+```yaml
+spec:
+  target: pulumi
+  secrets:
+    - name: db_password
+      from: env
+      key: APP_DB_PASSWORD
+  resources:
+    - id: db
+      type: aws:rds/instance:Instance
+      params:
+        engine: postgres
+        instanceClass: db.t3.micro
+        allocatedStorage: 20
+        username: app
+        password: ${{ secret.db_password }}
+```
+
+**What the compile writes.** The param becomes `${meridian_secret_db_password}`, and the
+program declares the value under `config`:
+
+```yaml
+config:
+  meridian_secret_db_password:
+    secret: true
+    type: string
+```
+
+The compiled program holds the key and never the value. Pulumi keeps a secret
+configuration value as a secret wherever it is handed on as it is: the resource input it
+becomes, the output property of the same name and a stack output of either are encrypted
+in the state and printed as `[secret]`. What a provider makes *from* it is not followed:
+an output property built from a secret input is an ordinary output unless the resource
+names it in `resourceOptions.additionalSecretOutputs` or the stack output wraps it in
+`fn::secret`; a secret inside a map input is not followed into the map that comes back;
+and a resource's ID is never a secret, so a secret should not shape one: a `RandomPet`
+whose prefix is a secret has its name in the open in the state. A document that hands
+Pulumi a secret should say which outputs the secret shapes.
+
+**How the value reaches the tool.** When a stage runs, after the stack is selected and
+before anything else, the runner runs `pulumi config set --secret
+meridian_secret_<name>` for each secret with the value on standard input, so that it is
+on no command line and in no environment. Pulumi encrypts it with the stack's secrets
+provider and writes the ciphertext into the stack's settings file beside the program.
+`preview` and `up` then read it as any configuration value. When the stage is over, and
+also when the preview fails, the runner runs `pulumi config rm meridian_secret_<name>` for
+each, so the settings file in the work directory names no secret between runs. The
+command line names the key and nothing more.
+
+**What Pulumi keeps.** The state keeps what the resources were given, encrypted with the
+stack's secrets provider, as it keeps every secret. The protection is the provider's:
+with no passphrase and no `secretsProvider` chosen, the runner sets an empty passphrase
+(see [The stack and its state](#the-stack-and-its-state)), and an empty passphrase
+protects the ciphertext from nobody who can read the state file. A document that hands
+Pulumi a secret should name a `secretsProvider`, or the operator should set
+`PULUMI_CONFIG_PASSPHRASE` or `PULUMI_CONFIG_PASSPHRASE_FILE`, and keep the state in a
+backend that protects it.
+
+**What is refused.** A secret in the `stack` resource's settings, or in a `config`
+resource's declaration (`default`, `value`), is refused at compile, rule
+`unsupported-secret-place`: the settings are the command line `pulumi` is given, and a
+declaration is written into the program as it stands.
+
+The handover is tested against a stand-in `pulumi` that keeps what it reads on standard
+input, its arguments and its environment (`plugins/pulumi/tests/run.rs`), and against
+the real `pulumi` in CI (`plugins/pulumi/tests/real.rs`), where a secret is a string
+input of a random string: it comes back as a secret output holding the value, the string
+does not, the value is in nothing Pulumi printed and in no file in the work directory in
+the open, and the settings file no longer names the key when the run is over.
+
 ## What is refused
 
 Every refusal carries a rule and, where it is about one resource, that resource with its file and line.

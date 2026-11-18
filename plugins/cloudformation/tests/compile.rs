@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text};
+use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text, secret_in_param};
 use meridian_sdk::{CompileError, Data, Emitted, Emitter, ResourceGraph};
 use meridian_target_cloudformation::CloudFormation;
 
@@ -141,4 +141,69 @@ fn stack_settings_are_checked() {
         "  resources:\n{BUCKET}    - id: s\n      type: stack\n      params: {{profile: prod}}\n"
     ));
     assert_eq!(err.rule, "unsupported-param");
+}
+
+// ---- secrets ------------------------------------------------------------
+
+/// A parameter in Systems Manager whose value is a secret.
+fn with_secret(id: &str) -> ResourceGraph {
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: net\nspec:\n  target: cloudformation\n  resources:\n{BUCKET}    - id: {id}\n      type: AWS::SSM::Parameter\n      params:\n        Name: /app/db\n        Type: String\n        Value: placeholder\n"
+    );
+    let mut graph = graph_from_text("infra.yaml", &text, "cloudformation");
+    secret_in_param(&mut graph, id, "Value", "db_password");
+    graph
+}
+
+#[test]
+fn a_secret_in_a_param_is_a_noecho_parameter_the_runner_fills_from_a_file() {
+    let emitted = emit(&with_secret("db")).unwrap();
+    let text = &emitted.artifact.files["template.yaml"];
+    assert!(
+        text.contains(
+            "Parameters:\n  MeridianSecretDbPassword:\n    Type: String\n    NoEcho: true\n"
+        ),
+        "{text}"
+    );
+    assert!(text.contains("Ref: MeridianSecretDbPassword"), "{text}");
+    assert!(!text.contains("(secret "), "{text}");
+    // A parameter is nothing to order after.
+    assert!(!text.contains("DependsOn"), "{text}");
+    assert_eq!(
+        meridian_target_cloudformation::secret_parameter("db_password").as_deref(),
+        Some("MeridianSecretDbPassword")
+    );
+    assert_eq!(
+        meridian_target_cloudformation::secret_reference("db_password"),
+        "${meridian_secret_db_password}"
+    );
+    assert!(CloudFormation.capabilities().secrets);
+}
+
+#[test]
+fn a_secret_whose_parameter_name_is_also_a_resources_logical_id_is_refused() {
+    let err = emit(&with_secret("meridian_secret_db_password")).unwrap_err();
+    assert_eq!(err.rule, "invalid-name");
+    assert!(
+        err.msg
+            .contains("secret \"db_password\" would be the parameter MeridianSecretDbPassword"),
+        "{}",
+        err.msg
+    );
+}
+
+#[test]
+fn a_secret_in_the_stacks_settings_is_refused_because_they_are_the_command_line() {
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: net\nspec:\n  target: cloudformation\n  resources:\n{BUCKET}    - id: s\n      type: stack\n      params:\n        region: us-east-1\n"
+    );
+    let mut graph = graph_from_text("infra.yaml", &text, "cloudformation");
+    secret_in_param(&mut graph, "s", "region", "db_password");
+    let err = emit(&graph).unwrap_err();
+    assert_eq!(err.rule, "unsupported-secret-place");
+    assert!(
+        err.msg.starts_with("param \"region\" of the stack holds a secret, and the stack's settings are the command line"),
+        "{}",
+        err.msg
+    );
 }

@@ -36,8 +36,8 @@ mod validate;
 use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, Value,
+    holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph, Value,
 };
 use meridian_yaml::Yaml;
 
@@ -46,6 +46,25 @@ pub use runner::CloudFormationRunner;
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "cloudformation";
+
+/// The id a secret is referred to by inside a param, before it is resolved:
+/// `meridian_secret_<name>`.
+pub fn secret_key(name: &str) -> String {
+    format!("meridian_secret_{name}")
+}
+
+/// The template parameter the secret `name` is handed over as:
+/// `MeridianSecretDbPassword` for `db_password`, since a parameter's name is
+/// letters and digits only. `None` when the name has neither.
+pub fn secret_parameter(name: &str) -> Option<String> {
+    logical_id(&secret_key(name))
+}
+
+/// How a secret is written in a param: a reference the transform resolves to
+/// `Ref` of its parameter, or `${X}` inside an `Fn::Sub`.
+pub fn secret_reference(name: &str) -> String {
+    format!("${{{}}}", secret_key(name))
+}
 
 /// One resource of the template.
 #[derive(Clone, Debug, PartialEq)]
@@ -77,6 +96,8 @@ pub(crate) struct Settings {
 pub(crate) struct Template {
     pub document: String,
     pub settings: Settings,
+    /// The parameters the secrets are handed over as, by logical id.
+    pub parameters: Vec<String>,
     pub entries: Vec<Entry>,
     /// Output name as written, its logical id, and its value.
     pub outputs: Vec<(String, String, Yaml, Position)>,
@@ -136,6 +157,31 @@ pub(crate) type Files = BTreeMap<String, String>;
 /// The CloudFormation emitter.
 pub struct CloudFormation;
 
+/// Refuses a secret in a resource of one of `types`: their params are not
+/// handed to the tool by a private channel but become `what`, so a secret
+/// there would be written in the open.
+fn refuse_secret_in(graph: &ResourceGraph, types: &[&str], what: &str) -> Result<(), CompileError> {
+    for r in graph
+        .resources
+        .iter()
+        .filter(|r| types.contains(&r.r#type.as_str()))
+    {
+        if let Some((name, _)) = r.params.iter().find(|(_, value)| holds_secret(value)) {
+            return Err(refuse(
+                r,
+                "unsupported-secret-place",
+                format!(
+                    "param {name:?} of the {} holds a secret, and {what}, where a secret cannot \
+                     go. A secret goes in a resource's params, which the tool is handed by a \
+                     private channel",
+                    r.r#type
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl Emitter for CloudFormation {
     fn name(&self) -> &str {
         NAME
@@ -149,9 +195,13 @@ impl Emitter for CloudFormation {
 
     /// CloudFormation cannot act on one resource because another changed,
     /// natively or otherwise, and it has no apply-time conditional that reads
-    /// the state of the world.
+    /// the state of the world. A secret is taken: it reaches CloudFormation
+    /// as a `NoEcho` parameter whose value is read from a private file.
     fn capabilities(&self) -> Capabilities {
-        Capabilities::default()
+        Capabilities {
+            secrets: true,
+            ..Capabilities::default()
+        }
     }
 
     fn category(&self) -> Category {
@@ -159,6 +209,14 @@ impl Emitter for CloudFormation {
     }
 
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        // A secret in a param is written as a reference to a NoEcho
+        // parameter, which the runner gives its value from a private file.
+        refuse_secret_in(
+            graph,
+            &["stack"],
+            "the stack's settings are the command line `aws` is given",
+        )?;
+        let graph = &graph.secrets_written_as(secret_reference);
         let mut template = transform::transform(graph)?;
         sort::apply_ordering(graph, &mut template)?;
         validate::validate(&template)?;

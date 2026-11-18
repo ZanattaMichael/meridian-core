@@ -1724,8 +1724,27 @@ its command line only, so an apply through it with a secret stops before it
 starts. `cloud-init` and `dsc` take none by design: the user-data is the
 compiled file, read by a machine that does not exist yet, and DSC compiles
 every value into the MOF. The example `secret-in-a-setting.yaml` targets
-`cloud-init` as the target that takes none. Still to come: the containers
-and infrastructure targets of the table, and credentials on these targets.
+`cloud-init` as the target that takes none.
+
+**As built (phase 7, fourth part).** Delivery on the infrastructure targets,
+each by the channel the table gives: `packer` by a sensitive input variable
+and `-var-file` (rank 2); `cloudformation` by a `NoEcho` parameter and a
+parameters file given to `create-change-set` (rank 2; the parameter's name is
+spelled as a logical id, `MeridianSecretDbPassword`, and a clash with a
+resource's logical id is refused); `bicep` by a `@secure()` parameter and
+`arm` by a `securestring` parameter, both given a Resource Manager parameters
+file on `what-if` and `create` (rank 2); `pulumi` by a configuration value
+declared `secret: true`, set with `pulumi config set --secret` reading
+standard input (rank 1) and removed with `config rm` when the stage is over.
+A secret in a tool's settings resource (`stack`, `deployment`) or in a
+declaration (`variable`, `plugin`, `parameter`, `config`) is refused,
+`unsupported-secret-place`, because those become the command line or are
+written as they stand; the conformance test in `meridian-cli` found that
+hole. `Secrets::json_file_shaped` in the SDK writes a secrets file of any
+JSON shape with the values going straight from protected memory into the
+file. Rank 4 for provider credentials (the table's second half for
+`terraform`), the SSH agent and the containers targets are still to come, as
+are credentials on these targets.
 
 ### 11.7 The operating system's own stores
 
@@ -2376,7 +2395,7 @@ green before the next starts.
 | 5b | `Composite`, `include`, `extends`, the configuration type (`segment`, `targets`) | 5 |
 | 6 | `Inventory`, endpoint types, `spec.endpoints`, one instance per endpoint, `--endpoint`, sources from outputs | 4, 5 |
 | 6a (built in part) | `meridian-secret`: the locked, wiped-on-drop value, process hardening, the secret handle in `Value` and how the mark spreads, the output filter, the delivery helpers (standard input, user-only files), `spec.secrets` with the `env`, `file`, `exec` and operating-system store providers, `meridian secret set` and `check`, `resolve_credential`, and the tests of [11.9](#119-what-is-tested). **Built so far:** the crate, the handle and the mark, `spec.secrets` with `env`, `file` and `exec`, fetched per stage and wiped after it, `--strict-secrets` and the warning when memory cannot be locked, `meridian secret check`, and `resolve_credential` for the `registry`, `usernamePassword` and `token` types ([reference](../reference/dsl/secrets.md), [how it is held](../concepts/secrets-in-memory.md)). Then the `keyring`, `systemd-creds`, `secret-service` and `keychain` stores, `fallback` places for one secret, and `meridian secret set` into the keyring and the Secret Service. **Still to come:** `credential-manager` on Windows, writing the keychain, the `tpm` plugin | 2 |
-| 7 (built in part) | secrets and credentials on targets: credential types, sealed references and the secret stream in the protocol, delivery on every target by its channel of [11.6](#116-handing-a-secret-to-a-tool), the plugin contract suite with the recording tool. **Built so far:** the `secrets` capability, secrets by name in the graph and by value in the run context, delivery on `ansible`, `puppet`, `openvox`, `salt`, `chef`, `terraform` and `opentofu` and the test target, the SDK's `Secrets`, `json_file`, `SecretFile::beside` and `stdin_secret`, and the stand-in and real-tool tests of the handover; credential types in documents (`spec.credentials`, every type checked, `targetHost.credential`, the `credentials` capability, delivery on `ansible` and the test target). **Still to come:** secret delivery on the containers and infrastructure targets, credentials on every target but `ansible`, the recording tool as one suite | 6, 6a |
+| 7 (built in part) | secrets and credentials on targets: credential types, sealed references and the secret stream in the protocol, delivery on every target by its channel of [11.6](#116-handing-a-secret-to-a-tool), the plugin contract suite with the recording tool. **Built so far:** the `secrets` capability, secrets by name in the graph and by value in the run context, delivery on `ansible`, `puppet`, `openvox`, `salt`, `chef`, `terraform`, `opentofu`, `packer`, `cloudformation`, `bicep`, `arm`, `pulumi` and the test target, the SDK's `Secrets`, `json_file`, `SecretFile::beside` and `stdin_secret`, and the stand-in and real-tool tests of the handover; credential types in documents (`spec.credentials`, every type checked, `targetHost.credential`, the `credentials` capability, delivery on `ansible` and the test target). **Still to come:** secret delivery on the containers targets (`docker`, `podman`, `kubernetes`, `helm`), provider credentials by rank 4 and the SSH agent, credentials on every target but `ansible`, the recording tool as one suite | 6, 6a |
 | 7a | events and the run record: the event stream, `status`, `runs`, `events`, locking, `--events json` | 4 |
 | 8 | `Workflow`: steps, order from needs, `with`, `assign` from data, fan-out strategies, gates, failure handling, resume | 5a, 6, 7a |
 | 8a | notification sinks: the sink protocol, `webhook` and `command` built in, then `slack`, `teams`, `email`, `opentelemetry` | 7, 7a |

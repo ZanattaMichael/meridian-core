@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text};
+use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text, secret_in_param};
 use meridian_sdk::{
     decode_value, Capabilities, Category, CompileError, Data, Emitted, Emitter, ResourceGraph,
     Value,
@@ -72,7 +72,13 @@ fn labels(value: &Value) -> Vec<&str> {
 fn the_plugin_says_what_it_is() {
     assert_eq!(Packer.name(), "packer");
     assert_eq!(Packer.category(), Category::InfrastructureAsCode);
-    assert_eq!(Packer.capabilities(), Capabilities::default());
+    assert_eq!(
+        Packer.capabilities(),
+        Capabilities {
+            secrets: true,
+            ..Capabilities::default()
+        }
+    );
     let types = Packer.supported_resource_types();
     let mut sorted = types.clone();
     sorted.sort();
@@ -612,5 +618,71 @@ fn a_notify_is_refused_because_nothing_in_a_build_reacts_to_a_change() {
         "notifies resource \"reload\" with action \"restart\", which this target cannot \
          express: a Packer build runs each step once on a machine it then discards, so nothing \
          in it can react to a change"
+    );
+}
+
+// ---- secrets ------------------------------------------------------------
+
+/// The build with a file provisioner whose content is a secret.
+fn with_secret() -> ResourceGraph {
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: img\nspec:\n  target: packer\n{}",
+        with_source(
+            "    - id: conf\n      type: provisioner.file\n      params:\n        destination: /etc/app.conf\n        content: placeholder\n"
+        )
+    );
+    let mut graph = graph_from_text("image.yaml", &text, "packer");
+    secret_in_param(&mut graph, "conf", "content", "db_password");
+    graph
+}
+
+#[test]
+fn a_secret_in_a_param_is_a_sensitive_variable_the_runner_fills_from_a_file() {
+    let emitted = emit(&with_secret()).unwrap();
+    let text = &emitted.artifact.files[CONFIG_PATH];
+    assert!(
+        text.contains("\"content\": \"${var.meridian_secret_db_password}\""),
+        "{text}"
+    );
+    assert!(!text.contains("(secret "), "{text}");
+    let root = decode_value(text.as_bytes()).unwrap();
+    let variable =
+        &root.as_map().unwrap()["variable"].as_map().unwrap()["meridian_secret_db_password"];
+    assert_eq!(
+        variable,
+        &Value::Map(
+            [
+                ("sensitive".to_owned(), Value::Bool(true)),
+                ("type".to_owned(), Value::from("string")),
+            ]
+            .into()
+        )
+    );
+    assert_eq!(
+        meridian_target_packer::secret_variable("db_password"),
+        "meridian_secret_db_password"
+    );
+    assert_eq!(
+        meridian_target_packer::secret_reference("db_password"),
+        "${var.meridian_secret_db_password}"
+    );
+    assert!(Packer.capabilities().secrets);
+}
+
+#[test]
+fn a_secret_in_a_variables_declaration_is_refused_because_it_would_be_written_as_it_stands() {
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: img\nspec:\n  target: packer\n{}",
+        with_source("    - id: token\n      type: variable\n      params:\n        type: string\n        default: placeholder\n")
+    );
+    let mut graph = graph_from_text("image.yaml", &text, "packer");
+    secret_in_param(&mut graph, "token", "default", "db_password");
+    let err = emit(&graph).unwrap_err();
+    assert_eq!(err.rule, "unsupported-secret-place");
+    assert!(
+        err.msg
+            .starts_with("param \"default\" of the variable holds a secret"),
+        "{}",
+        err.msg
     );
 }

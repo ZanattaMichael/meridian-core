@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
-    RunContext, RunError, Runner, Value,
+    RunContext, RunError, Runner, SecretFile, Value,
 };
 
 use crate::{DEPLOYMENT_PATH, TEMPLATE_PATH};
@@ -108,10 +108,22 @@ impl BicepRunner {
         tool.args(self.extra_args.iter().cloned())
     }
 
+    /// The call given the template and, when the run has secrets, the
+    /// parameters file that holds their values: named on the command line by
+    /// its path and nothing more.
+    fn with_template(tool: Tool, secrets: Option<&SecretFile>) -> Tool {
+        let tool = tool.args(["--template-file", TEMPLATE_PATH]);
+        match secrets {
+            Some(file) => tool.args(["--parameters", &format!("@{}", file.path().display())]),
+            None => tool,
+        }
+    }
+
     fn preview(
         &self,
         context: &RunContext,
         artifact: &Artifact,
+        secrets: Option<&SecretFile>,
         log: &dyn Log,
     ) -> Result<(Deployment, Plan), RunError> {
         let (Some(_), Some(settings)) = (
@@ -129,9 +141,7 @@ impl BicepRunner {
             "resource group {}: asking Azure what would change",
             deployment.resource_group
         ));
-        let finished = self
-            .az(context, &deployment, "what-if")
-            .args(["--template-file", TEMPLATE_PATH])
+        let finished = Self::with_template(self.az(context, &deployment, "what-if"), secrets)
             .args(["--no-pretty-print", "--output", "json"])
             .run_ok("az could not preview the deployment", log)?;
         let plan = read_what_if(&finished.stdout, &deployment)?;
@@ -140,6 +150,35 @@ impl BicepRunner {
         }
         Ok((deployment, plan))
     }
+}
+
+/// The run's secrets as a Resource Manager parameters file in a private
+/// file, held in memory where the system allows and removed when dropped;
+/// nothing when the run has none. Azure keeps a secure parameter's value out
+/// of the deployment's record.
+fn secrets_file(context: &RunContext) -> Result<Option<SecretFile>, RunError> {
+    if context.secrets.is_empty() {
+        return Ok(None);
+    }
+    context
+        .secrets
+        .json_file_shaped(
+            "{\"$schema\":\"https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#\",\"contentVersion\":\"1.0.0.0\",\"parameters\":{",
+            ",",
+            "}}\n",
+            "parameters.json",
+            |name| {
+                (
+                    format!(
+                        "{}:{{\"value\":\"",
+                        Value::String(crate::secret_parameter(name)).canonical()
+                    ),
+                    "\"}".to_owned(),
+                )
+            },
+        )
+        .map(Some)
+        .map_err(|e| RunError::new(format!("writing the parameters file: {e}")))
 }
 
 /// Reads the result of `az deployment group what-if`.
@@ -225,7 +264,8 @@ impl Runner for BicepRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
-        Ok(self.preview(context, artifact, log)?.1)
+        let secrets = secrets_file(context)?;
+        Ok(self.preview(context, artifact, secrets.as_ref(), log)?.1)
     }
 
     fn apply(
@@ -234,16 +274,18 @@ impl Runner for BicepRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
-        let (deployment, plan) = self.preview(context, artifact, log)?;
+        let secrets = secrets_file(context)?;
+        let (deployment, plan) = self.preview(context, artifact, secrets.as_ref(), log)?;
         log.out(&format!(
             "resource group {}: deploying",
             deployment.resource_group
         ));
-        let finished = self
-            .az(context, &deployment, "create")
-            .args(["--template-file", TEMPLATE_PATH])
-            .args(["--output", "json"])
-            .run_ok("az could not complete the deployment", log)?;
+        let finished =
+            Self::with_template(self.az(context, &deployment, "create"), secrets.as_ref())
+                .args(["--output", "json"])
+                .run_ok("az could not complete the deployment", log);
+        drop(secrets);
+        let finished = finished?;
         Ok(Applied {
             changes: plan.changes,
             outputs: read_outputs(&finished.stdout)?,

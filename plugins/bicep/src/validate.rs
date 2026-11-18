@@ -136,6 +136,7 @@ mod tests {
                 resource_group: "rg-site".to_owned(),
                 subscription: String::new(),
             },
+            parameters: Vec::new(),
             statements: vec![statement("store"), statement("logs")],
             outputs: vec![("endpoint".to_owned(), raw("store.id"), Position::default())],
         }

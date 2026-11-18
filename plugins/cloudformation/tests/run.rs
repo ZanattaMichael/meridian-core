@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{artifact, scratch, stand_in, KeptLog};
-use meridian_sdk::{Artifact, RunContext, Runner, Value};
+use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
+use meridian_sdk::{Artifact, RunContext, Runner, SecretRef, Value};
 use meridian_target_cloudformation::CloudFormationRunner;
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -225,4 +225,87 @@ fn a_refused_change_set_takes_the_stack_it_left_in_review_with_it() {
         calls[calls.len() - 2..],
         ["describe-stacks --output json", "delete-stack"]
     );
+}
+
+// ---- secrets ------------------------------------------------------------
+
+/// A stand-in that also keeps a copy of the parameters file it is given,
+/// its mode and the environment.
+fn runner_keeping_parameters(dir: &Path, cases: &str) -> CloudFormationRunner {
+    let program = stand_in(
+        dir,
+        "aws",
+        &format!(
+            "keep() {{\n  while [ $# -gt 0 ]; do\n    case \"$1\" in\n      --parameters)\n        f=\"${{2#file://}}\"\n        echo \"$f\" > \"{dir}/secrets-path\"\n        cp \"$f\" \"{dir}/secrets.json\"\n        stat -c %a \"$f\" > \"{dir}/mode\" 2>/dev/null || stat -f %Lp \"$f\" > \"{dir}/mode\"\n        shift;;\n    esac\n    shift\n  done\n}}\nkeep \"$@\"\nenv > \"{dir}/env\"\necho \"$@\" | sed 's/meridian-[0-9]*/meridian-N/' >> \"{dir}/calls\"\ncase \"$2\" in\n{cases}\nesac",
+            dir = dir.display()
+        ),
+    );
+    CloudFormationRunner {
+        program: program.to_str().unwrap().to_owned(),
+        extra_args: vec!["--profile".into(), "prod".into()],
+    }
+}
+
+fn with_secret(dir: &Path) -> RunContext {
+    let mut context = context(dir);
+    context.secrets = secrets(&[(SecretRef::new(1), "db_password", "hunter2\"\\")]);
+    context
+}
+
+#[test]
+fn secrets_reach_cloudformation_as_a_private_parameters_file_and_nowhere_else() {
+    let dir = scratch(TMP, "secrets");
+    let log = KeptLog::default();
+    runner_keeping_parameters(
+        &dir,
+        &format!("{EXISTING}\n{CHANGES}\nexecute-change-set) ;;"),
+    )
+    .apply(&with_secret(&dir), &compiled(), &log)
+    .unwrap();
+    let calls = calls(&dir);
+    let create = &calls[1];
+    assert!(
+        create.starts_with(
+            "create-change-set --change-set-name meridian-N --change-set-type UPDATE \
+             --template-body file://template.yaml --parameters file://"
+        ) && create.ends_with(" --capabilities CAPABILITY_IAM"),
+        "{create}"
+    );
+    // The change set carries the values; executing it names nothing more.
+    assert_eq!(calls[4], "execute-change-set --change-set-name meridian-N");
+    assert_eq!(
+        fs::read_to_string(dir.join("secrets.json")).unwrap(),
+        "[{\"ParameterKey\":\"MeridianSecretDbPassword\",\"ParameterValue\":\"hunter2\\\"\\\\\"}]\n"
+    );
+    #[cfg(unix)]
+    assert_eq!(fs::read_to_string(dir.join("mode")).unwrap().trim(), "600");
+    for call in &calls {
+        assert!(!call.contains("hunter2"), "{call}");
+    }
+    assert!(!fs::read_to_string(dir.join("env"))
+        .unwrap()
+        .contains("hunter2"));
+    assert!(!log.text().iter().any(|l| l.contains("hunter2")));
+    assert!(!fs::read_to_string(dir.join("work/template.yaml"))
+        .unwrap()
+        .contains("hunter2"));
+    let path = fs::read_to_string(dir.join("secrets-path")).unwrap();
+    assert!(
+        !Path::new(path.trim()).parent().unwrap().exists(),
+        "{path} was left behind"
+    );
+}
+
+#[test]
+fn a_run_without_secrets_names_no_parameters_file() {
+    let dir = scratch(TMP, "no-secrets");
+    runner_keeping_parameters(&dir, &format!("{NEW_STACK}\n{CHANGES}"))
+        .plan(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert!(
+        !calls(&dir)[1].contains("--parameters"),
+        "{:?}",
+        calls(&dir)
+    );
+    assert!(!dir.join("secrets.json").exists());
 }

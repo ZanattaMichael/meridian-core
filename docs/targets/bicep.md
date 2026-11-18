@@ -234,6 +234,66 @@ empty, so a run never says "nothing to do" on no evidence. `NoChange` and
 An apply reports the preview's changes and the deployment's outputs. An
 output of a secure type is reported as sensitive and never printed.
 
+## Secrets
+
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a resource's
+params reaches Azure as a `@secure()` parameter whose value is read from a private
+file, and through nothing else.
+
+```yaml
+spec:
+  target: bicep
+  secrets:
+    - name: db_password
+      from: env
+      key: APP_DB_PASSWORD
+  resources:
+    - id: db_password_secret
+      type: Microsoft.KeyVault/vaults/secrets@2023-07-01
+      params:
+        name: app-vault/db-password
+        properties:
+          value: ${{ secret.db_password }}
+```
+
+**What the compile writes.** The param becomes the parameter's name,
+`meridian_secret_db_password`, and the file declares the parameter at the top:
+
+```bicep
+@secure()
+param meridian_secret_db_password string
+```
+
+The compiler makes a `securestring` parameter of it, so Resource Manager keeps the
+value out of the deployment's record and its logs. The compiled file holds the
+parameter's name and never its value.
+
+**How the value reaches the tool.** When a stage runs, the runner writes every secret
+into one Resource Manager parameters file (`"parameters": {"<name>": {"value": ...}}`)
+in a directory only the user can enter (mode `0700`, the file `0600`, on a memory
+filesystem where the system has one), and passes it as `--parameters @<path>` to both
+`what-if` and `create`. The file is overwritten and removed when the stage ends. The
+command line names the file's path and nothing more, and `az`'s environment holds
+nothing of the value.
+
+**What Azure keeps.** A secure parameter's value is not in the deployment's record and
+not returned by `show`. A resource property given the value is kept by the resource
+provider the way it keeps that property: a Key Vault secret is encrypted at rest; a
+tag is not. The plugin reads only each change's resource id and kind from the preview,
+never a property's value. Whether Azure's what-if prints a secure parameter's value
+inside a property diff is not something the tests have checked: the job that runs
+against a real subscription is switched on by the repository's settings, see
+[Real-tool tests](../contributing/real-tool-tests.md#azure).
+
+**What is refused.** A secret in the `deployment` resource's settings is refused at
+compile, rule `unsupported-secret-place`: the settings are the command line `az` is
+given.
+
+The handover is tested against a stand-in `az` that keeps a copy of the parameters
+file, its mode, its arguments and its environment (`plugins/bicep/tests/run.rs`), and
+the compiled parameter is built by the real Bicep compiler in CI
+(`plugins/bicep/tests/real.rs`), which makes a `securestring` of it.
+
 ## Settings
 
 | Variable | Meaning |

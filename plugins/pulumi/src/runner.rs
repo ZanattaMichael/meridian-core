@@ -137,6 +137,44 @@ impl PulumiRunner {
         tool
     }
 
+    /// Hands the run's secrets to the stack: each becomes a secret
+    /// configuration value, set by `pulumi config set --secret` reading the
+    /// value from standard input, so it is on no command line and in no
+    /// environment. Pulumi encrypts it with the stack's secrets provider
+    /// before writing it to the stack's settings file and its state, and
+    /// prints `[secret]` wherever it would show it.
+    fn set_secrets(
+        &self,
+        context: &RunContext,
+        stack: &Stack,
+        log: &dyn Log,
+    ) -> Result<(), RunError> {
+        for (name, value) in context.secrets.iter() {
+            let value = value
+                .duplicate()
+                .map_err(|e| RunError::new(format!("copying the secret {name:?}: {e}")))?;
+            let key = crate::secret_key(name);
+            self.on_stack(context, stack, &["config", "set", "--secret", &key])
+                .stdin_secret(value)
+                .run_ok("pulumi could not take a secret as configuration", log)?;
+        }
+        Ok(())
+    }
+
+    /// Takes the secrets out of the stack's settings file again once the
+    /// stage is over, so that what was encrypted for one run does not stay
+    /// behind for the next: with no passphrase chosen the encryption
+    /// protects nothing (see `pulumi`). The state keeps what the resources
+    /// were given, as Pulumi's state always does, encrypted the same way.
+    fn forget_secrets(&self, context: &RunContext, stack: &Stack, log: &dyn Log) {
+        for name in context.secrets.names() {
+            let key = crate::secret_key(name);
+            let _ = self
+                .on_stack(context, stack, &["config", "rm", &key])
+                .run(log);
+        }
+    }
+
     /// Writes the program, makes sure the stack exists and asks Pulumi what
     /// an update would change.
     fn prepare(
@@ -165,6 +203,7 @@ impl PulumiRunner {
             select = select.args(["--secrets-provider", &stack.encryption]);
         }
         select.run_ok("pulumi could not select or create the stack", log)?;
+        self.set_secrets(context, &stack, log)?;
 
         log.out(&format!(
             "stack {}: asking Pulumi what would change",
@@ -175,7 +214,14 @@ impl PulumiRunner {
             context,
         )
         .capture_stdout()
-        .run(log)?;
+        .run(log);
+        let preview = match preview {
+            Ok(preview) => preview,
+            Err(e) => {
+                self.forget_secrets(context, &stack, log);
+                return Err(e);
+            }
+        };
         // With --json everything Pulumi has to say is in the document on
         // standard output, including why a preview failed.
         let read = read_preview(&preview.stdout);
@@ -200,9 +246,16 @@ impl PulumiRunner {
                 err.output.push_str(said.trim_end());
                 err.output.push('\n');
             }
+            self.forget_secrets(context, &stack, log);
             return Err(err);
         }
-        Ok((stack, read?.changes))
+        match read {
+            Ok(preview) => Ok((stack, preview.changes)),
+            Err(e) => {
+                self.forget_secrets(context, &stack, log);
+                Err(e)
+            }
+        }
     }
 
     fn read_outputs(
@@ -242,7 +295,8 @@ impl Runner for PulumiRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
-        let (_, changes) = self.prepare(context, artifact, log)?;
+        let (stack, changes) = self.prepare(context, artifact, log)?;
+        self.forget_secrets(context, &stack, log);
         Ok(Plan {
             changes,
             unknown: false,
@@ -258,12 +312,14 @@ impl Runner for PulumiRunner {
         let (stack, changes) = self.prepare(context, artifact, log)?;
         // The preview above is the report; the update does not print a
         // second one.
-        Self::with_inputs(
+        let updated = Self::with_inputs(
             self.on_stack(context, &stack, &["up"])
                 .args(["--yes", "--skip-preview"]),
             context,
         )
-        .run_ok("pulumi up failed", log)?;
+        .run_ok("pulumi up failed", log);
+        self.forget_secrets(context, &stack, log);
+        updated?;
         Ok(Applied {
             changes,
             outputs: self.read_outputs(context, &stack, log)?,
