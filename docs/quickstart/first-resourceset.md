@@ -1,7 +1,7 @@
 # Your first ResourceSet
 
-A ResourceSet describes how one machine that already exists should be
-configured. This page takes one from a document to a running web server.
+A ResourceSet configures a machine that already exists. This page takes one from a
+document to a running web server.
 
 ## The document
 
@@ -50,10 +50,8 @@ spec:
         - resource: nginx_pkg
 ```
 
-Three resources: a package, a file and a service. The file comes after the
-package (`dependsOn`), and when the file really changes the service is reloaded
-(`notifies`). `target` says which tool does the work and `targetHost` says on
-which machine.
+The file comes after the package (`dependsOn`). When the file changes, the service is
+reloaded (`notifies`). `target` names the tool, `targetHost` the machine.
 
 ## Check it
 
@@ -62,8 +60,7 @@ $ meridian validate examples/ansible/web-server.yaml
 1 document valid
 ```
 
-`validate` loads no plugin. It checks the document's shape: required fields,
-ids that exist, and no dependency cycles (a cycle lists its resources). An
+`validate` loads no plugin. It checks required fields, ids and dependency cycles. An
 error names the file, line and field.
 
 ## Compile it
@@ -75,8 +72,7 @@ web (ResourceSet, target ansible on web01.example.com)
   compiled 2 files into build/web
 ```
 
-Nothing has changed anywhere. `build/web/playbook.yml` is an ordinary playbook
-you could run by hand:
+Nothing is changed. `build/web/playbook.yml` is an ordinary playbook:
 
 ```yaml
 ---
@@ -112,9 +108,8 @@ you could run by hand:
         state: reloaded
 ```
 
-The warning is about the tool: the document says the file and service are
-independent, but Ansible runs them in sequence anyway. Warnings never hide a
-loss of meaning. When a tool cannot do what a document asks, the compile fails.
+The warning says Ansible runs independent resources in sequence. The result is the
+same.
 
 ## Plan it
 
@@ -122,9 +117,8 @@ loss of meaning. When a tool cannot do what a document asks, the compile fails.
 $ meridian plan examples/ansible/web-server.yaml
 ```
 
-runs the tool's preview (`ansible-playbook --check --diff`) and reports what an
-apply would change, per resource, by your ids. Ansible handles the connection;
-pass it what it needs through `MERIDIAN_ANSIBLE_ARGS`:
+runs `ansible-playbook --check --diff` and reports changes by resource id. Pass
+connection options through `MERIDIAN_ANSIBLE_ARGS`:
 
 ```
 $ MERIDIAN_ANSIBLE_ARGS="--user deploy --private-key ~/.ssh/deploy" \
@@ -137,8 +131,7 @@ $ MERIDIAN_ANSIBLE_ARGS="--user deploy --private-key ~/.ssh/deploy" \
 $ meridian apply examples/ansible/web-server.yaml
 ```
 
-A second apply changes nothing: the tools converge on the state the document
-describes.
+A second apply changes nothing.
 
 ## The same document, another tool
 
@@ -152,12 +145,8 @@ web (ResourceSet, target puppet on web01.example.com)
   FAILED: web-server.yaml:37:11: puppet: resource "nginx_conf" [unsupported-action]: notifies resource "nginx_svc" with action "reload", which this target cannot express: Puppet's refresh restarts a service; it takes no argument and cannot be told to reload instead. Emitting a restart here would do more than the document asked for. ...
 ```
 
-Puppet can only restart a service on a change, not reload it, and Meridian will
-not silently swap one for the other. Either change the action to `restart` for
-this target ([`examples/puppet/web-server.yaml`](../../examples/puppet/web-server.yaml))
-or keep a tool that can reload. The
-[capability matrix](../reference/capability-matrix.md) shows these differences
-for every target.
+Use `restart` for Puppet ([`examples/puppet/web-server.yaml`](../../examples/puppet/web-server.yaml))
+or keep a tool that can reload. The [capability matrix](../reference/capability-matrix.md)
+lists these differences.
 
-Next: [a two-stage workflow](first-two-stage.md), where one tool creates the
-machine and another configures it.
+Next: [a two-stage workflow](first-two-stage.md).

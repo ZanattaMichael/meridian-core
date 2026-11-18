@@ -1,8 +1,7 @@
 # Install
 
-Meridian is the `meridian` command plus one plugin binary per target, installed
-together in one directory. `meridian` finds the plugins beside it. Releases are
-built for Linux, macOS and Windows, on x86-64 and arm64.
+Meridian is the `meridian` command plus one plugin binary per target, in one directory.
+Releases are built for Linux, macOS and Windows, on x86-64 and arm64.
 
 > The Homebrew tap, Scoop bucket and winget package are not published yet.
 > Use the install scripts, the container image, `cargo install`, or
@@ -21,10 +20,8 @@ built for Linux, macOS and Windows, on x86-64 and arm64.
 curl -fsSL https://github.com/ZanattaMichael/meridian-core/releases/latest/download/install.sh | sh
 ```
 
-The script downloads the archive for your machine, checks it against the
-release checksums, and unpacks it into `~/.meridian/bin`. It writes nothing
-else and needs no root. If that directory is not on your `PATH`, it tells you
-how to add it.
+The script checks the archive against the release checksums and unpacks it into
+`~/.meridian/bin`. It needs no root.
 
 | Setting | Meaning |
 |---|---|
@@ -44,10 +41,9 @@ In PowerShell:
 irm https://github.com/ZanattaMichael/meridian-core/releases/latest/download/install.ps1 | iex
 ```
 
-It installs into `%LOCALAPPDATA%\Meridian\bin`, adds that to your user `PATH`,
-and takes the same environment variables as the script above. Set
-`MERIDIAN_NO_PATH` to leave `PATH` alone. No administrator rights are needed.
-[Meridian on Windows](windows.md) covers what differs there.
+It installs into `%LOCALAPPDATA%\Meridian\bin` and adds that to your user `PATH`
+(`MERIDIAN_NO_PATH` skips this). It needs no administrator rights. See
+[Meridian on Windows](windows.md).
 
 ## Homebrew
 
@@ -72,10 +68,9 @@ winget install ZanattaMichael.Meridian
 docker run --rm -v "$PWD:/work" ghcr.io/zanattamichael/meridian:latest compile site.yaml
 ```
 
-The image is for `linux/amd64` and `linux/arm64`. It holds `meridian` and every
-plugin, runs as an unprivileged user, and works in `/work`. It can compile and
-validate. Planning and applying need the target's own tool, which the image
-does not include, so build on it and add the tools you use:
+The image (`linux/amd64`, `linux/arm64`) holds `meridian` and every plugin, runs
+unprivileged, and works in `/work`. It does not include the tools, so add the ones you
+need to plan and apply:
 
 ```
 FROM ghcr.io/zanattamichael/meridian:0.1.0
@@ -86,9 +81,7 @@ USER meridian
 
 ## cargo install
 
-With a Rust toolchain, build and install the command and the plugins you want
-into `~/.cargo/bin` in one step. Name `meridian-cli` and each plugin package,
-`meridian-target-<name>`:
+Installs into `~/.cargo/bin`. Name `meridian-cli` and each `meridian-target-<name>`:
 
 ```
 cargo install --locked --git https://github.com/ZanattaMichael/meridian-core \
@@ -131,13 +124,10 @@ meridian-target-salt
 meridian-target-terraform
 ```
 
-`meridian` finds plugins in its own directory, so the build output works as is.
-To keep plugins elsewhere, use `--plugin-dir` (repeatable) or
-`MERIDIAN_PLUGIN_DIR` (separated by `:`, or `;` on Windows).
+Plugins elsewhere are found with `--plugin-dir` (repeatable) or `MERIDIAN_PLUGIN_DIR`
+(separated by `:`, or `;` on Windows).
 
 ## Check what you downloaded
-
-Every release file traces back to the commit and workflow run that built it.
 
 **Checksums.** `meridian-<version>-checksums.txt` lists the SHA-256 of every
 archive. The install scripts refuse a mismatch. By hand:
@@ -146,11 +136,10 @@ archive. The install scripts refuse a mismatch. By hand:
 sha256sum --check --ignore-missing meridian-0.1.0-checksums.txt
 ```
 
-**The release's signature.** The checksums file is signed with
-[Sigstore](https://www.sigstore.dev), with no long-lived key: the signature
-names the workflow that made it. The install scripts check it when
-[`cosign`](https://docs.sigstore.dev/cosign/system_config/installation/) is
-installed. By hand:
+**Signature.** The checksums file is signed keylessly with
+[Sigstore](https://www.sigstore.dev). The install scripts check it when
+[`cosign`](https://docs.sigstore.dev/cosign/system_config/installation/) is installed. By
+hand:
 
 ```
 cosign verify-blob \
@@ -168,20 +157,17 @@ cosign verify ghcr.io/zanattamichael/meridian:0.1.0 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-**Build provenance.** Each archive and the image has an attestation naming the commit
-and workflow run that produced it:
+**Provenance.** Each archive and the image has an attestation naming its commit and
+workflow run:
 
 ```
 gh attestation verify meridian-0.1.0-x86_64-unknown-linux-musl.tar.gz --repo ZanattaMichael/meridian-core
 ```
 
-**What it is made of.** Every crate in the build is listed, by version, in `meridian-<version>-sbom.spdx.json` and `meridian-<version>-sbom.cdx.json`
-(SPDX and CycloneDX).
+**SBOM.** `meridian-<version>-sbom.spdx.json` and `meridian-<version>-sbom.cdx.json`.
 
-**The plugins.** A released `meridian` checks a plugin's signature every time it
-starts one, and refuses a plugin that fails.
-[Plugin signatures](../reference/plugin-signatures.md) explains what is checked
-and how to use a plugin from elsewhere.
+**Plugins.** A released `meridian` checks each plugin's signature when it starts it
+([plugin signatures](../reference/plugin-signatures.md)).
 
 ## Check what is installed
 
@@ -189,13 +175,11 @@ and how to use a plugin from elsewhere.
 meridian plugins
 ```
 
-lists every plugin Meridian finds: its category, what it can do (compile, plan,
-apply, outputs), its resource types, and its signature check result.
+lists each plugin's category, capabilities, resource types and signature result.
 
 ## The tools themselves
 
-Compiling needs only Meridian. Planning and applying need the tool installed
-on the machine running Meridian, as if you ran it by hand:
+Compiling needs only Meridian. Planning and applying need the tool installed:
 
 | Target | Needs |
 |---|---|
@@ -228,14 +212,10 @@ Two targets can run `tofu`:
 
 The [OpenTofu page](../targets/opentofu.md#opentofu-or-terraform) compares them.
 
-The build also produces `meridian-policy-opa`, which `--policy` uses to ask
-[a policy](../reference/policy.md) whether a change is allowed. It needs
-`opa` (Open Policy Agent 1.0 or later), only when you pass `--policy`.
+`--policy` needs `opa` (Open Policy Agent 1.0 or later); see [policy](../reference/policy.md).
 
-Each tool uses its own credentials and configuration. Meridian stores none: if
-`aws sts get-caller-identity` or `kubectl get nodes` works in your shell, the
-plugin works too. Each [target's page](../targets/ansible.md) lists the
-environment variables that point a plugin at another binary or add arguments
-to every call.
+Each tool uses its own credentials and configuration; Meridian stores none. Each
+[target's page](../targets/ansible.md) lists the environment variables that set the
+binary or extra arguments.
 
 Next: [your first ResourceSet](first-resourceset.md).

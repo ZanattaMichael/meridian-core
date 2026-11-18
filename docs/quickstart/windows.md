@@ -1,8 +1,7 @@
 # Meridian on Windows
 
-Meridian runs on Windows with the same command, documents and plugins as on
-Linux and macOS. The full test suite runs on Windows on every change. This page
-covers what differs and what to expect of each target.
+Meridian runs on Windows with the same command, documents and plugins. The test suite
+runs on Windows on every change.
 
 ## Install
 
@@ -26,32 +25,21 @@ $env:MERIDIAN_PLUGIN_DIR = 'C:\meridian\plugins;D:\more-plugins'
 **Plugin binaries** are named `meridian-target-<name>.exe`, and a plugin's
 signature is `meridian-target-<name>.exe.sig`.
 
-**Finding a tool.** On Windows many tools are scripts: `az` is `az.cmd`, and
-Puppet and Chef install `.bat` files. Meridian looks names up as a Windows
-shell does, through `PATH`, trying `.exe`, `.cmd`, `.bat` and `.com` in that
-order. If a tool runs when you type its name, it runs for Meridian. For a tool
-not on `PATH`, set its full path in the target's variable, such as
-`MERIDIAN_TERRAFORM`; each [target page](../index.md) names
-it.
+**Finding a tool.** Meridian searches `PATH` for `.exe`, `.cmd`, `.bat` and `.com`, in
+that order, so `az.cmd` and Puppet's and Chef's `.bat` files are found. For a tool not on
+`PATH`, set the target's variable, such as `MERIDIAN_TERRAFORM`.
 
 **Work directories** are plain paths such as `C:\work\.meridian\work\web`,
 never the `\\?\C:\...` form, which many tools reject.
 
-**How a plugin is reached.** `meridian` starts each plugin as a process and
-talks to it over a private channel. On Linux and macOS that is a Unix socket in
-a directory only you can enter. On Windows it is a named pipe that refuses
-remote connections and that only your account, administrators and SYSTEM can
-write to, so no other account can send a plugin a request. Other local accounts
-can open it for reading, which yields nothing, since a plugin only answers
-requests. Nothing is left on disk when the plugin exits, and nothing listens on
-a network port on any system.
+**Plugin channel.** Each plugin is reached over a named pipe that refuses remote
+connections and that only your account, administrators and SYSTEM can write to (a
+private Unix socket on Linux and macOS). No network port is opened.
 
 ## Which targets make sense on Windows
 
-Compiling works for every target on every system. Planning and applying run the
-target's tool locally, so they work wherever that tool does. The table shows
-what to expect; [the next section](#what-has-and-has-not-been-tested-on-windows)
-shows what has actually been run.
+Compiling works for every target. Planning and applying work wherever the tool does
+([what has been tested](#what-has-and-has-not-been-tested-on-windows)).
 
 | Target | Expected on Windows |
 |---|---|
@@ -69,15 +57,10 @@ shows what has actually been run.
 
 ## What has and has not been tested on Windows
 
-CI runs every plugin's compile tests, the plugin protocol, the orchestrator, the
-command line, plugin signatures and the runner tests (against stand-ins) on
-Windows for every pull request.
-
-No real tool has been run on Windows: the real-tool workflows are Linux jobs. If
-a target misbehaves on Windows with its real tool,
-[open an issue](https://github.com/ZanattaMichael/meridian-core/issues) with the
-tool and version.
-
-A few tests are skipped on Windows, each with its reason in the source: those
-that drive a real tool, and the host's broken-plugin tests, whose plugins are
-shell scripts Windows cannot run.
+- Tested on Windows on every pull request: compile tests, the plugin protocol, the
+  orchestrator, the command line, plugin signatures, and runner tests against stand-ins.
+- Not tested on Windows: any real tool. Real-tool workflows run on Linux.
+  [Open an issue](https://github.com/ZanattaMichael/meridian-core/issues) with the tool and
+  version if one misbehaves.
+- Skipped on Windows: real-tool tests and the host's broken-plugin tests (shell
+  scripts).

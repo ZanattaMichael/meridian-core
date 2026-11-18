@@ -1,11 +1,7 @@
 # Worked workflows
 
-A workflow is several documents given to one `meridian` command. Below are eight,
-each a file under [`examples/workflow/`](../../examples/workflow). Together they
-use every target, each fitting tools together a different way.
-
-A test compiles every file here with the real plugins, in every way shown. The
-last one, the vertical slice, is also applied for real on every push, with a
+Eight workflows under [`examples/workflow/`](../../examples/workflow), covering every
+target. A test compiles each one. The vertical slice is also applied on every push with a
 real cluster, Terraform and Ansible.
 
 | Workflow | Tools, in the order they run | Shows |
@@ -19,9 +15,7 @@ real cluster, Terraform and Ansible.
 | [Tenants](#tenants) | Terraform, Salt, Kubernetes, Chef | one workflow for every customer: the plan decides which documents run, which resources they hold and what size they are |
 | [Vertical slice](#vertical-slice) | Kubernetes, Terraform, Ansible | the one that runs for real in CI: an output imported by Terraform, a host read by Ansible, and a second plan that changes nothing |
 
-New to workflows? Start with [a two-stage workflow](first-two-stage.md). The
-full rules are in [the language reference](../reference/dsl/index.md#workflows-several-documents).
-The three that matter most here:
+Rules ([full list](../reference/dsl/index.md#workflows-several-documents)):
 
 - Every Infrastructure document runs before any ResourceSet. Within a kind,
   documents run in the order they are given.
@@ -60,8 +54,6 @@ shop (ResourceSet, target docker)
 
 `meridian apply` runs OpenTofu, reads the outputs, then compiles and runs each
 ResourceSet against its address.
-
-Things to notice in the file:
 
 - **Two ResourceSets, one machine.** `web_host` (Ansible) and `shop` (Docker)
   both read `web_address`. Ansible installs Docker and Compose then runs the
@@ -126,9 +118,8 @@ flowchart LR
     F -->|address| P["baseline<br/>Puppet<br/>site, service"]
 ```
 
-Four tools, each doing what it does best. Packer bakes slow installs into an
-image. CloudFormation launches it. cloud-init handles first boot. Puppet keeps
-the machine converged after that.
+Packer builds an image, CloudFormation launches it, cloud-init handles first boot, and
+Puppet keeps the machine converged.
 
 - **Two configuration tools, two jobs.** `first_boot` and `baseline` are both
   ResourceSets on the same machine, and both use the shared types. cloud-init
@@ -234,8 +225,6 @@ later file replaces the same key in the earlier one entirely.
 | `budget` | `jobs` (Kubernetes) | `data.replicas == 3 \|\| data.high_availability` | removed | kept |
 | `load_test` | `jobs` (Kubernetes) | `data.env != 'prod' && (data.load_test == true)` | kept | removed |
 
-What the example is there to show:
-
 - **A condition means the same on every target.** `data.env != 'prod'` is
   used in Terraform, Ansible and Kubernetes documents. Meridian decides it before
   compiling, so no tool sees it or can read it differently. A removed resource
@@ -315,8 +304,6 @@ backup (ResourceSet, target chef)
 | `instance_type` | `cond.enterprise ? 'm6i.large' : 't3.small'` | `t3.small` | `m6i.large` |
 | `listen` in the site configuration | `join(var.ports, ' ')` | `8080` | `80 443` |
 | `RETAIN_DAYS` | `data.backup.retain_days ?? 30` | not compiled | `90` |
-
-What the example is there to show:
 
 - **A condition on a whole document.** `spec.when` removes the document from the
   run: nothing is compiled, no plugin starts, and the command names the
