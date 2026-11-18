@@ -33,7 +33,17 @@ const KEY: &str = "zzq-not-a-real-private-key-7Hq2\n";
 /// channel, and the reference each compiles in its place.
 const TAKE_A_SECRET: &[(&str, &str)] = &[
     ("ansible", "meridian_secret_db_password"),
+    ("chef", "node['meridian_secret_db_password']"),
+    (
+        "openvox",
+        "Sensitive(lookup('meridian_secret_db_password'))",
+    ),
     ("opentofu", "var.meridian_secret_db_password"),
+    ("puppet", "Sensitive(lookup('meridian_secret_db_password'))"),
+    (
+        "salt",
+        "{{ pillar['meridian_secret_db_password'] | yaml_encode }}",
+    ),
     ("terraform", "var.meridian_secret_db_password"),
 ];
 
