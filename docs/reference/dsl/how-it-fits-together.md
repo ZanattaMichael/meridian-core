@@ -4,37 +4,15 @@ The other pages of this reference take the language one item at a time. This
 page follows a document from the file you wrote to a tool that has run, and says
 which item matters at which step. Read it once and the rest falls into place.
 
-```mermaid
-flowchart LR
-    F["1. files<br/>YAML or JSON"] --> D["2. documents"]
-    D --> V["3. validated"]
-    V --> S["4. stages<br/>Infrastructure first,<br/>then ResourceSets"]
-    S --> O["5. resources ordered<br/>by dependsOn"]
-    O --> P["6. plugin for<br/>spec.target"]
-    P --> C["7. the tool's own files"]
-    C --> T["8. the tool runs:<br/>plan or apply"]
-    T -->|"9. outputs, for the stages that asked"| S
-```
+<p align="center"><img src="../../graphics/meridian-compile-pipeline.svg" alt="The path of a document: nine steps from a file to a tool that has run, and how far validate, compile, plan and apply each go" width="100%"></p>
 
-The same thing as an architecture: the core knows the language and nothing about
-any tool; each plugin knows one tool and nothing about the others.
+## The same thing as an architecture
 
-```mermaid
-flowchart TB
-    subgraph CORE["meridian (the core)"]
-        direction LR
-        PARSE["parse and validate<br/>the language"] --> GRAPH["decide conditions<br/>order resources"] --> ORCH["orchestrate stages<br/>carry outputs"]
-    end
-    ORCH <-->|"ordered resources in,<br/>files, plans and outputs back<br/>(one plugin program per target)"| PLUG
-    subgraph PLUG["plugins"]
-        direction LR
-        CM["configuration management<br/>ansible, puppet, openvox, chef, salt, dsc, cloud-init"]
-        IAC["infrastructure as code<br/>terraform, opentofu, pulumi, cloudformation, bicep, arm, packer"]
-        CON["containerization<br/>docker, podman"]
-        ORC["container orchestration<br/>kubernetes, helm"]
-    end
-    PLUG -->|"runs, as you would by hand"| TOOLS["the tools themselves<br/>ansible-playbook, terraform, kubectl, ..."]
-```
+The core knows the language and nothing about any tool; each plugin knows one tool
+and nothing about the others. Between them is the plugin protocol: one plugin
+program per target, spoken to over a private socket.
+
+<p align="center"><img src="../../graphics/meridian-architecture.svg" alt="Meridian architecture: documents go into the core, the core speaks to one plugin per target over the plugin protocol, and each plugin drives its own tool" width="100%"></p>
 
 | Step | What happens | Items of the language involved | Command that gets this far |
 |---|---|---|---|

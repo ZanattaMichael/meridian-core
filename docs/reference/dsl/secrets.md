@@ -246,7 +246,9 @@ same message.
 A secret in a resource's `params` is meant for the tool: a password in a
 database resource, a key in a file. It never reaches the tool through the
 compiled files. The target compiles a **reference** to the secret, by name, and
-hands the tool the **value** by a private channel when the stage runs.
+hands the tool the **value** by a private channel when the stage runs. The
+whole path, from the provider to the tool, is drawn in
+[how a secret is held in memory](../../concepts/secrets-in-memory.md).
 
 ```yaml
 spec:

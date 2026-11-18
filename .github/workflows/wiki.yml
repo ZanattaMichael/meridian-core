@@ -50,6 +50,9 @@ jobs:
           cargo install --locked mdbook --version "$MDBOOK_VERSION"
           cargo install --locked mdbook-mermaid --version "$MDBOOK_MERMAID_VERSION"
 
+      - name: Graphics match the script that draws them
+        run: python3 tools/wiki/graphics.py --check
+
       - name: Stage docs/ as the site and as wiki pages
         run: python3 tools/wiki/build.py all
 

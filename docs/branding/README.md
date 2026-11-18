@@ -54,6 +54,19 @@ Each module has two files in [`logos/`](logos/), drawn on a 64 by 64 grid:
 - `meridian-<module>-mono.svg` has no tile and uses `currentColor`, for single-colour
   contexts such as dark surfaces, terminals and print.
 
+The core mark also has an animated copy, `meridian-core-animated.svg`:
+
+<img src="logos/meridian-core-animated.svg" width="96" alt="The Meridian core mark, with light travelling along its meridians">
+
+A point of light leaves the white point and travels down each of the four meridians in
+turn. It is the still file with four overlays added by
+[`tools/wiki/graphics.py`](../../tools/wiki/graphics.py), which writes it; it is not
+edited by hand. The motion is CSS inside the file, so it plays wherever the file is
+shown as an image, and it is turned off for a reader whose system asks for less motion
+(`prefers-reduced-motion: reduce`), who sees the still mark. The documentation site shows
+it in its top bar. Use the still file where a mark should not move: a favicon, print, a
+plugin's own page, the plugin map.
+
 ## Banner
 
 <picture>
@@ -69,9 +82,21 @@ repository README and the documentation home page.
   backgrounds.
 - [`banner/meridian-banner-light.svg`](banner/meridian-banner-light.svg) is for light
   backgrounds, and uses the deeper category colours so they keep their contrast.
+- `meridian-banner-dark-animated.svg` and `meridian-banner-light-animated.svg` are the
+  same two with the travelling light, written by `tools/wiki/graphics.py` from the still
+  files in the same way as the core mark. The README and the documentation home page show
+  these; the still files are for a place where nothing should move.
 
 Use both through a `<picture>` element with a `prefers-color-scheme` source, as the README
 does, so each reader gets the one that matches their theme.
+
+## The explanatory graphics
+
+The pictures under [`docs/graphics/`](../graphics/) that explain the architecture, the
+path of a document, the two stages, secrets, runs and modules use the same tile, colours
+and type as the marks, and the same motion. They are drawn by `tools/wiki/graphics.py`,
+as [how the documentation is published](../contributing/documentation-site.md#the-graphics)
+describes.
 
 ## Adding a logo for a new plugin
 

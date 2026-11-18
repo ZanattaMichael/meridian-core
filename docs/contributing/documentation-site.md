@@ -1,4 +1,4 @@
-# How the wiki is published
+# How the documentation is published
 
 Everything under `docs/` is published twice by one pipeline, and nothing is published
 by hand:
@@ -29,7 +29,9 @@ Add the Markdown file under `docs/`. That is all.
   outside `docs/`, such as an example under `examples/`, is published as a link to that
   file on GitHub.
 - **Diagrams.** Write a fenced `mermaid` block. GitHub, the Wiki and the site all draw
-  it. The diagram below is one.
+  it. The diagram below is one. For a picture that explains a whole subject, draw it in
+  [`tools/wiki/graphics.py`](#the-graphics) instead, so it shares the look and the
+  motion of the others.
 
 ## The pipeline
 
@@ -41,6 +43,7 @@ flowchart TD
     M[Merge to main] --> B
     subgraph B[build job, every run]
         direction TB
+        G[graphics.py --check:<br/>the pictures match the script] --> S
         S[build.py stages docs/<br/>navigation, links, graphics] --> K[mdBook builds the site]
         K --> C[check_site.py checks<br/>every link in the built site]
     end
@@ -51,7 +54,7 @@ flowchart TD
 
 | Job | Runs on | What it does |
 |---|---|---|
-| `build` | every pull request, every push to `main`, weekly, and on demand | Stages `docs/`, builds the site, checks every internal link, image and heading anchor in the built pages, and keeps the site and the wiki pages as artifacts of the run |
+| `build` | every pull request, every push to `main`, weekly, and on demand | Checks that the graphics match the script that draws them, stages `docs/`, builds the site, checks every internal link, image and heading anchor in the built pages, and keeps the site and the wiki pages as artifacts of the run |
 | `publish-site` | `main` | Deploys the built site to GitHub Pages |
 | `publish-wiki` | `main` | Replaces the contents of the Wiki with the generated pages |
 
@@ -85,6 +88,7 @@ that somebody else's server being down cannot stop a merge.
 | Rewrites links that leave `docs/` | Links to the file on GitHub | The same |
 | Draws the plugin map | `generated/meridian-plugin-map.svg` | The same file |
 | Adds the graphics to pages | The plugin map on the home page, each target's logo on its page | The same |
+| Points at the other form | The home page links the Wiki | Every page opens with a link to its copy on the site; the sidebar and the footer link the site |
 
 Sections appear in a fixed reading order (quickstart, concepts, reference, targets, and
 so on, with the planning documents and branding last). A new top-level directory is
@@ -93,20 +97,61 @@ directory is shown under, are the short tables at the top of `build.py`.
 
 ### The graphics
 
-The home page carries two graphics:
+There are three kinds, and all of them are drawn by a script rather than kept by hand:
 
-- **The banner** is a pair of files kept in
-  [`docs/branding/banner/`](../branding/README.md#banner), one for light and one for dark
-  colour schemes. `docs/index.md` and the repository README both show it, so it is the
-  same on GitHub, the site and the Wiki.
+- **The banner and the core mark** are kept in
+  [`docs/branding/`](../branding/README.md), one banner for light and one for dark
+  colour schemes. The animated copies beside them (`*-animated.svg`) are written by
+  `tools/wiki/graphics.py` from the still ones: a point of light travels along each of
+  the four meridians. `docs/index.md` and the repository README show the animated
+  banner, so it is the same on GitHub, the site and the Wiki, and the site's top bar
+  shows the animated mark.
 - **The plugin map** is drawn by `build.py` each time, not kept as a file, so it is never
   out of date. It shows one document going through the core to every plugin, in a
   column for each category. Its columns and its plugins come from the capability
   matrix and `docs/targets/`, and each tile uses the plugin's own logo. A plugin that
   has no logo yet gets a lettered tile.
+- **The explanatory pictures** under [`docs/graphics/`](../graphics/) (the
+  architecture, the path of a document, kinds and categories, the two stages, a
+  secret's path, a run, modules) are drawn by
+  [`tools/wiki/graphics.py`](../../tools/wiki/graphics.py) and committed, so GitHub
+  shows them in the Markdown too. The workflow runs the script with `--check` and
+  fails when a file on disk differs from what the script draws, so a change to a
+  picture is a change to the script:
 
-The site's look is [`tools/wiki/theme/meridian.css`](../../tools/wiki/theme/meridian.css)
-on top of mdBook's stock themes, and its settings are
+  ```
+  python3 tools/wiki/graphics.py          # draw every file
+  python3 tools/wiki/graphics.py --check  # what the workflow runs
+  ```
+
+  Each picture is one function in the script, built from a few helpers (a card, a
+  chip, a line of text, a connector). To add one, write the function, add it to
+  `GRAPHIC_FILES`, run the script, and put an `<img>` for the new file on the page
+  that explains the subject. The home page's "In pictures" table lists them.
+
+#### Motion
+
+Every graphic shares one motion: a point of light travelling along the lines that join
+things, the way the banner's meridians leave the single point that stands for the DSL.
+It is CSS inside each SVG (`stroke-dasharray` on a copy of the line with
+`pathLength="100"`, moved by `stroke-dashoffset`), so it plays wherever the file is
+shown as an image, including a README on GitHub, and needs no script on the page.
+
+The site itself moves a little too: each page rises in as it opens, the line under a
+page's title drifts through the four category colours, links underline themselves,
+and the graphics lift under the pointer. All of it is in
+[`tools/wiki/theme/meridian.css`](../../tools/wiki/theme/meridian.css), and the
+animated mark in the top bar is put there by
+[`tools/wiki/theme/meridian.js`](../../tools/wiki/theme/meridian.js); without
+scripts the still mark is drawn by the stylesheet instead.
+
+A reader who has asked their system for less motion
+(`prefers-reduced-motion: reduce`) gets none of it: the stylesheet keeps its motion
+inside a `prefers-reduced-motion: no-preference` media query, and each SVG hides its
+travelling light under the matching `reduce` query and leaves the still drawing. Keep
+that rule when adding motion anywhere.
+
+The site's look is `meridian.css` on top of mdBook's stock themes, and its settings are
 [`tools/wiki/book.toml`](../../tools/wiki/book.toml).
 
 ## Building it on your own machine
@@ -122,6 +167,7 @@ cargo install --locked mdbook-mermaid --version 0.17.1
 Then, from the top of the repository:
 
 ```
+python3 tools/wiki/graphics.py --check         # the pictures match the script
 python3 tools/wiki/build.py all                # stage both forms into target/wiki/
 mdbook-mermaid install target/wiki/site        # add the diagram scripts
 mdbook build target/wiki/site                  # write target/wiki/site/book/
@@ -149,5 +195,8 @@ feature, since anything typed into the Wiki is replaced on the next run.
 
 The site's address appears in `tools/wiki/book.toml` (`site-url`,
 `git-repository-url`, `edit-url-template`), in the `--site-url` argument in the
-workflow, and in the table at the top of this page. The Wiki's addresses follow the
-repository's name automatically.
+workflow, in the table at the top of this page, in `README.md`, `CONTRIBUTING.md`
+and `docs/index.md`, and in the `WIKI_SITE_URL` setting `build.py` reads (which
+otherwise derives the github.io address from the repository's name) for the links
+the Wiki pages carry to the site. The Wiki's addresses follow the repository's name
+automatically.
