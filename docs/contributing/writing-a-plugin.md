@@ -35,9 +35,9 @@ A plugin has two halves, and they never mix. A third and a fourth are optional.
 | Importing, optional | [`Importer`](../../crates/meridian-sdk/src/import.rs) | reads the tool's existing configuration, handed to it as text, and returns documents as data with notes on what it could not carry over. See [An importer](#an-importer) | none, ever |
 | Describing the tool's types, optional | [`SchemaSource`](../../crates/meridian-sdk/src/schemas.rs) | asks the installed tool for the schemas of its own resource types, so editors complete and check them. Called by `meridian schema sync` only, never by an editor. See [A schema source](#a-schema-source) | runs the tool, inside a work directory the host gives it |
 
-By the time a document reaches your plugin, the core has already parsed it,
-validated it, resolved the target host to a literal and put the resources in an
-order that satisfies every `dependsOn`. Your job is mapping and serialisation.
+When a document reaches your plugin, the core has already parsed and validated
+it, resolved the target host, and ordered the resources by `dependsOn`. Your job
+is mapping and serialisation.
 
 There is one rule that matters more than any other, and reviewers will hold
 you to it:
@@ -46,10 +46,9 @@ you to it:
 > not compile and the author is told why. A plugin never emits output that
 > quietly does less.
 
-In practice that means refusing, with a `CompileError`, anything your tool
-cannot express: a resource type it does not have, a param you do not map, a
-`notifies` it cannot act on. A refusal is not a failure of your plugin. It is
-the plugin working. The background is in
+That means refusing, with a `CompileError`, anything your tool cannot express: a
+missing resource type, an unmapped param, a `notifies` it cannot act on. A
+refusal is the plugin working, not failing. Background:
 [The capability model](../concepts/capability-model.md).
 
 ### What the core has already done
@@ -74,22 +73,22 @@ itself is specified in the [language reference](../reference/dsl/index.md).
    [open pull requests](https://github.com/ZanattaMichael/meridian-core/pulls)
    and [issues](https://github.com/ZanattaMichael/meridian-core/issues) for the
    tool's name. If there is no issue, open one with the "New plugin" form and
-   say you are taking it, so two people do not write the same plugin.
-2. **Decide the category.** It is one of `infrastructure-as-code` (it creates
-   infrastructure), `configuration-management` (it configures a machine that
-   exists), `containerization` (containers on one host) or
-   `container-orchestration` (containers across a cluster). The core uses the
-   category to decide which workflows a plugin can join.
+   say you are taking it.
+2. **Decide the category**: `infrastructure-as-code` (creates infrastructure),
+   `configuration-management` (configures an existing machine),
+   `containerization` (containers on one host) or `container-orchestration`
+   (containers across a cluster). The core uses it to decide which workflows a
+   plugin can join.
 3. **Decide the vocabulary.** There are two families, described in
    [Documents, resources and targets](../concepts/ir-overview.md):
    - Configuration management targets share six abstract types (`package`,
-     `file`, `service`, `user`, `group`, `exec`), so the same document compiles
-     for Ansible, Puppet or Chef. A new tool of that kind should take the same
-     six, as far as it can. They are specified in
+     `file`, `service`, `user`, `group`, `exec`), so one document compiles for
+     Ansible, Puppet or Chef. A new tool of this kind should take the same six
+     where it can. They are specified in
      [Configuration management resource types](../reference/resource-types.md).
-   - Every other target is native: a resource's `type` is the tool's own type
-     and its `params` are the tool's own arguments, written exactly as the
-     tool's documentation writes them. Do not invent a new abstraction.
+   - Every other target is native: `type` is the tool's own type and `params`
+     its arguments, spelled exactly as the tool documents them. Do not invent a
+     new abstraction.
 
 ## Step 1: set up
 
@@ -203,16 +202,16 @@ return Err(refuse(
 
 The rule is a value, not a string: one of the constants in
 [`meridian_sdk::rules`](../../crates/meridian-sdk/src/rules.rs), each with a
-stable name, what it refuses and a hint. The same mistake carries the same
-name on every target, which is what lets a policy check, an editor or a test
-key off it, and the [refusal rules](../reference/refusal-rules.md) page is
-generated from the registry. Use a general rule wherever one fits:
+stable name, a description and a hint. The same mistake has the same name on
+every target, so policy checks, editors and tests can rely on it. The
+[refusal rules](../reference/refusal-rules.md) page is generated from the
+registry. Use a general rule wherever one fits:
 `unsupported-resource-type`, `unsupported-state`, `unsupported-param`,
 `missing-param`, `invalid-param`, `duplicate-resource`, `invalid-reference`,
-`unsupported-action`, `unsupported-runtime-condition` cover most of what a
-plugin refuses. Say what is supported in the message, as above, so the author
-knows what to write instead; the rule's own hint says it in general terms, and
-`.with_hint(...)` on the error replaces it with a specific one.
+`unsupported-action` and `unsupported-runtime-condition` cover most refusals.
+Say what is supported in the message, as above, so the author knows what to
+write instead. The rule's hint is general; `.with_hint(...)` replaces it with a
+specific one.
 
 A mistake that exists on your tool only, such as Salt's `shell-required`,
 gets a rule of the plugin's own. Declare it once, in a table in `lib.rs`, and
@@ -236,10 +235,10 @@ fn rules(&self) -> Vec<Rule> {
 }
 ```
 
-A test fails when a plugin's own rule has a general rule's name, and the
-conformance suite fails when a refusal carries a rule neither the registry nor
-the plugin declares. Run the tests with `UPDATE_GOLDEN=1` once to add your
-rules to the reference page.
+A test fails if a plugin's own rule reuses a general rule's name, and the
+conformance suite fails if a refusal uses a rule neither the registry nor the
+plugin declares. Run the tests once with `UPDATE_GOLDEN=1` to add your rules to
+the reference page.
 
 #### References
 
@@ -249,17 +248,16 @@ would hand the tool a literal `${...}`. What to do depends on the tool, and
 [References](../reference/dsl/references.md) describes each family from the
 user's side:
 
-- **The tool has nothing to read at apply time.** Most configuration
-  management tools are like this: all a resource has is what the author
-  wrote. Call
+- **The tool has nothing to read at apply time.** True of most configuration
+  management tools: a resource has only what the author wrote. Call
   [`meridian_sdk::expr::resolve_declared`](../../crates/meridian-sdk/src/expr.rs)
-  first thing in `emit`, as the template does. It replaces each `${id.param}`
-  with the value the document gives that param, and refuses anything it cannot
-  settle with the rule `invalid-reference`.
-- **The tool has its own references.** Terraform, Bicep and Compose do. Do not
-  call `resolve_declared`. Use `meridian_sdk::expr::parse` to find each
-  reference and rewrite it into the tool's own spelling in this stage, refusing
-  one that names a resource the document does not declare.
+  first in `emit`, as the template does. It replaces each `${id.param}` with
+  that param's value in the document, and refuses anything else as
+  `invalid-reference`.
+- **The tool has its own references** (Terraform, Bicep, Compose). Do not call
+  `resolve_declared`. Use `meridian_sdk::expr::parse` to find each reference and
+  rewrite it in the tool's spelling, refusing one that names an undeclared
+  resource.
 
 If your tool can report values, such as an address or an id, also compile each
 entry of `graph.outputs` into the tool's own output mechanism here.
@@ -317,36 +315,33 @@ them, so each one is a promise:
   `<Namespace>/<type>@<api-version>`.
 - `capabilities()`: `native_notify`, `synthetic_notify`, `runtime_condition`,
   `secrets` and `credentials`. Declare only what a test in your crate proves.
-  `secrets` says a param may hold a secret, and commits your runner to
-  [handing it over](#secrets) by a private channel. `credentials` says your
-  target reaches its host as the credential `targetHost.credential` names,
-  and commits your emitter and runner to [the same](#credentials).
-- `category()`: the one you chose before you started. It also decides which
-  kind of document your target accepts, as the table near the top says.
-- `target_versions()`: only if the tool comes in versions that need different
-  output, as DSC does. Leave it out otherwise, and a document that asks your
-  target for a version is refused instead of being silently ignored.
-- `settings_keys()`: the keys of `spec.settings` your target reads, if the
-  tool has settings that belong to the whole document and to no resource of
-  it: which engine runs it, how the host is reached. DSC declares `engine`,
-  `target` and `credential`. The core refuses a document that sets any other
-  key before `emit` is called, so `graph.settings` holds only keys you listed;
-  check the values as you check params, and document each key on your
-  target's page. Leave it out, and a document that sets any is refused. A
-  tool-wide setting is not a resource: do not add a resource type for it.
-- `rules()`: the [refusal rules](../reference/refusal-rules.md) your target
-  has of its own, if a mistake exists on your tool and no other. Most targets
-  leave it out and refuse only under the general rules; see
+  `secrets` means a param may hold a secret, and commits your runner to
+  [handing it over](#secrets) privately. `credentials` means your target
+  reaches its host as the credential `targetHost.credential` names, with the
+  [same commitment](#credentials).
+- `category()`: chosen in the first step. It also decides which kind of
+  document your target accepts (see the table near the top).
+- `target_versions()`: only if tool versions need different output, as for
+  DSC. Otherwise leave it out, and a document asking for a version is refused
+  rather than ignored.
+- `settings_keys()`: the `spec.settings` keys your target reads, for
+  document-wide settings that belong to no resource (which engine runs it, how
+  the host is reached). DSC declares `engine`, `target` and `credential`. The
+  core refuses any other key before `emit`, so `graph.settings` holds only
+  listed keys; check values as you check params, and document each key on
+  your target page. If left out, any setting is refused. Do not model a
+  tool-wide setting as a resource type.
+- `rules()`: [refusal rules](../reference/refusal-rules.md) unique to your
+  tool. Most targets leave it out and use only the general rules; see
   [Refusals](#refusals).
-- `placed_text()`: the openings of your tool's own expression syntax, if it
-  has any beyond `${`, and how each is written as literal text. The core
-  applies them to every value an interpolation places from data before `emit`
-  sees it, so data can never open an expression the tool evaluates; what the
-  author wrote in the document is untouched. Ansible declares Jinja's `{{`,
-  `{%` and `{#`, each written as `{{ '{{' }}`; ARM declares `[` at the start
-  of a value, written `[[`. A tool whose files are rendered through a template
-  engine must declare the engine's openings, or a value from `--data` is as
-  live as one the author wrote. Leave it out for a tool with no such syntax.
+- `placed_text()`: your tool's expression openers other than `${`, and how to
+  write each as literal text. The core applies them to every value an
+  interpolation places from data before `emit`, so data can never open an
+  expression the tool evaluates; the author's own text is untouched. Ansible
+  declares Jinja's `{{`, `{%` and `{#`, each written `{{ '{{' }}`; ARM declares
+  `[` at the start of a value, written `[[`. A tool whose files pass through a
+  template engine must declare its openers, or `--data` values become live
+  code. Leave it out if the tool has no such syntax.
 
 ```rust
 fn placed_text(&self) -> Vec<PlacedEscape> {
@@ -356,13 +351,13 @@ fn placed_text(&self) -> Vec<PlacedEscape> {
 
 ### Describe your resource types for editors
 
-One more declaration is optional and worth making: `resource_schemas()`. It
-tells the [editor tools](../tooling/index.md) what each of your resource types
-takes. With it, the language server completes and documents your params and
-states, `meridian lint` and the editor report an unknown param in its place
-before the document is compiled, and the [JSON Schema](../tooling/json-schema.md)
-checks them too. Without it, your types are still offered by name, and your
-own transform stage still refuses what is wrong when the document is compiled.
+One optional declaration is worth making: `resource_schemas()`. It tells the
+[editor tools](../tooling/index.md) what each resource type takes. With it, the
+language server completes and documents params and states, `meridian lint` and
+the editor flag unknown params in place, and the
+[JSON Schema](../tooling/json-schema.md) checks them. Without it, types are
+still offered by name, and your transform stage still refuses mistakes at
+compile time.
 
 ```rust
 fn resource_schemas(&self) -> Vec<ResourceSchema> {
@@ -376,35 +371,32 @@ fn resource_schemas(&self) -> Vec<ResourceSchema> {
 }
 ```
 
-- `ResourceSchema::closed` says the params listed are all there are, so any
-  other param is an error. `ResourceSchema::open` says the type takes params
-  you do not list, which is right for a type that passes params through to
-  the tool.
-- `.states(states, default)` lists the values of `state` and which one an
-  omitted `state` means. A type with no states takes no `state` at all.
+- `ResourceSchema::closed`: the listed params are all there are; any other is
+  an error. `ResourceSchema::open`: the type also takes unlisted params, as for
+  a passthrough type.
+- `.states(states, default)` lists `state` values and the default. A type with
+  no states takes no `state`.
 - `.actions(...)` lists the `action` values a `notifies` aimed at this type
   may ask for.
 - A configuration management target that maps the shared types (`package`,
   `file`, `service`, `user`, `group`, `exec`) calls
   `meridian_sdk::schema::shared(name, params, required, states, default, actions)`
-  with the lists its transform stage already checks against. The descriptions
-  of the shared params come from the SDK, so every target documents `mode` the
-  same way. The template plugin does this, and so do the first-party
-  configuration management plugins.
+  with the lists its transform stage already checks. Shared param descriptions
+  come from the SDK, so every target documents `mode` the same way. The
+  template and first-party configuration management plugins do this.
 
-A type whose params belong to the tool, not to Meridian, such as
-`aws_instance` or `apps/v1/Deployment`, is better described by the tool
-itself; that is what [a schema source](#a-schema-source) is for. The two
-compose: a cached tool schema refines a type the plugin only names and
-leaves one the plugin describes param by param alone.
+A type whose params belong to the tool, such as `aws_instance` or
+`apps/v1/Deployment`, is better described by the tool itself; that is what
+[a schema source](#a-schema-source) is for. The two combine: a cached tool schema
+refines a type the plugin only names, and leaves alone one the plugin describes
+in full.
 
-Build the description from the same tables your transform stage reads, never
-from a second list, so the two cannot disagree. The description is advice to
-editors and never replaces your checks: the host does not enforce it when
-compiling. `crates/meridian-tooling/tests/schema_conformance.rs` holds the
-first-party plugins to it, by compiling a resource with every declared param
-and state and checking that the plugin accepts what it said it takes and
-refuses what it left out.
+Build the description from the same tables your transform stage reads, never a
+second list, so they cannot disagree. It is advice to editors and never replaces
+your checks; the host does not enforce it at compile time.
+`crates/meridian-tooling/tests/schema_conformance.rs` checks first-party plugins
+by compiling a resource with every declared param and state, and confirming the
+plugin accepts what it declared and refuses what it did not.
 
 ## Step 5: the runner
 
@@ -485,14 +477,13 @@ pub fn settings() -> Vec<Setting> {
 }
 ```
 
-Read each one through `meridian_sdk::settings`, never with `std::env::var`
-directly: `settings::text` for a value, `settings::optional` when an unset
-setting means something, `settings::args` for an argument list and
-`settings::switch` for yes or no. That is what makes the project's
-`meridian.yaml` count: the host hands your plugin the `spec.settings.<target>`
-map when it starts, and the helpers read the environment variable first, the
-project second, the default last. `settings::args` splits like a POSIX shell,
-so an argument with a space in it can be quoted; never split on whitespace
+Read each through `meridian_sdk::settings`, never `std::env::var`:
+`settings::text` for a value, `settings::optional` when unset means something,
+`settings::args` for an argument list, `settings::switch` for yes/no. This is
+what makes the project's `meridian.yaml` count: the host passes the
+`spec.settings.<target>` map at start, and the helpers check the environment
+variable first, then the project, then the default. `settings::args` splits like
+a POSIX shell, so arguments with spaces can be quoted; never split on whitespace
 yourself.
 
 The short name is what a project writes under `spec.settings`: lower-case
@@ -505,18 +496,16 @@ from it, and `crates/meridian-cli/tests/plugin_settings.rs` fails when a
 
 ### Being stopped
 
-An operator can press Ctrl-C, and a run can have a `--stage-timeout`. Either
-way the host calls your plugin's `Cancel`, which the SDK answers for you: the
-log handed to `plan` and `apply` starts saying `log.cancelled()`, and
-[`Tool::run`](../../crates/meridian-sdk/src/tool.rs) notices while the tool
-runs, stops the tool and everything it started (`SIGTERM`, then `SIGKILL`
-ten seconds later; on Windows the process is killed) and returns a `RunError`
-that says the run was cancelled. A runner that only drives tools through
-`Tool` needs to do nothing.
+On Ctrl-C or a `--stage-timeout`, the host calls your plugin's `Cancel`, which
+the SDK handles: `log.cancelled()` becomes true for the log passed to `plan` and
+`apply`, and [`Tool::run`](../../crates/meridian-sdk/src/tool.rs) stops the tool
+and everything it started (`SIGTERM`, then `SIGKILL` ten seconds later; killed
+on Windows) and returns a `RunError` saying the run was cancelled. A runner that
+only uses `Tool` needs to do nothing.
 
-A runner that works in a loop of its own, or runs several tools in a row,
-should check `log.cancelled()` between steps and return a `RunError` whose
-`changes` list what it had done, so that the record and the terminal show it:
+A runner with its own loop, or several tools in a row, should check
+`log.cancelled()` between steps and return a `RunError` whose `changes` list
+what it did, so the record and terminal show it:
 
 ```rust
 for step in steps {
@@ -559,82 +548,74 @@ params: a password, a key. The host hands it to your plugin only if
    - a file only the user can read, for a tool that reads its variables from
      one. `context.secrets.json_file("vars.json", |name| format!("meridian_secret_{name}"))`
      writes them all as one JSON object into a `SecretFile`: mode `0600`, in
-     a directory of its own, in memory where the system allows, overwritten
-     and removed when you drop it. Keep it until the tool has exited, and
-     give the tool the path (`-var-file=<path>`, `--extra-vars @<path>`).
-     A tool that reads another format gets a `SecretFile::create` built from
-     `Part::Text` and `Part::JsonString` pieces (the Puppet plugin writes
-     Hiera YAML this way, the Salt plugin a pillar file), and a tool that
-     reaches the file only through a second one gets that second file from
-     `file.beside(name, text)`, in the same private directory: a `hiera.yaml`,
-     a pillar `top.sls`, a `client.rb`.
+     its own directory, in memory where possible, overwritten and removed on
+     drop. Keep it until the tool exits, and pass the path (`-var-file=<path>`,
+     `--extra-vars @<path>`). For another format, build a `SecretFile::create`
+     from `Part::Text` and `Part::JsonString` pieces (Puppet writes Hiera YAML
+     this way, Salt a pillar file). If the tool reaches the file through a
+     second one, create that with `file.beside(name, text)` in the same private
+     directory: a `hiera.yaml`, a pillar `top.sls`, a `client.rb`.
    - the tool's standard input, for a tool that reads a value from it.
      `Tool::stdin_secret(value)` pipes it straight from protected memory.
 
-   Never an argument, which every user of the machine can read in `ps`, and
-   never the environment, which the tool passes on to everything it starts.
-   A tool that takes a value no other way is refused it: return a `RunError`
-   that says so and names what to do instead, as the Chef plugin does for
-   `chef-run`.
+   Never an argument (every user can read it in `ps`) and never the
+   environment (the tool passes it to everything it starts). If a tool takes a
+   value no other way, refuse: return a `RunError` saying so and what to do
+   instead, as the Chef plugin does for `chef-run`.
    The value is a `SecretValue`: it cannot be printed, cloned or compared by
-   accident, and it is wiped when the context is dropped. A tool that keeps
-   what it was given (a saved plan, a state file) is your plugin's to clean
-   up or to document, as the Terraform plugin scrubs its saved plan.
+   accident, and is wiped when the context drops. If the tool keeps what it was
+   given (a saved plan, a state file), your plugin must clean it up or document
+   it, as the Terraform plugin scrubs its saved plan.
 
-Test both halves the way the first-party plugins do: a compile test that the
-reference is written and the value is not (`meridian_plugin_testkit::secret_in_param`),
-and a run test against a stand-in that keeps a copy of the file it was pointed
-at and of its arguments and environment
-(`meridian_plugin_testkit::secrets`), asserting the value is in the file, in
-mode `0600`, and nowhere else. The host masks whatever the tool prints, but
-that is the second line of defence, not the first.
+Test both halves as the first-party plugins do: a compile test that the
+reference is written and the value is not
+(`meridian_plugin_testkit::secret_in_param`), and a run test against a stand-in
+that copies the file it was given plus its arguments and environment
+(`meridian_plugin_testkit::secrets`), asserting the value is in the file, mode
+`0600`, and nowhere else. The host masks tool output, but that is the second
+line of defence, not the first.
 
 ### Credentials
 
-A document can name a [credential](../reference/dsl/credentials.md) its host
-is reached as: an `ssh` or `usernamePassword` identity, with a user that is
-plain text and a key or a password that is a secret. The host gives it to
-your plugin only if `capabilities().credentials` is true, and then in the
-same two halves:
+A document can name a [credential](../reference/dsl/credentials.md) for reaching
+its host: an `ssh` or `usernamePassword` identity, with a plain-text user and a
+secret key or password. The host passes it only if
+`capabilities().credentials` is true, in the same two halves:
 
 1. **Compiling: the shape, never a value.** `graph.credential` is a
    `Credential`: its `name`, `kind`, whether it is `ambient`, its `text`
    fields, its `flags`, and the *names* of its `secret_fields`. Write the
    plain fields where the tool reads an identity (Ansible puts the user after
    the host in the inventory), and refuse what the tool cannot take with a
-   `CompileError` that says why, as Ansible refuses a `passphrase`. Do not
-   silently drop a field: a credential the tool half-uses reaches the host as
-   someone else.
+   `CompileError` explaining why, as Ansible refuses a `passphrase`. Never drop
+   a field silently: a half-used credential reaches the host as someone else.
 
 2. **Running: the values, by a private channel.** `context.credential` is a
    `HeldCredential`: the same `declared` shape, and `secret(field)` lends
-   each secret field as a `SecretValue`. Hand each one to the tool the way
-   the tool takes an identity, and no other: a key as a `SecretFile` of
-   `Part::Secret(key)` named by the tool's own flag (`--private-key <path>`),
-   a password in the same `SecretFile` as the document's secrets where the
-   tool reads variables from one. `secrets()` iterates them. Never an
-   argument, never the environment. `Debug` prints the name, the type and
-   the field names.
+   each secret field as a `SecretValue`. Pass each the way the tool takes an
+   identity: a key as a `SecretFile` of `Part::Secret(key)` given by the tool's
+   flag (`--private-key <path>`); a password in the same `SecretFile` as the
+   document's secrets, where the tool reads variables from one. `secrets()`
+   iterates them. Never an argument or the environment. `Debug` prints only
+   the name, type and field names.
 
-The core refuses, before your plugin is called, a document that names a
-credential of a type a host cannot take, or for a target that did not declare
-the capability. Test both halves as for secrets: a compile test that the user
-is written and the key is not, and a stand-in test that keeps a copy of the
-key file and its mode and of the arguments and environment, asserting the key
-is in the file, in mode `0600`, and nowhere else. Then add the column to the
-[capability matrix](#step-7-documentation) and a section to the target's page
-saying where each field goes and what is refused.
+Before calling your plugin, the core refuses a credential whose type a host
+cannot take, or one for a target without the capability. Test both halves as
+for secrets: a compile test that the user is written and the key is not, and a
+stand-in test that copies the key file, its mode, and the arguments and
+environment, asserting the key is in the file, mode `0600`, and nowhere else.
+Then add the column to the [capability matrix](#step-7-documentation) and a
+section on the target page saying where each field goes and what is refused.
 
 ## An importer
 
 This step is optional. A plugin is complete without it, and `meridian plugins` simply
 does not list `import` for one that has none.
 
-An importer is the third half of a plugin: it reads the tool's **existing**
-configuration and returns the Meridian documents that describe the same thing, so
-`meridian import` can write them
-([what the operator sees](../operations/importing.md)). Write one when people already
-have a body of configuration for your tool. It lives in `src/import.rs`.
+An importer is a plugin's optional third half: it reads the tool's **existing**
+configuration and returns equivalent Meridian documents for `meridian import` to
+write ([what the operator sees](../operations/importing.md)). Write one when people
+already have configuration for your tool. It lives in `src/import.rs`.
 
 ```rust
 use meridian_sdk::{ImportError, ImportFormat, ImportSource, Imported, Importer};
@@ -697,16 +678,15 @@ levels, so do not use them for things that are fine.
 
 Three things reviewers will look for:
 
-- **Do not fall back to an escape hatch.** A construct your target has no resource type
-  for is `untranslated`. Turning it into an `exec`, or a passthrough that happens to
-  compile, produces a document that claims more than it does.
+- **No escape hatches.** A construct with no matching resource type is `untranslated`.
+  Turning it into an `exec`, or a passthrough that happens to compile, gives a document
+  that claims more than it does.
 - **Do not evaluate.** Variables, loops, templates and functions in the source are
-  somebody else's program. Carry what is declared with literals; report what is computed.
-  The one exception is something whose value is written right there, such as a variable
-  with a literal value.
-- **Keep runtime conditions at runtime.** A condition the tool evaluates on the node goes
-  in `runtime_when`, and only if your target supports `runtimeWhen`. Never decide one at
-  import time.
+  someone else's program. Carry literals; report computed values. The exception is a
+  value written inline, such as a variable with a literal value.
+- **Keep runtime conditions at runtime.** A condition the tool checks on the node goes
+  in `runtime_when`, only if your target supports `runtimeWhen`. Never decide it at
+  import.
 
 ### What `meridian-import` gives you
 
@@ -759,10 +739,10 @@ fn a_configuration_comes_back_meaning_the_same() {
 }
 ```
 
-`Rules` names the differences your tool does not care about, such as a key that is null
-and a key that is absent. Where the compiled output is spelled differently from the
-source on purpose (task names, a different syntax for the same language), compare with
-the same configuration written by hand in the target's spelling, and say so in the test.
+`Rules` lists differences your tool ignores, such as a null key versus an absent one.
+Where compiled output is deliberately spelled differently from the source (task names,
+another syntax for the same language), compare against the same configuration written
+by hand in the target's spelling, and note that in the test.
 
 Write a second test for a source full of things a document cannot say, and assert on the
 notes. That test is the one that proves nothing is dropped quietly.
@@ -774,24 +754,23 @@ Add the importer to the plugin's `target!` entry in
 
 ## A schema source
 
-This step is optional too, and it only makes sense for a target whose
-resource types are the tool's own: a Terraform provider's, a Kubernetes API
-server's, a Pulumi package's, a DSC module's. A plugin with no schema source
-is complete, and `meridian schema sync` says the target does not export
-schemas and moves on.
+This step is optional, and only makes sense for targets whose resource types are
+the tool's own: a Terraform provider's, a Kubernetes API server's, a Pulumi
+package's, a DSC module's. A plugin without a schema source is complete;
+`meridian schema sync` notes it and moves on.
 
 A plugin that has one names it in its entry in
 `crates/meridian-all-targets/src/lib.rs` (the `schemas` field), which puts
 it in the capability matrix.
 
-A schema source is the fourth half: given the documents that use the target,
-it asks the installed tool what each resource type takes and returns resource
-schemas, the same [`ResourceSchema`](../../crates/meridian-sdk/src/schema.rs)
-your `resource_schemas()` returns, under the exact name a document writes.
-`meridian schema sync` calls it once, caches what it returns under the
-project's state directory and records the versions in `meridian.lock`; the
-language server, `meridian lint` and `meridian schema` read the cache and
-never call you. What the operator sees is in
+A schema source is the fourth half: given the documents using the target, it asks
+the installed tool what each resource type takes and returns
+[`ResourceSchema`](../../crates/meridian-sdk/src/schema.rs)s (as
+`resource_schemas()` does), under the exact names documents use.
+`meridian schema sync` calls it once, caches the result in the project's state
+directory, and records versions in `meridian.lock`; the language server,
+`meridian lint` and `meridian schema` read the cache and never call you. What the
+operator sees is in
 [Tool schemas](../tooling/schema-sync.md).
 
 ```rust
@@ -840,45 +819,39 @@ What you return:
 
 The rules a schema source keeps:
 
-- **It is advice.** `emit` and the tool remain the judges of what compiles
-  and applies. Never promise in a schema what the tool refuses, and never
-  reject in a schema what the tool accepts. A type you cannot describe is
-  left out, with a note, and the editor then knows it by name as before.
-- **It changes nothing outside `request.work_dir`.** Initialise the tool
-  there, download into it, keep its lock file in it; the host keeps the
-  directory between syncs and never reads it.
-- **It may be slow and may use the network**, because it is run by a person
-  who asked for a sync, never by an editor. Say what you are doing through
-  `log`, which `meridian schema sync` shows.
-- **Describe in full what the documents use, and by name the rest.** A
-  provider with a thousand types would make a cache too big for an editor
-  to read at each start. The types in `request.types` get their params; the
-  others get a `ResourceSchema::open(name, description)` so completion offers
-  them, and the next sync after a document uses one describes it. Say in a
-  note how many were listed by name.
-- **Read the tool's own schema format.** Many tools publish JSON Schema:
+- **It is advice.** `emit` and the tool still decide what compiles and applies.
+  Never promise what the tool refuses or reject what it accepts. Leave out a
+  type you cannot describe, with a note; the editor then knows it by name only.
+- **It changes nothing outside `request.work_dir`.** Initialise the tool,
+  download and keep lock files there; the host keeps the directory between
+  syncs and never reads it.
+- **It may be slow and use the network**: a person asked for the sync, not an
+  editor. Report progress through `log`, which `meridian schema sync` shows.
+- **Describe used types in full, the rest by name.** A provider with a thousand
+  types would make the cache too big for an editor to load. Types in
+  `request.types` get params; others get `ResourceSchema::open(name,
+  description)` so completion offers them, and the next sync after a document
+  uses one describes it. Note how many were listed by name.
+- **Read the tool's own schema format.** Many tools publish JSON Schema;
   `meridian_sdk::schema::params_from_json_schema` reads it into params,
-  following `$ref`s through a resolver you give it, and stops at a depth so
-  a recursive schema ends. `meridian_sdk::version_in` finds the version in
-  what `tool --version` prints.
+  following `$ref`s through your resolver, with a depth limit for recursive
+  schemas. `meridian_sdk::version_in` extracts the version from
+  `tool --version` output.
 - **Fetch a published file through `meridian_sdk::fetch`.** When the vendor
-  publishes the catalogue as a file instead of a command (CloudFormation's
-  registry zip, the Azure type definitions, a JSON Schema in a repository),
-  `fetch(url, &request.work_dir, name, what, log)` downloads it over HTTPS
-  into the work directory, keeps it with the server's `ETag` so the next
-  sync downloads nothing when it is unchanged, uses the last copy with a
-  note when the server cannot be reached, and gives you its SHA-256 to pin
-  (`Fetched::pin`). The rules are
+  publishes the catalogue as a file (CloudFormation's registry zip, the Azure
+  type definitions, a JSON Schema in a repository),
+  `fetch(url, &request.work_dir, name, what, log)` downloads it over HTTPS into
+  the work directory, keeps the server's `ETag` so unchanged files are not
+  re-downloaded, falls back to the last copy (with a note) when offline, and
+  returns its SHA-256 to pin (`Fetched::pin`). The rules are
   [decision 0036](../decisions/0036-a-published-schema-file-is-fetched-over-https-pinned-by-hash-and-reused-offline.md);
   the CloudFormation and Compose plugins are the shortest examples.
 
-Test it twice: a unit test that reads a saved sample of the tool's output
-into schemas, and a [real-tool test](real-tool-tests.md) in `tests/real.rs`
-that runs the source against the installed tool, gated by the same variable
-as the runner's tests, and asserts on a type it knows. Then document it: a
-section on the target's page saying what the sync asks the tool, what is
-described in full and what by name, and what is pinned, and the row for the
-target in [Tool schemas](../tooling/schema-sync.md#what-each-target-exports).
+Test it twice: a unit test reading a saved sample of tool output into schemas,
+and a [real-tool test](real-tool-tests.md) in `tests/real.rs` that runs against
+the installed tool (same switch as the runner's tests) and checks a known type.
+Then document it: a target-page section on what the sync asks the tool, what is
+described in full or by name, and what is pinned, plus the target's row in [Tool schemas](../tooling/schema-sync.md#what-each-target-exports).
 
 ## Step 6: tests
 
@@ -893,15 +866,15 @@ The template's tests show both kinds. Keep them and add to them.
   UPDATE_GOLDEN=1 cargo test -p meridian-target-nomad
   ```
 
-  then read the diff before you commit it. Golden files are reviewed like
-  code, because they are what your users will get.
-- Refusals are golden files too (`assert_golden_refusal`), because the wording
-  an operator reads is output like any other.
-- Compile the shared documents in [`fixtures/`](../../fixtures) that make
-  sense for your category, as the template does with `web_stack`. Every plugin
-  either compiles a fixture or refuses it for a stated reason.
-- Add one small test per refusal and per mapping decision. Name each test as a
-  sentence that says what is true, as the existing ones do.
+  then read the diff before committing. Golden files are reviewed like code:
+  they are what your users get.
+- Refusals are golden files too (`assert_golden_refusal`), since their wording
+  is output.
+- Compile the shared [`fixtures/`](../../fixtures) that fit your category, as
+  the template does with `web_stack`. Every plugin compiles a fixture or
+  refuses it for a stated reason.
+- Add one small test per refusal and mapping decision. Name each test as a
+  sentence stating what is true, like the existing ones.
 
 **Run tests** (`tests/run.rs`) drive the runner against a stand-in: a shell
 script, written by `meridian_plugin_testkit::stand_in`, that records how it
@@ -909,18 +882,17 @@ was called and prints what the real tool would print. Capture the real tool's
 output once, by hand, and paste it into the stand-in, so the test is honest
 about what the tool says.
 
-**Real-tool tests** are welcome but not required for a first pull request. If
-you add one, mark each test `#[ignore = "needs a real <tool>; see
+**Real-tool tests** are welcome but not required in a first pull request. To add
+one, mark each test `#[ignore = "needs a real <tool>; see
 docs/contributing/real-tool-tests.md"]`, switch it on with
 `meridian_plugin_testkit::real_tool_asked("<TOOL>")`, which reads
 `MERIDIAN_TEST_REAL_<TOOL>`, and give it its own workflow file that runs it
 with `-- --ignored` and `MERIDIAN_TEST_REAL_REQUIRED=1`, as
 [`puppet.yml`](../../.github/workflows/puppet.yml) and
 [`kubernetes.yml`](../../.github/workflows/kubernetes.yml) do. A test in
-`crates/meridian-all-targets` fails when a plugin has an ignored test and no
-workflow. [Real-tool tests](real-tool-tests.md) gives the shape one should
-have and lists the existing ones. A plugin that has only been tested against
-a stand-in must say so on its documentation page.
+`crates/meridian-all-targets` fails if a plugin has an ignored test but no
+workflow. [Real-tool tests](real-tool-tests.md) shows the shape and lists
+existing ones. A plugin tested only against a stand-in must say so on its page.
 
 ## Step 7: documentation
 
@@ -928,10 +900,9 @@ A plugin without documentation is not finished, and will not be merged. Fill
 in `docs/targets/<name>.md`. The stub has the sections every target page has.
 The rules:
 
-- It opens with **What it does and does not support**. Say what it refuses as
-  plainly as what it does.
-- Every example on the page is a file under `examples/<name>/`, so a test
-  compiles it and it cannot rot.
+- It opens with **What it does and does not support**. State refusals as
+  clearly as features.
+- Every example is a file under `examples/<name>/`, so a test compiles it.
 - List every refusal rule the plugin can raise and what the author should do
   about it.
 - Name the versions of the tool you tested with, and how.
@@ -1027,14 +998,13 @@ done it. Good ones to read:
 
 You do not write any version handling. `meridian_sdk::serve` does it:
 
-- **The protocol version** is agreed when your plugin starts. `meridian` sets
-  `MERIDIAN_PLUGIN_PROTOCOLS` to the versions it speaks, the SDK picks the
-  highest one it also speaks, and announces it in the handshake line. Your
-  plugin therefore keeps loading on newer releases of `meridian` for as long
-  as they still speak a protocol version your SDK does.
-- **The SDK version** your plugin was built against is announced in the same
-  line. `meridian` loads a plugin built against the same SDK line as its own,
-  and not a newer one.
+- **The protocol version** is agreed at start. `meridian` sets
+  `MERIDIAN_PLUGIN_PROTOCOLS` to the versions it speaks; the SDK picks the
+  highest it also speaks and announces it in the handshake line. So your plugin
+  keeps loading on newer `meridian` releases as long as they share a protocol
+  version.
+- **The SDK version** is announced in the same line. `meridian` loads plugins
+  built against its own SDK line, not newer ones.
 
 When either check fails, `meridian` does not load the plugin and says which
 side is behind. The fix is always one of two: rebuild the plugin against a
@@ -1050,22 +1020,21 @@ lets it go.
 
 ## A plugin in another language, or outside this repository
 
-A plugin is a separate process that speaks gRPC, and the protocol is defined
-in [`proto/meridian/plugin/v1/plugin.proto`](../../proto/meridian/plugin/v1/plugin.proto).
-So a plugin can be written in any language, and can live in its own
-repository: build a binary named `meridian-target-<name>`, put it beside
-`meridian` or in a directory named by `--plugin-dir`, and the host finds it.
-A released `meridian` starts only plugins signed by a key it trusts, so the
-people who run your plugin need your public key, or need to relax the check:
+A plugin is a separate gRPC process, defined in
+[`proto/meridian/plugin/v1/plugin.proto`](../../proto/meridian/plugin/v1/plugin.proto),
+so it can be written in any language and live in its own repository. Build a
+binary named `meridian-target-<name>` and put it beside `meridian` or in a
+`--plugin-dir` directory. A released `meridian` starts only plugins signed by a
+trusted key, so your users need your public key, or must relax the check:
 [Plugin signatures](../reference/plugin-signatures.md#signing-plugins-of-your-own)
-shows how to make a key and sign a binary. A plugin written without the SDK
-also has to listen where the host can dial it: print one line to stdout,
+shows how to make a key and sign a binary. A plugin written without the SDK must
+also listen where the host can dial it: print one line to stdout,
 `MERIDIAN-PLUGIN|<protocol>|<sdk version>|<network>|<address>`, where the
 network is `unix` with a socket path, `npipe` with a Windows named pipe's
 name, or `tcp` with a loopback address, and exit when stdin closes.
-The Rust SDK is the supported path today, and the only one with a test kit.
-If you write one in another language, please open an issue and tell us what
-was hard; that is how the protocol gets better.
+The Rust SDK is the supported path today, and the only one with a test kit. If
+you write a plugin in another language, please open an issue about what was
+hard.
 
 A plugin that does not use the Rust SDK has to do the handshake itself: read
 `MERIDIAN_PLUGIN_PROTOCOLS` (a comma-separated list such as `2,3`; when it is
