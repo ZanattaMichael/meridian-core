@@ -15,6 +15,7 @@ meridian unlock   <ID>
 meridian plugins
 meridian import   <paths>... [--from TARGET] [--name NAME] [-o DIR] [-r] [--force] [--strict]
 meridian migrate  <files>... [--to APIVERSION] [--check]
+meridian retarget <file> --to TARGET [--out FILE] [--no-adopt] [--state-dir DIR]
 meridian version
 meridian module   install [--locked] | update [NAME]... | verify | list | sign --key FILE | pack [--out FILE] | push REPOSITORY
 meridian secret check <files>... | set NAME <files>...
@@ -424,6 +425,29 @@ it was, and exits `1`. It never moves a document to an older version.
 `meridian/v1` is the only language version so far, so today the command
 reports that every Meridian document is already current. It is here now so
 that the release that introduces `meridian/v2` ships with its migration.
+
+### `retarget`
+
+Moves a document to another target. It writes a new file with `spec.target`
+changed and, when the new tool imports, an `adopt:` line under each resource
+the old tool manages, holding the identifier the old tool reports.
+
+```
+meridian retarget site.yaml --to opentofu
+meridian retarget site.yaml --to opentofu --out next/site.yaml
+meridian retarget web.yaml --to salt --no-adopt
+```
+
+- `--out` names the file to write. Without it, `spec.retarget.out` in the
+  project's `meridian.yaml` decides, and without that `site.opentofu.yaml`
+  beside `site.yaml`. An existing file is refused.
+- `--no-adopt` reads nothing from the old tool and writes no `adopt:`.
+- Without `--no-adopt`, a document the old tool has not applied, or an old
+  target whose plugin cannot report what it manages, is refused.
+
+The file read is never changed, and no tool changes anything: the old tool's
+state is only read. [Moving a document to another tool](../operations/retargeting.md)
+has the whole procedure and its limits.
 
 ### `version`
 
@@ -863,7 +887,7 @@ No version is deprecated today.
 | Status | When |
 |---|---|
 | `0` | everything asked for succeeded. For `plan` without `--detailed-exitcode`, whether or not an apply would change anything; for `drift`, nothing drifted; for `import`, the documents were written, whatever was reported about them |
-| `1` | an error: a document was invalid or did not compile; a tool failed; a policy denied a change or could not be asked; a stage could not be rolled back; the run was refused because the state is locked or there was nothing to resume or roll back; a [sink](reporting.md#sinks) marked `required` failed; a run was stopped by `--stage-timeout`; `fmt --check` found a file that is not formatted; `lint` found an error, or a warning with `--strict`; `migrate --check` found a file that would change; `import` could not read the source, no plugin imports it, or, with `--strict`, something was changed or not translated; `module verify`, `signing verify`, `secret check` or `rules check` found something wrong; `test` had a case that failed or could not run, or ran none |
+| `1` | an error: a document was invalid or did not compile; a tool failed; a policy denied a change or could not be asked; a stage could not be rolled back; the run was refused because the state is locked or there was nothing to resume or roll back; a [sink](reporting.md#sinks) marked `required` failed; a run was stopped by `--stage-timeout`; `fmt --check` found a file that is not formatted; `lint` found an error, or a warning with `--strict`; `migrate --check` found a file that would change; `retarget` could not read the old tool or write the new file; `import` could not read the source, no plugin imports it, or, with `--strict`, something was changed or not translated; `module verify`, `signing verify`, `secret check` or `rules check` found something wrong; `test` had a case that failed or could not run, or ran none |
 | `2` | `drift`: a stage has drifted. `plan --detailed-exitcode`: an apply would do something. Any command: a mistake in the command line itself |
 | `130` | the run was [stopped with Ctrl-C](../concepts/run-safety.md#stopping-a-run), as a shell reports a command ended that way |
 

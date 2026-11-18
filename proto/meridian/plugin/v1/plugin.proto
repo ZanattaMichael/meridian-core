@@ -368,6 +368,11 @@ message DescribeResponse {
   // saves none: an apply from a saved plan then checks the artifact's hash
   // and plans again, which the plan file says.
   bool saves_plans = 26;
+  // reads_identifiers is true when the plugin's Runner answers Identifiers:
+  // the tool's own identifier of each thing it manages, read from its state.
+  // `meridian retarget` writes them as the resources' adopt for the new
+  // target. A plugin built before this field reads none.
+  bool reads_identifiers = 27;
 }
 
 // Setting is one thing an operator can configure about a runner.
@@ -705,6 +710,17 @@ message OutputsResponse {
   RunError error = 2;
 }
 
+message IdentifiersRequest {
+  RunContext context = 1;
+}
+
+message IdentifiersResponse {
+  // identifiers maps a resource's id to the identifier the tool's import
+  // takes for it. A resource the tool has no record of is left out.
+  map<string, string> identifiers = 1;
+  RunError error = 2;
+}
+
 // Runner hands an artifact to the real tool. Unlike Emitter it has side
 // effects, takes as long as the tool takes, and can fail for reasons that have
 // nothing to do with the document. Plan and Apply stream, so an operator sees
@@ -717,6 +733,11 @@ service Runner {
   // Outputs reports the values the last apply produced, read from the tool's
   // own state, without applying anything.
   rpc Outputs(OutputsRequest) returns (OutputsResponse);
+  // Identifiers reports the tool's own identifier of each thing it manages,
+  // by the id of the resource it was declared as, read from the tool's state
+  // without changing anything. Asked only of a plugin whose Describe says
+  // reads_identifiers.
+  rpc Identifiers(IdentifiersRequest) returns (IdentifiersResponse);
   // Cancel asks the plugin to stop the Plan or Apply it is running: the SDK
   // stops the tool's process and the run's stream ends with a RunError that
   // carries what the tool had done so far. The stream is not closed by the

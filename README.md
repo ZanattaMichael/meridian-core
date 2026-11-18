@@ -90,7 +90,9 @@ recorded: `meridian status` shows the last one step by step, and `meridian apply
 continues an apply that failed from the stage that failed. `--on-failure rollback` and
 `meridian rollback` put back what an apply changed, and `meridian drift` says whether what was
 applied is still what is there. A resource's `adopt` takes a thing that already exists under
-management instead of creating another ([adopting what exists](docs/reference/dsl/resources.md#adopting-what-exists)).
+management instead of creating another ([adopting what exists](docs/reference/dsl/resources.md#adopting-what-exists)),
+and `meridian retarget` moves a document to another tool with an `adopt` for everything the old one
+manages ([moving a document to another tool](docs/operations/retargeting.md)).
 With `--policy`, a `plan` or `apply` first asks a policy, written
 in Rego for Open Policy Agent, whether each change may be made, and an apply that is denied
 applies nothing ([policy checks](docs/reference/policy.md)). The record can be kept in a shared place with `--backend`. See

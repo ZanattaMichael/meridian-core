@@ -109,6 +109,51 @@ pub struct Manifest {
     /// `spec.schemas`: where `meridian schema sync` fetches signed schema
     /// bundles from, and whether their signatures must pass.
     pub schemas: SchemaSettings,
+    /// `spec.retarget.out`: where `meridian retarget` writes a moved file,
+    /// as a pattern of `{name}`, `{target}` and `{ext}`, relative to the
+    /// file moved. `None` when the manifest does not say.
+    pub retarget_out: Option<String>,
+}
+
+/// The placeholders `spec.retarget.out` may use.
+pub const RETARGET_PLACEHOLDERS: &[&str] = &["name", "target", "ext"];
+
+/// Checks a `spec.retarget.out` pattern: relative, naming only known
+/// placeholders, and holding `{target}` so moves to two targets cannot
+/// write the same file.
+pub fn check_retarget_out(pattern: &str) -> Result<(), String> {
+    if pattern.starts_with('/') || pattern.starts_with('\\') || pattern.contains(':') {
+        return Err(format!(
+            "{pattern:?} must be a path relative to the file moved"
+        ));
+    }
+    let mut rest = pattern;
+    let mut has_target = false;
+    while let Some(open) = rest.find('{') {
+        if rest[..open].contains('}') {
+            return Err(format!("{pattern:?} has a `}}` with no `{{`"));
+        }
+        let Some(close) = rest[open..].find('}') else {
+            return Err(format!("{pattern:?} has a `{{` with no `}}`"));
+        };
+        let name = &rest[open + 1..open + close];
+        if !RETARGET_PLACEHOLDERS.contains(&name) {
+            return Err(format!(
+                "{pattern:?} names {{{name}}}; the placeholders are {{name}}, {{target}} and {{ext}}"
+            ));
+        }
+        has_target |= name == "target";
+        rest = &rest[open + close + 1..];
+    }
+    if rest.contains('}') {
+        return Err(format!("{pattern:?} has a `}}` with no `{{`"));
+    }
+    if !has_target {
+        return Err(format!(
+            "{pattern:?} must hold {{target}}, so moves to two targets never write the same file"
+        ));
+    }
+    Ok(())
 }
 
 /// `spec.schemas` in a project's manifest.
@@ -797,7 +842,14 @@ impl Manifest {
         let spec = r.map(
             top.get("spec"),
             "spec",
-            &["meridian", "modules", "credentials", "settings", "schemas"],
+            &[
+                "meridian",
+                "modules",
+                "credentials",
+                "settings",
+                "schemas",
+                "retarget",
+            ],
         )?;
         let settings = r.settings(spec.and_then(|s| s.get("settings")))?;
         let mut credentials: Vec<CredentialDeclaration> = Vec::new();
@@ -884,6 +936,22 @@ impl Manifest {
         }
 
         let schemas = r.schemas(spec.and_then(|s| s.get("schemas")), &credentials)?;
+        let retarget_out = match r.map(
+            spec.and_then(|s| s.get("retarget")),
+            "spec.retarget",
+            &["out"],
+        )? {
+            None => None,
+            Some(map) => match r.string(map.get("out"), "spec.retarget.out")? {
+                None => None,
+                Some(pattern) => {
+                    if let Err(why) = check_retarget_out(&pattern) {
+                        return r.err("spec.retarget.out", why);
+                    }
+                    Some(pattern)
+                }
+            },
+        };
 
         Ok(Manifest {
             name,
@@ -894,6 +962,7 @@ impl Manifest {
             credentials,
             settings,
             schemas,
+            retarget_out,
         })
     }
 }
@@ -1211,6 +1280,46 @@ spec:
                 .to_string();
             assert!(err.contains(want), "wanted {want:?} in {err:?}");
         }
+    }
+
+    #[test]
+    fn retarget_out_is_a_relative_pattern_holding_the_target() {
+        let with = |out: &str| {
+            WITH_LOGIN.replace("spec:\n", &format!("spec:\n  retarget:\n    out: {out}\n"))
+        };
+        let m = Manifest::parse(
+            "meridian.yaml",
+            with("\"moved/{name}.{target}.{ext}\"").as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(
+            m.retarget_out.as_deref(),
+            Some("moved/{name}.{target}.{ext}")
+        );
+        assert!(Manifest::parse("meridian.yaml", WITH_LOGIN.as_bytes())
+            .unwrap()
+            .retarget_out
+            .is_none());
+        for (out, want) in [
+            ("\"{name}.yaml\"", "must hold {target}"),
+            ("\"/abs/{target}.yaml\"", "relative"),
+            ("\"C:/x/{target}.yaml\"", "relative"),
+            ("\"{stem}.{target}\"", "names {stem}"),
+            ("\"{target\"", "no `}`"),
+            ("\"x}{target}\"", "no `{`"),
+            ("\"\"", "must not be empty"),
+        ] {
+            let err = Manifest::parse("meridian.yaml", with(out).as_bytes())
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("spec.retarget.out"), "{err}");
+            assert!(err.contains(want), "wanted {want:?} in {err:?}");
+        }
+        let text = WITH_LOGIN.replace("spec:\n", "spec:\n  retarget:\n    into: x\n");
+        assert!(Manifest::parse("meridian.yaml", text.as_bytes())
+            .unwrap_err()
+            .to_string()
+            .contains("spec.retarget.into: unknown field"));
     }
 
     const WITH_LOGIN: &str = r#"apiVersion: meridian/v1
