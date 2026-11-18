@@ -201,6 +201,12 @@ and the report is [`web-vm.notes`](../../plugins/terraform/testdata/import/web-v
 | Plan | `terraform init`, then `terraform plan -out=meridian.tfplan`, then `terraform show -json` to read it |
 | Apply | the same plan, then `terraform apply meridian.tfplan`, then `terraform output -json` |
 | `MERIDIAN_TERRAFORM` | the program to run, when it is not `terraform` on `PATH`; set it to `tofu` for OpenTofu |
+| `MERIDIAN_TERRAFORM_ARGS` | arguments added to `init`, `plan` and `apply`, split like a shell command line (quotes hold a word together): `-parallelism=4`, `-lock-timeout=30s`. The calls that read the saved plan and the outputs get none |
+
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.terraform`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#terraform).
 
 What is applied is exactly the plan that was shown. Values the document
 [imports](#values-from-other-documents) reach the configuration

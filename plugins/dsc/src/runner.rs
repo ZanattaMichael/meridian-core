@@ -6,6 +6,7 @@ use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, Operations, Plan, RunContext,
     RunError, Runner, Value,
 };
+use meridian_sdk::{settings, Setting};
 
 use crate::DATUM_PATH;
 
@@ -14,6 +15,25 @@ pub const PROGRAM_VARIABLE: &str = "MERIDIAN_PWSH";
 /// The DscPipelineRunner module to import: a name PowerShell can find, or
 /// the path of its manifest.
 pub const MODULE_VARIABLE: &str = "MERIDIAN_DSC_MODULE";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "program",
+            PROGRAM_VARIABLE,
+            "pwsh",
+            "The PowerShell program, when it is not `pwsh` on `PATH`.",
+        ),
+        Setting::new(
+            "module",
+            MODULE_VARIABLE,
+            "Dsc.PipelineRunner",
+            "The DscPipelineRunner module to import: a name PowerShell can find, or the path of its manifest.",
+        ),
+    ]
+}
 
 /// The line of PowerShell's output that carries the run's result.
 const RESULT_MARK: &str = "MERIDIAN-RESULT ";
@@ -39,15 +59,11 @@ struct Outcome {
 impl DscRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
-        let variable = |name: &str, default: &str| {
-            std::env::var(name)
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or_else(|| default.to_owned())
-        };
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         DscRunner {
-            program: variable(PROGRAM_VARIABLE, "pwsh"),
-            module: variable(MODULE_VARIABLE, "Dsc.PipelineRunner"),
+            program: settings::text(setting("program")),
+            module: settings::text(setting("module")),
         }
     }
 
@@ -176,6 +192,10 @@ fn drift(outcomes: &[Outcome]) -> Vec<Change> {
 }
 
 impl Runner for DscRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations {
             plan: true,

@@ -42,6 +42,7 @@ fn runner(dir: &Path, cases: &str) -> PackerRunner {
     );
     PackerRunner {
         program: program.to_str().unwrap().to_owned(),
+        extra_args: Vec::new(),
     }
 }
 
@@ -242,6 +243,7 @@ fn a_missing_packer_says_so() {
     let dir = scratch(TMP, "missing");
     let err = PackerRunner {
         program: dir.join("no-such-packer").to_str().unwrap().to_owned(),
+        extra_args: Vec::new(),
     }
     .plan(&context(&dir), &compiled(), &KeptLog::default())
     .unwrap_err();
@@ -284,6 +286,7 @@ fn runner_keeping_vars(dir: &Path, cases: &str) -> PackerRunner {
     );
     PackerRunner {
         program: program.to_str().unwrap().to_owned(),
+        extra_args: Vec::new(),
     }
 }
 

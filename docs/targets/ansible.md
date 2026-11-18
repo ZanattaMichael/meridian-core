@@ -335,7 +335,12 @@ failed task, `4` is a host that could not be reached.
 | Variable | Meaning |
 |---|---|
 | `MERIDIAN_ANSIBLE_PLAYBOOK` | the program to run, when `ansible-playbook` is not on `PATH` |
-| `MERIDIAN_ANSIBLE_ARGS` | arguments added to every run, split on spaces: `--user deploy --private-key ~/.ssh/deploy`, or `--connection local` for this machine |
+| `MERIDIAN_ANSIBLE_ARGS` | arguments added to every run, split like a shell command line (quotes hold a word together): `--user deploy --private-key ~/.ssh/deploy`, or `--connection local` for this machine |
+
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.ansible`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#ansible).
 
 ## Reaching the host as a credential
 

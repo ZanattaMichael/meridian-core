@@ -9,16 +9,42 @@ use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
     RunContext, RunError, Runner, Value, Written,
 };
+use meridian_sdk::{settings, Setting};
 
 use crate::{secret_token, CLUSTER_PATH, MANIFESTS_PATH};
 
 /// Names the program to run, when it is not `kubectl` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_KUBECTL";
-/// Extra arguments for every call, split on whitespace.
+/// Extra arguments for every call, split like a shell command line.
 pub const ARGS_VARIABLE: &str = "MERIDIAN_KUBECTL_ARGS";
 /// How many seconds an apply waits for an output the cluster has not filled
 /// in yet, such as a load balancer's address.
 pub const OUTPUT_WAIT_VARIABLE: &str = "MERIDIAN_KUBECTL_OUTPUT_WAIT";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "program",
+            PROGRAM_VARIABLE,
+            "kubectl",
+            "The `kubectl` program to run, when it is not on `PATH`. Shared with the helm target.",
+        ),
+        Setting::new(
+            "args",
+            ARGS_VARIABLE,
+            "",
+            "Extra arguments for every `kubectl` call, split like a shell command line: `--context prod`. Shared with the helm target.",
+        ),
+        Setting::new(
+            "output-wait",
+            OUTPUT_WAIT_VARIABLE,
+            "120",
+            "How many seconds an apply waits for an output the cluster has not filled in yet, such as a load balancer's address.",
+        ),
+    ]
+}
 
 /// Applies compiled manifests to a cluster.
 ///
@@ -105,18 +131,14 @@ impl Cluster {
 impl KubernetesRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         KubernetesRunner {
-            program: std::env::var(PROGRAM_VARIABLE)
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or_else(|| "kubectl".to_owned()),
-            extra_args: std::env::var(ARGS_VARIABLE)
-                .map(|v| v.split_whitespace().map(str::to_owned).collect())
-                .unwrap_or_default(),
+            program: settings::text(setting("program")),
+            extra_args: settings::args(setting("args")),
             output_wait: Duration::from_secs(
-                std::env::var(OUTPUT_WAIT_VARIABLE)
-                    .ok()
-                    .and_then(|v| v.trim().parse().ok())
+                settings::text(setting("output-wait"))
+                    .parse()
                     .unwrap_or(120),
             ),
             output_poll: Duration::from_secs(2),
@@ -331,6 +353,10 @@ fn only_missing_new_namespaces(stdout: &str, stderr: &str) -> bool {
 }
 
 impl Runner for KubernetesRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations::ALL
     }
