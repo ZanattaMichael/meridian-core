@@ -222,6 +222,7 @@ fn expand(azure: Azure, r: &Resource) -> Result<Expansion, CompileError> {
     let own_id = || outputs(&[("id", azure.id(id))]);
     Ok(match r.r#type.as_str() {
         "network" => Expansion {
+            order: Vec::new(),
             resources: vec![azure.network(
                 r,
                 None,
@@ -288,6 +289,7 @@ fn expand(azure: Azure, r: &Resource) -> Result<Expansion, CompileError> {
                 }
             };
             Expansion {
+                order: Vec::new(),
                 resources: vec![azure.network(r, None, "virtualNetworks/subnets", body)],
                 outputs: own_id(),
             }
@@ -307,11 +309,13 @@ fn expand(azure: Azure, r: &Resource) -> Result<Expansion, CompileError> {
                 Value::Map(map(vec![("securityRules", Value::List(rules))])),
             );
             Expansion {
+                order: Vec::new(),
                 resources: vec![azure.network(r, None, "networkSecurityGroups", body)],
                 outputs: own_id(),
             }
         }
         "address" => Expansion {
+            order: Vec::new(),
             resources: vec![azure.network(
                 r,
                 None,
@@ -564,6 +568,7 @@ fn vm(azure: Azure, r: &Resource) -> Result<Expansion, CompileError> {
         ));
     }
     Ok(Expansion {
+        order: Vec::new(),
         resources: vec![nic, machine],
         outputs: outputs(&reads),
     })

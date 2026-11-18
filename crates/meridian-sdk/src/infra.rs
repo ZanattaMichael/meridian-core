@@ -31,7 +31,7 @@ use std::collections::BTreeMap;
 
 use crate::expr::{self, Part};
 use crate::rules;
-use crate::types::{CompileError, Resource, ResourceGraph};
+use crate::types::{CompileError, Edge, EdgeKind, Resource, ResourceGraph};
 use crate::{ParamKind, ParamSchema, ResourceSchema, Value};
 
 /// What each common infrastructure type is, sorted by name.
@@ -713,6 +713,10 @@ pub struct Expansion {
     /// such as `${ip.public_ip}`. An output a target cannot read is left
     /// out, and a document that reads it is refused.
     pub outputs: BTreeMap<String, String>,
+    /// Orders the tool cannot infer from a reference, as (first, then): the
+    /// resource `first` is applied before `then`. Each becomes a
+    /// `dependsOn` edge, placed at the common resource.
+    pub order: Vec<(String, String)>,
 }
 
 /// Replaces every common resource of the tree with what `expand` makes of
@@ -742,6 +746,14 @@ pub fn lower(
             "an expansion keeps the common resource's id"
         );
         reads.insert(resource.id.clone(), expansion.outputs);
+        out.edges
+            .extend(expansion.order.into_iter().map(|(from, to)| Edge {
+                from,
+                to,
+                kind: EdgeKind::HardOrder,
+                action: String::new(),
+                pos: resource.pos.clone(),
+            }));
         out.resources.extend(expansion.resources);
     }
     if reads.is_empty() {

@@ -12,6 +12,7 @@ on:
   pull_request:
     paths:
       - 'plugins/cloudformation/**'
+      - 'examples/common/**'
       - 'examples/cloudformation/**'
       - 'crates/**'
       - 'Cargo.toml'
