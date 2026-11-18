@@ -888,9 +888,15 @@ exec sh -c "$last""#,
     runner.plan(&remote, &shop(), &KeptLog::default()).unwrap();
     assert!(lines(dir.join("ssh.calls"))[0].contains("-l ops edge01.example.com"));
     assert!(!dir.join("ssh-agent.args").exists());
-    assert!(!fs::read_to_string(dir.join("ssh.env"))
-        .unwrap()
-        .contains("SSH_AUTH_SOCK="));
+    // ssh sees the agent the user has, if any (macOS gives every process
+    // one), and none of Meridian's.
+    let env = fs::read_to_string(dir.join("ssh.env")).unwrap();
+    let told: Vec<&str> = env
+        .lines()
+        .filter_map(|l| l.strip_prefix("SSH_AUTH_SOCK="))
+        .collect();
+    let own = std::env::var("SSH_AUTH_SOCK").ok();
+    assert_eq!(told, own.iter().map(String::as_str).collect::<Vec<_>>());
 }
 
 #[test]
