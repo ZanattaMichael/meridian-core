@@ -93,11 +93,8 @@ error, with the line.
 
 ## Why the output is JSON
 
-The configuration is written in Terraform's JSON syntax (`main.tf.json`), not
-HCL. In HCL a nested block and a map-valued argument are written differently,
-and only the provider's schema says which a param is. In the JSON syntax
-Terraform decides that itself, so a document compiles correctly with no schema.
-Terraform reads the file like any other configuration.
+The output is Terraform's JSON syntax (`main.tf.json`), not HCL, so blocks and map arguments
+compile correctly without the provider's schema.
 
 ## Notifications
 

@@ -578,23 +578,9 @@ and after `meridian apply`:
 
 ## Why this category
 
-Every Meridian plugin declares a category, and the plugin protocol has four:
-infrastructure as code, configuration management, containerization and container
-orchestration. Packer builds images, which is none of them exactly.
-
-It is declared as **infrastructure as code** because that is the closest fit:
-
-- An image is created from nothing by a declarative definition, the way a Terraform
-  resource is. Configuration management, by contrast, configures a machine that already
-  exists and keeps existing.
-- What a build produces is an id that the stage creating machines consumes, so it belongs
-  in the same part of a workflow as the tools that provision infrastructure, ahead of them.
-- It uses the `Infrastructure` document kind, which is the kind that has outputs.
-- Packer builds containers too, but also AMIs and VM templates, so containerization would
-  be wrong for most of what it does.
-
-If the protocol gains an image-building category, this plugin should move to it. That is a
-one-line change in the plugin.
+Packer is declared **infrastructure as code**, the closest of the four categories: it creates
+images declaratively, its output (an image id) feeds the stages that create machines, and it
+needs the `Infrastructure` kind's outputs. It moves if an image-building category is added.
 
 ## Testing
 

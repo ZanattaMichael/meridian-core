@@ -56,7 +56,6 @@ Contents: [Requirements](#requirements) ·
 [Warnings](#warnings) ·
 [What the plugin refuses](#what-the-plugin-refuses) ·
 [When a run fails](#when-a-run-fails) ·
-[Differences from other targets](#differences-from-other-targets) ·
 [How it is tested](#how-it-is-tested)
 
 ## Requirements
@@ -900,28 +899,6 @@ Messages name `salt-ssh` in place of `salt-call` when that is what ran.
 
 A permission error from `salt-call`, such as being unable to write under `/var/cache/salt`,
 means it needs root or a configuration directory of its own; see [Settings](#settings).
-
-## Differences from other targets
-
-The same document compiles for Ansible, Puppet and Salt. Where they differ, it is
-because the tools do:
-
-- **Reload.** Salt can reload a service on a change; so can Ansible. Puppet cannot, and
-  its plugin refuses the document.
-- **Runtime conditions.** Salt and Ansible support `runtimeWhen`, each in its own
-  expression language. Puppet does not.
-- **Restart timing.** Salt restarts a watched service where its state is evaluated.
-  Ansible runs handlers at the end of the play.
-- **Ordering.** Salt and Puppet keep the dependency graph. Ansible flattens it to a
-  sequence and warns about it.
-- **Commands.** Salt always uses a shell, hence the `shell-required` rule.
-- **Service states.** `restarted` and `reloaded` are not states on this target. Salt has
-  no state that means "restart every time"; use a notification.
-- **Empty files.** A `file` with no `content` creates a missing file here; Ansible's
-  `file` module would fail instead.
-- **The tool's own types.** Every state function is reachable by its dotted name, and
-  none has a bare name, so `native/<name>` is refused here where Puppet and Chef accept
-  it.
 
 ## How it is tested
 
