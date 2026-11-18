@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text};
+use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text, secret_at};
 use meridian_sdk::{CompileError, Data, Emitted, Emitter, ResourceGraph};
 use meridian_target_kubernetes::Kubernetes;
 
@@ -195,4 +195,84 @@ fn absent_and_runtime_conditions_are_refused() {
         refusal("    - id: app\n      type: v1/ConfigMap\n      state: absent\n      params: {}\n");
     assert_eq!(err.rule, "unsupported-state");
     assert!(err.msg.contains("never deletes"), "{}", err.msg);
+}
+
+const SECRET: &str = "    - id: db_login\n      type: v1/Secret\n      params:\n        stringData:\n          username: app\n          password: placeholder\n";
+
+/// The document with the `password` of the Secret made a secret.
+fn with_secret(resources: &str, id: &str, path: &[&str]) -> ResourceGraph {
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: app\nspec:\n  target: kubernetes\n  resources:\n{resources}"
+    );
+    let mut graph = graph_from_text("infra.yaml", &text, "kubernetes");
+    secret_at(&mut graph, id, path, "db_password");
+    graph
+}
+
+#[test]
+fn a_secret_in_string_data_is_written_as_a_token_the_runner_fills_on_the_way_to_kubectl() {
+    let graph = with_secret(SECRET, "db_login", &["stringData", "password"]);
+    let emitted = emit(&graph).unwrap();
+    let text = &emitted.artifact.files["manifests.yaml"];
+    assert_eq!(
+        text,
+        "---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: db-login\nstringData:\n  password: \"${meridian_secret_db_password}\"\n  username: app\n"
+    );
+    assert!(!text.contains("(secret "), "{text}");
+    assert_eq!(
+        meridian_target_kubernetes::secret_token("db_password"),
+        "${meridian_secret_db_password}"
+    );
+    assert!(Kubernetes.capabilities().secrets);
+}
+
+#[test]
+fn a_secret_anywhere_but_a_secrets_string_data_is_refused_with_where_it_goes() {
+    let cases: [(&str, &str, &[&str], &str); 5] = [
+        (
+            CONFIG,
+            "app_config",
+            &["data", "workers"],
+            "it would be written into the object for every reader of it to see",
+        ),
+        (
+            SECRET,
+            "db_login",
+            &["data", "password"],
+            "put the secret in stringData",
+        ),
+        (
+            SECRET,
+            "db_login",
+            &["metadata", "labels", "tier"],
+            "only a value of stringData can",
+        ),
+        (
+            SECRET,
+            "db_login",
+            &["stringData", "nested", "deeper"],
+            "a stringData value is a whole string",
+        ),
+        (
+            "    - id: target\n      type: cluster\n      params:\n        context: prod\n",
+            "target",
+            &["context"],
+            "the command line kubectl is given",
+        ),
+    ];
+    for (resources, id, path, said) in cases {
+        let err = emit(&with_secret(resources, id, path)).unwrap_err();
+        assert_eq!(err.rule, "unsupported-secret-place", "{path:?}: {err}");
+        assert!(err.msg.contains(said), "{path:?}: {err}");
+        assert!(!err.msg.contains("(secret "), "{err}");
+    }
+}
+
+#[test]
+fn text_that_reads_as_a_secrets_token_is_refused() {
+    let err = refusal(
+        "    - id: c\n      type: v1/ConfigMap\n      params:\n        data:\n          x: \"${meridian_secret_db_password}\"\n",
+    );
+    assert_eq!(err.rule, "reserved-text");
+    assert!(err.msg.contains("choose other text"), "{err}");
 }

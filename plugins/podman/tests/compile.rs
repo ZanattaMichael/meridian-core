@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text};
+use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text, secret_at};
 use meridian_sdk::{Capabilities, Category, CompileError, Data, Emitted, Emitter, ResourceGraph};
 use meridian_target_podman::{Podman, META_PATH};
 
@@ -52,7 +52,7 @@ fn the_plugin_says_what_it_is() {
             native_notify: true,
             synthetic_notify: false,
             runtime_condition: false,
-            secrets: false,
+            secrets: true,
             credentials: false,
         }
     );
@@ -554,4 +554,91 @@ fn the_guides_first_document_compiles_to_the_unit_the_guide_shows() {
         emitted.artifact.files["web.container"],
         guide_block(&guide, "ini")
     );
+}
+
+/// The document with the given place made a secret called `db_password`.
+fn with_secret(spec: &str, id: &str, path: &[&str]) -> ResourceGraph {
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: shop\nspec:\n  target: podman\n{spec}"
+    );
+    let mut graph = graph_from_text("infra.yaml", &text, "podman");
+    secret_at(&mut graph, id, path, "db_password");
+    graph
+}
+
+#[test]
+fn a_secret_in_a_containers_environment_becomes_a_podman_secret_the_container_reads() {
+    let graph = with_secret(
+        &format!("  resources:\n{WEB}        Environment:\n          MODE: fast\n          PASSWORD: placeholder\n        Secret: other,type=mount\n"),
+        "web",
+        &["Environment", "PASSWORD"],
+    );
+    let text = &emit(&graph).unwrap().artifact.files["web.container"];
+    assert!(text.contains("Environment=MODE=fast\n"), "{text}");
+    assert!(!text.contains("PASSWORD="), "{text}");
+    assert!(
+        text.contains("Secret=other,type=mount\nSecret=meridian_secret_db_password,type=env,target=PASSWORD\n"),
+        "{text}"
+    );
+    assert!(!text.contains("(secret "), "{text}");
+    assert_eq!(
+        meridian_target_podman::podman_secret("db_password"),
+        "meridian_secret_db_password"
+    );
+    assert_eq!(
+        meridian_target_podman::secret_reference("db_password", "PASSWORD"),
+        "meridian_secret_db_password,type=env,target=PASSWORD"
+    );
+    assert!(Podman.capabilities().secrets);
+}
+
+#[test]
+fn an_environment_that_is_only_secrets_leaves_no_empty_key_behind() {
+    let graph = with_secret(
+        &format!("  resources:\n{WEB}        Environment:\n          PASSWORD: placeholder\n"),
+        "web",
+        &["Environment", "PASSWORD"],
+    );
+    let text = &emit(&graph).unwrap().artifact.files["web.container"];
+    assert!(!text.contains("Environment="), "{text}");
+    assert!(
+        text.contains("Secret=meridian_secret_db_password,type=env,target=PASSWORD\n"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_secret_anywhere_but_a_containers_environment_is_refused_with_where_it_goes() {
+    let cases: [(&str, &str, &[&str], &str); 4] = [
+        (WEB, "web", &["Image"], "put it in Environment as a map"),
+        (
+            "    - id: data\n      type: volume\n      params:\n        Label: x\n",
+            "data",
+            &["Label"],
+            "only a container's Environment can take one",
+        ),
+        (
+            &format!("{WEB}        Environment:\n          PASSWORD: {{a: b}}\n"),
+            "web",
+            &["Environment", "PASSWORD", "a"],
+            "write the secret as the whole value",
+        ),
+        (
+            &format!("{WEB}        unit:\n          Description: x\n"),
+            "web",
+            &["unit", "Description"],
+            "put it in Environment as a map",
+        ),
+    ];
+    for (resources, id, path, said) in cases {
+        let err = emit(&with_secret(
+            &format!("  resources:\n{resources}"),
+            id,
+            path,
+        ))
+        .unwrap_err();
+        assert_eq!(err.rule, "unsupported-secret-place", "{path:?}: {err}");
+        assert!(err.msg.contains(said), "{path:?}: {err}");
+        assert!(!err.msg.contains("(secret "), "{err}");
+    }
 }

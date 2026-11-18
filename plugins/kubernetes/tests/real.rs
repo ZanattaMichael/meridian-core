@@ -21,7 +21,7 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{graph_from_text, repo_root, scratch, KeptLog};
+use meridian_plugin_testkit::{graph_from_text, repo_root, scratch, secret_at, secrets, KeptLog};
 use meridian_sdk::tool::Tool;
 use meridian_sdk::{
     Applied, Artifact, Change, ChangeAction, Data, Emitter, NoLog, Output, ParamKind, Plan,
@@ -363,4 +363,108 @@ fn the_api_servers_kinds_are_exported_for_an_editor() {
         "a kind of another group is listed"
     );
     assert!(!export.schemas.iter().any(|s| s.r#type.ends_with("List")));
+}
+
+/// Unlike anything the cluster or the plugin prints, with the characters a
+/// JSON string escapes, so that finding it is finding a leak.
+const SECRET: &str = "zzq-Vt9 \"not\" a\\real $tok'en 4kLm";
+
+#[ignore = "needs a real kubectl and a cluster; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_secret_reaches_the_cluster_as_a_secret_and_is_in_no_file() {
+    if !cluster() {
+        return;
+    }
+    let _ = kubectl(&[
+        "delete",
+        "secret",
+        "meridian-real-login",
+        "--ignore-not-found",
+    ]);
+    struct Remove;
+    impl Drop for Remove {
+        fn drop(&mut self) {
+            let _ = kubectl(&[
+                "delete",
+                "secret",
+                "meridian-real-login",
+                "--ignore-not-found",
+            ]);
+        }
+    }
+    let _remove = Remove;
+    let dir = scratch(TMP, "real-secret");
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: login\nspec:\n  target: kubernetes\n  resources:\n    - id: target\n      type: cluster\n      params:\n        namespace: default\n    - id: login\n      type: v1/Secret\n      params:\n        metadata:\n          name: meridian-real-login\n        stringData:\n          user: app\n          password: placeholder\n";
+    let mut graph = graph_from_text("login.yaml", text, "kubernetes");
+    let slot = secret_at(&mut graph, "login", &["stringData", "password"], "token");
+    let artifact = Kubernetes.emit(&graph, &Data::new()).unwrap().artifact;
+    assert!(!artifact.files["manifests.yaml"].contains(SECRET));
+
+    let mut context = context(&dir);
+    context.secrets = secrets(&[(slot, "token", SECRET)]);
+    let log = KeptLog::default();
+    let runner = KubernetesRunner::from_env();
+    let plan = runner
+        .plan(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(changes(&plan.changes), [(ChangeAction::Create, "login")]);
+    let applied = runner
+        .apply(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(changes(&applied.changes), [(ChangeAction::Create, "login")]);
+
+    // The cluster holds the value, as a Secret.
+    let encoded = kubectl(&[
+        "get",
+        "secret",
+        "meridian-real-login",
+        "--namespace",
+        "default",
+        "--output",
+        "jsonpath={.data.password}",
+    ])
+    .unwrap();
+    let decoded = Tool::new("base64")
+        .arg("--decode")
+        .stdin(encoded.trim().to_owned())
+        .capture_stdout()
+        .run_ok("base64", &NoLog)
+        .unwrap()
+        .stdout;
+    // A fixed message, so that a failure never prints the value.
+    assert!(
+        decoded == SECRET,
+        "the Secret in the cluster does not hold the value kubectl was handed"
+    );
+
+    // Nothing printed holds it, and no file does: the manifests in the work
+    // directory hold the token, as the artifact does.
+    assert!(
+        !log.text().iter().any(|l| l.contains(SECRET)),
+        "the secret reached the log:\n{}",
+        log.text().join("\n")
+    );
+    for entry in fs::read_dir(dir.join("work")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() {
+            let bytes = fs::read(&path).unwrap();
+            assert!(
+                !String::from_utf8_lossy(&bytes).contains(SECRET),
+                "{} holds the secret in the open",
+                path.display()
+            );
+        }
+    }
+    assert!(fs::read_to_string(dir.join("work").join("manifests.yaml"))
+        .unwrap()
+        .contains("\"${meridian_secret_token}\""));
+
+    // A second plan reports the Secret as an update, as kubectl does for
+    // every Secret written with stringData: the cluster stores it as data,
+    // so the stringData the manifest carries is a patch every time, whether
+    // or not the stored value changes. The target documents this.
+    let plan = runner
+        .plan(&context, &artifact, &KeptLog::default())
+        .unwrap();
+    assert_eq!(changes(&plan.changes), [(ChangeAction::Update, "login")]);
 }

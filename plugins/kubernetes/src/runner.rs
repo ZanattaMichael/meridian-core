@@ -7,18 +7,44 @@ use std::time::{Duration, Instant};
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
-    RunContext, RunError, Runner, Value,
+    RunContext, RunError, Runner, Value, Written,
 };
+use meridian_sdk::{settings, Setting};
 
-use crate::{CLUSTER_PATH, MANIFESTS_PATH};
+use crate::{secret_token, CLUSTER_PATH, MANIFESTS_PATH};
 
 /// Names the program to run, when it is not `kubectl` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_KUBECTL";
-/// Extra arguments for every call, split on whitespace.
+/// Extra arguments for every call, split like a shell command line.
 pub const ARGS_VARIABLE: &str = "MERIDIAN_KUBECTL_ARGS";
 /// How many seconds an apply waits for an output the cluster has not filled
 /// in yet, such as a load balancer's address.
 pub const OUTPUT_WAIT_VARIABLE: &str = "MERIDIAN_KUBECTL_OUTPUT_WAIT";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "program",
+            PROGRAM_VARIABLE,
+            "kubectl",
+            "The `kubectl` program to run, when it is not on `PATH`. Shared with the helm target.",
+        ),
+        Setting::new(
+            "args",
+            ARGS_VARIABLE,
+            "",
+            "Extra arguments for every `kubectl` call, split like a shell command line: `--context prod`. Shared with the helm target.",
+        ),
+        Setting::new(
+            "output-wait",
+            OUTPUT_WAIT_VARIABLE,
+            "120",
+            "How many seconds an apply waits for an output the cluster has not filled in yet, such as a load balancer's address.",
+        ),
+    ]
+}
 
 /// Applies compiled manifests to a cluster.
 ///
@@ -105,18 +131,14 @@ impl Cluster {
 impl KubernetesRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         KubernetesRunner {
-            program: std::env::var(PROGRAM_VARIABLE)
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or_else(|| "kubectl".to_owned()),
-            extra_args: std::env::var(ARGS_VARIABLE)
-                .map(|v| v.split_whitespace().map(str::to_owned).collect())
-                .unwrap_or_default(),
+            program: settings::text(setting("program")),
+            extra_args: settings::args(setting("args")),
             output_wait: Duration::from_secs(
-                std::env::var(OUTPUT_WAIT_VARIABLE)
-                    .ok()
-                    .and_then(|v| v.trim().parse().ok())
+                settings::text(setting("output-wait"))
+                    .parse()
                     .unwrap_or(120),
             ),
             output_poll: Duration::from_secs(2),
@@ -151,6 +173,44 @@ impl KubernetesRunner {
             }
         }
         tool.args(self.extra_args.iter().cloned())
+    }
+
+    /// `kubectl apply`, given the manifests. With no secrets in the run it
+    /// reads the file in the work directory. With secrets, the file holds
+    /// a token where each value goes, and the manifests are put together
+    /// with the values in protected memory and handed over on standard
+    /// input, so that no file ever holds a value: the first choice of
+    /// channel, and the only copy is the API server's.
+    fn apply_manifests(
+        &self,
+        context: &RunContext,
+        cluster: &Cluster,
+        artifact: &Artifact,
+        before: &[&str],
+    ) -> Result<Tool, RunError> {
+        let mut operation = vec!["apply"];
+        operation.extend_from_slice(before);
+        if context.secrets.is_empty() {
+            operation.extend(["--filename", MANIFESTS_PATH]);
+            return Ok(self.kubectl(context, cluster, &operation, ""));
+        }
+        operation.extend(["--filename", "-"]);
+        let text = artifact
+            .files
+            .get(MANIFESTS_PATH)
+            .map(String::as_str)
+            .unwrap_or("");
+        let filled = context
+            .secrets
+            .filled_text(text, secret_token, Written::JsonString)
+            .map_err(|e| {
+                RunError::new(format!(
+                    "the secrets could not be put into the manifests for kubectl: {e}"
+                ))
+            })?;
+        Ok(self
+            .kubectl(context, cluster, &operation, "")
+            .stdin_secret(filled))
     }
 
     fn prepare(&self, context: &RunContext, artifact: &Artifact) -> Result<Cluster, RunError> {
@@ -293,6 +353,10 @@ fn only_missing_new_namespaces(stdout: &str, stderr: &str) -> bool {
 }
 
 impl Runner for KubernetesRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations::ALL
     }
@@ -306,12 +370,7 @@ impl Runner for KubernetesRunner {
         let cluster = self.prepare(context, artifact)?;
         log.out("asking the cluster what an apply would change");
         let finished = self
-            .kubectl(
-                context,
-                &cluster,
-                &["apply", "--dry-run=server", "--filename", MANIFESTS_PATH],
-                "",
-            )
+            .apply_manifests(context, &cluster, artifact, &["--dry-run=server"])?
             .run(log)?;
         let mut plan = Plan {
             changes: read_report(&finished.stdout, &cluster),
@@ -341,12 +400,7 @@ impl Runner for KubernetesRunner {
     ) -> Result<Applied, RunError> {
         let cluster = self.prepare(context, artifact)?;
         let finished = self
-            .kubectl(
-                context,
-                &cluster,
-                &["apply", "--filename", MANIFESTS_PATH],
-                "",
-            )
+            .apply_manifests(context, &cluster, artifact, &[])?
             .run_ok("kubectl could not apply the manifests", log)?;
         let changes = read_report(&finished.stdout, &cluster);
         for change in &changes {

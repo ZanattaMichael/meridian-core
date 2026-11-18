@@ -8,8 +8,17 @@ use std::path::Path;
 use meridian_sdk::tool::{write_artifact, Finished, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
-    RunContext, RunError, Runner, Value,
+    RunContext, RunError, Runner, Value, Written,
 };
+use meridian_sdk::{settings, Setting};
+
+use crate::podman_secret;
+
+/// The text that stands for a secret's value in the secrets script until
+/// the runner fills it in: it is unlike anything else the script holds.
+fn secret_token(name: &str) -> String {
+    format!("${{meridian_secret_{name}}}")
+}
 
 use crate::script::{self, Desired, FileState, Generator, Probe, Settings, Steps};
 use crate::META_PATH;
@@ -30,9 +39,58 @@ pub const UNIT_DIR_VARIABLE: &str = "MERIDIAN_PODMAN_UNIT_DIR";
 pub const QUADLET_VARIABLE: &str = "MERIDIAN_PODMAN_QUADLET";
 /// Names the `ssh` program used to reach another host.
 pub const SSH_VARIABLE: &str = "MERIDIAN_PODMAN_SSH";
-/// Extra arguments for every `ssh`, split on whitespace: which user, which
-/// key, which port. For example `-l deploy -i ~/.ssh/deploy`.
+/// Extra arguments for every `ssh`, split like a shell command line: which
+/// user, which key, which port. For example `-l deploy -i ~/.ssh/deploy`.
 pub const SSH_ARGS_VARIABLE: &str = "MERIDIAN_PODMAN_SSH_ARGS";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "podman",
+            PODMAN_VARIABLE,
+            "podman",
+            "The `podman` program on the host, when it is not on its `PATH`.",
+        ),
+        Setting::new(
+            "systemctl",
+            SYSTEMCTL_VARIABLE,
+            "systemctl",
+            "The `systemctl` program on the host.",
+        ),
+        Setting::new(
+            "scope",
+            SCOPE_VARIABLE,
+            "user",
+            "`user` runs the units as the connecting user's own, without root. `system` installs them for the whole machine, using `sudo` when the connecting user is not root.",
+        ),
+        Setting::new(
+            "unit-dir",
+            UNIT_DIR_VARIABLE,
+            "",
+            "The directory unit files are installed in, when it is not the standard one for the scope.",
+        ),
+        Setting::new(
+            "quadlet",
+            QUADLET_VARIABLE,
+            "",
+            "Where Quadlet's generator is on the host, when it is not in one of the places distributions put it.",
+        ),
+        Setting::new(
+            "ssh",
+            SSH_VARIABLE,
+            "ssh",
+            "The `ssh` program used to reach another host.",
+        ),
+        Setting::new(
+            "ssh-args",
+            SSH_ARGS_VARIABLE,
+            "",
+            "Extra arguments for every `ssh`, split like a shell command line: which user, which key, which port. For example `-l deploy -i ~/.ssh/deploy`.",
+        ),
+    ]
+}
 
 /// The file in the work directory that lists the unit files the last apply
 /// left on the host, which is how a later one knows what to remove.
@@ -98,35 +156,24 @@ impl Default for PodmanRunner {
     }
 }
 
-fn setting(variable: &str) -> Option<String> {
-    std::env::var(variable)
-        .ok()
-        .map(|v| v.trim().to_owned())
-        .filter(|v| !v.is_empty())
-}
-
 impl PodmanRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
-        let mut runner = PodmanRunner::default();
-        if let Some(podman) = setting(PODMAN_VARIABLE) {
-            runner.podman = podman;
-        }
-        if let Some(systemctl) = setting(SYSTEMCTL_VARIABLE) {
-            runner.systemctl = systemctl;
-        }
-        if let Some(ssh) = setting(SSH_VARIABLE) {
-            runner.ssh = ssh;
-        }
-        runner.ssh_args = setting(SSH_ARGS_VARIABLE)
-            .map(|v| v.split_whitespace().map(str::to_owned).collect())
-            .unwrap_or_default();
-        runner.unit_dir = setting(UNIT_DIR_VARIABLE);
-        runner.generator = setting(QUADLET_VARIABLE);
-        match setting(SCOPE_VARIABLE).as_deref() {
-            None | Some("user") => runner.scope = Scope::User,
-            Some("system") => runner.scope = Scope::System,
-            Some(other) => {
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
+        let mut runner = PodmanRunner {
+            podman: settings::text(setting("podman")),
+            systemctl: settings::text(setting("systemctl")),
+            ssh: settings::text(setting("ssh")),
+            ssh_args: settings::args(setting("ssh-args")),
+            unit_dir: settings::optional(setting("unit-dir")),
+            generator: settings::optional(setting("quadlet")),
+            ..PodmanRunner::default()
+        };
+        match settings::text(setting("scope")).as_str() {
+            "user" => runner.scope = Scope::User,
+            "system" => runner.scope = Scope::System,
+            other => {
                 runner.misconfigured = Some(format!(
                     "{SCOPE_VARIABLE} is {other:?}; it must be \"user\" or \"system\""
                 ))
@@ -154,7 +201,62 @@ impl PodmanRunner {
         script: String,
         log: &dyn Log,
     ) -> Result<Finished, RunError> {
-        let tool = if is_local(&context.host) {
+        let tool = self.host_shell(context)?.stdin(script);
+        self.finished(context, tool.capture_stdout().run(log)?)
+    }
+
+    /// Creates the run's secrets in Podman on the host, before anything
+    /// else of an apply. The script holds the values, so it is put together
+    /// in protected memory and read by the host's shell on standard input
+    /// like every other script: locally a pipe, elsewhere the ssh
+    /// connection. A changed value is created anew; the container reads it
+    /// when it is next started.
+    fn secrets_on_host(&self, context: &RunContext, log: &dyn Log) -> Result<(), RunError> {
+        if context.secrets.is_empty() {
+            return Ok(());
+        }
+        let names: Vec<(String, String)> = context
+            .secrets
+            .names()
+            .into_iter()
+            .map(|name| (podman_secret(name), secret_token(name)))
+            .collect();
+        let script = context
+            .secrets
+            .filled_text(
+                &self.settings().secrets(&names),
+                secret_token,
+                Written::ShellSingleQuoted,
+            )
+            .map_err(|e| {
+                RunError::new(format!(
+                    "the secrets could not be put into the script for podman: {e}"
+                ))
+            })?;
+        log.out(&format!(
+            "creating {} in podman on {}",
+            names
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            host_name(context)
+        ));
+        let tool = self.host_shell(context)?.stdin_secret(script);
+        let finished = self.finished(context, tool.capture_stdout().run(log)?)?;
+        if !finished.success() {
+            return Err(finished.into_error(format!(
+                "could not create the secrets in podman on {}",
+                host_name(context)
+            )));
+        }
+        Ok(())
+    }
+
+    /// The shell on the host a context names, reading its script from
+    /// standard input.
+    fn host_shell(&self, context: &RunContext) -> Result<Tool, RunError> {
+        Ok(if is_local(&context.host) {
             Tool::new(&self.shell).args(["-c", READ_AND_RUN])
         } else {
             let host = context.host.as_str();
@@ -166,8 +268,11 @@ impl PodmanRunner {
                 .args(self.ssh_args.iter().cloned())
                 .arg(host)
                 .arg(format!("sh -c {}", script::quote(READ_AND_RUN)))
-        };
-        let finished = tool.stdin(script).capture_stdout().run(log)?;
+        })
+    }
+
+    /// A script's end, with ssh's own failures told apart from the script's.
+    fn finished(&self, context: &RunContext, finished: Finished) -> Result<Finished, RunError> {
         // ssh keeps 255 for its own failures; the script never exits with it.
         if finished.code == Some(255) && !is_local(&context.host) {
             return Err(finished.into_error(format!("could not reach {} over ssh", context.host)));
@@ -293,6 +398,10 @@ impl PodmanRunner {
 }
 
 impl Runner for PodmanRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations::ALL
     }
@@ -316,6 +425,9 @@ impl Runner for PodmanRunner {
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
         let survey = self.survey(context, artifact, log)?;
+        // The secrets first, so a unit that names one can start, and on
+        // every apply, so a changed value is in place for the next start.
+        self.secrets_on_host(context, log)?;
         let now_installed: Vec<Installed> = survey
             .meta
             .units

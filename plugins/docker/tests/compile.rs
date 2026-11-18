@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text};
+use meridian_plugin_testkit::{assert_golden, graph_from_file, graph_from_text, secret_at};
 use meridian_sdk::{CompileError, Data, Emitted, Emitter, ResourceGraph};
 use meridian_target_docker::Docker;
 
@@ -224,4 +224,75 @@ fn types_states_and_missing_images_are_checked() {
         "    - id: target\n      type: project\n      params: {{name: My Shop}}\n{DB}"
     ));
     assert_eq!(err.rule, "invalid-name");
+}
+
+/// The document with the given place made a secret called `db_password`.
+fn with_secret(resources: &str, id: &str, path: &[&str]) -> ResourceGraph {
+    let mut graph = graph_from_text("infra.yaml", &document(resources), "docker");
+    secret_at(&mut graph, id, path, "db_password");
+    graph
+}
+
+#[test]
+fn a_secret_in_a_services_params_is_composes_own_interpolation_of_a_variable() {
+    let graph = with_secret(
+        &format!("{DB}        environment:\n          POSTGRES_PASSWORD: placeholder\n          A_DOLLAR: $5\n"),
+        "db",
+        &["environment", "POSTGRES_PASSWORD"],
+    );
+    let text = &emit(&graph).unwrap().artifact.files["compose.yaml"];
+    // The secret's `$` is Compose's; the document's own is escaped as before.
+    assert!(
+        text.contains("    POSTGRES_PASSWORD: ${meridian_secret_db_password}\n"),
+        "{text}"
+    );
+    assert!(text.contains("    A_DOLLAR: $$5\n"), "{text}");
+    assert!(!text.contains("(secret "), "{text}");
+    assert_eq!(
+        meridian_target_docker::secret_variable("db_password"),
+        "meridian_secret_db_password"
+    );
+    assert_eq!(
+        meridian_target_docker::secret_reference("db_password"),
+        "${meridian_secret_db_password}"
+    );
+    assert!(Docker.capabilities().secrets);
+}
+
+#[test]
+fn a_secret_elements_value_is_the_variable_compose_reads_it_from() {
+    let graph = with_secret(
+        &format!("{DB}        secrets: [db_pw]\n    - id: db_pw\n      type: secret\n      params:\n        value: placeholder\n"),
+        "db_pw",
+        &["value"],
+    );
+    let text = &emit(&graph).unwrap().artifact.files["compose.yaml"];
+    assert!(
+        text.contains("secrets:\n  db_pw:\n    environment: meridian_secret_db_password\n"),
+        "{text}"
+    );
+    assert!(!text.contains("value:"), "{text}");
+}
+
+#[test]
+fn a_secret_elements_value_that_is_not_a_secret_is_refused() {
+    let err =
+        refusal("    - id: db_pw\n      type: secret\n      params:\n        value: hunter2\n");
+    assert_eq!(err.rule, "invalid-param");
+    assert!(err.msg.contains("must be a secret"), "{err}");
+}
+
+#[test]
+fn a_secret_in_the_projects_settings_is_refused_because_they_are_the_command_line() {
+    let graph = with_secret(
+        &format!(
+            "{DB}    - id: where\n      type: project\n      params:\n        context: remote\n"
+        ),
+        "where",
+        &["context"],
+    );
+    let err = emit(&graph).unwrap_err();
+    assert_eq!(err.rule, "unsupported-secret-place");
+    assert!(err.msg.contains("command line docker is given"), "{err}");
+    assert!(!err.msg.contains("(secret "), "{err}");
 }

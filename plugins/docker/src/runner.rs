@@ -13,16 +13,52 @@ use std::collections::{BTreeMap, BTreeSet};
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
-    RunContext, RunError, Runner, Value,
+    RunContext, RunError, Runner, SecretFile, Value,
 };
+use meridian_sdk::{settings, Setting};
 
-use crate::{COMPOSE_PATH, PROJECT_PATH};
+use crate::{secret_variable, COMPOSE_PATH, PROJECT_PATH};
+
+/// The secrets of a run, written for Compose: one private `.env` file,
+/// given to every `docker compose` call of the stage with `--env-file` and
+/// removed when the stage is over. Compose reads it for its interpolation
+/// and for a secret element's `environment`, and the values go nowhere but
+/// into what Compose makes of the file.
+fn secrets_file(context: &RunContext) -> Result<Option<SecretFile>, RunError> {
+    if context.secrets.is_empty() {
+        return Ok(None);
+    }
+    context
+        .secrets
+        .dotenv_file("secrets.env", secret_variable)
+        .map(Some)
+        .map_err(|e| RunError::new(format!("the secrets could not be written for Compose: {e}")))
+}
 
 /// Names the program to run, when it is not `docker` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_DOCKER";
-/// Extra arguments for `docker compose up`, split on whitespace:
+/// Extra arguments for `docker compose up`, split like a shell command line:
 /// `--pull always`, `--force-recreate`.
 pub const ARGS_VARIABLE: &str = "MERIDIAN_DOCKER_ARGS";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "program",
+            PROGRAM_VARIABLE,
+            "docker",
+            "The `docker` program to run, when it is not on `PATH`.",
+        ),
+        Setting::new(
+            "args",
+            ARGS_VARIABLE,
+            "",
+            "Extra arguments for `docker compose up`, split like a shell command line: `--pull always`, `--force-recreate`.",
+        ),
+    ]
+}
 
 /// Brings a compiled Compose project up on a Docker daemon.
 ///
@@ -124,14 +160,11 @@ impl Project {
 impl DockerRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         DockerRunner {
-            program: std::env::var(PROGRAM_VARIABLE)
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or_else(|| "docker".to_owned()),
-            extra_args: std::env::var(ARGS_VARIABLE)
-                .map(|v| v.split_whitespace().map(str::to_owned).collect())
-                .unwrap_or_default(),
+            program: settings::text(setting("program")),
+            extra_args: settings::args(setting("args")),
         }
     }
 
@@ -147,12 +180,21 @@ impl DockerRunner {
         tool
     }
 
-    /// `docker compose`, aimed at the project.
-    fn compose(&self, context: &RunContext, project: &Project) -> Tool {
+    /// `docker compose`, aimed at the project, reading the run's secrets
+    /// when it has any.
+    fn compose(
+        &self,
+        context: &RunContext,
+        project: &Project,
+        secrets: Option<&SecretFile>,
+    ) -> Tool {
         let mut tool = self
             .docker(context, project)
             .args(["compose", "--project-name", &project.name])
             .args(["--file", COMPOSE_PATH]);
+        if let Some(secrets) = secrets {
+            tool = tool.args(["--env-file", &secrets.path().to_string_lossy()]);
+        }
         if !project.directory.is_empty() {
             tool = tool.args(["--project-directory", &project.directory]);
         }
@@ -188,6 +230,7 @@ impl DockerRunner {
         &self,
         context: &RunContext,
         project: &Project,
+        secrets: Option<&SecretFile>,
         log: &dyn Log,
     ) -> Result<(Desired, Plan), RunError> {
         log.out(&format!(
@@ -196,12 +239,12 @@ impl DockerRunner {
         ));
         // Compose's own reading of the file, which is also its validation.
         let config = self
-            .compose(context, project)
+            .compose(context, project, secrets)
             .args(["config", "--format", "json"])
             .capture_stdout()
             .run_ok("docker compose rejected the compiled file", log)?;
         let hashes = self
-            .compose(context, project)
+            .compose(context, project, secrets)
             .args(["config", "--hash", "*"])
             .capture_stdout()
             .run_ok("docker compose could not hash the services", log)?;
@@ -253,8 +296,11 @@ impl DockerRunner {
             Part::Text(text) => Ok(Value::String(text.clone())),
             Part::Port { service, port } => {
                 let (number, protocol) = port.split_once('/').unwrap_or((port, "tcp"));
+                // Reading needs no secret: Compose finds the container by
+                // the project's labels, and warns about an unset variable
+                // without failing.
                 let finished = self
-                    .compose(context, project)
+                    .compose(context, project, None)
                     .args(["port", "--protocol", protocol, service, number])
                     .capture_stdout()
                     .run_ok(&what, &NoLog)?;
@@ -271,7 +317,7 @@ impl DockerRunner {
             }
             Part::Inspect { service, path } => {
                 let finished = self
-                    .compose(context, project)
+                    .compose(context, project, None)
                     .args(["ps", "--all", "--quiet", service])
                     .capture_stdout()
                     .run_ok(&what, &NoLog)?;
@@ -565,6 +611,10 @@ pub(crate) fn diff(desired: &Desired, actual: &Actual) -> Plan {
 }
 
 impl Runner for DockerRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations::ALL
     }
@@ -576,7 +626,9 @@ impl Runner for DockerRunner {
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
         let project = self.prepare(context, artifact)?;
-        let (_, plan) = self.survey(context, &project, log)?;
+        let secrets = secrets_file(context)?;
+        let (_, plan) = self.survey(context, &project, secrets.as_ref(), log)?;
+        drop(secrets);
         for change in &plan.changes {
             log.out(&change.to_string());
         }
@@ -590,10 +642,13 @@ impl Runner for DockerRunner {
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
         let project = self.prepare(context, artifact)?;
-        let (desired, plan) = self.survey(context, &project, log)?;
-        let mut up = self
-            .compose(context, &project)
-            .args(["up", "--detach", "--remove-orphans"]);
+        let secrets = secrets_file(context)?;
+        let (desired, plan) = self.survey(context, &project, secrets.as_ref(), log)?;
+        let mut up = self.compose(context, &project, secrets.as_ref()).args([
+            "up",
+            "--detach",
+            "--remove-orphans",
+        ]);
         // An image built from source is built again, so a change to the
         // source is applied and not only a change to the file.
         if desired.services.iter().any(|s| s.builds) {
@@ -610,6 +665,7 @@ impl Runner for DockerRunner {
              failed",
             log,
         )?;
+        drop(secrets);
         Ok(Applied {
             changes: plan.changes,
             outputs: self.read_outputs(context, &project)?,

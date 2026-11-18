@@ -4,9 +4,12 @@
 use std::collections::BTreeMap;
 
 use meridian_sdk::expr::{self, Part};
-use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
+use meridian_sdk::{CompileError, Resource, ResourceGraph, SecretName, Value};
 
-use crate::{refuse, refuse_at, Composition, Element, OutputPart, Project, Section};
+use crate::{
+    refuse, refuse_at, secret_reference, secret_variable, Composition, Element, OutputPart,
+    Project, Section,
+};
 
 pub(crate) fn transform(graph: &ResourceGraph) -> Result<Composition, CompileError> {
     let mut composition = Composition {
@@ -59,7 +62,27 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Composition, CompileErr
         };
         let mut body = BTreeMap::new();
         for (key, value) in &r.params {
-            let rewritten = rewrite(value, &sections)
+            // A secret element's `value` is the secret itself: Compose reads
+            // it from the variable the runner's environment file sets.
+            if section == Section::Secret && key == "value" {
+                let Value::Secret(slot) = value else {
+                    return Err(refuse(
+                        r,
+                        "invalid-param",
+                        "param \"value\" of a secret is the secret's value, so it must be a \
+                         secret, ${{ secret.<name> }}; to read a file or a variable of your \
+                         own, write file or environment instead"
+                            .to_owned(),
+                    ));
+                };
+                let name = secret_name(*slot, &graph.secrets);
+                body.insert(
+                    "environment".to_owned(),
+                    Value::String(secret_variable(&name)),
+                );
+                continue;
+            }
+            let rewritten = rewrite(value, &sections, &graph.secrets)
                 .map_err(|msg| refuse(r, "invalid-reference", format!("param {key:?}: {msg}")))?;
             body.insert(key.clone(), rewritten);
         }
@@ -245,22 +268,39 @@ fn read_project(r: &Resource, project: &mut Project) -> Result<(), CompileError>
 }
 
 /// Replaces every reference in a value with the name it stands for.
-fn rewrite(value: &Value, sections: &BTreeMap<&str, Section>) -> Result<Value, String> {
+fn rewrite(
+    value: &Value,
+    sections: &BTreeMap<&str, Section>,
+    secrets: &[SecretName],
+) -> Result<Value, String> {
     Ok(match value {
         Value::String(s) => Value::String(rewrite_string(s, sections)?),
+        // Written as Compose's own interpolation, which `literal` must not
+        // escape, so a secret does not go through `rewrite_string`.
+        Value::Secret(slot) => Value::String(secret_reference(&secret_name(*slot, secrets))),
         Value::List(items) => Value::List(
             items
                 .iter()
-                .map(|item| rewrite(item, sections))
+                .map(|item| rewrite(item, sections, secrets))
                 .collect::<Result<_, _>>()?,
         ),
         Value::Map(map) => Value::Map(
             map.iter()
-                .map(|(k, v)| Ok((k.clone(), rewrite(v, sections)?)))
+                .map(|(k, v)| Ok((k.clone(), rewrite(v, sections, secrets)?)))
                 .collect::<Result<_, String>>()?,
         ),
         other => other.clone(),
     })
+}
+
+/// The declared name of a secret's slot. A slot the graph does not name
+/// cannot be handed over, so it is written as the mask.
+fn secret_name(slot: meridian_sdk::SecretRef, secrets: &[SecretName]) -> String {
+    secrets
+        .iter()
+        .find(|s| s.secret == slot)
+        .map(|s| s.name.clone())
+        .unwrap_or_else(|| meridian_sdk::SENSITIVE.to_owned())
 }
 
 /// A `$` that Compose would otherwise take for a variable of its own.

@@ -483,9 +483,15 @@ Every refusal carries a rule and, where it is about one resource, that resource 
 | Variable | Effect |
 |---|---|
 | `MERIDIAN_PULUMI` | The program to run, when it is not `pulumi` on `PATH`. |
+| `MERIDIAN_PULUMI_ARGS` | Arguments added to `pulumi preview` and `pulumi up`, split like a shell command line (quotes hold a word together): `--parallel 4`. The calls that select the stack and read its outputs get none. |
 | `PULUMI_BACKEND_URL` | Where state lives; wins over the document. |
 | `PULUMI_CONFIG_PASSPHRASE`, `PULUMI_CONFIG_PASSPHRASE_FILE` | The passphrase for a stack's secrets. Set either and the plugin sets none. |
 | `PULUMI_ACCESS_TOKEN` and provider credentials | Passed through to `pulumi` untouched. |
+
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.pulumi`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#pulumi).
 
 ## How it is tested
 

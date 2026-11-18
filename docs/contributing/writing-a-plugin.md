@@ -417,6 +417,40 @@ Three rules for a runner:
 Let the operator point at the program with an environment variable named
 `MERIDIAN_<TOOL>`, as the template does. The tests rely on it too.
 
+### Settings
+
+Everything an operator can configure about your runner is a **setting**: the
+program's path, extra arguments for every call, a transport, a wait. Declare
+each one once, in a `settings()` function the template already has, and return
+the list from `Runner::settings`:
+
+```rust
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new("program", PROGRAM_VARIABLE, "mytool", "The `mytool` program to run, when it is not on `PATH`."),
+        Setting::new("args", ARGS_VARIABLE, "", "Extra arguments for every run, split like a shell command line."),
+    ]
+}
+```
+
+Read each one through `meridian_sdk::settings`, never with `std::env::var`
+directly: `settings::text` for a value, `settings::optional` when an unset
+setting means something, `settings::args` for an argument list and
+`settings::switch` for yes or no. That is what makes the project's
+`meridian.yaml` count: the host hands your plugin the `spec.settings.<target>`
+map when it starts, and the helpers read the environment variable first, the
+project second, the default last. `settings::args` splits like a POSIX shell,
+so an argument with a space in it can be quoted; never split on whitespace
+yourself.
+
+The short name is what a project writes under `spec.settings`: lower-case
+words joined by `-`, such as `args` or `ssh-args`. The variable starts with
+`MERIDIAN_`. Give every runner an argument-list setting, because an operator
+always needs one eventually. `meridian plugins --settings` prints the list,
+the [plugin settings reference](../reference/plugin-settings.md) is generated
+from it, and `crates/meridian-cli/tests/plugin_settings.rs` fails when a
+`MERIDIAN_*` constant in your `runner.rs` is not declared.
+
 ### Secrets
 
 A document can put a [secret](../reference/dsl/secrets.md) in a resource's
@@ -877,6 +911,7 @@ is this list:
 - [ ] `capabilities()`, `category()` and `supported_resource_types()` claim only what a test proves
 - [ ] `resource_schemas()` describes each type from the tables the transform stage checks, or is left out on purpose
 - [ ] `placed_text()` declares every opening of the tool's own expression syntax, or the tool has none
+- [ ] `settings()` declares every setting the runner reads, each read through `meridian_sdk::settings`
 - [ ] a runner checks `RunContext.host` with `meridian_sdk::check_host` before handing it to a command line, and an emitter that writes the host into a file refuses one that is not a name
 - [ ] The runner builds no shell command strings, or says where it does and why
 - [ ] `docs/targets/<name>.md` is complete and opens with what is and is not supported

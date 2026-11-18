@@ -123,15 +123,7 @@ impl SecretFile {
                 in_memory,
             };
             let mut handle = private_file(&file.path)?;
-            for part in parts {
-                match part {
-                    Part::Text(text) => handle.write_all(text.as_bytes())?,
-                    Part::Secret(secret) => secret.expose(|bytes| handle.write_all(bytes))?,
-                    Part::JsonString(secret) => {
-                        secret.expose(|bytes| write_json_string(&mut handle, bytes))?
-                    }
-                }
-            }
+            write_parts(&mut handle, parts)?;
             handle.flush()?;
             return Ok(file);
         }
@@ -180,7 +172,8 @@ impl SecretFile {
     }
 }
 
-/// One piece of a [`SecretFile`].
+/// One piece of a [`SecretFile`], or of a [`SecretValue`] put together
+/// with [`SecretValue::from_parts`].
 #[derive(Debug)]
 pub enum Part<'a> {
     Text(&'a str),
@@ -191,6 +184,102 @@ pub enum Part<'a> {
     /// as JSON. A secret that is not text (not UTF-8) cannot be one and is
     /// refused.
     JsonString(&'a SecretValue),
+    /// The secret as the inside of a single-quoted word of a POSIX shell:
+    /// every `'` becomes `'\''`, and nothing else means anything to the
+    /// shell. For a script that pipes the value into a tool with the
+    /// shell's own `printf`, which is a builtin and so puts it on no
+    /// process's command line.
+    ShellSingleQuoted(&'a SecretValue),
+    /// The secret as the inside of a double-quoted value of a Compose `.env`
+    /// file: `\`, `"`, a line break and a tab escaped as in JSON, and `$`
+    /// doubled so Compose does not take it for a variable of its own. A
+    /// secret that is not text is refused.
+    DotenvString(&'a SecretValue),
+}
+
+/// Writes `parts` one after another to `out`, each secret straight from
+/// protected memory.
+pub(crate) fn write_parts(out: &mut impl Write, parts: &[Part<'_>]) -> std::io::Result<()> {
+    for part in parts {
+        match part {
+            Part::Text(text) => out.write_all(text.as_bytes())?,
+            Part::Secret(secret) => secret.expose(|bytes| out.write_all(bytes))?,
+            Part::JsonString(secret) => secret.expose(|bytes| write_json_string(out, bytes))?,
+            Part::ShellSingleQuoted(secret) => {
+                secret.expose(|bytes| write_escaped(out, bytes, shell_escape))?
+            }
+            Part::DotenvString(secret) => {
+                secret.expose(|bytes| write_escaped(out, bytes, dotenv_escape))?
+            }
+        }
+    }
+    Ok(())
+}
+
+/// How many bytes `parts` take once written, counted without keeping any.
+pub(crate) fn parts_len(parts: &[Part<'_>]) -> std::io::Result<usize> {
+    let mut counter = Counter(0);
+    write_parts(&mut counter, parts)?;
+    Ok(counter.0)
+}
+
+/// A writer that counts and keeps nothing.
+struct Counter(usize);
+
+impl Write for Counter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0 += buf.len();
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn shell_escape(byte: u8) -> Option<&'static [u8]> {
+    match byte {
+        b'\'' => Some(b"'\\''"),
+        _ => None,
+    }
+}
+
+fn dotenv_escape(byte: u8) -> Option<&'static [u8]> {
+    match byte {
+        b'"' => Some(b"\\\""),
+        b'\\' => Some(b"\\\\"),
+        b'\n' => Some(b"\\n"),
+        b'\r' => Some(b"\\r"),
+        b'\t' => Some(b"\\t"),
+        b'$' => Some(b"$$"),
+        _ => None,
+    }
+}
+
+/// Writes `bytes` with every byte `escape` names replaced by what it gives,
+/// in runs, so a long secret is not one write per byte. The bytes are
+/// written as they are, so this is for escapes that leave every other byte
+/// alone; the value must be text, as the files these go into are.
+fn write_escaped(
+    out: &mut impl Write,
+    bytes: &[u8],
+    escape: fn(u8) -> Option<&'static [u8]>,
+) -> std::io::Result<()> {
+    if std::str::from_utf8(bytes).is_err() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "the secret is not text, so it cannot be written into a text file",
+        ));
+    }
+    let mut plain = 0;
+    for (at, byte) in bytes.iter().enumerate() {
+        if let Some(escaped) = escape(*byte) {
+            out.write_all(&bytes[plain..at])?;
+            out.write_all(escaped)?;
+            plain = at + 1;
+        }
+    }
+    out.write_all(&bytes[plain..])
 }
 
 /// Writes `bytes` escaped as JSON requires inside a string, straight to the

@@ -102,6 +102,23 @@ impl SecretValue {
         Ok(SecretValue { region })
     }
 
+    /// A secret put together from `parts`, text and other secrets, in
+    /// protected memory: for what a tool reads on its standard input when
+    /// the secret has text around it, such as a manifest, a values file or
+    /// a script. The parts are counted first and then written straight into
+    /// the new value, so no copy is made on the way.
+    pub fn from_parts(parts: &[deliver::Part<'_>]) -> std::io::Result<SecretValue> {
+        let len = deliver::parts_len(parts)?;
+        SecretValue::filled(len, |bytes| {
+            let mut cursor = std::io::Cursor::new(bytes);
+            deliver::write_parts(&mut cursor, parts)?;
+            if cursor.position() as usize != len {
+                return Err(std::io::Error::other("the parts were not written whole"));
+            }
+            Ok(())
+        })
+    }
+
     /// Reads a secret from `reader` until it ends. Nothing is buffered on
     /// the way: the bytes go from the reader into protected memory. A value
     /// longer than `max` bytes is refused, so a provider pointed at the

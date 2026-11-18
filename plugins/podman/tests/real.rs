@@ -17,7 +17,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use meridian_plugin_testkit::{graph_from_file, graph_from_text, scratch, KeptLog};
+use meridian_plugin_testkit::{
+    graph_from_file, graph_from_text, scratch, secret_at, secrets, KeptLog,
+};
 use meridian_sdk::{Artifact, Change, Data, Emitter, RunContext, Runner, Value};
 use meridian_target_podman::{Podman, PodmanRunner, Scope};
 
@@ -463,4 +465,138 @@ fn a_container_that_cannot_start_fails_the_apply_and_says_why() {
         "{}",
         err.output
     );
+}
+
+/// Unlike anything Podman or the plugin prints, with the characters a shell
+/// word escapes, so that finding it is finding a leak.
+const SECRET: &str = "zzq-Vt9 \"not\" a\\real $tok'en 4kLm";
+
+#[ignore = "needs a real Podman; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn the_real_quadlet_accepts_a_unit_that_names_a_secret() {
+    if !wants("quadlet") {
+        return;
+    }
+    let dir = scratch(TMP, "real-quadlet-secret");
+    let text = document(&web(
+        "        Environment:\n          PASSWORD: placeholder\n",
+    ));
+    let mut graph = graph_from_text("real.yaml", &text, "podman");
+    secret_at(&mut graph, CONTAINER, &["Environment", "PASSWORD"], "token");
+    let artifact = Podman.emit(&graph, &Data::new()).unwrap().artifact;
+    let unit = &artifact.files[&format!("{CONTAINER}.container")];
+    assert!(
+        unit.contains("Secret=meridian_secret_token,type=env,target=PASSWORD\n"),
+        "{unit}"
+    );
+    let generated = generated(&dir, &artifact);
+    assert!(generated.contains("--secret"), "{generated}");
+    assert!(generated.contains("meridian_secret_token"), "{generated}");
+}
+
+#[ignore = "needs a real Podman; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_secret_is_created_in_podman_and_read_by_the_container_and_no_file_holds_it() {
+    if !wants("system") {
+        return;
+    }
+    let dir = scratch(TMP, "real-system-secret");
+    let context_plain = context(&dir);
+    let runner = PodmanRunner {
+        scope: Scope::System,
+        ..PodmanRunner::default()
+    };
+    struct CleanupSecret;
+    impl Drop for CleanupSecret {
+        fn drop(&mut self) {
+            drop(Cleanup);
+            as_root(&["podman", "secret", "rm", "meridian_secret_token"]);
+        }
+    }
+    let _cleanup = CleanupSecret;
+    drop(CleanupSecret);
+
+    // The pause image has no shell, so the probe is busybox, kept alive.
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: real\nspec:\n  target: podman\n  resources:\n    - id: meridian-ci-data\n      type: volume\n    - id: {CONTAINER}\n      type: container\n      params:\n        Image: docker.io/library/busybox:stable\n        ContainerName: {CONTAINER}\n        Exec: sleep 3600\n        Volume: ${{meridian-ci-data}}:/data\n        Environment:\n          MODE: fast\n          PASSWORD: placeholder\n        service:\n          TimeoutStartSec: 300\n"
+    );
+    let mut graph = graph_from_text("real.yaml", &text, "podman");
+    let slot = secret_at(&mut graph, CONTAINER, &["Environment", "PASSWORD"], "token");
+    let artifact = Podman.emit(&graph, &Data::new()).unwrap().artifact;
+    assert!(!artifact.files[&format!("{CONTAINER}.container")].contains(SECRET));
+    let mut context = context_plain;
+    context.secrets = secrets(&[(slot, "token", SECRET)]);
+
+    let log = KeptLog::default();
+    let plan = runner
+        .plan(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{:?}", log.text()));
+    assert_eq!(plan.changes.len(), 2);
+    assert!(
+        !as_root(&["podman", "secret", "ls", "--format", "{{.Name}}"])
+            .contains("meridian_secret_token"),
+        "a plan creates no secret"
+    );
+    runner
+        .apply(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{:?}", log.text()));
+
+    assert!(
+        as_root(&["podman", "secret", "ls", "--format", "{{.Name}}"])
+            .lines()
+            .any(|l| l == "meridian_secret_token")
+    );
+    // The container reads the value, exactly as it was. A fixed message, so
+    // that a failure never prints the value.
+    assert!(
+        as_root(&[
+            "podman",
+            "exec",
+            CONTAINER,
+            "sh",
+            "-c",
+            "printf '%s' \"$PASSWORD\""
+        ]) == SECRET,
+        "the container's environment does not hold the value Podman was handed"
+    );
+    assert_eq!(
+        as_root(&[
+            "podman",
+            "exec",
+            CONTAINER,
+            "sh",
+            "-c",
+            "printf '%s' \"$MODE\""
+        ]),
+        "fast"
+    );
+    // The unit on the host names the secret and holds no value, and nothing
+    // printed holds it.
+    let unit = fs::read_to_string(Path::new(UNITS).join(format!("{CONTAINER}.container"))).unwrap();
+    assert!(
+        unit.contains("Secret=meridian_secret_token,type=env,target=PASSWORD\n"),
+        "{unit}"
+    );
+    assert!(!unit.contains(SECRET), "{unit}");
+    assert!(
+        !log.text().iter().any(|l| l.contains(SECRET)),
+        "the secret reached the log:\n{}",
+        log.text().join("\n")
+    );
+    for entry in fs::read_dir(dir.join("work")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() {
+            assert!(
+                !fs::read_to_string(&path).unwrap().contains(SECRET),
+                "{} holds the secret in the open",
+                path.display()
+            );
+        }
+    }
+    // Applied again, nothing changes in the units, and the secret is made
+    // anew for the container's next start.
+    let plan = runner
+        .plan(&context, &artifact, &KeptLog::default())
+        .unwrap();
+    assert!(plan.in_sync(), "{:?}", plan.changes);
 }

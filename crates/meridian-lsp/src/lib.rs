@@ -118,7 +118,7 @@ pub struct Discovery {
 /// asks to exit. Plugins are found as `discovery` says.
 pub fn run_stdio(discovery: Discovery) -> Result<(), Error> {
     let (connection, io_threads) = Connection::stdio();
-    serve(&connection, Plugins::Discover(discovery))?;
+    serve(&connection, Plugins::Discover(Box::new(discovery)))?;
     drop(connection);
     io_threads.join()?;
     Ok(())
@@ -128,7 +128,7 @@ pub fn run_stdio(discovery: Discovery) -> Result<(), Error> {
 pub enum Plugins {
     /// Find plugin binaries in the directories given, and in any the client
     /// names in its initialization options.
-    Discover(Discovery),
+    Discover(Box<Discovery>),
     /// Use exactly this registry. This is how tests serve compiled-in
     /// plugins.
     Loaded(Registry),

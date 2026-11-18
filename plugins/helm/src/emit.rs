@@ -6,7 +6,7 @@ use meridian_sdk::Value;
 use meridian_yaml::Yaml;
 
 use crate::transform::ACTION_MARK;
-use crate::{path, plain, template, Chart, Manifest, Node, OutputPart};
+use crate::{path, template, values_yaml, Chart, Manifest, Node, OutputPart};
 
 /// The directory of the artifact that holds the chart.
 pub const CHART_DIR: &str = "chart";
@@ -45,7 +45,10 @@ pub(crate) fn serialise(chart: &Chart) -> BTreeMap<String, String> {
     );
     files.insert(
         format!("{CHART_DIR}/values.yaml"),
-        meridian_yaml::write(&plain(&Value::Map(chart.values.clone()))),
+        meridian_yaml::write(&values_yaml(
+            &Value::Map(chart.values.clone()),
+            &chart.secrets,
+        )),
     );
     for manifest in &chart.manifests {
         files.insert(

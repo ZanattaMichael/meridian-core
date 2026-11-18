@@ -4,8 +4,8 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{artifact, scratch, stand_in, KeptLog};
-use meridian_sdk::{Artifact, RunContext, Runner, Value};
+use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
+use meridian_sdk::{Artifact, RunContext, Runner, SecretRef, Value};
 use meridian_target_helm::HelmRunner;
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -133,12 +133,13 @@ fn runner(dir: &Path, status: &str, installed: &str) -> HelmRunner {
         &format!(
             r#"echo "helm $@" >> "{d}/calls"
 case "$1" in
-template) cat "{d}/templated" ;;
+template) cat > "{d}/values-template"; cat "{d}/templated" ;;
 status)
   if [ -s "{d}/status" ]; then echo "{{\"name\":\"web-app\",\"info\":{{\"status\":\"$(cat "{d}/status")\"}}}}"
   else echo 'Error: release: not found' >&2; exit 1; fi ;;
 get) cat "{d}/installed" ;;
 upgrade)
+  cat > "{d}/values-upgrade"
   if [ -e "{d}/fail-upgrade" ]; then echo 'Error: UPGRADE FAILED: timed out waiting for the condition' >&2; exit 1; fi
   echo 'Release "web-app" has been upgraded. Happy Helming!' ;;
 esac"#
@@ -508,4 +509,57 @@ fn outputs_need_an_earlier_apply() {
     let outputs = helm.outputs(&context(&dir)).unwrap();
     assert_eq!(outputs[0].name, "address");
     assert_eq!(outputs[0].value, Value::String("203.0.113.7".into()));
+}
+
+/// Unlike anything else the tests write, with the characters a JSON string
+/// has to escape.
+const SECRET: &str = "hunter2 \"q\" $5 it's \\";
+
+#[test]
+fn secrets_reach_helm_as_a_values_file_on_standard_input_and_no_file_holds_them() {
+    let dir = scratch(TMP, "secrets");
+    let log = KeptLog::default();
+    let values = "db:\n  password: \"${meridian_secret_db_password}\"\n  user: app\n";
+    let release = release_json(false);
+    let artifact = artifact(&[
+        ("chart/Chart.yaml", "apiVersion: v2\nname: web-app\n"),
+        ("chart/values.yaml", values),
+        ("chart/templates/web.yaml", "kind: Deployment\n"),
+        ("release.json", release.as_str()),
+    ]);
+    let mut context = context(&dir);
+    context.secrets = secrets(&[(SecretRef::new(1), "db_password", SECRET)]);
+    runner(&dir, "", "")
+        .apply(&context, &artifact, &log)
+        .unwrap();
+    let all = calls(&dir);
+    assert_eq!(all[0], "helm template web-app chart --values -");
+    assert_eq!(
+        all[2],
+        "helm upgrade --install web-app chart --create-namespace --wait --timeout 5m --values -"
+    );
+    let filled = values.replace(
+        "${meridian_secret_db_password}",
+        "hunter2 \\\"q\\\" $5 it's \\\\",
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("values-template")).unwrap(),
+        filled
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("values-upgrade")).unwrap(),
+        filled
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("work").join("chart").join("values.yaml")).unwrap(),
+        values
+    );
+    assert!(
+        !log.text().join("\n").contains("hunter2"),
+        "{:?}",
+        log.text()
+    );
+    assert!(!fs::read_to_string(dir.join("calls"))
+        .unwrap()
+        .contains("hunter2"));
 }
