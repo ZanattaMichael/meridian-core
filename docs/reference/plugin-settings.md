@@ -65,6 +65,7 @@ for each target by name.
 | `run` | `MERIDIAN_CHEF_RUN` | `chef-run` | The `chef-run` program, when it is not on `PATH`. |
 | `transport` | `MERIDIAN_CHEF_TRANSPORT` | none | `local` or `remote`, to override the choice made from the host: `local` converges this machine with chef-client, `remote` reaches the host with chef-run. |
 | `args` | `MERIDIAN_CHEF_ARGS` | none | Extra arguments for every run, split like a shell command line. |
+| `inspector` | `MERIDIAN_CHEF_INSPECTOR` | `chef-resource-inspector` | The resource inspector `meridian schema sync` runs to read what each resource takes, when it is not `chef-resource-inspector` on `PATH`; `cinc-resource-inspector`, then the copies the Cinc and Chef packages keep under `/opt/cinc` and `/opt/chef`, are tried when that does not run. |
 | `ssh-agent` | `MERIDIAN_SSH_AGENT` | `ssh-agent` | The `ssh-agent` program, when it is not on `PATH`. It is started for the length of a stage when the document reaches its host as a credential with a private key, which the tool is then given through the agent and nothing else. |
 | `ssh-add` | `MERIDIAN_SSH_ADD` | `ssh-add` | The `ssh-add` program, when it is not on `PATH`. It loads the credential's key into the agent from its standard input. |
 

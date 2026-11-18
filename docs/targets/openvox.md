@@ -18,6 +18,7 @@ of Puppet: `puppet apply` on the machine itself, or OpenBolt for another machine
 | `runtimeWhen` | No. A catalog is compiled before it reaches the node, so there is nothing left to evaluate at apply time. Refused |
 | `state: restarted` | No. It is not a state a node can be left in. Notify the service instead |
 | Secrets | Yes: by Hiera, as a `Sensitive` lookup, exactly as the Puppet target does. See [Secrets](#secrets) |
+| Editor schemas | Yes: `meridian schema sync` asks `puppet describe` what each type takes, as the Puppet target does. See [Editor schemas](#editor-schemas) |
 | References (`${id.param}`) | Yes, settled at compile time to the value the document declares. Anything that cannot be settled is refused. See [References](#references) |
 | Plan | Yes: the tool's own `--noop` run |
 | Apply | Yes |
@@ -537,6 +538,16 @@ does not tell you which one you have. Before a local run the plugin asks the too
 
 The check covers local runs. Over OpenBolt the catalog is applied by whatever agent is
 installed on the node, and the plugin does not connect to the node just to ask.
+
+## Editor schemas
+
+`meridian schema sync` asks the OpenVox `puppet describe` what the Puppet
+types the documents use take, exactly as the
+[Puppet target does](puppet.md#editor-schemas), with this target's own
+settings (`MERIDIAN_OPENVOX`, `MERIDIAN_OPENVOX_ARGS`) and the tool pinned
+as `openvox` at the installed version. Each used type is described in full
+from `puppet describe <type>`; every other type `puppet describe --list`
+knows is listed by name, the six shared names under `native/`.
 
 ## Credentials
 

@@ -72,7 +72,8 @@ Each target's page says, under its running section, what its real-tool test cove
 A target that exports [tool schemas](../tooling/schema-sync.md) has a schema
 export test in the same file, switched on by the same variable, that runs the
 export and checks a type it knows: against the installed tool for terraform,
-opentofu, kubernetes, helm, pulumi, dsc and ansible; against the file the
+opentofu, kubernetes, helm, pulumi, dsc, ansible, puppet, openvox, chef and
+salt; against the file the
 vendor publishes, fetched over the network, for cloudformation, bicep, arm,
 cloud-init and docker, which need no tool and no account for it. The docker
 test also holds the attribute names the compile checks against to the
