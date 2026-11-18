@@ -21,13 +21,7 @@ and has systemd run them, on this machine or on another over `ssh`.
 | Documents | Infrastructure (this machine) and ResourceSet (its `targetHost`, over `ssh`) |
 | Needs on the host | Linux with systemd, and Podman 4.4 or later (4.8 for image units, 5.0 for pods, 5.2 for builds) |
 
-Podman has no daemon and no `apply` command. Its declarative form is Quadlet: you write a
-small unit file for a container, and systemd turns it into a service that runs `podman`.
-The containers then start at boot and restart on failure with nothing else running.
-
-This plugin compiles a Meridian document into those unit files, installs them, and has
-systemd start them. A plan is an exact comparison of the unit files on the host with the
-ones your document compiles to.
+A plan compares the unit files on the host with the compiled ones.
 
 ## A first document
 
@@ -88,10 +82,8 @@ Each resource becomes one unit file named after its `id`.
 | `image` | `<id>.image` | `<id>-image.service` | the `Image` it pulls |
 | `build` | `<id>.build` | `<id>-build.service` | its `ImageTag` |
 
-An `id` starts with a letter or a digit, holds only letters, digits, `_` and `-`, and is
-at most 200 characters long, because it is a file name and a systemd unit name.
-
-What each type is for, and what it cannot do without:
+An `id` starts with a letter or digit, holds only letters, digits, `_` and `-`, and is at
+most 200 characters.
 
 | `type` | What it is | Required params |
 |---|---|---|
@@ -113,8 +105,7 @@ A `pod`, a `volume` and a `network` may have no `params` at all.
 - The **name in Podman** is what `${id.name}` gives. When it is built from a systemd
   specifier (`ContainerName: web-%H`), only systemd knows it, and `${id.name}` is refused.
   A `kube` unit has no single name.
-- Two resources may not end up as the same service. A container `db-volume` and a volume
-  `db` would both be `db-volume.service`, and are refused.
+- Two resources may not map to one service (a container `db-volume` and a volume `db`).
 
 ### State
 
@@ -126,13 +117,9 @@ A `pod`, a `volume` and a `network` may have no `params` at all.
 
 ## Params
 
-`params` are Quadlet's own keys, spelled exactly as
+`params` are Quadlet's keys, spelled as
 [Podman documents them](https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html):
-`Image`, `PublishPort`, `Volume`, `Environment`, `Network`, `Pod`, `Exec`, `AutoUpdate`
-and the rest. Meridian does not put a smaller vocabulary in front of them, so anything
-Quadlet can do, a document can say.
-
-How a value is written:
+`Image`, `PublishPort`, `Volume`, `Environment` and the rest.
 
 | In the document | In the unit file |
 |---|---|
@@ -141,19 +128,14 @@ How a value is written:
 | `PublishPort: ["8080:80", "8443:443"]` | one `PublishPort=` line per item |
 | `Environment: {TZ: UTC, NOTE: two words}` | `Environment=TZ=UTC` and `Environment="NOTE=two words"` |
 
-The full rules:
-
 - A **string, number or boolean** is one line, `Key=value`. Booleans are written `true`
   and `false`.
 - A **list** is one line per item. An empty list leaves the key out. A list inside a list
   is refused.
-- A **map** is one `Key=name=value` line per entry, in the order of the names. A value
-  with a space, a quote or a backslash is quoted the way systemd expects. A map's values
-  must be single values.
-- A value with **no value** (`~`) is refused; leave the key out. A value with a **line
-  break** is refused, because a unit file value is one line.
-- Keys are written in alphabetical order within their section, so the same document always
-  compiles to the same bytes.
+- A **map** is one `Key=name=value` line per entry, sorted by name, quoted as systemd
+  expects. Its values must be single values.
+- `~` and values with a line break are refused.
+- Keys are sorted within their section.
 
 The other sections of a unit file are four lower-case params, each a map:
 
@@ -181,22 +163,16 @@ The other sections of a unit file are four lower-case params, each a map:
 | `install` | `[Install]` | `WantedBy` |
 | `quadlet` | `[Quadlet]` | `DefaultDependencies` (Podman 5.3 and later) |
 
-Their keys are systemd's and are written as given, with the same value rules as above.
-Meridian does not check them against a list. The file is written in the order `[Unit]`,
-the unit's own section, `[Service]`, `[Quadlet]`, `[Install]`, under a comment that names
-the document it came from.
+Their keys are systemd's, unchecked, with the same value rules. Section order: `[Unit]`, the
+unit's own section, `[Service]`, `[Quadlet]`, `[Install]`.
 
-Containers, pods and kube units get `[Install] WantedBy=default.target` unless the
-document has its own `install`, so what an apply starts is started again after a reboot.
-Write `install: {}` for a unit that should only run when something starts it. Volumes,
-networks, images and builds get no `[Install]`: they start when a unit that uses them does.
+Containers, pods and kube units get `[Install] WantedBy=default.target` unless `install` is
+set; `install: {}` leaves it out. Volumes, networks, images and builds get no `[Install]`.
 
 ### Secrets
 
-A value under `Environment` is written into the unit file, which other users of the host
-may be able to read. A [declared secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool)
-there is not: it becomes a Podman secret the container reads into the variable, and the
-unit file names it and nothing more.
+A [declared secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) under
+`Environment` becomes a Podman secret; the unit file only names it.
 
 ```yaml
 spec:
@@ -215,8 +191,7 @@ spec:
           POSTGRES_PASSWORD: ${{ secret.db_password }}
 ```
 
-**What the compile writes.** The variable leaves `Environment` and becomes a `Secret`
-line that names the Podman secret and the variable to read it into:
+The compile writes a `Secret` line:
 
 ```ini
 [Container]
@@ -225,69 +200,44 @@ Environment=POSTGRES_DB=app
 Secret=meridian_secret_db_password,type=env,target=POSTGRES_PASSWORD
 ```
 
-**How the value reaches Podman.** An apply, after it has surveyed the host and before it
-writes or starts any unit, creates each secret in Podman on the host with
-`podman secret create meridian_secret_<name> -`, reading the value from the script's own
-standard input, the same channel every other step of an apply uses: over `ssh` for a
-remote host, as the unit's user for user units and with `sudo` for system units. A secret
-that already exists is replaced first (`podman secret rm`), so the value is current every
-apply. The value is on no command line and in no environment, and in no file Meridian
-writes; a plan creates nothing and reads nothing. The log says which secrets were created
-and never what they hold.
+Before writing any unit, an apply runs `podman secret create meridian_secret_<name> -` with
+the value on stdin (over `ssh`, as the unit's user, or with `sudo` for system units). An
+existing secret is replaced first. A plan creates nothing. Logs name secrets, not values.
 
-**What Podman keeps.** Podman stores the secret with its default driver, `file`, which
-writes it under the user's Podman directory base64-encoded and unencrypted, readable by
-that user alone. Secrets created for a system unit belong to root. A changed value takes
-effect when the container next starts: a changed `Secret` line restarts the unit, a changed
-value alone does not, so restart the service or notify it from a resource that changes.
+Podman's `file` driver stores it base64-encoded, unencrypted, readable by that user only
+(root for system units). A changed value alone does not restart the unit.
 
-**What is refused.** A secret anywhere but a container's `Environment` is refused at
-compile, rule `unsupported-secret-place`: a unit file is written onto the host as it
-stands. A secret inside a value, such as `postgres://app:${{ secret.db_password }}@db/app`,
-is refused too: a variable's value is one string, so the secret has to be the whole value.
-Write a secret for another kind of unit, or a secret Podman already holds, with Quadlet's
-own `Secret` key and create it yourself:
+A secret anywhere else, or inside a longer value, is refused (`unsupported-secret-place`).
+For other cases use Quadlet's `Secret` key and create the secret yourself:
 
 ```yaml
         Secret: db-password,type=env,target=POSTGRES_PASSWORD
 ```
 
-The handover is tested against a stand-in `podman` that keeps what it was given on
-standard input (`plugins/podman/tests/run.rs`) and against the real Podman in CI
-(`plugins/podman/tests/real.rs`): the value reaches the container's environment, and is in
-no unit file, no argument, and nothing the plan or apply prints.
+Tested against a stand-in `podman` (`plugins/podman/tests/run.rs`) and real Podman in CI
+(`plugins/podman/tests/real.rs`).
 
 ### Literal values and systemd's expansions
 
-systemd expands `%` specifiers (`%H` is the host name) and `${VAR}` in what Quadlet hands
-it. Meridian keeps the two cases apart:
-
-- A value written as a **string or a list** is systemd's to expand. `HostName: web-%H`
-  works as systemd documents it.
-- The values of a **map** mean exactly what they say. `Environment: {PASSWORD: "50%off$now"}`
-  reaches the container as `50%off$now`; Meridian writes the escapes systemd needs.
+- **Strings and lists** are expanded by systemd (`HostName: web-%H`).
+- **Map values** are literal: `Environment: {PASSWORD: "50%off$now"}` is escaped for systemd.
 
 `${...}` in a document is a Meridian reference (below). To hand `${HOME}` to systemd as
 written, escape it as `$${HOME}`.
 
 ### Mistakes caught at compile time
 
-- A key in the wrong capitalisation, such as `image`, is refused with the right spelling.
-  Quadlet reads keys exactly, and would otherwise reject the unit where only the journal
-  sees it.
-- A key this plugin does not know is kept and warned about, since a newer Podman may have
-  added it. If the host's Podman does not know it either, the plan refuses the unit.
+- A wrongly capitalised key, such as `image`, is refused with the right spelling.
+- An unknown key is kept with a warning; the host's Quadlet refuses it at plan if it is
+  unknown there too.
 - A container without `Image` or `Rootfs`, a `kube` without `Yaml`, an `image` without
   `Image`, and a `build` without `ImageTag` and a `File` are refused.
-- A value with a line break, an empty value, and a resource type that is not in the table
-  above are refused.
+- Line breaks, empty values and unknown types are refused.
 
 ### Known keys
 
-These are the keys this plugin knows for each type, as of Podman 5. What each one means is
-in [Podman's reference](https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html).
-The table only exists to catch typing mistakes: a key that is not here is still written,
-with a warning, and the host's own Quadlet has the last word when the document is planned.
+Keys known per type, as of Podman 5, used to catch typos. See
+[Podman's reference](https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html).
 
 | `type` | Keys |
 |---|---|
@@ -299,8 +249,7 @@ with a warning, and the host's own Quadlet has the last word when the document i
 | `image` | `AllTags`, `Arch`, `AuthFile`, `CertDir`, `ContainersConfModule`, `Creds`, `DecryptionKey`, `GlobalArgs`, `Image`, `ImageTag`, `OS`, `PodmanArgs`, `Retry`, `RetryDelay`, `ServiceName`, `TLSVerify`, `Variant` |
 | `build` | `Annotation`, `Arch`, `AuthFile`, `ContainersConfModule`, `DNS`, `DNSOption`, `DNSSearch`, `Environment`, `File`, `ForceRM`, `GlobalArgs`, `GroupAdd`, `ImageTag`, `Label`, `Network`, `PodmanArgs`, `Pull`, `Retry`, `RetryDelay`, `Secret`, `ServiceName`, `SetWorkingDirectory`, `TLSVerify`, `Target`, `Variant`, `Volume` |
 
-`PodmanArgs` and `GlobalArgs` pass arguments straight to `podman` for anything Quadlet has
-no key for.
+`PodmanArgs` and `GlobalArgs` pass arguments straight to `podman`.
 
 ## Wiring resources together
 
@@ -323,14 +272,11 @@ Quadlet orders a unit after every unit file it names, so `Volume: ${data}:/srv` 
         - resource: db        # becomes Requires=db.service and After=db.service
 ```
 
-An order the document's own `unit` section already states is kept, and the `dependsOn`
-lines are added after it.
+Lines in the document's `unit` section are kept; `dependsOn` lines follow them.
 
 ### Notifications
 
-`notifies` with the action `restart` becomes `PartOf=`: when the notifying unit changes
-and is restarted, systemd restarts the notified one with it. `restart` is the only action
-systemd can carry, so any other is refused.
+`notifies` with `restart` becomes `PartOf=`. Other actions are refused.
 
 ```yaml
     - id: proxy-config
@@ -340,15 +286,9 @@ systemd can carry, so any other is refused.
           action: restart     # proxy.container gets PartOf=proxy-config-volume.service
 ```
 
-This is a native notify: `PartOf=` is systemd's own mechanism, and nothing is emulated.
-What it means in practice:
-
-- When an apply finds that the notifier's unit file changed, it restarts the notifier, and
-  systemd restarts every unit that is `PartOf=` it.
-- The same happens when someone restarts or stops the notifier by hand with `systemctl`.
-- A notified unit that is not running is not started by this; the apply starts it anyway.
-- A notify does not order the two units. Add `dependsOn`, or a reference, when the order
-  matters.
+- systemd restarts the notified unit whenever the notifier restarts or stops, by apply
+  or by hand.
+- It sets no order; use `dependsOn` or a reference.
 
 ### What a reference can read
 
@@ -359,13 +299,11 @@ What it means in practice:
 | `${id.name}` | the name in Podman | the image name or tag | refused |
 | `${id.inspect.<Field>}` (outputs only) | a field of `podman <type> inspect` | a field of `podman image inspect` | refused |
 
-A reference to a resource that is not in the document is refused at compile time, with
-the line it is on. So is anything else after the id, such as `${web.address}`.
+Any other reference, such as `${web.address}`, is refused at compile.
 
 ## Outputs
 
-An Infrastructure document's outputs can be plain text, the names above, or values read
-from Podman once the thing exists:
+Outputs can be text, the names above, or values from Podman:
 
 ```yaml
   outputs:
@@ -377,32 +315,24 @@ from Podman once the thing exists:
       value: ${web.inspect.State.StartedAt}
 ```
 
-What follows `.inspect.` is a path of field names from `podman container inspect`,
-`podman volume inspect` and so on, joined by dots. Each name is letters, digits and
-underscores. A `kube` unit cannot be inspected.
+After `.inspect.` comes a dotted path of fields from `podman <type> inspect`. A `kube` unit
+cannot be inspected.
 
-- Outputs are text. An output made of several parts, such as
-  `http://${web.inspect.NetworkSettings.IPAddress}:8080/`, is joined into one string.
-- Parts known at compile time cost nothing at apply time. Podman is only asked for the
-  `.inspect.` parts, once, after the units have started.
-- No output of this target is marked sensitive. Do not put a secret in one.
-- If Podman cannot report a field, the apply fails and names the field, the type and the
-  thing it asked about.
-- Only an Infrastructure document has outputs. A ResourceSet uses them, through
-  `targetHost.from: infrastructure`.
+- Outputs are text; multi-part outputs are joined.
+- `.inspect.` parts are read once, after units start. A missing field fails the apply.
+- No output is sensitive. Do not put a secret in one.
+- Only Infrastructure documents have outputs.
 
 ## What plan and apply do
 
 `meridian plan`:
 
-1. Compares each compiled unit file with the one on the host: new, changed or the same.
+1. Compares each compiled unit file with the host's.
 2. Asks systemd whether each service is running.
-3. Has the host's own Quadlet read the compiled units, in a temporary directory. A unit it
-   refuses, or a kind of unit the host's Podman is too old for, fails the plan with what
-   Quadlet said. Nothing has been touched at that point.
-4. Lists unit files a previous apply installed that the document no longer has.
+3. Has the host's Quadlet check the units in a temporary directory, failing on any it refuses.
+4. Lists previously installed units the document no longer has.
 
-It changes nothing and needs no more rights than you have, even for system units.
+It changes nothing and needs no extra rights.
 
 | Plan line | Meaning |
 |---|---|
@@ -411,15 +341,7 @@ It changes nothing and needs no more rights than you have, even for system units
 | `update web: web.service is inactive; start it` | the file matches but the service is not running |
 | `delete web: stop web.service and remove web.container` | the document no longer has the resource |
 
-`meridian apply` makes the same checks, then stops and removes what was deleted, writes
-what is new or changed, runs `systemctl daemon-reload`, restarts the changed units and
-starts all of them. If a unit does not start, the apply fails and shows the end of that
-unit's journal.
-
-Only units Meridian installed are ever removed. Other unit files in the same directory are
-left alone.
-
-In order, an apply:
+`meridian apply`, in order:
 
 1. Makes the plan's checks. If they fail, it stops here and nothing has changed.
 2. Creates the unit directory if it is missing.
@@ -431,7 +353,8 @@ In order, an apply:
    leaves alone what is already running.
 8. Reads the outputs.
 
-When nothing differs, an apply does none of steps 2 to 7: no reload, no restart.
+A unit that does not start fails the apply with its journal tail. Only units Meridian
+installed are removed. When nothing differs, steps 2 to 7 are skipped.
 
 ### What Meridian keeps
 
@@ -443,8 +366,7 @@ Under `--state-dir` (`.meridian` by default), in the document's work directory:
 | `meridian-podman.json` | which service each unit becomes and what the outputs are made of; written by the compile, never installed on the host |
 | `installed.json` | the unit files the last apply left on the host, which is how a later apply knows what to remove |
 
-If `installed.json` is lost, Meridian no longer knows about units of resources you have
-since deleted, and leaves them on the host. Remove those by hand.
+If `installed.json` is lost, units of deleted resources stay on the host.
 
 ### When it fails
 
@@ -462,15 +384,13 @@ since deleted, and leaves them on the host. Remove those by hand.
 | `podman could not report <Field> of the <type> <name>` | an output reads a field that does not exist | Fix the output's path |
 | `nothing has been applied for this document yet` | outputs were asked for before an apply | Apply first |
 
-A failed apply reports which changes it had already made. Running it again is safe: it
-compares the host with the document again and does only what is still needed.
+A failed apply reports what it changed. Running it again is safe.
 
 ## Where it runs
 
 - An **Infrastructure** document runs on the machine running Meridian.
-- A **ResourceSet** runs on its `targetHost`, reached over `ssh`. The host needs Podman and
-  nothing else. The host can come from an earlier stage, so one workflow can create a
-  machine with Terraform and then run containers on it:
+- A **ResourceSet** runs on its `targetHost` over `ssh`. The host needs only Podman, and can
+  come from an earlier stage:
 
 ```yaml
 apiVersion: meridian/v1
@@ -491,20 +411,12 @@ spec:
         PublishPort: ["80:80", "443:443"]
 ```
 
-The first document, `edge-vm`, is an Infrastructure document for Terraform, Bicep or
-CloudFormation with an output named `public_ip`. `meridian apply` runs it first and hands
-the address to this one. Until the machine exists, `meridian plan` reports this document
-as deferred.
+Until `edge-vm` exists, `meridian plan` reports this document as deferred.
 
-How another host is reached:
-
-- With `ssh -o BatchMode=yes <host>`, so a run never stops to ask for a password. Use a key
-  or an agent.
-- The user, key and port come from your `ssh` configuration or from
-  `MERIDIAN_PODMAN_SSH_ARGS`.
-- Each step is one shell script sent over that connection. Nothing is copied to the host
-  except the unit files, and nothing of Meridian's is installed there.
-- `localhost`, `127.0.0.1` and `::1` count as this machine and do not use `ssh`.
+- Hosts are reached with `ssh -o BatchMode=yes <host>`; use a key or an agent.
+- User, key and port come from your `ssh` config or `MERIDIAN_PODMAN_SSH_ARGS`.
+- Each step is one shell script over that connection. Only unit files are copied.
+- `localhost`, `127.0.0.1` and `::1` do not use `ssh`.
 
 ### User units and system units
 
@@ -534,25 +446,17 @@ The runner is configured through the environment of the `meridian` command.
 | `MERIDIAN_PODMAN_QUADLET` | found automatically | Quadlet's generator on the host, when it is not where distributions install it. |
 | `MERIDIAN_PODMAN_UNIT_DIR` | by scope | The directory unit files are installed in. |
 
-Every setting can also be written in the project's `meridian.yaml` under
-`spec.settings.podman`, by its short name; the environment variable still wins.
-The names, defaults and the splitting rule for argument lists are in the
-[plugin settings reference](../reference/plugin-settings.md#podman).
+Settings can also go in `meridian.yaml` under `spec.settings.podman`; the environment wins.
+See the [plugin settings reference](../reference/plugin-settings.md#podman).
 
-`MERIDIAN_PODMAN_SCOPE` set to anything but `user` or `system` fails every run with a
-message saying so, instead of quietly using the default. `journalctl` and `sudo` are run by
-those names from the host's `PATH`.
-
-For rootless units to keep running after you log out, enable lingering for the user once:
-`loginctl enable-linger <user>`.
-
-Podman uses its own configuration for registries and credentials. Meridian does not store
-or pass any: if `podman pull` works for the user on the host, so will an apply.
+- Any other `MERIDIAN_PODMAN_SCOPE` value fails the run.
+- For rootless units to outlive your login: `loginctl enable-linger <user>`.
+- Registry credentials are Podman's own; if `podman pull` works on the host, so does apply.
 
 ## Credentials
 
-`targetHost.credential` names the [credential](../reference/dsl/credentials.md) the host is
-reached as. The plugin reaches another machine with `ssh`, so it takes an `ssh` credential with a user and a private key, and gives `ssh` the two the way `ssh` takes them:
+`targetHost.credential` names an `ssh` [credential](../reference/dsl/credentials.md) with a
+user and a private key:
 
 ```yaml
 spec:
@@ -573,30 +477,21 @@ spec:
 ```
 
 - **The user** is `ssh`'s `-l`, before the arguments of `MERIDIAN_PODMAN_SSH_ARGS`.
-- **A key is never on disk.** It goes into an SSH agent Meridian starts for the stage:
-  `ssh-agent -D -a <socket>`, its socket in a directory only you can enter, loaded with
-  `ssh-add -` from standard input. `ssh` is told the socket in `SSH_AUTH_SOCK` and
-  nothing else. A `passphrase` is answered to `ssh-add` from a file only you can read. The
-  agent is stopped and its directory removed when the stage ends. Nothing of the key is on
-  the command line, in the environment, in the compiled files or in a file Meridian keeps.
-- **`agent: true`** names a key in your own agent: `ssh` reads `SSH_AUTH_SOCK` as it is,
-  and Meridian starts nothing. **`from: ambient`** leaves signing in to the tool's own
-  configuration, as with no credential at all.
-- **Refused at compile**, rule `unsupported-credential`: a `password` (`ssh` asks for one on a terminal, which a run has not; reach the host as an `ssh` credential with a `privateKey`); a `certificate` (put it
-  beside the key in an agent of your own and set `agent: true`); a `domain` (for WinRM
-  hosts, which this plugin does not reach); a user name with a space or a line break.
+- **A key** goes into an SSH agent Meridian starts for the stage, loaded through `ssh-add`'s
+  stdin; `ssh` gets only `SSH_AUTH_SOCK`. A `passphrase` is answered from a private file.
+  See [0028](../decisions/0028-a-key-reaches-a-host-through-an-agent-meridian-starts.md).
+- **`agent: true`** uses your own agent. **`from: ambient`** leaves signing in to the tool.
+- **Refused at compile** (`unsupported-credential`): a `password` (use a `privateKey`), a
+  `certificate` (load it in your own agent, `agent: true`), a `domain`, a user name with a
+  space or line break.
 - **Refused at run time:** a credential for this machine (`localhost`, `127.0.0.1`, `::1`
-  or no host). The scripts run here as the user running Meridian, whoever the document names. Leave the credential out, or name another host.
+  or no host). Leave the credential out, or name another host.
 
-The plan line names the identity, `web (podman) on edge01.example.com as deploy (ssh,
-user deploy)`, and never a value. `ssh-agent` and `ssh-add` are run from `PATH`, or from
-`MERIDIAN_SSH_AGENT` and `MERIDIAN_SSH_ADD`.
-
-The handover is tested against stand-ins for `ssh`, `ssh-agent` and `ssh-add` that keep what they are given: `ssh` sees `-l deploy` and the socket, `ssh-add` sees the key on its standard input and the passphrase from its askpass program, and the key is in nothing printed or left behind. The real `ssh` is not driven in CI; the Podman workflow has no SSH server.
+The plan names the identity (`web (podman) on edge01.example.com as deploy (ssh, user
+deploy)`), never a value. `ssh-agent` and `ssh-add` come from `PATH` or `MERIDIAN_SSH_AGENT`
+and `MERIDIAN_SSH_ADD`. Tested against stand-ins only; CI has no SSH server for Podman.
 
 ## What this target cannot express
-
-Meridian refuses these at compile time instead of emitting something that does less.
 
 | In the document | Why it is refused | What to do |
 |---|---|---|
@@ -607,8 +502,7 @@ Meridian refuses these at compile time instead of emitting something that does l
 
 ## Every compile-time refusal
 
-Each refusal names the resource and the line. The rule is the short name `meridian`
-prints with it.
+Each refusal names the resource, line and rule.
 
 | Rule | When |
 |---|---|
@@ -625,31 +519,21 @@ prints with it.
 | `unknown-dependency` | an edge names a resource the document does not declare |
 | `unsupported-secret-place` | a [secret](#secrets) is anywhere but the whole value of a container's `Environment` variable |
 
-One thing is a warning and not a refusal: a capitalised key that is not in
-[Known keys](#known-keys).
+A capitalised key not in [Known keys](#known-keys) is a warning.
 
 ## Things to know
 
-- **Volumes and networks are created once.** Quadlet creates them if they are missing and
-  does not alter one that exists. Changing a volume's or a network's params rewrites the
-  unit; to apply the change to the real thing, remove it with `podman volume rm` or
-  `podman network rm` first.
-- **Removing a volume from the document removes its unit, not its data.** Delete the data
-  with `podman volume rm` when you mean to.
-- **A container that exits is started again by the next apply**, because its service is
-  no longer active. For a job that is meant to finish, set
+- **Volumes and networks are created once.** To apply changed params, remove the existing
+  one with `podman volume rm` or `podman network rm`.
+- **Removing a volume removes its unit, not its data.**
+- **An exited container is restarted by the next apply.** For a job, set
   `service: {Type: oneshot, RemainAfterExit: yes}`.
-- **Pods need Podman 5.0, builds 5.2, image units 4.8.** On an older host the plan says so
-  by name.
-- **Linux hosts only.** Quadlet is part of systemd. On macOS and Windows, Podman runs in a
-  virtual machine; point a ResourceSet at that machine over `ssh` instead.
-- **Edits on the host are overwritten.** A unit file changed by hand differs from the
-  compiled one, so the next plan shows it as changed and the next apply puts it back.
-- **Image updates are Podman's.** Set `AutoUpdate: registry` and enable
-  `podman-auto-update.timer` on the host. Meridian restarts a container when its unit
-  changes, not when a tag moves.
-- **Relative paths** in `Yaml`, `File`, `EnvironmentFile` and the like are resolved by
-  Quadlet from the unit directory on the host, not from the document. Use absolute paths.
+- **Pods need Podman 5.0, builds 5.2, image units 4.8.**
+- **Linux hosts only.** On macOS and Windows, target the Podman VM over `ssh`.
+- **Hand edits on the host are reverted** by the next apply.
+- **Image updates are Podman's:** `AutoUpdate: registry` and `podman-auto-update.timer`.
+- **Relative paths** in `Yaml`, `File` and similar resolve from the host's unit directory.
+  Use absolute paths.
 
 ## Troubleshooting
 
@@ -661,8 +545,7 @@ One thing is a warning and not a refusal: a capitalised key that is not in
 | A port below 1024 will not publish | Rootless Podman cannot bind it. Use the `system` scope or a higher port |
 | A changed volume or network has no effect | It already exists. See the first note above |
 
-To see exactly what will be installed without touching anything, run
-`meridian compile <file> --out build` and read the unit files.
+`meridian compile <file> --out build` shows the unit files without touching the host.
 
 ## Examples
 

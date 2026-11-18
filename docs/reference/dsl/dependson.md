@@ -8,10 +8,8 @@
     - resource: nginx_pkg
 ```
 
-"Do not touch this resource until that one is done." A dependency is about
-order and nothing else. It does not carry data (that is a
-[reference](references.md)) and it does not react to change (that is
-[`notifies`](notifies.md)).
+Order only. Data is a [reference](references.md); reacting to change is
+[`notifies`](notifies.md).
 
 ## Fields
 
@@ -22,8 +20,6 @@ order and nothing else. It does not carry data (that is a
 | `resource` | yes | the `id` of another resource in the same document |
 | `when` | no | a [condition](conditions.md#where-a-when-can-be-written) on the entry itself. False, and the entry is dropped; both resources stay |
 | `ifMissing` | no | `error` (the default) or `skip`: what happens when a [`when`](conditions.md#when) removed the resource this entry names. See [`ifMissing`](conditions.md#ifmissing) |
-
-A resource may depend on any number of others, and any number may depend on it.
 
 ## Rules
 
@@ -37,19 +33,14 @@ A resource may depend on any number of others, and any number may depend on it.
 
 ## How the order is worked out
 
-Meridian builds a graph from every `dependsOn` in the document and sorts it
-before any plugin sees the document. The rule is deterministic:
+Meridian sorts before any plugin sees the document:
 
-1. A resource is placed as early as its dependencies allow.
-2. Among resources that are ready at the same moment, the one written first in
-   the document goes first.
-
-So the same document always gives the same order, and the order of the file is
-the only tiebreak.
+1. Each resource as early as its dependencies allow.
+2. Ties in written order.
 
 ### A worked example
 
-Four resources, written in an order that is not the order they must run in:
+Four resources, written out of order:
 
 ```yaml
 resources:
@@ -86,8 +77,7 @@ The sort, step by step:
 | 3 | `conf` | `conf` | `pkg` is placed, so `conf` is ready |
 | 4 | `svc` | `svc` | |
 
-The order handed to the plugin is `motd`, `pkg`, `conf`, `svc`, and on Ansible
-that is the order of the tasks in the playbook.
+Result: `motd`, `pkg`, `conf`, `svc`, which is the task order on Ansible.
 
 ### A cycle
 
@@ -96,24 +86,18 @@ flowchart LR
     a --> b --> a
 ```
 
-There is no order that satisfies this, so the document is refused, and the
-message names the resources on the cycle, in the order they would have to be
-applied, so it can be broken:
+Refused, naming the resources on the cycle:
 
 ```
 cycle.yaml:8:7: spec.resources[0].dependsOn: dependency cycle among 2 resources: a -> b -> a
 ```
 
-`meridian validate` finds a cycle, and so do `compile`, `plan` and `apply`,
-before any plugin is loaded. Every resource counts, whatever its `when` says:
-an order that only works while one condition happens to be false is still a
-mistake in the document. Only `dependsOn` can form a cycle; two resources that
-notify each other are fine.
+Every command finds it, before loading a plugin. Every resource counts, whatever its
+`when`. Notifies do not form cycles.
 
 ## What a dependency becomes
 
-Meridian always sorts. What the plugin then writes depends on how its tool
-thinks about order:
+What the plugin writes:
 
 ```mermaid
 flowchart TD
@@ -138,23 +122,15 @@ flowchart TD
 | nothing | `kubernetes` | the order of the manifests, with a warning |
 | the kind of each object | `helm` | nothing written where Helm's own install order already agrees; refused where it does not |
 
-Two consequences worth knowing:
-
-- **A file-ordered tool cannot run independent resources side by side.** The
-  compile says which resources that affects:
+- **File-ordered tools run independent resources in sequence**, with a warning:
 
   ```
   warning: ansible: resources "motd", "pkg" are independent but will run in sequence; this target flattens the dependency graph and cannot express parallelism
   ```
 
-  The result is the same; only the time differs.
-
-- **Where a reference already implies the order, the keyword is not written
-  twice.** On Terraform, OpenTofu, Pulumi, CloudFormation and Bicep, `${web_sg.id}`
-  inside `web` already puts `web_sg` first, so an explicit `dependsOn` between the two adds
-  nothing to the tool's file. Write `dependsOn` for an order the tool cannot
-  see from the data: an IAM role that must exist before an instance starts,
-  though nothing in the instance mentions it.
+- **A reference that implies order is not repeated.** On Terraform, OpenTofu, Pulumi,
+  CloudFormation and Bicep, `${web_sg.id}` in `web` already orders them. Use `dependsOn`
+  for order the tool cannot see, such as an IAM role an instance needs.
 
 ## When to use it, and when not
 
@@ -165,5 +141,4 @@ Two consequences worth knowing:
 | B should be restarted when A changes | [`notifies`](notifies.md) |
 | document 2 must run after document 1 | nothing to write: [Infrastructure runs before ResourceSet](how-it-fits-together.md#step-4-documents-become-stages), and a `targetHost` taken from an output makes the wait explicit |
 
-The concept behind this page, with the comparison to `notifies`, is in
-[dependencies and notifications](../../concepts/dependencies.md).
+See [dependencies and notifications](../../concepts/dependencies.md).

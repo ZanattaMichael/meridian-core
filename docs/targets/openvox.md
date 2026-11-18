@@ -27,22 +27,13 @@ of Puppet: `puppet apply` on the machine itself, or OpenBolt for another machine
 | Compiles to | `manifests/init.pp`, `site.pp` |
 | Plugin binary | `meridian-target-openvox` |
 
-Meridian never emits a manifest that quietly does less than the document asked for.
-Everything this target cannot do is a compile-time refusal that names the resource and
-the reason, and every one is listed under [Refusals](#refusals).
-
-One behaviour to know about: an `exec` runs on every apply unless it has `creates`.
-Notifying it with `run` makes it run once more when the notifier changes; it does not
-make it run only then.
+What the target cannot do is [refused](#refusals). An `exec` runs on every apply unless it
+has `creates`; `run` notifies make it run once more.
 
 ## How it relates to the Puppet target
 
-OpenVox reads the language Puppet reads and ships the same `puppet` command, so the two
-targets share one compiler. What `openvox` compiles is byte for byte what `puppet`
-compiles, and a test in this repository holds them to that. Switching a document between
-the two is a one-word change to `spec.target`.
-
-The difference is in which product runs the manifest:
+The two targets share one compiler and emit identical bytes (tested). They differ in what
+runs the manifest:
 
 | | `puppet` | `openvox` |
 |---|---|---|
@@ -52,21 +43,13 @@ The difference is in which product runs the manifest:
 | Settings | `MERIDIAN_PUPPET…` | `MERIDIAN_OPENVOX…` |
 | Checks which product it is running | no | yes, see [Making sure it is OpenVox](#making-sure-it-is-openvox) |
 
-Because the settings are separate, one machine can drive both.
-
 ## Install
 
-You need OpenVox on the machine that applies the manifest.
+- Locally: install `openvox-agent`, or `gem install openvox` (no root; used by CI).
+- Remote: OpenBolt locally and an OpenVox agent on the node.
 
-- To apply on the machine Meridian runs on, install OpenVox there. The `openvox-agent`
-  package from the OpenVox project is the usual way. `gem install openvox` also works and
-  needs no root, which is how this repository's CI does it.
-- To apply to another host, install OpenBolt on the machine Meridian runs on, and have an
-  OpenVox agent package on the node. The catalog is compiled locally and applied by the
-  node's agent over SSH or WinRM.
-
-Then put `meridian-target-openvox` beside the `meridian` binary, or in a directory named
-by `--plugin-dir` or `MERIDIAN_PLUGIN_DIR`, and check that Meridian sees it:
+Put `meridian-target-openvox` beside `meridian`, or in `--plugin-dir` or
+`MERIDIAN_PLUGIN_DIR`:
 
 ```
 $ meridian plugins
@@ -78,8 +61,8 @@ openvox
 
 ## Try it on your own machine
 
-[`examples/openvox/local.yaml`](../../examples/openvox/local.yaml) manages two files and a
-command under `/tmp`, so it needs no root:
+[`examples/openvox/local.yaml`](../../examples/openvox/local.yaml) works under `/tmp`, no
+root:
 
 ```yaml
 apiVersion: meridian/v1
@@ -114,7 +97,7 @@ spec:
         - resource: hello_conf
 ```
 
-Ask what applying it would change. Nothing is touched:
+Plan:
 
 ```
 $ meridian plan examples/openvox/local.yaml
@@ -128,10 +111,7 @@ hello (ResourceSet, target openvox on localhost)
   3 changes to make
 ```
 
-The lines with a bar are OpenVox's own output, relayed as it runs. The summary below
-them is Meridian's, with each change traced back to the `id` you wrote.
-
-Apply it, then plan again:
+Barred lines are OpenVox's output; the summary is Meridian's. Apply, then plan again:
 
 ```
 $ meridian apply examples/openvox/local.yaml
@@ -148,11 +128,8 @@ hello (ResourceSet, target openvox on localhost)
 
 ## A fuller example
 
-[`examples/openvox/web.yaml`](../../examples/openvox/web.yaml) sets up a small web
-application on another host: a system user and group, a directory they own, nginx, a
-site configuration that restarts nginx when it changes, and a command that runs once.
-
-The part worth reading is how ordering and notification are written:
+[`examples/openvox/web.yaml`](../../examples/openvox/web.yaml): a user and group, a
+directory, nginx, a site config that restarts nginx, and a one-off command.
 
 ```yaml
     - id: site_conf
@@ -209,30 +186,18 @@ node 'web01.example.com' {
 }
 ```
 
-The compiled files are ordinary manifests. You can read them, review them in a pull
-request, or hand `manifests/init.pp` to an OpenVox server as a module's class without
-Meridian being involved in the run at all.
+`manifests/init.pp` can also be used as a module class on an OpenVox server.
 
 ## What a document compiles to
 
-`manifests/init.pp` holds a class named `meridian_<document name>` with one resource
-declaration for each resource, titled by its `id`. `site.pp` holds the node statement
-that includes the class on the document's host. They are separate so a site that
-classifies nodes some other way can use the class alone.
+`manifests/init.pp` holds class `meridian_<document name>`, one declaration per resource
+titled by its `id`. `site.pp` holds the node statement.
 
-- **The class name** comes from the document name, so the name may hold only lower-case
-  letters, digits and underscores. A name that cannot be a class name is refused, not
-  rewritten.
-- **Titles** are the resource ids, which is how a line of the tool's output is traced
-  back to your document. The thing being managed is always spelled out in its own
-  attribute (`name`, `path` or `command`), never taken from the title.
-- **Attributes** are written in alphabetical order with `ensure` first and `require` and
-  `notify` last, so the same document always compiles to the same bytes.
-- **Values.** A string is single-quoted, so nothing in it is interpolated on the node. A
-  string holding a single quote, a backslash, a line break or a tab is double-quoted
-  with `$` escaped, to the same effect. Numbers and booleans are written bare, a whole
-  number without a decimal point. A list becomes an array and a map becomes a hash. An
-  empty (`null`) value is refused.
+- **Class name**: lower-case letters, digits and underscores; otherwise refused.
+- **Titles** are ids; the managed thing is in `name`, `path` or `command`.
+- **Attributes** are sorted, `ensure` first, `require` and `notify` last.
+- **Values**: strings single-quoted (double-quoted with `$` escaped when needed), numbers and
+  booleans bare, lists as arrays, maps as hashes. `null` is refused.
 
 ### Ordering
 
@@ -255,13 +220,9 @@ Every `dependsOn` becomes a `require` on the dependent resource:
   }
 ```
 
-The order of declarations in the file means nothing to OpenVox; the `require` is what
-orders them. A cycle is refused by Meridian before the plugin is reached.
-
 ### Notifications
 
-A `notifies` entry becomes `notify` on the notifier. It also orders the two, so when a
-resource both depends on and is notified by another, only the `notify` is written.
+`notifies` becomes `notify`, which also orders; a matching `require` is dropped.
 
 | Notified type | Actions accepted | What OpenVox does |
 |---|---|---|
@@ -269,15 +230,12 @@ resource both depends on and is notified by another, only the `notify` is writte
 | `exec` | `run` | runs the command once more on a run where the notifier changed |
 | `package`, `file`, `user`, `group` | none | these types do nothing on a refresh, so notifying one is refused |
 
-`reload`, `start` and `stop` on a service are refused, each with its reason. To reload
-instead of restart, manage that service with a module of your own that sets its `restart`
-command.
+`reload`, `start` and `stop` are refused. For a reload, set the service's `restart`
+command in your own module.
 
 ### References
 
-A manifest has no way to read one resource's attribute from another at apply time, so a
-reference is settled when the document is compiled. `${id.param}` becomes the value the
-document gives that param on the resource `id`:
+`${id.param}` is settled at compile to that param's value on resource `id`:
 
 ```yaml
     - id: site_root
@@ -300,31 +258,21 @@ document gives that param on the resource `id`:
   }
 ```
 
-- A reference that is the whole value of a param keeps the type of what it reads, so
-  `groups: ${app_user.groups}` is a list. Inside longer text it must read a single value.
-- References chain: a param that was itself written with a reference can be read.
-- A reference does not order the two resources. Use `dependsOn` for that.
-- Write a literal `${` by doubling the dollar sign, as a shell script in a file's
-  `content` may need. A lone `$` is left alone, and nothing is interpolated on the node.
-- A reference that cannot be settled is refused with the rule `invalid-reference`: a
-  resource the document does not declare, a param that resource does not set, a bare
-  `${id}`, a path deeper than `${id.param}`, an expression, a resource that refers back
-  to itself, or a `${` that is never closed.
+- A whole-value reference keeps its type; inside text it must be a single value.
+- References chain. They do not order resources.
+- `$${` is a literal `${`.
+- Anything unsettleable is refused (`invalid-reference`).
 
-The same rules hold on every target that shares these six types; see
-[the reference](../reference/resource-types.md#references).
+See [the reference](../reference/resource-types.md#references).
 
 ### Outputs
 
-None. A ResourceSet has no `outputs`, and the plugin does not offer the outputs
-operation, so nothing from an OpenVox run can feed a later stage.
+None.
 
 ## Resource reference
 
-The six shared types are listed here; anything else is a Puppet type of its
-own, [below](#puppet-types-beside-the-six). A param a shared type does not
-take is refused at compile time, naming the resource and what is accepted. A
-resource with no `state` gets the default.
+Other types are [Puppet types](#puppet-types-beside-the-six). Unknown params are refused.
+No `state` means the default.
 
 ### package
 
@@ -361,7 +309,7 @@ Can be notified with `restart` or `refresh`.
 | `group` | `group` |
 | `mode` | `mode` |
 
-Quote `mode` (`"0644"`) so YAML does not read it as a number. Cannot be notified.
+Quote `mode` (`"0644"`). Cannot be notified.
 
 ### user
 
@@ -404,23 +352,16 @@ with `run`.
 
 ### Puppet types beside the six
 
-Any Puppet type OpenVox can load is a resource type, written as a
-declaration names it: `cron`, `mount`, `mysql::db`. Its `params` are the
-type's attributes, written as given and checked against nothing; `state` is
-its `ensure`; notified with `refresh`, it is refreshed. The six names the
-shared types have taken are reached with a prefix: `native/file` is Puppet's
-own `file`, with `source` and `recurse`. It is exactly what the
-[Puppet target does](puppet.md#puppet-types-beside-the-six), compiled by the
-same code, and [`examples/puppet/native-types.yaml`](../../examples/puppet/native-types.yaml)
-compiles for this target with `spec.target: openvox`. A document that names a
-Puppet type compiles for the two of them only; the
-[`native-type`](../reference/lint.md#native-type) lint rule marks each such
-resource.
+As on the [Puppet target](puppet.md#puppet-types-beside-the-six): any loadable Puppet type
+(`cron`, `mysql::db`), params unchecked, `state` as `ensure`, `refresh` notifies, and
+`native/file` for Puppet's own `file`.
+[`examples/puppet/native-types.yaml`](../../examples/puppet/native-types.yaml) works with
+`spec.target: openvox`. Such documents compile for Puppet and OpenVox only; the
+[`native-type`](../reference/lint.md#native-type) lint marks them.
 
 ## Refusals
 
-Each refusal is printed with the file, line and column of the resource, the target, the
-resource id and the rule in brackets:
+Each refusal names file, line, column, target, id and rule:
 
 ```
 site.yaml:37:11: openvox: resource "nginx_conf" [unsupported-action]: notifies resource "nginx_svc" with action "reload", which this target cannot express: …
@@ -443,43 +384,30 @@ site.yaml:37:11: openvox: resource "nginx_conf" [unsupported-action]: notifies r
 | `missing-param` | a resource of a shared type that would be declared with no attributes at all |
 | `param-conflicts-with-state` | `content` on a `directory`; `state` and `params.ensure` both on a Puppet type of its own |
 
-Five more rules guard the plugin against a malformed tree from Meridian itself and are
-not reachable from a valid document: `unknown-dependency`, `unknown-notify-target`,
-`invalid-reference`, `duplicate-resource` and `ordering-violated`. If you see one, it is a
-bug in Meridian; please report it.
+`unknown-dependency`, `unknown-notify-target`, `invalid-reference`, `duplicate-resource`
+and `ordering-violated` are internal guards; report them if seen.
 
 ## How a run works
 
-Meridian compiles the document, writes the files into its state directory, and runs the
-tool there. Which tool depends on the document's host:
+- `localhost`, `127.0.0.1`, `::1`: `puppet apply`.
+- Otherwise: `bolt apply --targets <host>`.
 
-- `localhost`, `127.0.0.1` or `::1`: `puppet apply`, on the machine Meridian runs on.
-- Anything else: `bolt apply --targets <host>`, which compiles the catalog locally and
-  applies it on the node.
-
-A plan is the same run with `--noop`. OpenVox works out every change and makes none.
+A plan adds `--noop`.
 
 | Host | Tool | Plan | Apply |
 |---|---|---|---|
 | this machine | OpenVox's `puppet` | `puppet apply --detailed-exitcodes --color=false --noop apply.pp` | the same without `--noop` |
 | anything else | OpenBolt's `bolt` | `bolt apply apply.pp --targets <host> --format json --noop` | the same without `--noop` |
 
-`apply.pp` is the compiled class followed by the line that includes it. The compiled
-`site.pp` does the same through a node statement, which only matches on a machine whose
-certificate name is the host, so the runner does not depend on it.
+`apply.pp` is the class plus an include, so the run does not depend on the node's
+certificate name.
 
-Meridian reads the result from the tool itself. Locally, an exit status of 0 or 2 is
-success (2 means changes were made) and 4 or 6 means a resource failed. When an apply
-fails part way, Meridian reports the failure with the tool's own explanation, lists what
-had already been changed, and exits non-zero. Resources that depended on the failed one
-are skipped by OpenVox and are not reported as changed.
-
-Over OpenBolt the changes are read from the report it prints. If that report cannot be
-read, the plan is reported as unknown, never as "nothing to change".
+Locally, exit 0 or 2 is success (2: changed); 4 or 6 is a failed resource, reported with
+what had changed. Over OpenBolt an unreadable report makes the plan unknown.
 
 ### Settings
 
-All of them are environment variables read by the plugin, and all are optional.
+Optional environment variables.
 
 | Variable | Meaning | Default |
 |---|---|---|
@@ -491,45 +419,35 @@ All of them are environment variables read by the plugin, and all are optional.
 | `MERIDIAN_SSH_AGENT` | The `ssh-agent` program, started for a credential's key; see [Credentials](#credentials) | `ssh-agent` on `PATH` |
 | `MERIDIAN_SSH_ADD` | The `ssh-add` program | `ssh-add` on `PATH` |
 
-Every setting can also be written in the project's `meridian.yaml` under
-`spec.settings.openvox`, by its short name; the environment variable still wins.
-The names, defaults and the splitting rule for argument lists are in the
-[plugin settings reference](../reference/plugin-settings.md#openvox).
-
-For example, to apply as root on the node and against a particular environment:
+Settings can also go in `meridian.yaml` under `spec.settings.openvox`; the environment
+wins. See the [plugin settings reference](../reference/plugin-settings.md#openvox).
+Applying as root against an environment:
 
 ```
 MERIDIAN_OPENVOX_ARGS="--run-as root" meridian apply site.yaml              # over OpenBolt
 MERIDIAN_OPENVOX_ARGS="--environment staging" meridian apply site.yaml      # locally
 ```
 
-`MERIDIAN_OPENVOX_TRANSPORT=local` is for running Meridian on the node itself when the
-document names that node by its real host name.
+`MERIDIAN_OPENVOX_TRANSPORT=local` runs on this node when the document names it by host
+name.
 
 ### Secrets
 
-A [secret](../reference/dsl/secrets.md) in a resource's params is compiled to a Hiera
-lookup wrapped in `Sensitive`, so OpenVox redacts the value in its report and in any
-diff:
+A [secret](../reference/dsl/secrets.md) compiles to a Hiera lookup in `Sensitive`, redacted
+in reports and diffs:
 
 ```puppet
     content => Sensitive(lookup('meridian_secret_db_password')),
 ```
 
-When a stage runs, the value is written under that key into a Hiera data file only the
-user can read, with a `hiera.yaml` beside it, both in a private directory that is
-removed when the run ends; the run is given `--hiera_config <dir>/hiera.yaml` (OpenBolt:
-`--hiera-config`) and nothing more. The command line, the environment and the work
-directory never hold the value. A secret inside a list or a map is refused at compile,
-because a lookup is one value. This is the Puppet target's handover, run through
-OpenVox's `puppet`; [its page](puppet.md#secrets) describes it in full, and the real-tool
-test here (`MERIDIAN_TEST_REAL_OPENVOX=1`) proves it against OpenVox itself.
+The value goes into a private Hiera data file for the run, passed by
+`--hiera_config` (OpenBolt: `--hiera-config`). A secret in a list or map is refused. Same as
+[Puppet](puppet.md#secrets); tested with `MERIDIAN_TEST_REAL_OPENVOX=1`.
 
 ### Making sure it is OpenVox
 
-Puppet and OpenVox both install a command called `puppet`, so "is `puppet` installed"
-does not tell you which one you have. Before a local run the plugin asks the tool for its
-`implementation` fact, which OpenVox reports as `openvox`.
+Both install `puppet`. Before a local run the plugin checks the `implementation` fact is
+`openvox`.
 
 | `MERIDIAN_OPENVOX_VERIFY` | If the tool is not OpenVox |
 |---|---|
@@ -537,23 +455,17 @@ does not tell you which one you have. Before a local run the plugin asks the too
 | `strict` | Refuses before anything is written or applied. Use it where running the other product is a licensing or policy problem. |
 | `off` | Does not ask. Saves under a second per session. |
 
-The check covers local runs. Over OpenBolt the catalog is applied by whatever agent is
-installed on the node, and the plugin does not connect to the node just to ask.
+Over OpenBolt the node's agent is not checked.
 
 ## Editor schemas
 
-`meridian schema sync` asks the OpenVox `puppet describe` what the Puppet
-types the documents use take, exactly as the
-[Puppet target does](puppet.md#editor-schemas), with this target's own
-settings (`MERIDIAN_OPENVOX`, `MERIDIAN_OPENVOX_ARGS`) and the tool pinned
-as `openvox` at the installed version. Each used type is described in full
-from `puppet describe <type>`; every other type `puppet describe --list`
-knows is listed by name, the six shared names under `native/`.
+As on [Puppet](puppet.md#editor-schemas), using `MERIDIAN_OPENVOX` and
+`MERIDIAN_OPENVOX_ARGS`, pinned as `openvox`.
 
 ## Credentials
 
-`targetHost.credential` names the [credential](../reference/dsl/credentials.md) the host is
-reached as. Another machine is reached with OpenBolt's `bolt`, which reads how to sign in from an inventory, so the plugin writes one for the run:
+`targetHost.credential` names the [credential](../reference/dsl/credentials.md). `bolt`
+reads it from an inventory written for the run:
 
 ```yaml
 spec:
@@ -573,9 +485,8 @@ spec:
       privateKey: ${{ secret.deploy_key }}
 ```
 
-- **The user and a password** (an `ssh` credential with a `password`, or a
-  `usernamePassword` one) go into a Bolt inventory written for the run, in a directory only
-  you can enter and removed when the run ends, and `--inventoryfile` names it:
+- **A user and password** (`ssh` with `password`, or `usernamePassword`) go into a private
+  inventory, removed after the run, passed by `--inventoryfile`:
 
   ```yaml
   targets:
@@ -587,63 +498,45 @@ spec:
           password: "..."
   ```
 
-- Bolt's own `--inventoryfile` in `MERIDIAN_OPENVOX_ARGS` is then a second inventory; leave
-  it out when the document names a credential.
-- **A key is never on disk.** It goes into an SSH agent Meridian starts for the stage:
-  `ssh-agent -D -a <socket>`, its socket in a directory only you can enter, loaded with
-  `ssh-add -` from standard input. `bolt` is told the socket in `SSH_AUTH_SOCK` and
-  nothing else. A `passphrase` is answered to `ssh-add` from a file only you can read. The
-  agent is stopped and its directory removed when the stage ends. Nothing of the key is on
-  the command line, in the environment, in the compiled files or in a file Meridian keeps.
-- **`agent: true`** names a key in your own agent: `bolt` reads `SSH_AUTH_SOCK` as it is,
-  and Meridian starts nothing. **`from: ambient`** leaves signing in to the tool's own
-  configuration, as with no credential at all.
-- **Refused at compile**, rule `unsupported-credential`: a `certificate` (put it
-  beside the key in an agent of your own and set `agent: true`); a `domain` (for WinRM
-  hosts, which this plugin does not reach); a user name with a space or a line break.
+- Leave `--inventoryfile` out of `MERIDIAN_OPENVOX_ARGS` when a credential is named.
+- **A key** goes into an SSH agent Meridian starts for the stage, loaded through `ssh-add`'s
+  stdin; `bolt` gets only `SSH_AUTH_SOCK`. A `passphrase` is answered from a private file.
+  See [0028](../decisions/0028-a-key-reaches-a-host-through-an-agent-meridian-starts.md).
+- **`agent: true`** uses your own agent. **`from: ambient`** leaves signing in to the tool.
+- **Refused at compile** (`unsupported-credential`): a `certificate` (load it in your own
+  agent, `agent: true`), a `domain`, a user name with a space or line break.
 - **Refused at run time:** a credential for this machine (`localhost`, `127.0.0.1`, `::1`
-  or no host). `puppet apply` configures this machine as the user running Meridian, whoever the document names. Leave the credential out, or name another host.
+  or no host). Leave the credential out, or name another host.
 
-The plan line names the identity, `web (openvox) on web01.example.com as deploy (ssh,
-user deploy)`, and never a value. `ssh-agent` and `ssh-add` are run from `PATH`, or from
-`MERIDIAN_SSH_AGENT` and `MERIDIAN_SSH_ADD`.
-
-The runner is the Puppet plugin's, so the handover is tested there, against stand-ins for `bolt`, `ssh-agent` and `ssh-add` that keep what they are given (the inventory and its mode, the environment, the key and the passphrase). A refusal names `openvox`. The real `bolt` is not driven in CI.
+The plan names the identity (`web (openvox) on web01.example.com as deploy (ssh, user
+deploy)`), never a value. `ssh-agent` and `ssh-add` come from `PATH` or `MERIDIAN_SSH_AGENT`
+and `MERIDIAN_SSH_ADD`. Tested in the Puppet plugin against stand-ins; real `bolt` is not
+run in CI.
 
 ## Troubleshooting
 
 **`could not run puppet: it is not installed, or not on the PATH`**
-OpenVox is not installed where Meridian runs, or is somewhere the plugin does not look.
-Set `MERIDIAN_OPENVOX` to the full path of its `puppet` command.
+Set `MERIDIAN_OPENVOX` to the full path of OpenVox's `puppet`.
 
 **`… is not OpenVox: it has no implementation fact`**
-The `puppet` that was found is Puppet, or an OpenVox release from before the fact
-existed. Point `MERIDIAN_OPENVOX` at OpenVox's command, or see the table above.
+It found Puppet or an old OpenVox. Point `MERIDIAN_OPENVOX` at OpenVox.
 
 **`puppet apply reported a failed resource`**
-OpenVox ran and a resource failed. The tool's own error follows the message. Fix the
-cause on the node or in the document and apply again; what already succeeded will not be
-redone.
+The tool's error follows. Fix it and apply again.
 
 **`bolt apply failed`**
-Usually the node could not be reached, or has no agent installed. The output that follows
-is OpenBolt's own.
+Usually the node is unreachable or has no agent. OpenBolt's output follows.
 
 **A plan always shows an `exec` as a change**
-It has no `creates`, so it runs on every apply. That is what the document says; add
-`creates` if the command should run once.
+Add `creates` to run it once.
 
 ## How this target is tested
 
-- Golden files: every shared fixture and both documented examples are compiled and
-  compared with recorded output in `plugins/openvox/testdata`, and with what the Puppet
-  target emits.
-- The runner is tested against stand-ins for `puppet` and `bolt`, so it runs anywhere.
-- The plugin binary is started as a real process and driven over the plugin protocol.
-- In CI the same plugin is run against a real OpenVox: every compiled manifest is
-  parsed by it, and manifests are planned, applied, changed, drifted and removed on disk.
+- Golden files in `plugins/openvox/testdata`, compared with Puppet's output.
+- Stand-ins for `puppet` and `bolt`; the binary over the plugin protocol.
+- CI parses every manifest with real OpenVox, and plans, applies, changes and removes.
 
-To run the last group yourself:
+To run the real-tool tests:
 
 ```
 gem install openvox

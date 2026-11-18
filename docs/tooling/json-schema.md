@@ -4,39 +4,31 @@
 meridian schema [--target TARGET] [-o FILE] [--plugin-dir DIR]
 ```
 
-`meridian schema` writes a [JSON Schema](https://json-schema.org/) (draft 7)
-of the document language. It is for editors and tools that validate YAML
-against a schema and cannot run a language server, and for anything else that
-wants a machine-readable description of a Meridian document.
-
-If your editor can run the [language server](language-server.md), use that
-instead. It knows everything the schema does and a good deal the schema cannot
-say.
+`meridian schema` writes a [JSON Schema](https://json-schema.org/) (draft 7) of the
+language, for editors without the [language server](language-server.md), which checks
+more.
 
 ## The published schema
 
-The schema for the language and every target in this repository is checked in
-at [`schemas/meridian-v1.schema.json`](../../schemas/meridian-v1.schema.json),
-and a test fails when it is out of date. Point an editor at:
+[`schemas/meridian-v1.schema.json`](../../schemas/meridian-v1.schema.json) covers every target
+in this repository and is kept current by a test:
 
 ```
 https://raw.githubusercontent.com/ZanattaMichael/meridian-core/main/schemas/meridian-v1.schema.json
 ```
 
-To get a schema for exactly the plugins you have installed, generate one:
+For your installed plugins:
 
 ```sh
 meridian schema -o meridian.schema.json
 ```
 
-`--target ansible` writes the rules for that one target and leaves the others
-out, which makes a smaller schema for a project that uses one tool.
+`--target ansible` limits it to one target.
 
 ## Using it
 
-With [yaml-language-server](https://github.com/redhat-developer/yaml-language-server)
-(the YAML support in VS Code, Neovim, Helix and others), name the schema in a
-comment at the top of a document:
+With [yaml-language-server](https://github.com/redhat-developer/yaml-language-server), add a
+comment:
 
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/ZanattaMichael/meridian-core/main/schemas/meridian-v1.schema.json
@@ -44,8 +36,7 @@ apiVersion: meridian/v1
 kind: ResourceSet
 ```
 
-or map it to files in the editor's settings. In VS Code with the YAML
-extension:
+or map it in settings. VS Code:
 
 ```json
 {
@@ -55,16 +46,12 @@ extension:
 }
 ```
 
-JetBrains IDEs take the same file under *Languages & Frameworks, Schemas and
-DTDs, JSON Schema Mappings*.
-
-Do not use both the schema and the Meridian language server on the same files:
-each problem would be reported twice.
+JetBrains: *Languages & Frameworks, Schemas and DTDs, JSON Schema Mappings*. Do not combine
+it with the language server; problems would show twice.
 
 ## What it checks
 
-The schema is generated from the tables the parser reads and from what the
-loaded plugins declare. It is never written by hand.
+Generated from the parser's tables and the plugins.
 
 | It checks | From |
 |---|---|
@@ -75,29 +62,19 @@ loaded plugins declare. It is never written by hand.
 | For targets that describe their types (ansible, puppet, openvox, chef, salt, cloud-init): the params a type takes, which are required, their kinds and fixed values, and the states the type takes | each plugin |
 | For a tool's own types, once `meridian schema sync` has run: the same, nested params included, with a param the tool sets left out so a document cannot write it | the [synced tool schemas](schema-sync.md) under `--state-dir` |
 
-Every field carries its documentation as a `description`, which editors show
-on hover.
+Each field has a `description` for hover.
 
 ## What it cannot check
 
-A schema describes the shape of one document. It cannot follow a name, so it
-does not know that:
+It cannot check:
 
-- a `dependsOn` or `notifies` names a resource that exists, or that the
-  dependencies have no cycle;
-- a `${...}` reference names something real;
-- a target accepts this kind of document (`kind: Infrastructure` with a
-  configuration management target);
-- a `when` condition or a `${{ ... }}` expression is written correctly, or
-  names a variable, condition or secret the document declares;
-- a plugin refuses a combination of params that are each allowed.
+- that `dependsOn` and `notifies` names exist, or cycles;
+- that `${...}` references resolve;
+- that a target accepts the document's kind;
+- `when` and `${{ ... }}` expressions;
+- param combinations a plugin refuses.
 
-`meridian validate`, `meridian lint` and the language server check all of
-these. A document that passes the schema can still fail to compile; a document
-the compiler accepts always passes the schema. Tests hold both directions for
-every example in this repository: each example is valid against the schema,
-and a set of documents the compiler refuses are refused by the schema too.
+`meridian validate`, `meridian lint` and the language server do. Anything the compiler
+accepts passes the schema; tests check both directions on the examples.
 
-Two details follow from YAML. A param may always be a string, because any
-param can hold a `${...}` reference. And `targetVersion: 3` is accepted as
-well as `"3"`, because the compiler reads either as text.
+Any param may be a string (for references), and `targetVersion: 3` equals `"3"`.

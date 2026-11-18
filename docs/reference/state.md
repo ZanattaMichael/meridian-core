@@ -1,7 +1,6 @@
 # State, runs and backends
 
-What Meridian keeps about its own runs, where, and in what form. The reasons
-are in [running safely](../concepts/run-safety.md).
+What Meridian keeps about its runs. See also [running safely](../concepts/run-safety.md).
 
 ## What is kept, and where
 
@@ -28,36 +27,23 @@ flowchart TB
 | `runs/<id>/run.json` | one run's summary | when the run starts, and at every step boundary |
 | `runs/<id>/events.jsonl` | one run's events, in order | with `run.json` |
 
-A working directory belongs to the plugin. Meridian creates it, hands it to
-the plugin, keeps it between runs, and never reads it.
+A working directory belongs to the plugin; Meridian keeps it between runs and never reads it.
 
-With the local backend, files are written beside the target and renamed over
-it, so a crash never leaves half a file, and are readable only by their owner
-(mode `0600`).
+The local backend writes files atomically, mode `0600`.
 
-**No secret value is kept in the record, in any form.** The record holds
-names, ids, hashes of artifacts, counts and times. It does not hold a param,
-an output's value, a data file, or anything a tool printed. What a tool
-printed is kept apart, masked and only on this machine:
-[`runs/<id>/logs/`](#runsidlogs).
+**The record holds no secret value.** Only names, ids, hashes, counts and times; never a
+param, output value, data file or tool output. Tool output is kept apart, masked, on this
+machine only: [`runs/<id>/logs/`](#runsidlogs).
 
 ## `history/`
 
-A [rollback](../concepts/run-safety.md#putting-a-run-back) applies the
-artifact of a stage's last successful apply, so that artifact is kept:
-`history/<kind>/<document>/<hash>.json`, a JSON object of the artifact's
-files by path. Two are kept per stage, the one just applied and the last good
-one before it.
+For [rollback](../concepts/run-safety.md#putting-a-run-back), each stage keeps two
+artifacts at `history/<kind>/<document>/<hash>.json` (files by path): the one just applied
+and the last good one.
 
-Unlike the record, a snapshot holds content: an artifact contains whatever
-its document contains. It is therefore kept **only in the state directory, on
-the machine that applied**, readable only by its owner, beside the working
-directory where the plugin has already written the same files. It is never
-sent to a backend. A machine without the snapshot cannot roll that stage
-back, and says so.
-
-A snapshot is loaded by its hash and checked against it. One that has been
-changed is refused.
+Snapshots hold content, so they stay **only on the machine that applied**, mode `0600`,
+never in a backend. Another machine cannot roll that stage back. A snapshot whose hash does
+not match is refused.
 
 ## `runs/<id>/logs/`
 
@@ -111,9 +97,8 @@ the step's file.
 | `command` | what the run is doing: the subcommand, the files and the selector |
 | `since` | when it was taken |
 
-The lock is created with the backend's one atomic operation, "create only if
-absent", so of two runs exactly one gets it. A lock that cannot be read is
-still a lock.
+The lock uses the backend's atomic "create only if absent". An unreadable lock is still a
+lock.
 
 ## `state.json`
 
@@ -146,9 +131,7 @@ One entry per stage, keyed by the document's kind and name:
 | `run` | the run that did it |
 | `lastGood` | the artifact hash of the last apply that succeeded; equal to `artifactHash` after a success, unchanged by a failure, empty when no apply ever succeeded |
 
-An artifact's hash covers the path and content of every file in it, so the
-same documents and data always give the same hash, and anyone can recompile
-and compare.
+An artifact's hash covers every file's path and content, so it is reproducible.
 
 ## `runs/<id>/run.json`
 
@@ -183,9 +166,8 @@ and compare.
 | `resumes` | the run this one continued, when it was started with `--resume` |
 | `selector` | the `-l` selection, when there was one |
 
-A step's `previous` is the artifact hash of its last successful apply before
-this run: what a rollback of the run goes back to. It is empty when there was
-none.
+A step's `previous` is the hash of its last successful apply before this run (empty if
+none).
 
 A step's `status`:
 
@@ -214,8 +196,7 @@ A step's `reason`, when it failed:
 | `timed-out` | the step's tool ran past `--stage-timeout` and was stopped |
 | `plan-differs` | an `apply --plan` compiled the stage to an artifact other than the one the saved plan recorded, or the plan previewed a stage the document now leaves out; the stages after it are not run |
 
-These words are fixed: a new kind of failure gets a new word, and a word is
-never reused. They are also listed with every other error code in
+These words are never reused. See also
 [error kinds and codes](errors.md#stages-of-a-run-meridian-orchestrator).
 
 ## Events
@@ -239,9 +220,6 @@ never reused. They are also listed with every other error code in
 | `attempt` | `1` for a step's event, `0` for the run's |
 | `workflow` | empty today |
 | `detail` | what else there is to say; fixed per type |
-
-`workflow`, `instance` and `attempt` are in the envelope now so that it does
-not change when workflows, fan-out and retries arrive.
 
 | Type | When | `detail` |
 |---|---|---|
@@ -267,9 +245,8 @@ not change when workflows, fan-out and retries arrive.
 | `run.succeeded`, `run.failed` | the run ends | `steps`, `failed`, `rolledBack` |
 | `lock.released` | the run is about to release the lock | `id` |
 
-`action` is `create`, `update`, `delete` or `replace`. `resource` is the id
-the tool reported, which is the document's id where the tool's report can be
-traced back to one.
+`action` is `create`, `update`, `delete` or `replace`. `resource` is the tool's id, mapped
+to the document's id where possible.
 
 ```mermaid
 sequenceDiagram
@@ -291,9 +268,8 @@ sequenceDiagram
     M->>B: delete lock
 ```
 
-The events are written whole at each step boundary, not appended line by
-line, because a store of blobs has no append. A run that dies keeps its
-events up to the last boundary.
+Events are written whole at each step boundary; a run that dies keeps them up to the last
+one.
 
 ## Choosing a backend
 
@@ -303,13 +279,12 @@ events up to the last boundary.
 | `--backend-config KEY=VALUE` | | | a setting for the backend; may be repeated |
 | `--state-dir DIR` | `MERIDIAN_STATE_DIR` | `.meridian` | the working directories, and with `local` the record too |
 
-Every command that reads or writes the record takes these: `plan`, `apply`,
-`drift`, `rollback`, `status`, `runs`, `events` and `unlock`.
+Taken by `plan`, `apply`, `drift`, `rollback`, `status`, `runs`, `events` and `unlock`.
 
 ## Writing a backend
 
-A backend is a program named `meridian-backend-<name>`, in a directory
-Meridian looks for plugins in. Meridian runs it once per operation.
+A backend is a program `meridian-backend-<name>` on the plugin path, run once per
+operation.
 
 | Arguments | Standard input | Standard output | Exit status |
 |---|---|---|---|
@@ -319,29 +294,17 @@ Meridian looks for plugins in. Meridian runs it once per operation.
 | `delete <key>` | | | `0`, also when there was none |
 | `list <prefix>` | | the keys that start with the prefix, one per line | `0` |
 
-- Any other exit status is a failure. What the program wrote to standard
-  error is shown as the reason.
-- Each `--backend-config KEY=VALUE` arrives as the environment variable
-  `MERIDIAN_BACKEND_<KEY>`, in upper case, with anything that is not a letter
-  or a digit turned into `_`.
-- A key is a relative path with `/` between its parts, such as
-  `runs/2026-11-17T09-14-03Z-0cc7/run.json`. Meridian never sends one that
-  climbs out of the store, and a backend should refuse one anyway.
-- `put` replaces the blob whole. A reader must see the old blob or the new
-  one, never part of each.
-- **`create` must be atomic.** Of two callers, exactly one may be told `0`.
-  The lock stands on this and on nothing else. Use what your store gives you
-  for it: `O_EXCL` on a file system, `If-None-Match: *` on an object store
-  that supports conditional writes, a conditional put on a key-value store. A
-  store with no such operation cannot hold a lock, and should not be used as
-  a backend.
+- Any other exit status fails; stderr is the reason.
+- `--backend-config KEY=VALUE` arrives as `MERIDIAN_BACKEND_<KEY>` (upper case, non-alphanumerics
+  as `_`).
+- Keys are relative paths such as `runs/2026-11-17T09-14-03Z-0cc7/run.json`. Refuse any that
+  climb out.
+- `put` replaces the blob atomically.
+- **`create` must be atomic**: exactly one of two callers gets `0` (`O_EXCL`,
+  `If-None-Match: *`, a conditional put). Without that, a store cannot be a backend.
 
-The reference implementation is
-[`examples/backends/meridian-backend-dir`](../../examples/backends/meridian-backend-dir),
-a shell script that keeps the record in a directory. The test suite runs the
-same contract against it and against the built-in backend, and runs a whole
-apply, a refusal on its lock, and a resume through it.
+Reference implementation:
+[`examples/backends/meridian-backend-dir`](../../examples/backends/meridian-backend-dir), tested
+against the same contract as the built-in backend.
 
-A backend receives nothing secret from Meridian, but its own settings may be
-credentials. They are passed in the environment, are not written to the
-record, and are left out of the `command` in the lock and the run.
+Backend settings may be credentials; they are passed in the environment and never recorded.
