@@ -15,7 +15,7 @@ packages, files and services. This page is how the
 
 | Target | Types | Page |
 |---|---|---|
-| `ansible` | the six shared types | [ansible](../../targets/ansible.md) |
+| `ansible` | the six shared types, and any module by its full name (`ansible.builtin.lineinfile`) | [ansible](../../targets/ansible.md) |
 | `puppet` | the six shared types | [puppet](../../targets/puppet.md) |
 | `chef` | the six shared types | [chef](../../targets/chef.md) |
 | `salt` | the six shared types | [salt](../../targets/salt.md) |
@@ -24,7 +24,8 @@ packages, files and services. This page is how the
 | `dsc` | DSC's own resources | [dsc](../../targets/dsc.md) |
 
 There are two dialects in this segment, and the table shows which target speaks
-which.
+which. A target of the shared dialect may also take its tool's own types
+beside the six; see [native types beside the six](#native-types-beside-the-six).
 
 ## The shared dialect: six types
 
@@ -93,7 +94,8 @@ and it compiles for all three tools. A longer one for each tool is under
 
 Anything outside the six types and their params is refused when the document is
 compiled: an unknown type, a param the type does not have, a state the tool
-cannot express. Nothing is dropped.
+cannot express. Nothing is dropped. The one way past the six is the tool's own
+types, below.
 
 In this dialect a reference is settled when the document is compiled:
 `${id.param}` becomes the value the document gives that param on the resource
@@ -111,6 +113,70 @@ through them is refused), and it adds a few params of its own, such as a user's
 `ssh_authorized_keys`. Use it for what must be true before any other tool can
 reach the machine. [Its page](../../targets/cloud-init.md) has the detail, and
 [the resource types reference](../resource-types.md) marks every difference.
+
+## Native types beside the six
+
+A tool does more than the six types say, and a document is allowed to reach
+it. On a target of the shared dialect, a `type` that is not one of the six is
+the tool's own type, written as the tool writes it, and its `params` are the
+tool's own arguments, passed through unchanged, exactly as on the
+[infrastructure as code targets](infrastructure-as-code.md). Nothing is
+checked against a list in Meridian: an argument the tool does not take is the
+tool's to refuse when it runs, until the tool's schema is synced
+([tool schemas](../../tooling/schema-sync.md)) and the editor and `meridian
+lint` report it in place.
+
+| Target | The native `type` is | Example | `state` | When notified |
+|---|---|---|---|---|
+| `ansible` | the module's fully qualified collection name | `ansible.builtin.lineinfile`, `community.general.ufw` | the module's `state` argument | runs the task again (`run`) |
+| `puppet`, `openvox` | not yet: refused as `unsupported-resource-type` | | | |
+| `chef` | not yet | | | |
+| `salt` | not yet | | | |
+| `cloud-init` | not yet | | | |
+
+Three rules hold the two apart:
+
+- **The bare word is always the shared type.** `file` is the shared `file`
+  on every target, whatever the tool calls its own. A dotted or namespaced
+  name can never be a shared type, so it is the tool's.
+- **A native type whose bare name a shared type has taken is written
+  `native/<name>`**: `native/file` is the tool's own `file`, with every
+  attribute the shared type does not take. The prefix is accepted only for
+  the six names, and only where the tool has a bare type of that name; a
+  target whose types are always written in full refuses it and says what to
+  write instead (`ansible.builtin.file` on Ansible).
+- **A native type makes the document single-target.** The `native-type`
+  lint rule ([reference](../lint.md#native-type)) marks each such resource,
+  so a document that was meant to move between tools shows where it stopped.
+
+```yaml
+resources:
+  - id: nginx_pkg
+    type: package                        # shared: compiles for every target
+    params:
+      name: nginx
+  - id: worker_count
+    type: ansible.builtin.lineinfile     # Ansible's own: compiles for ansible only
+    params:
+      path: /etc/nginx/nginx.conf
+      regexp: "^worker_processes"
+      line: worker_processes 4;
+    dependsOn:
+      - resource: nginx_pkg
+    notifies:
+      - resource: nginx_svc
+        action: reload
+  - id: nginx_svc
+    type: service
+    params:
+      name: nginx
+```
+
+A native resource takes `dependsOn`, `notifies`, `runtimeWhen`, secrets and
+references like any other; what differs is only how `type`, `params` and
+`state` are read. How each target writes a native resource, and what it
+refuses, is on the target's page. The choice is
+[decision 0032](../../decisions/0032-native-types-beside-the-six-and-a-prefix-for-colliding-names.md).
 
 ## The native dialect: DSC
 
@@ -155,7 +221,7 @@ the compile warns.
 
 | Target | Actions accepted |
 |---|---|
-| `ansible` | `restart`, `reload`, `start`, `stop` on a service; `run` on an exec |
+| `ansible` | `restart`, `reload`, `start`, `stop` on a service; `run` on an exec or on a module named in full |
 | `chef` | `restart`, `reload`, `start`, `stop` on a service; `run` on an exec |
 | `salt` | `restart`, `reload`, `start`, `stop` on a service; `run` on an exec |
 | `puppet`, `openvox` | `restart` (or `refresh`) on a service; `run` on an exec. `reload`, `start` and `stop` are refused: Puppet's refresh restarts a service and takes no argument |

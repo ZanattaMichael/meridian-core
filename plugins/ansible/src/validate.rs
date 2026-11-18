@@ -86,7 +86,9 @@ pub(crate) fn validate(playbook: &Playbook) -> Result<(), CompileError> {
                 "task has no module".to_owned(),
             ));
         }
-        if task.args.is_empty() {
+        // A module the plugin mapped always has arguments; one the document
+        // named may take none, as `ansible.builtin.setup` does.
+        if task.args.is_empty() && !task.native {
             return Err(fail(
                 task,
                 "empty-module-args",
@@ -215,6 +217,10 @@ mod tests {
                 p.tasks[0].notify.clear();
             }),
             ("a play with no tasks at all", |p| p.tasks.clear()),
+            ("a module the document named, given no arguments", |p| {
+                p.tasks[0].args.clear();
+                p.tasks[0].native = true;
+            }),
         ];
         for (what, change) in table {
             let mut p = play();

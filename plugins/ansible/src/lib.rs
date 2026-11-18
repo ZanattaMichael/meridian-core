@@ -18,6 +18,7 @@
 mod emit;
 mod import;
 mod runner;
+mod schemas;
 mod sort;
 mod transform;
 mod validate;
@@ -31,8 +32,9 @@ use meridian_sdk::{
 
 pub use emit::{INVENTORY_PATH, PLAYBOOK_PATH};
 pub use import::AnsibleImporter;
-pub use runner::AnsibleRunner;
-pub use transform::supported_resource_types;
+pub use runner::{AnsibleRunner, DOC_VARIABLE, GALAXY_VARIABLE};
+pub use schemas::AnsibleSchemas;
+pub use transform::{supported_resource_types, NATIVE_PATTERN};
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "ansible";
@@ -76,6 +78,9 @@ pub(crate) struct Task {
     /// resource's `runtimeWhen`: a compile-time `when` is pruned long before
     /// this stage and must never reach the output.
     pub when: String,
+    /// Whether the task calls a module the document named itself, whose
+    /// arguments this plugin passes through and does not know.
+    pub native: bool,
     /// Provenance, kept so a validation failure can name the resource the
     /// author wrote and not the task it became.
     pub resource_id: String,

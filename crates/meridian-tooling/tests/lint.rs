@@ -196,6 +196,26 @@ fn useless_if_missing() {
 }
 
 #[test]
+fn native_type() {
+    let module = "    - id: workers\n      type: ansible.builtin.lineinfile\n      params:\n        path: /etc/app.conf\n        line: workers = 4\n";
+    assert_eq!(
+        found(&doc(module)),
+        [pair("native-type", "ansible.builtin.lineinfile")]
+    );
+    let silenced = module.replace(
+        "      type: ansible",
+        "      # meridian-lint: disable=native-type\n      type: ansible",
+    );
+    assert_eq!(found(&doc(&silenced)), []);
+    // The shared types are the portable ones, a typo is the compiler's to
+    // refuse, and a target that has no shared types has nothing to say.
+    assert_eq!(found(&doc(CLEAN)), []);
+    assert_eq!(found(&doc(&CLEAN.replace("type: file", "type: fiel"))), []);
+    let terraform = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: net\nspec:\n  target: terraform\n  resources:\n    - id: vm\n      type: aws_instance\n      params:\n        ami: ami-1\n";
+    assert_eq!(found(terraform), []);
+}
+
+#[test]
 fn unguarded_exec() {
     let exec =
         "    - id: migrate\n      type: exec\n      params:\n        command: /usr/bin/migrate\n";
