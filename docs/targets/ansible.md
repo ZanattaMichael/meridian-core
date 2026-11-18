@@ -2,10 +2,8 @@
 
 <img src="../branding/logos/meridian-ansible.svg" width="72" alt="Meridian Ansible plugin logo">
 
-Compiles a ResourceSet into a playbook and an inventory, and runs them with
-`ansible-playbook` from the machine Meridian runs on. Ansible still does the
-work: Meridian writes the play a person would have written and runs Ansible
-on it.
+Compiles a ResourceSet into a playbook and an inventory, run with `ansible-playbook` from
+the machine Meridian runs on.
 
 ## What it does and does not support
 
@@ -27,35 +25,13 @@ on it.
 | Compiles to | `playbook.yml` and `inventory.ini` |
 | Runs with | `ansible-playbook`, over whatever connection Ansible is configured for |
 
-What it does not do:
+Not supported:
 
-- **No roles, no vault.** A play is one list of tasks, each a module call.
-  What the document says is all the play says. A module from an installed
-  collection is called by its full name; the collection itself is not
-  installed by Meridian.
-- **No short module names.** A module is written in full,
-  `ansible.builtin.lineinfile`, never `lineinfile`. The six shared types are
-  the only bare words.
-- **No inventory beyond the host.** `inventory.ini` holds the document's one
-  host. Groups, host variables and connection settings go through
-  [`MERIDIAN_ANSIBLE_ARGS`](#settings) or Ansible's own configuration.
-- **`package.version` is refused**, though Ansible could express it; see
-  [What is refused](#what-is-refused).
-- **It creates no infrastructure.** It configures a host that already exists.
-
-Contents: [Requirements](#requirements) ·
-[A first document](#a-first-document) ·
-[Resource types](#resource-types) ·
-[Modules beside the six](#modules-beside-the-six) ·
-[Ordering and notifications](#ordering-and-notifications) ·
-[What a compile writes](#what-a-compile-writes) ·
-[Importing](#importing) ·
-[Running](#running) ·
-[Settings](#settings) ·
-[Editor schemas](#editor-schemas) ·
-[What is refused](#what-is-refused) ·
-[Troubleshooting](#troubleshooting) ·
-[How it is tested](#how-it-is-tested)
+- **Roles and vault.** A play is one task list. Collections are not installed for you.
+- **Short module names.** Write `ansible.builtin.lineinfile`.
+- **Inventory beyond the host.** Use [`MERIDIAN_ANSIBLE_ARGS`](#settings) or Ansible's config.
+- **`package.version`** ([refused](#what-is-refused)).
+- **Creating infrastructure.**
 
 ## Requirements
 
@@ -69,9 +45,8 @@ Tested with ansible-core 2.19.
 
 ## A first document
 
-[`examples/ansible/web-server.yaml`](../../examples/ansible/web-server.yaml)
-installs nginx, writes its configuration and keeps it running, and is walked
-through in [your first ResourceSet](../quickstart/first-resourceset.md):
+[`examples/ansible/web-server.yaml`](../../examples/ansible/web-server.yaml), from
+[your first ResourceSet](../quickstart/first-resourceset.md):
 
 ```yaml
 apiVersion: meridian/v1
@@ -115,7 +90,7 @@ spec:
         - resource: nginx_pkg
 ```
 
-It compiles to a play of three tasks and one handler:
+It compiles to three tasks and a handler:
 
 ```yaml
 ---
@@ -151,15 +126,12 @@ It compiles to a play of three tasks and one handler:
         state: reloaded
 ```
 
-The same document compiles for Chef, Salt or cloud-init by changing `target`,
-and for Puppet or OpenVox once the reload is a restart; the
-[conformance matrix](../reference/conformance-matrix.md) says where the
-targets differ.
+It also compiles for Chef, Salt and cloud-init, and for Puppet and OpenVox with a restart
+instead of a reload. See the [conformance matrix](../reference/conformance-matrix.md).
 
 ## Resource types
 
-The six shared types, as this target takes them. A param not listed is refused
-(`unsupported-param`); a state not listed is refused (`unsupported-state`).
+Unlisted params (`unsupported-param`) and states (`unsupported-state`) are refused.
 
 | Type | Module | States (`state`) | Params | Required |
 |---|---|---|---|---|
@@ -170,31 +142,17 @@ The six shared types, as this target takes them. A param not listed is refused
 | `group` | `ansible.builtin.group` | `present` (default), `absent` | `name`, `gid`, `system` | `name` |
 | `exec` | `ansible.builtin.command`, or `ansible.builtin.shell` with `shell: true` | none; an exec has no state | `command` (`cmd`), `chdir`, `creates`, `removes`, `shell` | `command` |
 
-Notes on how they map:
-
-- A resource's **id is the task name**, so Ansible's output names the task
-  by the id, and Meridian reads the changes back by it. An id must be one
-  line and not empty.
-- `exec` with `shell: true` runs through `ansible.builtin.shell`, so a pipe or
-  a redirection works. Without it `ansible.builtin.command` runs the command
-  as written, so a pipe reaches the program as an argument.
-- `exec` runs on every play unless `creates` or `removes` says when it is
-  already done. In check mode a command with neither is skipped, which makes
-  the plan unknown.
-- A `mode` is written as Ansible reads it: quote it in the document
-  (`"0644"`), or the YAML reads it as a number and the compile refuses it.
+- The **id is the task name** (one line, not empty); changes are read back by it.
+- `exec` with `shell: true` uses `ansible.builtin.shell`; otherwise `ansible.builtin.command`.
+- `exec` runs every play unless `creates` or `removes` is set; without them check mode skips
+  it and the plan is unknown.
+- Quote `mode` (`"0644"`).
 
 ## Modules beside the six
 
-Any module Ansible can find is a resource type, written by its fully
-qualified collection name: `ansible.builtin.lineinfile`,
-`ansible.builtin.template`, `community.general.ufw`. The module's arguments
-are the resource's `params`, passed through to the task exactly as written;
-Meridian checks nothing against a list of what the module takes. An argument
-the module does not have, or a module that is not installed, is Ansible's to
-refuse when the play runs, as a provider's type is Terraform's, until the
-module's schema is [synced](#editor-schemas) and the editor reports it in
-place.
+Any module is a type by its full name (`ansible.builtin.template`, `community.general.ufw`).
+`params` are its arguments, passed through; Ansible checks them when the play runs, or the
+editor once [synced](#editor-schemas).
 
 ```yaml
 resources:
@@ -239,24 +197,17 @@ compiles to
 | References | `${id.param}` is settled from the document, as for the six |
 
 [`examples/ansible/native-modules.yaml`](../../examples/ansible/native-modules.yaml)
-is a whole document of both kinds. A document that names a module compiles
-for Ansible only, since no other target knows the module. The [`native-type`](../reference/lint.md#native-type)
-lint rule marks each such resource. The six shared types stay the portable
-way to say what they can say; a module is for everything else. The split, and
-why `native/file` is refused here, is
+uses both. Such a document compiles for Ansible only; the
+[`native-type`](../reference/lint.md#native-type) lint marks it. `native/file` is refused
+here; see
 [decision 0032](../decisions/0032-native-types-beside-the-six-and-a-prefix-for-colliding-names.md).
 
 ## Ordering and notifications
 
-`dependsOn` becomes the order of the tasks. Ansible runs a play top to bottom,
-so the resources are written in the apply order Meridian decided, and
-resources that are independent of each other still run one after the other.
-The compile warns which resources were independent, so the flattening is
-visible.
+`dependsOn` becomes task order, with a warning naming independent resources.
 
-`notifies` becomes a handler, named after the action and the resource, such
-as `reload nginx_svc`. Handlers run once, at the end of the play, only when a
-task that notifies them changed something:
+`notifies` becomes a handler such as `reload nginx_svc`, run once at the end of the play if
+a notifier changed:
 
 | Notified type | Actions | What the handler does |
 |---|---|---|
@@ -265,15 +216,13 @@ task that notifies them changed something:
 | a module named in full | `run` | runs the module's task again, as written |
 | anything else | none | refused: `unsupported-action` |
 
-`runtimeWhen` is copied into the task's `when:` as written, so it is an
-Ansible expression, answered by the host's facts when the play runs:
+`runtimeWhen` is copied into `when:` as an Ansible expression:
 
 ```yaml
 runtimeWhen: "ansible_facts['os_family'] == 'Debian'"
 ```
 
-A handler never carries a condition: it runs because a task that notified it
-changed, and nothing else.
+Handlers carry no condition.
 
 ## What a compile writes
 
@@ -282,51 +231,30 @@ playbook.yml
 inventory.ini
 ```
 
-`playbook.yml` holds one play with one task per resource, named by the
-resource's id, and one handler per distinct notification. `inventory.ini`
-holds the document's host on one line, in a group named `meridian`. They are separate so the play can be
-run against an inventory of your own.
+`playbook.yml` holds one task per resource and one handler per distinct notification.
+`inventory.ini` holds the host in group `meridian`.
 
-Ansible renders every task string through Jinja on the control machine.
+- Jinja you write, such as `{{ ansible_facts['os_family'] }}`, runs.
+- Values from `--data`, `--set`, data layers or `env()` are escaped (`{{ '{{' }}`), so they
+  never run on the control machine
+  ([see](../reference/dsl/interpolation.md#a-tools-own-expressions)).
 
-- A Jinja expression written in the document, such as
-  `{{ ansible_facts['os_family'] }}`, is passed through and evaluated when the
-  play runs.
-- A value Meridian places from `--data`, `--set`, a data layer or `env()` is
-  not. The plugin declares Jinja's openings (`{{`, `{%`, `{#`), and the core
-  writes each one as an expression that yields itself (`{{ '{{' }}`). A data
-  value holding `{{ lookup('pipe', 'id') }}` reaches the host as that text and
-  never runs `id` on the control machine
-([values from data are literal](../reference/dsl/interpolation.md#a-tools-own-expressions)).
+A host that is not a name is refused (`invalid-host`;
+[`targetHost`](../reference/dsl/outputs-and-hand-offs.md#rules)).
 
-The host in `inventory.ini` is one line, so the plugin refuses a host that is
-not a name (`invalid-host`); the core refuses one before it gets this far
-([`targetHost`](../reference/dsl/outputs-and-hand-offs.md#rules)).
-
-A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a
-resource's params is compiled as `{{ meridian_secret_<name> }}`, and the task
-that holds one is marked `no_log: true`, so Ansible prints neither its
-arguments, its diff nor its result. When the stage runs, the values are
-written into an extra-vars file only the user can read, held in memory where
-the system allows, and passed as `--extra-vars @<path>`; the file is removed
-when the run ends. The value is never on the command line and never in
-Ansible's environment.
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) compiles to
+`{{ meridian_secret_<name> }}` in a task marked `no_log: true`. The value goes in a private
+extra-vars file, passed as `--extra-vars @<path>` and removed after the run.
 
 ## Importing
 
-`meridian import site.yml` reads playbooks and task files and writes one ResourceSet for
-each play. [Importing existing configuration](../operations/importing.md) is the guide. `site.yml`, `playbook.yml` and any name with `playbook` in it
-are recognised; for another name say `--from ansible`.
+`meridian import site.yml` writes one ResourceSet per play
+([guide](../operations/importing.md)). `site.yml`, `playbook.yml` and names containing
+`playbook` need no `--from ansible`.
 
-A playbook says far more than the six resource types do, so this importer reports more
-than any other. What it carries over is exact. What it does not is listed, not
-approximated.
-
-- A task one of the six carries whole becomes that type, so the document still moves to
-  other tools.
-- Any other task becomes the module itself, by its full name, with every argument as
-  written, and the document says it is now written for Ansible.
-- A task it does not understand never becomes an `exec`.
+- A task one of the six fully carries becomes that type.
+- Any other becomes the module, with every argument; the document is then Ansible-only.
+- Nothing becomes an `exec`.
 
 | In the playbook | In the document |
 |---|---|
@@ -350,10 +278,7 @@ approximated.
 | `mode: 0644` | `"0644"`. An unquoted mode is a number to Ansible, and the document writes the digits it means |
 | A module addressed as `ansible.builtin.apt` | the same as `apt` |
 
-The files are read by YAML 1.1's rules, as Ansible reads them, so `enabled: yes` is
-`true`.
-
-What is reported:
+Files are read as YAML 1.1 (`yes` is `true`). Reported:
 
 | In the playbook | What happens | Level |
 |---|---|---|
@@ -374,15 +299,10 @@ What is reported:
 | `gather_facts` | Not carried; the compiled play gathers facts | note |
 | A handler nothing imported notifies | Left out | note |
 
-The round-trip test imports
-[`web/site.yml`](../../plugins/ansible/testdata/import/web/site.yml), compiles the
-document, and compares the playbook it compiles to, by meaning, with
-[`web.expected.playbook.yml`](../../plugins/ansible/testdata/import/web.expected.playbook.yml):
-the same play written by hand the way the target writes one, with tasks named by id and
-modules in full. The imported document is
-[`web.meridian.yaml`](../../plugins/ansible/testdata/import/web.meridian.yaml). A second
-test imports a playbook full of things a document cannot say; its document and report are
-[`odd.meridian.yaml`](../../plugins/ansible/testdata/import/odd.meridian.yaml) and
+Round-trip tests: [`web/site.yml`](../../plugins/ansible/testdata/import/web/site.yml) to
+[`web.meridian.yaml`](../../plugins/ansible/testdata/import/web.meridian.yaml), compared with
+[`web.expected.playbook.yml`](../../plugins/ansible/testdata/import/web.expected.playbook.yml);
+and [`odd.meridian.yaml`](../../plugins/ansible/testdata/import/odd.meridian.yaml) with
 [`odd.notes`](../../plugins/ansible/testdata/import/odd.notes).
 
 ## Running
@@ -392,20 +312,11 @@ test imports a playbook full of things a document cannot say; its document and r
 | Plan | `ansible-playbook --inventory inventory.ini --check --diff playbook.yml` |
 | Apply | `ansible-playbook --inventory inventory.ini playbook.yml` |
 
-Both run in the stage's work directory with the output callback forced to
-`default` and colour off, so an `ansible.cfg` of your own cannot reshape the
-report Meridian reads. Changes are read from that report, task by task and
-handler by handler: a `changed:` line under `TASK [nginx_conf]` is a change to
-`nginx_conf`. A looped task reports once.
+Both force the `default` callback with colour off. A `changed:` line under
+`TASK [nginx_conf]` is a change to `nginx_conf`; a loop reports once.
 
-In check mode a task Ansible cannot preview is skipped: a command with no
-`creates` or `removes`, or a condition only the host can answer. A plan with
-a skipped task is reported as **unknown**, not as empty, so a run never says
-"nothing to do" on no evidence.
-
-A failed task fails the stage, with the end of Ansible's output and the
-changes made before it. Ansible's own exit statuses are named: `2` is a
-failed task, `4` is a host that could not be reached.
+A task check mode skips makes the plan **unknown**. A failed task fails the stage with what
+had changed; exit `2` is a failed task, `4` an unreachable host.
 
 ## Settings
 
@@ -416,17 +327,13 @@ failed task, `4` is a host that could not be reached.
 | `MERIDIAN_ANSIBLE_DOC` | the `ansible-doc` program `meridian schema sync` runs, when it is not on `PATH` |
 | `MERIDIAN_ANSIBLE_GALAXY` | the `ansible-galaxy` program `meridian schema sync` runs for the collections' versions, when it is not on `PATH` |
 
-Every setting can also be written in the project's `meridian.yaml` under
-`spec.settings.ansible`, by its short name; the environment variable still wins.
-The names, defaults and the splitting rule for argument lists are in the
-[plugin settings reference](../reference/plugin-settings.md#ansible).
+Settings can also go in `meridian.yaml` under `spec.settings.ansible`; the environment
+wins. See the [plugin settings reference](../reference/plugin-settings.md#ansible).
 
 ## Reaching the host as a credential
 
-The target takes a [credential](../reference/dsl/credentials.md) for its
-host: `targetHost.credential` names an `ssh` or `usernamePassword`
-credential, and the host is reached as it instead of as whoever
-`ansible-playbook` is configured to be.
+`targetHost.credential` names an `ssh` or `usernamePassword`
+[credential](../reference/dsl/credentials.md).
 
 ```yaml
 spec:
@@ -454,22 +361,13 @@ spec:
 | `agent: true` | nothing: the key comes from the SSH agent `ansible-playbook` already uses |
 | `from: ambient` | the user, if given, and nothing else |
 
-What `ansible-playbook` cannot take is refused when the document is compiled,
-with the reason (rule `unsupported-credential`): a `passphrase` on the key
-(add the key to an agent and set `agent: true`), a `certificate` beside the
-key (put it in the agent too), and a `domain` (for WinRM hosts, which this
-plugin does not reach). The credential is never in `playbook.yml`, and the
-plan names it: `on web01.internal as deploy (ssh, user deploy)`.
-
-`MERIDIAN_ANSIBLE_ARGS` still applies, so `--user` or `--private-key` given
-there and a credential in the document would both reach the command line;
-name the identity in one place.
+Refused (`unsupported-credential`): a key `passphrase` or `certificate` (use your own agent,
+`agent: true`), a `domain`. The plan names the identity: `on web01.internal as deploy (ssh,
+user deploy)`. Do not also set `--user` or `--private-key` in `MERIDIAN_ANSIBLE_ARGS`.
 
 ## Editor schemas
 
-`meridian schema sync` asks `ansible-doc` what the modules the documents
-name take, so an editor completes and checks `ansible.builtin.lineinfile`'s
-arguments as it does the six types' params
+`meridian schema sync` asks `ansible-doc` for the modules documents name
 ([Tool schemas](../tooling/schema-sync.md)).
 
 | | |
@@ -478,14 +376,11 @@ arguments as it does the six types' params
 | Listed by name | every other module `ansible-doc --list` finds, with its short description: ansible-core's own and every installed collection's |
 | Pinned | ansible-core's version as `ansible.builtin`, and each installed collection's version from `ansible-galaxy collection list`. A collection installed under several paths is pinned at its newest version |
 
-An option's aliases are not listed: a document writes the option's own name,
-which is what the play holds. The `state` option is listed as a param; a
-document may write it as the resource's `state` instead.
+Aliases are not listed. `state` may be a param or the resource's `state`.
 
 ## What is refused
 
-Every refusal names the resource, the line and the rule. The rules this
-target can raise, and what to do:
+Each names the resource, line and rule:
 
 | Rule | Meaning | What to do |
 |---|---|---|
@@ -523,34 +418,14 @@ target can raise, and what to do:
 
 ## How it is tested
 
-- **Golden files** under `plugins/ansible/testdata/` record what every fixture
-  compiles to, byte for byte, the warnings it raises, and what each refusal
-  says; `native_modules` is the play of modules named in full.
-- **Schema tests** (`plugins/ansible/src/schemas.rs`) read saved `ansible-doc`
-  output: options, sub-options, choices, secrets.
-- **The conformance tests** compile the same documents for every shared-type
-  target and generate the [conformance matrix](../reference/conformance-matrix.md),
-  which fails when this target starts accepting or refusing something new.
-- **Run tests** (`plugins/ansible/tests/run.rs`) drive the runner against a
-  stand-in for `ansible-playbook`: the exact command, the report read back
-  task by task, and the exit statuses.
-- **Import tests** (`plugins/ansible/tests/import.rs`) round-trip the
-  playbooks under `testdata/import/`; see [Importing](#importing).
-- **Real-tool tests** (`plugins/ansible/tests/real.rs`, workflow
-  `ansible.yml`) run ansible-core 2.19 over the `local` connection: a
-  check-mode plan that creates nothing, a play checked on disk, a second plan
-  that is in sync, drift put right, a handler that runs only when its
-  notifier changed, a `runtimeWhen` answered by the host's facts, a command
-  check mode cannot preview, a failed task, a secret that reaches the
-  play through the extra-vars file and is in nothing Ansible prints, check
-  mode with diff included, a credential whose user is read from the
-  inventory and whose key is named on the command line and is in nothing
-  Ansible prints or the plugin writes, a `lineinfile` module named in full
-  that keeps a line, is run again when notified, takes its state out again
-  and fails on an argument it does not have, and the modules' schemas read
-  from `ansible-doc`. They are marked `#[ignore]`
-  and run with
+- **Golden files** in `plugins/ansible/testdata/`, warnings and refusals included.
+- **Schema tests** (`plugins/ansible/src/schemas.rs`) on saved `ansible-doc` output.
+- **Conformance tests** generate the [conformance matrix](../reference/conformance-matrix.md).
+- **Run tests** (`plugins/ansible/tests/run.rs`) against a stand-in `ansible-playbook`.
+- **Import tests** (`plugins/ansible/tests/import.rs`).
+- **Real-tool tests** (`plugins/ansible/tests/real.rs`, `ansible.yml`) run ansible-core 2.19
+  locally: plan, apply, drift, handlers, `runtimeWhen`, failures, secrets, credentials,
+  native modules and `ansible-doc`. Run with
   `MERIDIAN_TEST_REAL_ANSIBLE=1 cargo test -p meridian-target-ansible --test real -- --ignored`.
-  Reaching another machine over SSH, and the package, service, user and group
-  modules, have only met stand-ins. See
+  SSH and the package, service, user and group modules have only met stand-ins. See
   [Real-tool tests](../contributing/real-tool-tests.md).
