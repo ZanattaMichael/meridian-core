@@ -41,7 +41,7 @@ jobs:
         run: pip install --quiet checkov==3.2.477
 
       - name: Install Trivy
-        run: curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+        run: curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
 
       - name: Show the versions under test
         run: |
