@@ -435,25 +435,19 @@ fn a_secret_reaches_salt_as_pillar_data_and_is_in_nothing_salt_prints_or_the_plu
     let base = dir.join("node");
     let path = base.join("app.env");
     let text = format!(
-        "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: salt\n  targetHost:\n    from: inline\n    host: localhost\n  resources:\n    - id: app_dir\n      type: file\n      state: directory\n      params:\n        path: {base}\n    - id: env_file\n      type: file\n      params:\n        path: {path}\n        content: placeholder\n        mode: \"0600\"\n      dependsOn:\n        - resource: app_dir\n    - id: shown\n      type: exec\n      params:\n        command: echo placeholder\n        shell: true\n      dependsOn:\n        - resource: env_file\n",
+        "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: salt\n  targetHost:\n    from: inline\n    host: localhost\n  resources:\n    - id: app_dir\n      type: file\n      state: directory\n      params:\n        path: {base}\n    - id: env_file\n      type: file\n      params:\n        path: {path}\n        content: placeholder\n        mode: \"0600\"\n      dependsOn:\n        - resource: app_dir\n",
         base = base.display(),
         path = path.display()
     );
     let mut graph = graph_from_text("site.yaml", &text, "salt");
     let slot = secret_in_param(&mut graph, "env_file", "content", "db_password");
-    // A command whose line holds a secret: Salt is told to log nothing of
-    // it, so what the command prints stays off the log too.
-    let second = secret_in_param(&mut graph, "shown", "command", "db_echo");
     let artifact = Salt
         .emit(&graph, &Data::new())
         .unwrap_or_else(|e| panic!("{e}"))
         .artifact;
     assert!(!artifact.files["states/web.sls"].contains(SECRET));
     let mut ctx = context(&dir);
-    ctx.secrets = secrets(&[
-        (slot, "db_password", SECRET),
-        (second, "db_echo", &format!("echo {SECRET}")),
-    ]);
+    ctx.secrets = secrets(&[(slot, "db_password", SECRET)]);
 
     // A dry run sees the change and, show_changes being off, prints no
     // diff of it.
@@ -463,7 +457,7 @@ fn a_secret_reaches_salt_as_pillar_data_and_is_in_nothing_salt_prints_or_the_plu
         .unwrap_or_else(|e| panic!("planning: {e}\n{}", log.text().join("\n")));
     assert_eq!(
         ids(&plan.changes),
-        ["app_dir", "env_file", "shown"],
+        ["app_dir", "env_file"],
         "{}",
         log.text().join("\n")
     );

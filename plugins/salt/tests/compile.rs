@@ -803,18 +803,29 @@ fn a_secret_in_a_param_is_read_from_the_pillar_and_the_state_shows_no_change() {
 }
 
 #[test]
-fn a_command_given_a_secret_logs_nothing_and_other_braces_in_the_file_stay_literal() {
+fn a_command_given_a_secret_is_refused_because_salt_prints_the_command_line() {
     let graph = with_secrets(
-        "    - id: literal\n      type: file\n      params: {path: /etc/app/tpl, content: \"{{ not jinja }}\\n\"}\n    - id: login\n      type: exec\n      params: {command: \"db-login --token placeholder\"}\n",
+        "    - id: login\n      type: exec\n      params: {command: \"db-login --token placeholder\"}\n",
         &[("login", "command", "api_token")],
+    );
+    let err = emit(&graph).unwrap_err();
+    assert_eq!(err.rule, "unsupported-secret-place");
+    assert_eq!(err.resource, "login");
+    assert!(err.msg.contains("Salt prints the command line"), "{err}");
+}
+
+#[test]
+fn other_braces_in_a_file_rendered_for_a_secret_stay_literal() {
+    let graph = with_secrets(
+        "    - id: literal\n      type: file\n      params: {path: /etc/app/tpl, content: \"{{ not jinja }}\\n\"}\n    - id: env\n      type: file\n      params: {path: /etc/app/env, content: placeholder}\n",
+        &[("env", "content", "api_token")],
     );
     let text = emit(&graph).unwrap().artifact.files[SLS].clone();
     assert!(text.starts_with("#!jinja|yaml\n"), "{text}");
     assert!(
-        text.contains("    - name: {{ pillar['meridian_secret_api_token'] | yaml_encode }}\n"),
+        text.contains("    - contents: {{ pillar['meridian_secret_api_token'] | yaml_encode }}\n"),
         "{text}"
     );
-    assert!(text.contains("    - output_loglevel: quiet\n"), "{text}");
     // The other file is rendered by Jinja now too, so its braces are
     // escaped: Salt reads the same bytes the document wrote.
     assert!(

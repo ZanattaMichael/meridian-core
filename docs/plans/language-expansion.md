@@ -1713,7 +1713,8 @@ and passes `--hiera_config` to `puppet apply` or `--hiera-config` to `bolt
 apply`; a secret inside a list or a map is refused, `unsupported-secret-place`);
 `salt` by a pillar root (`{{ pillar['meridian_secret_<name>'] | yaml_encode }}`
 written raw in a Jinja-rendered state file, `show_changes: false` on a file
-state and `output_loglevel: quiet` on a command; `meridian.sls` and `top.sls`
+state, and a secret in an `exec` refused because Salt prints the command
+line in its report; `meridian.sls` and `top.sls`
 in the private directory, `--pillar-root` for `salt-call` and `pillar_roots`
 in the `salt-ssh` configuration); `chef` by node attributes
 (`node['meridian_secret_<name>']` and `sensitive true`; `--json-attributes`

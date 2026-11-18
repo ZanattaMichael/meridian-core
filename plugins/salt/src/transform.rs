@@ -440,18 +440,25 @@ fn state_for(
     }
 
     // A state handed a secret is not allowed to show it: a managed file
-    // prints no diff, and a command is not logged. The runner hands the
-    // value over through the pillar; here only its name is written.
+    // prints no diff. The runner hands the value over through the pillar;
+    // here only its name is written. A command is refused one: Salt writes
+    // the command line into its result's comment, in a dry run ("Command
+    // ... would have been executed") and in a real one, and no setting
+    // keeps it out, so the value would be in the report Meridian reads.
     if args.values().any(holds_secret) {
         match m.module {
             "file" => {
                 args.insert("show_changes".to_owned(), Value::Bool(false));
             }
             "cmd" => {
-                args.insert(
-                    "output_loglevel".to_owned(),
-                    Value::String("quiet".to_owned()),
-                );
+                return Err(refuse(
+                    r,
+                    "unsupported-secret-place",
+                    "a secret cannot be used in an exec on this target: Salt prints the \
+                     command line in its report, and nothing turns that off. Put the \
+                     secret in a file the command reads, or in a runtimeWhen"
+                        .to_owned(),
+                ));
             }
             _ => {}
         }

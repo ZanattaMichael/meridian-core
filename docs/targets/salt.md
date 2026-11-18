@@ -16,7 +16,7 @@ have written and runs Salt on it.
 | `dependsOn` | Yes, as `require`. The states are also written in apply order, so the dependency graph survives into the state file intact and nothing is flattened |
 | `notifies` | Native: `watch` and `onchanges`. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec |
 | `runtimeWhen` | Yes: a Jinja expression over grains and pillar, which the minion evaluates when it renders the file |
-| Secrets | Yes: as pillar data, from a pillar root only the user can read. A file state given one shows no diff and a command logs no output. See [Secrets](#secrets) |
+| Secrets | Yes: as pillar data, from a pillar root only the user can read. A file state given one shows no diff; an `exec` is refused one, because Salt prints the command line. See [Secrets](#secrets) |
 | References | `${id.param}` is settled from the document when it is compiled; anything else in `${...}` is refused, and `$${` is a literal `${` ([rules](../reference/resource-types.md#references)) |
 | Plan | Yes: Salt's dry run, `test=True`. Every state reports whether it would change, so a plan is never "unknown" |
 | Apply | Yes |
@@ -586,8 +586,7 @@ becomes `#!jinja|yaml`, as it is for a `runtimeWhen`), and the param is a read o
 secret's pillar key. The value goes through Salt's `yaml_encode` filter, so whatever it
 holds, what Jinja writes in its place is one quoted YAML scalar, and the reference is
 written unquoted where YAML reads that scalar. A file state given a secret is told not
-to show its diff, and a command not to log its output, since either would print the
-value:
+to show its diff, since the diff would print the value:
 
 ```yaml
 db_conf:
@@ -613,10 +612,16 @@ line nor the tool's environment ever holds the value, and nothing in the stage's
 directory does. The report Meridian reads says the file is set to be changed, as it does
 for any file, without the content.
 
+**What is refused.** A secret in an `exec`. Salt writes the command line into its
+result's comment, in a dry run (`Command "..." would have been executed`) and in a real
+one, and no setting keeps it out, so the value would be in the report Meridian reads. The
+compile refuses it, rule `unsupported-secret-place`; put the secret in a file the command
+reads, or use it in a `runtimeWhen`.
+
 The handover is tested against a stand-in `salt-call` that keeps a copy of the pillar
 files, their mode, its arguments and its environment, and against the real `salt-call` in
-CI, which applies a file whose content is a secret and a command whose line holds one, and
-whose value then appears in the file and in nothing Salt printed or the plugin wrote.
+CI, which applies a file whose content is a secret, and whose value then appears in the
+file and in nothing Salt printed or the plugin wrote.
 
 ## Using the files with a Salt master
 
