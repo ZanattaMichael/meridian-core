@@ -253,7 +253,7 @@ fn every_workflow_compiles_each_document_or_defers_it() {
         .filter(|file| file.parent().unwrap().ends_with("workflow"))
         .collect();
     assert!(
-        workflows.len() >= 7,
+        workflows.len() >= 8,
         "examples/workflow holds {} workflows",
         workflows.len()
     );

@@ -1,0 +1,164 @@
+# One workflow through three tools, and the one that runs for real in CI:
+# every push applies it with a real kubectl against a kind cluster, a real
+# terraform, and a real ansible-playbook, then plans it again and expects
+# nothing to change. The `vertical slice` workflow and
+# crates/meridian-cli/tests/vertical_slice.rs are where that happens.
+#
+#   1. Kubernetes applies the application: a namespace, its configuration and
+#      a Deployment. Its outputs say what was created.
+#   2. Terraform wires the edge to it. The workload's name arrives from the
+#      first document as an import, so this stage is deferred until the
+#      application has been applied. Everything it creates is local: a
+#      `terraform_data` value for the machine, and a file the `local`
+#      provider writes, so no account is needed.
+#   3. Ansible configures that machine. The host is Terraform's `address`
+#      output, read after the second stage is applied. In CI the machine is
+#      the runner itself, reached over Ansible's local connection.
+#
+# `data.root` is where the second and third stages write; see
+# vertical-slice.data.yaml.
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: app
+  labels:
+    tier: application
+spec:
+  target: kubernetes
+  resources:
+    - id: target
+      type: cluster
+      params:
+        namespace: meridian-slice
+
+    - id: space
+      type: v1/Namespace
+      params:
+        metadata:
+          name: meridian-slice
+
+    - id: web_config
+      type: v1/ConfigMap
+      params:
+        data:
+          greeting: hello from the slice
+      dependsOn:
+        - resource: space
+      notifies:
+        - resource: web
+          action: restart
+
+    - id: web
+      type: apps/v1/Deployment
+      params:
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: web
+          template:
+            metadata:
+              labels:
+                app: web
+            spec:
+              containers:
+                - name: pause
+                  image: registry.k8s.io/pause:3.10
+                  volumeMounts:
+                    - name: config
+                      mountPath: /etc/web
+              volumes:
+                - name: config
+                  configMap:
+                    name: ${web_config}
+      dependsOn:
+        - resource: web_config
+
+  outputs:
+    - name: workload
+      value: ${web.metadata.namespace}/${web.metadata.name}
+    - name: greeting
+      value: ${web_config.data.greeting}
+---
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: edge
+  labels:
+    tier: edge
+spec:
+  target: terraform
+  imports:
+    - name: workload
+      from: output
+      ref: app
+      output: workload
+  resources:
+    - id: local
+      type: provider
+      params:
+        source: hashicorp/local
+        version: ">= 2.5.0"
+
+    - id: workload
+      type: variable
+      params:
+        type: string
+        description: The application this edge fronts, as namespace/name
+
+    - id: host
+      type: terraform_data
+      params:
+        input: localhost
+
+    - id: upstream
+      type: local_file
+      params:
+        filename: ${{ data.root }}/edge/upstream.conf
+        content: "upstream ${workload}\n"
+        file_permission: "0644"
+
+  outputs:
+    - name: address
+      value: ${host.output}
+    - name: upstream
+      value: ${upstream.filename}
+---
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: site
+  labels:
+    tier: edge
+spec:
+  target: ansible
+  targetHost:
+    from: infrastructure
+    ref: edge
+    output: address
+  resources:
+    - id: site_root
+      type: file
+      state: directory
+      params:
+        path: ${{ data.root }}/site
+
+    - id: index
+      type: file
+      params:
+        path: ${site_root.path}/index.html
+        content: "<h1>${{ data.site_title }}</h1>\n"
+        mode: "0644"
+      dependsOn:
+        - resource: site_root
+      notifies:
+        - resource: warm
+          action: run
+
+    - id: warm
+      type: exec
+      params:
+        command: touch ${site_root.path}/.warmed
+        creates: ${site_root.path}/.warmed
+      dependsOn:
+        - resource: index

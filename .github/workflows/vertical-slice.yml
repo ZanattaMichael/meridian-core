@@ -1,0 +1,91 @@
+name: vertical slice
+
+# One workflow through three real tools, end to end: the real meridian binary
+# applies examples/workflow/vertical-slice.yaml with kubectl against a kind
+# cluster, terraform with the local provider, and ansible-playbook over the
+# local connection, then plans it again and expects nothing to change. The
+# per-plugin workflows test each tool on its own; this is the one place the
+# hand-offs between them (an output imported by Terraform, a host read by
+# Ansible) are exercised with nothing standing in for a tool.
+#
+# Nothing here needs an account: the cluster runs inside Docker on the runner,
+# Terraform creates only local values and a file, and Ansible configures the
+# runner itself.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'examples/workflow/vertical-slice*'
+      - 'plugins/kubernetes/**'
+      - 'plugins/terraform/**'
+      - 'plugins/ansible/**'
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/vertical-slice.yml'
+
+permissions:
+  contents: read
+
+# A newer push to the same pull request replaces the run in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  slice:
+    name: kubectl, terraform and ansible, end to end
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-rust
+
+      # The wrapper script the action can install rewrites terraform's output,
+      # which would break reading its JSON.
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.x
+          terraform_wrapper: false
+
+      # The runner image ships an Ansible of its own; this one is pinned so
+      # that the version under test is chosen here.
+      - name: Install ansible-core
+        run: |
+          python3 -m venv "$RUNNER_TEMP/ansible"
+          "$RUNNER_TEMP/ansible/bin/pip" install --quiet 'ansible-core==2.19.*'
+          echo "$RUNNER_TEMP/ansible/bin" >> "$GITHUB_PATH"
+
+      # Built before the cluster exists, so a compile error costs no cluster.
+      # The test builds the three plugin binaries itself, through the testkit.
+      - name: Build the command and the test
+        run: cargo test -p meridian-cli --locked --test vertical_slice --no-run
+
+      - name: Create a cluster
+        run: kind create cluster --name meridian --wait 180s
+
+      - name: Show the versions under test
+        run: |
+          kind version
+          kubectl version
+          terraform version
+          ansible-playbook --version
+
+      # With the variable set, a tool that does not run or a cluster that
+      # cannot be reached fails the test, so this job cannot pass by checking
+      # nothing. MERIDIAN_TEST_REAL_REQUIRED makes a forgotten switch a failure
+      # too.
+      - name: Apply the slice, then plan it again
+        env:
+          MERIDIAN_TEST_REAL_SLICE: '1'
+          MERIDIAN_TEST_REAL_REQUIRED: '1'
+        run: cargo test -p meridian-cli --locked --test vertical_slice -- --ignored --nocapture
+
+      - name: Show the cluster when something failed
+        if: failure()
+        run: |
+          kubectl get all,configmaps --namespace meridian-slice || true
+          kubectl get events --all-namespaces --sort-by=.lastTimestamp | tail -40 || true
