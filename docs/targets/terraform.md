@@ -20,8 +20,7 @@ with `terraform`. OpenTofu's `tofu` takes the same commands.
 
 ## What a document looks like
 
-A resource's `type` is the Terraform type and its `params` are that type's
-arguments, exactly as the provider documents them.
+`type` is the Terraform type; `params` are its arguments as the provider documents them.
 
 | `type` | Becomes |
 |---|---|
@@ -33,9 +32,7 @@ arguments, exactly as the provider documents them.
 | `variable` | a `variable` block named by the resource's id. Its params are Terraform's: `type`, `default`, `description`, `sensitive`, `nullable`, `validation` |
 | `local` | an entry of `locals` named by the resource's id. Its one param is `value` |
 
-A variable gets its value from `TF_VAR_<id>` in the environment `meridian` runs in, as it
-would with `terraform` itself. `${region}` refers to a variable or a local value of that
-id and becomes `var.region` or `local.region`.
+Variables come from `TF_VAR_<id>`. `${region}` becomes `var.region` or `local.region`.
 
 ```yaml
     - id: region
@@ -52,12 +49,8 @@ id and becomes `var.region` or `local.region`.
 
 ### Values from other documents
 
-A value the document
-[imports](../reference/dsl/outputs-and-hand-offs.md#imports) from another
-document arrives as a variable's value, under the import's name, so the import
-and the variable share a name. A string is passed as it is; a number, a
-boolean, a list or a map is passed as JSON. The value is never written into
-`main.tf.json`.
+An [import](../reference/dsl/outputs-and-hand-offs.md#imports) sets the same-named
+variable (non-strings as JSON), never written into `main.tf.json`.
 
 ```yaml
 spec:
@@ -85,11 +78,8 @@ creates a machine with the user-data a cloud-init document compiles to.
 
 ## References
 
-`${web_vm.public_ip}` in a param or an output refers to another resource of the
-document by its id, and is rewritten to Terraform's own address for it
-(`aws_instance.web_vm.public_ip`, or `data.aws_ami.ubuntu.id` for a data
-source). A reference to a resource that is not in the document is a compile
-error, with the line.
+`${web_vm.public_ip}` becomes `aws_instance.web_vm.public_ip` (`data.aws_ami.ubuntu.id` for
+a data source). Unknown ids are compile errors.
 
 ## Why the output is JSON
 
@@ -98,12 +88,8 @@ compile correctly without the provider's schema.
 
 ## Notifications
 
-Terraform has no handlers. The one reaction it can be given is
-`replace_triggered_by`: when the notifier changes, the notified resource is
-destroyed and created again. So this target accepts a notify with the action
-`replace`, aimed at a managed resource, and nothing else. The compile warns that
-this is how the notify works, and a `terraform plan` will show the notified
-resource as "must be replaced". That is the notify, not a bug.
+Only `replace` on a managed resource, compiled to `replace_triggered_by`, with a warning.
+The plan shows "must be replaced".
 
 ```yaml
 - id: launch_config
@@ -116,11 +102,8 @@ resource as "must be replaced". That is the notify, not a bug.
 
 ## Example
 
-[`examples/terraform/web-vm.yaml`](../../examples/terraform/web-vm.yaml) declares a
-provider, a data source, a security group, an instance and an address, and two
-outputs. Its compiled configuration is checked in as
-[`web-vm.main_tf_json`](../../plugins/terraform/testdata/web-vm.main_tf_json). The
-instance, for example:
+[`examples/terraform/web-vm.yaml`](../../examples/terraform/web-vm.yaml) compiles to
+[`web-vm.main_tf_json`](../../plugins/terraform/testdata/web-vm.main_tf_json). The instance:
 
 ```yaml
 - id: web_vm
@@ -143,13 +126,9 @@ instance, for example:
 
 ## Importing
 
-`meridian import --from terraform DIR` reads the `*.tf` and `*.tf.json` files of a
-directory, as Terraform does, and writes one Infrastructure document. `*.tfvars` files are
-values for one run and not configuration, so they are reported and not read.
-[Importing existing configuration](../operations/importing.md) is the guide; this is what the Terraform importer does.
-
-`--from` is needed because `*.tf` is also OpenTofu's. Whichever you name is the tool
-Meridian will run for the document.
+`meridian import --from terraform DIR` reads `*.tf` and `*.tf.json` into one document
+([guide](../operations/importing.md)). `*.tfvars` are reported, not read. `--from` picks
+Terraform or OpenTofu.
 
 | In the configuration | In the document |
 |---|---|
@@ -167,10 +146,7 @@ Meridian will run for the document.
 | The same addresses inside a larger expression, such as `merge(local.tags, {...})` or a conditional | kept as Terraform's own addresses inside `${...}`, which the compiled configuration carries unchanged. A renamed resource is renamed there too |
 | `count`, `for_each`, `dynamic` blocks, functions, `each.key`, `count.index` | kept as written. They are Terraform expressions and the compiled configuration carries them unchanged |
 
-A nested block is written as a mapping, and a block that may repeat as a list of
-mappings, which is how Terraform's JSON syntax spells them.
-
-What is reported:
+Nested blocks become mappings; repeatable ones lists of mappings. Reported:
 
 | In the configuration | What happens | Level |
 |---|---|---|
@@ -184,12 +160,10 @@ What is reported:
 | A provider required and never configured | A `provider` resource with only its source and version | note |
 | `.terraform.lock.hcl` | Not read. The tool writes a new lock file where Meridian runs it | note |
 
-The round-trip test imports [`web-vm/`](../../plugins/terraform/testdata/import/web-vm),
-compiles the document, and compares `main.tf.json` by meaning with
+Round-trip test: [`web-vm/`](../../plugins/terraform/testdata/import/web-vm),
 [`web-vm.expected.tf.json`](../../plugins/terraform/testdata/import/web-vm.expected.tf.json),
-which is the same configuration written by hand in the JSON syntax. The imported document
-is [`web-vm.meridian.yaml`](../../plugins/terraform/testdata/import/web-vm.meridian.yaml)
-and the report is [`web-vm.notes`](../../plugins/terraform/testdata/import/web-vm.notes).
+[`web-vm.meridian.yaml`](../../plugins/terraform/testdata/import/web-vm.meridian.yaml),
+[`web-vm.notes`](../../plugins/terraform/testdata/import/web-vm.notes).
 
 ## Running
 
@@ -200,46 +174,24 @@ and the report is [`web-vm.notes`](../../plugins/terraform/testdata/import/web-v
 | `MERIDIAN_TERRAFORM` | the program to run, when it is not `terraform` on `PATH`; set it to `tofu` for OpenTofu |
 | `MERIDIAN_TERRAFORM_ARGS` | arguments added to `init`, `plan` and `apply`, split like a shell command line (quotes hold a word together): `-parallelism=4`, `-lock-timeout=30s`. The calls that read the saved plan and the outputs get none |
 
-Every setting can also be written in the project's `meridian.yaml` under
-`spec.settings.terraform`, by its short name; the environment variable still wins.
-The names, defaults and the splitting rule for argument lists are in the
-[plugin settings reference](../reference/plugin-settings.md#terraform).
+Settings can also go in `meridian.yaml` under `spec.settings.terraform`; the environment
+wins. See the [plugin settings reference](../reference/plugin-settings.md#terraform).
 
-What is applied is exactly the plan that was shown. Values the document
-[imports](#values-from-other-documents) reach the configuration
-as `TF_VAR_<name>` input variables.
-Terraform's state stays where the configuration's `backend` puts it; with no
-backend it is a local file in the document's directory under the state
-directory, so keep that directory.
+The apply applies exactly the plan shown. State lives in the `backend`, or a local file
+under the state directory; keep it. Sensitive outputs are never printed.
 
-An output Terraform marks sensitive is reported as sensitive and never printed.
-
-A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a
-resource's params is compiled as `${var.meridian_secret_<name>}`, with the
-variable declared `sensitive`, so Terraform shows `(sensitive value)` wherever
-it would print it. When the stage runs, the values are written into a
-variables file only the user can read, held in memory where the system
-allows, and passed to `terraform plan` as `-var-file=<path>`; the file is
-removed once the plan is saved. The saved plan holds every variable's value,
-as every Terraform plan file does, so it is overwritten and removed as soon as
-it has been applied or shown. For the same reason a
-[saved plan](../operations/pull-requests.md) (`meridian plan --out`) keeps no
-Terraform plan file for a stage that was handed a secret, and the apply plans
-again for it. The value is never on the command line and never
-in Terraform's environment. Terraform writes a resource's arguments into its
-state whichever variable they came from, so a document that hands it a secret
-should declare a `backend` that protects its state.
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) compiles to
+`${var.meridian_secret_<name>}`, declared `sensitive`. The value goes in a private
+variables file passed as `-var-file`, removed after planning; the plan file is removed after
+use. A [saved plan](../operations/pull-requests.md) keeps no plan file for such a stage, so
+apply plans again. State holds the arguments, so use a `backend` that protects it.
 
 ## Editor schemas
 
-`meridian schema sync` asks Terraform for the providers' own schemas, so an
-editor completes and checks `aws_instance`'s arguments as it does a plugin's
-own types ([Tool schemas](../tooling/schema-sync.md)). The plugin writes a
-configuration into its work directory that requires every provider the
-documents use (the `source` and `version` of each `provider` resource, or
-`hashicorp/<name>` for a provider only named by a type's prefix), runs
-`terraform init -backend=false` there and reads `terraform providers schema
--json`.
+`meridian schema sync` writes a configuration requiring the documents' providers (each
+`provider`'s `source` and `version`, or `hashicorp/<name>`), runs
+`terraform init -backend=false` and reads `terraform providers schema -json`
+([Tool schemas](../tooling/schema-sync.md)).
 
 | | |
 |---|---|
@@ -247,23 +199,9 @@ documents use (the `source` and `version` of each `provider` resource, or
 | Listed by name | every other resource and data source of those providers, with its description, and `terraform_data` |
 | Pinned | each provider's version, from the `.terraform.lock.hcl` that `init` writes in the work directory |
 
-An attribute that is both optional and computed is described as one the
-provider sets when the document leaves it out, and is not an error to write.
-An attribute that is only computed, such as `arn`, is: a document reads it
+Optional-and-computed attributes may be written; computed-only ones such as `arn` are read
 with `${id.arn}`.
 
-The runner is tested against the real `terraform` command (1.13) on every pull
-request that touches it, and the same tests run again with `tofu`:
-
-- a plan that creates nothing
-- an apply checked on disk
-- a second plan that is in sync
-- an update and a replacement
-- outputs, including a sensitive one
-- a configuration Terraform refuses
-- a secret that reaches a resource through the variables file and is in nothing
-  Terraform prints
-
-They use `terraform_data` and a local state file, so a
-provider that talks to a cloud has not been run this way. See
-[Real-tool tests](../contributing/real-tool-tests.md).
+CI runs the runner against `terraform` 1.13 and `tofu`: plan, apply, in-sync, update,
+replace, outputs, a refused configuration and a secret. They use `terraform_data` and local
+state; cloud providers are untested. See [Real-tool tests](../contributing/real-tool-tests.md).
