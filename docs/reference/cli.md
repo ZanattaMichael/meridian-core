@@ -646,7 +646,7 @@ that other machines need no tool.
 meridian schema pack terraform --name hashicorp-aws --version 5.60.0 [--prefix aws_]... [--key FILE] [--out FILE]
 meridian schema sign FILE --key FILE [--out FILE]
 meridian schema push FILE ghcr.io/acme/meridian-schemas [--credential NAME] [--insecure] [--no-index]
-meridian schema fetch oci://ghcr.io/acme/meridian-schemas/terraform/hashicorp-aws:5.60.0 [PATHS]... [--no-lock]
+meridian schema fetch oci://ghcr.io/acme/meridian-schemas/terraform/hashicorp-aws:5.60.0 [PATHS]... [--no-lock] [--credential NAME] [--insecure]
 ```
 
 | Command | Does |
@@ -654,7 +654,7 @@ meridian schema fetch oci://ghcr.io/acme/meridian-schemas/terraform/hashicorp-aw
 | `pack` | writes the target's cache as a bundle archive (default `.meridian/schemas/packed/<target>-<name>-<version>.tar.gz`); `--prefix` keeps only types whose names start with the text; `--key` signs it |
 | `sign` | signs a packed bundle, writing it again with `meridian.sig` inside |
 | `push` | publishes it to `<registry>/<target>/<name>:<version>` (or a `file://DIR` registry) and lists it in the registry's index; a version is published once |
-| `fetch` | writes a target's cache from one bundle, by `oci://` reference or file, checks its signature by `--schema-signatures` or `spec.schemas.signatures`, and records it in the lock |
+| `fetch` | writes a target's cache from one bundle, by `oci://` reference or file, checks its signature by `--schema-signatures` or `spec.schemas.signatures`, and records it in the lock; a registry `spec.schemas` names uses its own login, another takes `--credential` and `--insecure` as `push` does |
 
 ### `lsp`
 

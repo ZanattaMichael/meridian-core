@@ -138,7 +138,7 @@ say "a bundle fetched by reference"
 fetched="$work/fetched"
 mkdir -p "$fetched"
 cd "$fetched"
-"$meridian" schema fetch "oci://$open/ansible/builtin:2.17.0" --schema-signatures require \
+"$meridian" schema fetch "oci://$open/ansible/builtin:2.17.0" --insecure --schema-signatures require \
   --trusted-key "$work/schemas.pub" --no-lock | tee "$work/fetch.txt"
 grep -q 'cached 2 resource types' "$work/fetch.txt" || fail "fetch did not write the cache"
 

@@ -493,6 +493,8 @@ pub(crate) fn fetch(
     wanted: Option<BTreeSet<String>>,
     flag: Option<SignaturePolicy>,
     write_lock: bool,
+    credential: Option<&str>,
+    insecure: bool,
 ) -> Result<(), Failure> {
     let project = Path::new(".");
     let manifest = project_manifest(project)?;
@@ -516,14 +518,13 @@ pub(crate) fn fetch(
             )
         }
         Reference::Oci { prefix, id } => {
-            let registry = named
+            let declared = named
                 .into_iter()
-                .find(|r| matches!(r, Registry::Oci { prefix: p, .. } if *p == prefix))
-                .unwrap_or(Registry::Oci {
-                    prefix,
-                    insecure: false,
-                    login: None,
-                });
+                .find(|r| matches!(r, Registry::Oci { prefix: p, .. } if *p == prefix));
+            let registry = match declared {
+                Some(registry) if credential.is_none() && !insecure => registry,
+                _ => open_registry(project, manifest.as_ref(), &prefix, credential, insecure)?,
+            };
             let (digest, bundle) =
                 bundles::open_stored(store.dir(), None, || registry.fetch(&id, None))
                     .map_err(Failure::Message)?;

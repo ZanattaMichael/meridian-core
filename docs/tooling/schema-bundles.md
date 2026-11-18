@@ -3,7 +3,7 @@
 ```
 meridian schema sync   <paths>... [--prefer bundles|tool] [--locked] [--schema-signatures POLICY]
 meridian schema update <paths>... [--target TARGET]
-meridian schema fetch  <oci://REGISTRY/TARGET/NAME:VERSION | FILE> [PATHS]... [--no-lock]
+meridian schema fetch  <oci://REGISTRY/TARGET/NAME:VERSION | FILE> [PATHS]... [--no-lock] [--credential NAME] [--insecure]
 meridian schema pack   <target> --name NAME --version VERSION [--prefix TEXT]... [--key FILE] [--out FILE]
 meridian schema sign   <file> --key FILE [--out FILE]
 meridian schema push   <file> <REGISTRY> [--credential NAME] [--insecure] [--no-index]
@@ -293,7 +293,10 @@ $ meridian schema fetch ./terraform-hashicorp-aws-5.60.0.tar.gz
 With documents, it describes their types in full and the bundle's other
 types by name; without, every type in full. It replaces that target's cache,
 records the bundle in the lock unless `--no-lock`, and checks the signature
-by `--schema-signatures` or `spec.schemas.signatures`.
+by `--schema-signatures` or `spec.schemas.signatures`. A registry that
+`spec.schemas` names is reached with its own login and `insecure` setting;
+for any other, `--credential NAME` and `--insecure` work as they do for
+`push`.
 
 ## Publishing the global repository
 

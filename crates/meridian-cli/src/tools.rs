@@ -260,6 +260,14 @@ pub enum SchemaCommand {
         /// Defaults to spec.schemas.signatures in meridian.yaml, else off
         #[arg(long, value_name = "POLICY", env = "MERIDIAN_SCHEMA_SIGNATURES")]
         schema_signatures: Option<SignaturePolicy>,
+        /// Log in with this credential from spec.credentials in
+        /// meridian.yaml. A registry spec.schemas names uses its own
+        #[arg(long, value_name = "NAME")]
+        credential: Option<String>,
+        /// Talk plain HTTP to a registry spec.schemas does not name. For a
+        /// registry on a trusted network only
+        #[arg(long)]
+        insecure: bool,
     },
     /// Show what is cached for each target and how it stands against
     /// meridian.lock
@@ -720,6 +728,8 @@ pub fn schema(args: &SchemaArgs) -> Result<(), Failure> {
             state_dir,
             no_lock,
             schema_signatures,
+            credential,
+            insecure,
         }) => {
             let wanted = if paths.is_empty() {
                 None
@@ -740,6 +750,8 @@ pub fn schema(args: &SchemaArgs) -> Result<(), Failure> {
                 wanted,
                 *schema_signatures,
                 !no_lock,
+                credential.as_deref(),
+                *insecure,
             );
         }
         Some(SchemaCommand::Status {
