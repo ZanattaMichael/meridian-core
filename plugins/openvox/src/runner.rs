@@ -12,8 +12,8 @@ use std::sync::Mutex;
 
 use meridian_sdk::tool::Tool;
 use meridian_sdk::{
-    decode_value, Applied, Artifact, Log, NoLog, Operations, Plan, RunContext, RunError, Runner,
-    Value,
+    decode_value, AgentPrograms, Applied, Artifact, Log, NoLog, Operations, Plan, RunContext,
+    RunError, Runner, Value,
 };
 use meridian_target_puppet::{PuppetRunner, Transport};
 
@@ -137,6 +137,7 @@ impl OpenVoxRunner {
                 bolt: bolt.into(),
                 transport: None,
                 extra_args: Vec::new(),
+                agent: AgentPrograms::default(),
             },
             verify: Verify::default(),
             checked: Mutex::new(None),
@@ -170,6 +171,7 @@ impl OpenVoxRunner {
             "bolt" => Some(Transport::Bolt),
             _ => None,
         };
+        runner.tool.agent = AgentPrograms::from_env();
         runner.tool.extra_args = variable(ARGS_VARIABLE)
             .map(|v| v.split_whitespace().map(str::to_owned).collect())
             .unwrap_or_default();

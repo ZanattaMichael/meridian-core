@@ -468,6 +468,8 @@ All of them are environment variables read by the plugin, and all are optional.
 | `MERIDIAN_OPENVOX_TRANSPORT` | `local` or `bolt`, to override the choice made from the host | chosen from the host |
 | `MERIDIAN_OPENVOX_ARGS` | Extra arguments for every run, split on spaces | none |
 | `MERIDIAN_OPENVOX_VERIFY` | `warn`, `strict` or `off`, see below | `warn` |
+| `MERIDIAN_SSH_AGENT` | The `ssh-agent` program, started for a credential's key; see [Credentials](#credentials) | `ssh-agent` on `PATH` |
+| `MERIDIAN_SSH_ADD` | The `ssh-add` program | `ssh-add` on `PATH` |
 
 For example, to apply as root on the node and against a particular environment:
 
@@ -512,6 +514,66 @@ does not tell you which one you have. Before a local run the plugin asks the too
 
 The check covers local runs. Over OpenBolt the catalog is applied by whatever agent is
 installed on the node, and the plugin does not connect to the node just to ask.
+
+## Credentials
+
+`targetHost.credential` names the [credential](../reference/dsl/credentials.md) the host is
+reached as. Another machine is reached with OpenBolt's `bolt`, which reads how to sign in from an inventory, so the plugin writes one for the run:
+
+```yaml
+spec:
+  target: openvox
+  targetHost:
+    from: inline
+    host: web01.example.com
+    credential: deploy
+  secrets:
+    - name: deploy_key
+      from: env
+      key: DEPLOY_KEY
+  credentials:
+    - name: deploy
+      type: ssh
+      user: deploy
+      privateKey: ${{ secret.deploy_key }}
+```
+
+- **The user and a password** (an `ssh` credential with a `password`, or a
+  `usernamePassword` one) go into a Bolt inventory written for the run, in a directory only
+  you can enter and removed when the run ends, and `--inventoryfile` names it:
+
+  ```yaml
+  targets:
+    - uri: "web01.example.com"
+      config:
+        transport: ssh
+        ssh:
+          user: "deploy"
+          password: "..."
+  ```
+
+- Bolt's own `--inventoryfile` in `MERIDIAN_OPENVOX_ARGS` is then a second inventory; leave
+  it out when the document names a credential.
+- **A key is never on disk.** It goes into an SSH agent Meridian starts for the stage:
+  `ssh-agent -D -a <socket>`, its socket in a directory only you can enter, loaded with
+  `ssh-add -` from standard input. `bolt` is told the socket in `SSH_AUTH_SOCK` and
+  nothing else. A `passphrase` is answered to `ssh-add` from a file only you can read. The
+  agent is stopped and its directory removed when the stage ends. Nothing of the key is on
+  the command line, in the environment, in the compiled files or in a file Meridian keeps.
+- **`agent: true`** names a key in your own agent: `bolt` reads `SSH_AUTH_SOCK` as it is,
+  and Meridian starts nothing. **`from: ambient`** leaves signing in to the tool's own
+  configuration, as with no credential at all.
+- **Refused at compile**, rule `unsupported-credential`: a `certificate` (put it
+  beside the key in an agent of your own and set `agent: true`); a `domain` (for WinRM
+  hosts, which this plugin does not reach); a user name with a space or a line break.
+- **Refused at run time:** a credential for this machine (`localhost`, `127.0.0.1`, `::1`
+  or no host). `puppet apply` configures this machine as the user running Meridian, whoever the document names. Leave the credential out, or name another host.
+
+The plan line names the identity, `web (openvox) on web01.example.com as deploy (ssh,
+user deploy)`, and never a value. `ssh-agent` and `ssh-add` are run from `PATH`, or from
+`MERIDIAN_SSH_AGENT` and `MERIDIAN_SSH_ADD`.
+
+The runner is the Puppet plugin's, so the handover is tested there, against stand-ins for `bolt`, `ssh-agent` and `ssh-add` that keep what they are given (the inventory and its mode, the environment, the key and the passphrase). A refusal names `openvox`. The real `bolt` is not driven in CI.
 
 ## Troubleshooting
 

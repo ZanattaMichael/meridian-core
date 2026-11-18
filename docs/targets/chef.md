@@ -243,6 +243,8 @@ changes made before it.
 | `MERIDIAN_CHEF_RUN` | the program to run for another machine, when it is not `chef-run` on `PATH` |
 | `MERIDIAN_CHEF_TRANSPORT` | `local` or `remote`, to override the choice made from the host |
 | `MERIDIAN_CHEF_ARGS` | arguments added to every run, split on spaces: `--chef-license accept`, or `chef-run`'s `--user deploy --identity-file ~/.ssh/deploy` |
+| `MERIDIAN_SSH_AGENT` | the `ssh-agent` program, when it is not on `PATH`; started for a credential's key, see [Credentials](#credentials) |
+| `MERIDIAN_SSH_ADD` | the `ssh-add` program, when it is not on `PATH` |
 
 ## Secrets
 
@@ -314,6 +316,52 @@ environment, and against the real client in CI (`MERIDIAN_TEST_REAL_CHEF=1`),
 which converges a file whose content is a secret and whose value then appears
 in the file and in nothing Chef printed or the plugin wrote, the node file
 included.
+
+## Credentials
+
+`targetHost.credential` names the [credential](../reference/dsl/credentials.md) the host is
+reached as. Another machine is reached with `chef-run`, so the plugin takes an `ssh` credential with a user and a private key, and gives `chef-run` the two the way it takes them:
+
+```yaml
+spec:
+  target: chef
+  targetHost:
+    from: inline
+    host: web01.example.com
+    credential: deploy
+  secrets:
+    - name: deploy_key
+      from: env
+      key: DEPLOY_KEY
+  credentials:
+    - name: deploy
+      type: ssh
+      user: deploy
+      privateKey: ${{ secret.deploy_key }}
+```
+
+- **The user** is `chef-run`'s `--user`, before the host.
+- A plan for another machine is unknown and runs nothing, as without a credential, so no agent is started for it.
+- **A key is never on disk.** It goes into an SSH agent Meridian starts for the stage:
+  `ssh-agent -D -a <socket>`, its socket in a directory only you can enter, loaded with
+  `ssh-add -` from standard input. `chef-run` is told the socket in `SSH_AUTH_SOCK` and
+  nothing else. A `passphrase` is answered to `ssh-add` from a file only you can read. The
+  agent is stopped and its directory removed when the stage ends. Nothing of the key is on
+  the command line, in the environment, in the compiled files or in a file Meridian keeps.
+- **`agent: true`** names a key in your own agent: `chef-run` reads `SSH_AUTH_SOCK` as it is,
+  and Meridian starts nothing. **`from: ambient`** leaves signing in to the tool's own
+  configuration, as with no credential at all.
+- **Refused at compile**, rule `unsupported-credential`: a `password` (`chef-run` takes one on its command line only, where every user of this machine could read it; reach the host as an `ssh` credential with a `privateKey`); a `certificate` (put it
+  beside the key in an agent of your own and set `agent: true`); a `domain` (for WinRM
+  hosts, which this plugin does not reach); a user name with a space or a line break.
+- **Refused at run time:** a credential for this machine (`localhost`, `127.0.0.1`, `::1`
+  or no host). `chef-client` configures this machine as the user running Meridian, whoever the document names. Leave the credential out, or name another host.
+
+The plan line names the identity, `web (chef) on web01.example.com as deploy (ssh,
+user deploy)`, and never a value. `ssh-agent` and `ssh-add` are run from `PATH`, or from
+`MERIDIAN_SSH_AGENT` and `MERIDIAN_SSH_ADD`.
+
+The handover is tested against stand-ins for `chef-run`, `ssh-agent` and `ssh-add` that keep what they are given: `chef-run` sees `--user deploy` and the socket, `ssh-add` the key and the passphrase, and the key is in nothing printed or left behind. The real `chef-run` is not driven in CI.
 
 ## What is refused
 

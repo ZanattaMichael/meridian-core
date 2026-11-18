@@ -43,6 +43,7 @@
 // per target, so the size of the error path is not worth boxing the contract.
 #![allow(clippy::result_large_err)]
 
+pub mod agent;
 mod credential;
 pub mod expr;
 mod import;
@@ -65,7 +66,10 @@ pub mod pb {
     tonic::include_proto!("meridian.plugin.v1");
 }
 
-pub use credential::{Credential, HeldCredential};
+pub use agent::{agent_for, AgentPrograms, SshAgent};
+pub use credential::{
+    check_ssh_credential, credential_for_this_machine, Credential, HeldCredential, SshTakes,
+};
 pub use import::{
     DocumentKind, ImportError, ImportFormat, ImportNote, ImportSource, Imported, ImportedDocument,
     ImportedNotify, ImportedOutput, ImportedResource, Importer, NoteLevel,

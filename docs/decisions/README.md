@@ -47,3 +47,4 @@ page it affects. The pull request template asks for it.
 | [Podman output is Quadlet units only](0019-podman-output-is-quadlet-units-only.md) | Targets | proposed |
 | [Terraform import renames colliding names](0020-terraform-import-renames-colliding-names.md) | Targets | proposed |
 | [A secret has one place on each containers target](0022-a-secret-has-one-place-on-each-containers-target.md) | Targets | proposed |
+| [A key reaches a host through an agent Meridian starts](0023-a-key-reaches-a-host-through-an-agent-meridian-starts.md) | Targets | proposed |

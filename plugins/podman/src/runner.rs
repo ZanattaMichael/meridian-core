@@ -7,8 +7,9 @@ use std::path::Path;
 
 use meridian_sdk::tool::{write_artifact, Finished, Tool};
 use meridian_sdk::{
-    decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
-    RunContext, RunError, Runner, Value, Written,
+    agent_for, credential_for_this_machine, decode_value, AgentPrograms, Applied, Artifact, Change,
+    ChangeAction, Log, NoLog, Operations, Output, Plan, RunContext, RunError, Runner, SshAgent,
+    Value, Written,
 };
 
 use crate::podman_secret;
@@ -80,6 +81,9 @@ pub struct PodmanRunner {
     pub ssh: String,
     /// Arguments added to every `ssh`, before the host.
     pub ssh_args: Vec<String>,
+    /// The programs an SSH agent is started with, when the document reaches
+    /// its host as a credential with a key.
+    pub agent: AgentPrograms,
     pub scope: Scope,
     pub unit_dir: Option<String>,
     pub generator: Option<String>,
@@ -98,6 +102,7 @@ impl Default for PodmanRunner {
             shell: "sh".to_owned(),
             ssh: "ssh".to_owned(),
             ssh_args: Vec::new(),
+            agent: AgentPrograms::default(),
             scope: Scope::User,
             unit_dir: None,
             generator: None,
@@ -129,6 +134,7 @@ impl PodmanRunner {
         runner.ssh_args = setting(SSH_ARGS_VARIABLE)
             .map(|v| v.split_whitespace().map(str::to_owned).collect())
             .unwrap_or_default();
+        runner.agent = AgentPrograms::from_env();
         runner.unit_dir = setting(UNIT_DIR_VARIABLE);
         runner.generator = setting(QUADLET_VARIABLE);
         match setting(SCOPE_VARIABLE).as_deref() {
@@ -155,14 +161,26 @@ impl PodmanRunner {
         }
     }
 
+    /// Starts what a stage needs to reach its host as the document's
+    /// credential: an SSH agent holding the key, when there is one. A
+    /// credential for this machine is refused: the scripts run here as the
+    /// user running Meridian, whoever the document names.
+    fn session(&self, context: &RunContext, log: &dyn Log) -> Result<Option<SshAgent>, RunError> {
+        if let (true, Some(credential)) = (is_local(&context.host), &context.credential) {
+            return Err(credential_for_this_machine("podman", credential));
+        }
+        agent_for(&self.agent, context.credential.as_ref(), log)
+    }
+
     /// Runs one script on the host a context names.
     fn on_host(
         &self,
         context: &RunContext,
+        agent: Option<&SshAgent>,
         script: String,
         log: &dyn Log,
     ) -> Result<Finished, RunError> {
-        let tool = self.host_shell(context)?.stdin(script);
+        let tool = self.host_shell(context, agent)?.stdin(script);
         self.finished(context, tool.capture_stdout().run(log)?)
     }
 
@@ -172,7 +190,12 @@ impl PodmanRunner {
     /// like every other script: locally a pipe, elsewhere the ssh
     /// connection. A changed value is created anew; the container reads it
     /// when it is next started.
-    fn secrets_on_host(&self, context: &RunContext, log: &dyn Log) -> Result<(), RunError> {
+    fn secrets_on_host(
+        &self,
+        context: &RunContext,
+        agent: Option<&SshAgent>,
+        log: &dyn Log,
+    ) -> Result<(), RunError> {
         if context.secrets.is_empty() {
             return Ok(());
         }
@@ -203,7 +226,7 @@ impl PodmanRunner {
                 .join(", "),
             host_name(context)
         ));
-        let tool = self.host_shell(context)?.stdin_secret(script);
+        let tool = self.host_shell(context, agent)?.stdin_secret(script);
         let finished = self.finished(context, tool.capture_stdout().run(log)?)?;
         if !finished.success() {
             return Err(finished.into_error(format!(
@@ -216,17 +239,25 @@ impl PodmanRunner {
 
     /// The shell on the host a context names, reading its script from
     /// standard input.
-    fn host_shell(&self, context: &RunContext) -> Result<Tool, RunError> {
+    fn host_shell(&self, context: &RunContext, agent: Option<&SshAgent>) -> Result<Tool, RunError> {
         Ok(if is_local(&context.host) {
             Tool::new(&self.shell).args(["-c", READ_AND_RUN])
         } else {
             let host = context.host.as_str();
             meridian_sdk::check_host(host)
                 .map_err(|why| RunError::new(format!("ssh cannot be given this host: {why}")))?;
-            Tool::new(&self.ssh)
+            let mut tool = Tool::new(&self.ssh)
                 // A run has nobody to answer a password prompt.
-                .args(["-o", "BatchMode=yes"])
-                .args(self.ssh_args.iter().cloned())
+                .args(["-o", "BatchMode=yes"]);
+            // The credential's user is ssh's -l; its key is in the agent,
+            // which ssh is told about and nothing more.
+            if let Some(user) = context.credential.as_ref().and_then(|c| c.text("user")) {
+                tool = tool.args(["-l", user]);
+            }
+            if let Some(agent) = agent {
+                tool = agent.tell(tool);
+            }
+            tool.args(self.ssh_args.iter().cloned())
                 .arg(host)
                 .arg(format!("sh -c {}", script::quote(READ_AND_RUN)))
         })
@@ -247,6 +278,7 @@ impl PodmanRunner {
         &self,
         context: &RunContext,
         artifact: &Artifact,
+        agent: Option<&SshAgent>,
         log: &dyn Log,
     ) -> Result<Survey, RunError> {
         if let Some(problem) = &self.misconfigured {
@@ -281,7 +313,8 @@ impl PodmanRunner {
             .map(|old| old.file.clone())
             .collect();
 
-        let finished = self.on_host(context, self.settings().probe(&desired, &stale), log)?;
+        let finished =
+            self.on_host(context, agent, self.settings().probe(&desired, &stale), log)?;
         if !finished.success() {
             return Err(finished.into_error(format!(
                 "could not look at the units on {}",
@@ -313,6 +346,7 @@ impl PodmanRunner {
         &self,
         context: &RunContext,
         meta: &Meta,
+        agent: Option<&SshAgent>,
         log: &dyn Log,
     ) -> Result<Vec<Output>, RunError> {
         let mut wanted = Vec::new();
@@ -323,7 +357,7 @@ impl PodmanRunner {
         }
         let mut values = BTreeMap::new();
         if !wanted.is_empty() {
-            let finished = self.on_host(context, self.settings().inspect(&wanted), log)?;
+            let finished = self.on_host(context, agent, self.settings().inspect(&wanted), log)?;
             values = script::read_values(&finished.stdout);
             if !finished.success() || values.len() != wanted.len() {
                 let (noun, name, path) = &wanted[values.len().min(wanted.len() - 1)];
@@ -369,8 +403,9 @@ impl Runner for PodmanRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
+        let agent = self.session(context, log)?;
         Ok(Plan {
-            changes: self.survey(context, artifact, log)?.changes,
+            changes: self.survey(context, artifact, agent.as_ref(), log)?.changes,
             unknown: false,
         })
     }
@@ -381,10 +416,12 @@ impl Runner for PodmanRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
-        let survey = self.survey(context, artifact, log)?;
+        let agent = self.session(context, log)?;
+        let agent = agent.as_ref();
+        let survey = self.survey(context, artifact, agent, log)?;
         // The secrets first, so a unit that names one can start, and on
         // every apply, so a changed value is in place for the next start.
-        self.secrets_on_host(context, log)?;
+        self.secrets_on_host(context, agent, log)?;
         let now_installed: Vec<Installed> = survey
             .meta
             .units
@@ -408,7 +445,7 @@ impl Runner for PodmanRunner {
             write_installed(&context.work_dir, &both)?;
 
             let steps = survey.steps();
-            let finished = self.on_host(context, self.settings().apply(&steps), log)?;
+            let finished = self.on_host(context, agent, self.settings().apply(&steps), log)?;
             if !finished.success() {
                 let done = script::read_done(&finished.stdout);
                 let what = match finished.code {
@@ -432,7 +469,7 @@ impl Runner for PodmanRunner {
         write_installed(&context.work_dir, &now_installed)?;
 
         Ok(Applied {
-            outputs: self.read_outputs(context, &survey.meta, log)?,
+            outputs: self.read_outputs(context, &survey.meta, agent, log)?,
             changes: survey.changes,
         })
     }
@@ -445,7 +482,10 @@ impl Runner for PodmanRunner {
                 "nothing has been applied for this document yet, so it has no outputs",
             ));
         };
-        self.read_outputs(context, &Meta::read(&meta)?, &NoLog)
+        // Read as the credential when the context carries one, and as the
+        // tool's own identity otherwise.
+        let agent = self.session(context, &NoLog)?;
+        self.read_outputs(context, &Meta::read(&meta)?, agent.as_ref(), &NoLog)
     }
 }
 

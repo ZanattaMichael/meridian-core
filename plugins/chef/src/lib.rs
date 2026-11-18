@@ -31,8 +31,33 @@ use std::collections::BTreeMap;
 
 use meridian_sdk::{
     Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, Value,
+    ResourceGraph, SshTakes, Value,
 };
+
+/// What `chef-run` can take of the credential a document reaches its host
+/// as: the user, as `--user`, and a key through an agent Meridian starts for
+/// the run. A password cannot: `chef-run` takes one on its command line
+/// only. Nothing of the credential is in the cookbook.
+pub(crate) const SSH_TAKES: SshTakes = SshTakes {
+    tool: "chef-run",
+    password: Err(
+        "chef-run takes a password on its command line only, where every user of this machine \
+         could read it",
+    ),
+};
+
+fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
+    let Some(credential) = &graph.credential else {
+        return Ok(());
+    };
+    meridian_sdk::check_ssh_credential(credential, &SSH_TAKES).map_err(|msg| CompileError {
+        target: NAME.to_owned(),
+        resource: String::new(),
+        rule: "unsupported-credential".to_owned(),
+        msg: format!("the credential {:?}: {msg}", credential.name),
+        pos: Position::default(),
+    })
+}
 
 pub use emit::{metadata_path, recipe_path};
 pub use runner::{ChefRunner, Transport};
@@ -134,7 +159,7 @@ impl Emitter for Chef {
             synthetic_notify: false,
             runtime_condition: true,
             secrets: true,
-            credentials: false,
+            credentials: true,
         }
     }
 
@@ -143,6 +168,7 @@ impl Emitter for Chef {
     }
 
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        check_credential(graph)?;
         // A resource here has nothing to read at apply time, so a reference
         // is settled now, from what the document declares, or refused.
         let graph = &meridian_sdk::expr::resolve_declared(graph, NAME)?;

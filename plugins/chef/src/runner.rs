@@ -11,8 +11,8 @@ use std::path::PathBuf;
 
 use meridian_sdk::tool::{absolute_path, write_artifact, Tool};
 use meridian_sdk::{
-    Applied, Artifact, Change, ChangeAction, Log, Operations, Plan, RunContext, RunError, Runner,
-    SecretFile,
+    agent_for, credential_for_this_machine, AgentPrograms, Applied, Artifact, Change, ChangeAction,
+    Log, Operations, Plan, RunContext, RunError, Runner, SecretFile,
 };
 
 /// Names the `chef-client` program, when it is not on `PATH`. Cinc's
@@ -47,6 +47,9 @@ pub struct ChefRunner {
     pub transport: Option<Transport>,
     /// Arguments added to every run, after Meridian's own.
     pub extra_args: Vec<String>,
+    /// The programs an SSH agent is started with, when the document reaches
+    /// its host as a credential with a key.
+    pub agent: AgentPrograms,
 }
 
 fn variable(name: &str, default: &str) -> String {
@@ -73,6 +76,7 @@ impl ChefRunner {
             extra_args: std::env::var(ARGS_VARIABLE)
                 .map(|v| v.split_whitespace().map(str::to_owned).collect())
                 .unwrap_or_default(),
+            agent: AgentPrograms::from_env(),
         }
     }
 
@@ -107,6 +111,11 @@ impl ChefRunner {
         why_run: bool,
         log: &dyn Log,
     ) -> Result<Vec<Change>, RunError> {
+        if let Some(credential) = &context.credential {
+            // chef-client configures this machine as the user running it,
+            // whoever the document names.
+            return Err(credential_for_this_machine("chef-client", credential));
+        }
         let attributes = secret_attributes(context)?;
         let mut tool = Tool::new(&self.client)
             // Local mode takes the directory it runs in for the repository
@@ -288,12 +297,23 @@ impl Runner for ChefRunner {
                 meridian_sdk::check_host(&context.host).map_err(|why| {
                     RunError::new(format!("chef-run cannot be given this host: {why}"))
                 })?;
-                Tool::new(&self.run)
-                    .arg(&context.host)
+                // The credential's user is chef-run's --user; its key is in
+                // an agent for the length of the run, which chef-run is told
+                // of and nothing more.
+                let agent = agent_for(&self.agent, context.credential.as_ref(), log)?;
+                let mut tool = Tool::new(&self.run);
+                if let Some(user) = context.credential.as_ref().and_then(|c| c.text("user")) {
+                    tool = tool.args(["--user", user]);
+                }
+                if let Some(agent) = &agent {
+                    tool = agent.tell(tool);
+                }
+                tool.arg(&context.host)
                     .arg(format!("cookbooks/{cookbook}"))
                     .args(self.extra_args.iter().cloned())
                     .dir(&context.work_dir)
                     .run_ok("chef-run could not converge the cookbook", log)?;
+                drop(agent);
                 log.out("chef-run does not report which resources it changed");
                 Vec::new()
             }

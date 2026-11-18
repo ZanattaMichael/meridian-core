@@ -201,3 +201,80 @@ mod tests {
         assert_eq!(held.clone(), held);
     }
 }
+
+/// How a tool that reaches its host over SSH takes a credential: its name,
+/// and whether a password can reach it by a private channel, with the reason
+/// when it cannot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SshTakes {
+    /// The program, as a refusal names it: `ssh`, `salt-ssh`, `bolt`.
+    pub tool: &'static str,
+    /// `Ok` when a password reaches the tool privately; `Err` says why it
+    /// cannot.
+    pub password: Result<(), &'static str>,
+}
+
+/// Checks a credential against what an SSH tool can take: an `ssh` or
+/// `usernamePassword` credential, a key (through an agent Meridian starts,
+/// with its passphrase), a password where the tool takes one privately, and
+/// never a certificate or a domain. The message of a refusal says what to
+/// do instead.
+pub fn check_ssh_credential(credential: &Credential, takes: &SshTakes) -> Result<(), String> {
+    let tool = takes.tool;
+    match credential.kind.as_str() {
+        "ssh" => {}
+        "usernamePassword" => {
+            if let Err(why) = takes.password {
+                return Err(format!(
+                    "{tool} takes no password for a host: {why}; reach the host as an ssh \
+                     credential with a privateKey"
+                ));
+            }
+        }
+        other => {
+            return Err(format!(
+                "{tool} reaches a host as an ssh or usernamePassword credential, not {other}"
+            ))
+        }
+    }
+    if credential.has_secret("password") {
+        if let Err(why) = takes.password {
+            return Err(format!(
+                "{tool} takes no password for a host: {why}; give the credential a privateKey \
+                 instead"
+            ));
+        }
+    }
+    if credential.text("certificate").is_some() {
+        return Err(format!(
+            "{tool} takes no certificate for a key from Meridian; put it beside the key in an \
+             SSH agent of your own and set agent: true"
+        ));
+    }
+    if credential.text("domain").is_some() {
+        return Err(format!(
+            "{tool} over SSH takes no domain; it is for WinRM hosts, which this plugin does \
+             not reach"
+        ));
+    }
+    if let Some(user) = credential.text("user") {
+        if user.is_empty() || user.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err(format!(
+                "the user {user:?} cannot be given to {tool}: a user name holds no space or \
+                 line break"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The error for a credential named by a document whose host is the
+/// machine Meridian runs on, which a tool configures as the user running it.
+pub fn credential_for_this_machine(tool: &str, credential: &HeldCredential) -> crate::RunError {
+    crate::RunError::new(format!(
+        "the document names the credential {:?} for its host, and the host is this machine, \
+         which {tool} configures as the user running Meridian; leave the credential out, or \
+         name another host",
+        credential.name()
+    ))
+}

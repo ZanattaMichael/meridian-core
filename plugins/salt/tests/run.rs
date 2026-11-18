@@ -5,8 +5,10 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
-use meridian_sdk::{Artifact, ChangeAction, RunContext, Runner, SecretRef};
+use meridian_plugin_testkit::{
+    agent_stand_ins, artifact, credential, scratch, secrets, stand_in, KeptLog,
+};
+use meridian_sdk::{AgentPrograms, Artifact, ChangeAction, RunContext, Runner, SecretRef};
 use meridian_target_salt::{SaltRunner, Transport};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -46,6 +48,7 @@ fn runner(dir: &Path, body: &str) -> SaltRunner {
             .to_owned(),
         transport: None,
         extra_args: vec!["--log-level".into(), "quiet".into()],
+        agent: AgentPrograms::default(),
     }
 }
 
@@ -402,6 +405,7 @@ fn a_missing_program_and_a_foreign_artifact_are_plain_errors() {
         salt_ssh: "meridian-no-such-salt-ssh".into(),
         transport: None,
         extra_args: Vec::new(),
+        agent: AgentPrograms::default(),
     };
     let err = absent
         .plan(
@@ -564,4 +568,188 @@ fn a_run_without_secrets_has_no_pillar_root() {
         .unwrap();
     let master = fs::read_to_string(Path::new(&work(&dir)).join("ssh/master")).unwrap();
     assert!(!master.contains("pillar_roots"), "{master}");
+}
+
+// ---- credentials ----------------------------------------------------------
+
+const KEY: &str =
+    "-----BEGIN OPENSSH PRIVATE KEY-----\nnot-a-real-key-9fXw\n-----END OPENSSH PRIVATE KEY-----";
+
+/// A stand-in body for `salt-ssh` that keeps its environment and a copy of
+/// the roster it is given, with the roster's mode, then prints `result`.
+fn keeping_roster(dir: &Path, result: &str) -> String {
+    format!(
+        "env > \"{dir}/env\"
+while [ $# -gt 0 ]; do
+  case \"$1\" in
+    --roster-file)
+      echo \"$2\" > \"{dir}/roster-path\"
+      cp \"$2\" \"{dir}/roster\"
+      stat -c %a \"$2\" > \"{dir}/mode\" 2>/dev/null || stat -f %Lp \"$2\" > \"{dir}/mode\"
+      shift;;
+  esac
+  shift
+done
+{result}",
+        dir = dir.display()
+    )
+}
+
+fn remote_result() -> String {
+    print(&DRY_RUN.replacen("\"local\"", "\"web01.example.com\"", 1))
+}
+
+#[test]
+fn a_credentials_key_reaches_salt_ssh_through_an_agent_and_the_roster_names_the_user() {
+    let dir = scratch(TMP, "credential-agent");
+    let mut salt = runner(&dir, &keeping_roster(&dir, &remote_result()));
+    salt.agent = agent_stand_ins(&dir);
+    let mut context = context(&dir, "web01.example.com");
+    context.credential = Some(credential(
+        "ssh",
+        "deploy",
+        &[("privateKey", KEY), ("passphrase", "open sesame")],
+    ));
+    let log = KeptLog::default();
+    let plan = salt.plan(&context, &compiled(), &log).unwrap();
+    assert_eq!(plan.changes.len(), 4);
+
+    // The roster is in the work directory, as without a credential, and
+    // says who to sign in as and that the key is in an agent.
+    let work = work(&dir);
+    assert_eq!(
+        fs::read_to_string(dir.join("roster-path"))
+            .unwrap()
+            .trim()
+            .replace('\\', "/"),
+        format!("{work}/ssh/roster")
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("roster")).unwrap(),
+        "# Written by Meridian for salt-ssh. It is rewritten on every run.\n\
+         \"web01.example.com\":\n  host: \"web01.example.com\"\n  user: \"deploy\"\n  priv: agent-forwarding\n"
+    );
+    // salt-ssh was told the agent's socket and nothing else of the credential.
+    let agent_args = fs::read_to_string(dir.join("ssh-agent.args")).unwrap();
+    let socket = agent_args
+        .trim()
+        .strip_prefix("-D -a ")
+        .expect("ssh-agent -D -a <socket>");
+    let env = fs::read_to_string(dir.join("env")).unwrap();
+    assert!(env.contains(&format!("SSH_AUTH_SOCK={socket}")), "{env}");
+    assert!(
+        !env.contains("not-a-real-key") && !env.contains("sesame"),
+        "{env}"
+    );
+    assert!(!args(&dir).contains("deploy"), "{}", args(&dir));
+    // The key and its passphrase went to ssh-add, from standard input and
+    // the askpass program.
+    assert_eq!(
+        fs::read_to_string(dir.join("ssh-add.args")).unwrap().trim(),
+        "-"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("added-key")).unwrap(),
+        format!("{KEY}\n")
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("added-passphrase")).unwrap(),
+        "open sesame\n"
+    );
+    // Nothing printed holds them, and the agent's directory is gone.
+    assert!(!log
+        .text()
+        .iter()
+        .any(|l| l.contains("not-a-real-key") || l.contains("sesame")));
+    assert!(!Path::new(socket).parent().unwrap().exists());
+}
+
+#[test]
+fn a_credentials_password_is_in_a_roster_only_the_user_can_read_and_not_in_the_work_directory() {
+    let dir = scratch(TMP, "credential-password");
+    let mut salt = runner(&dir, &keeping_roster(&dir, &remote_result()));
+    salt.agent = agent_stand_ins(&dir);
+    let mut context = context(&dir, "web01.example.com");
+    context.credential = Some(credential(
+        "usernamePassword",
+        "deploy",
+        &[("password", "hunter2\"\\")],
+    ));
+    let log = KeptLog::default();
+    salt.plan(&context, &compiled(), &log).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(dir.join("roster")).unwrap(),
+        "# Written by Meridian for salt-ssh. It is rewritten on every run.\n\
+         \"web01.example.com\":\n  host: \"web01.example.com\"\n  user: \"deploy\"\n  passwd: \"hunter2\\\"\\\\\"\n"
+    );
+    #[cfg(unix)]
+    assert_eq!(fs::read_to_string(dir.join("mode")).unwrap().trim(), "600");
+    let roster_path = fs::read_to_string(dir.join("roster-path")).unwrap();
+    let roster_path = Path::new(roster_path.trim());
+    let work = Path::new(&work(&dir)).to_path_buf();
+    assert!(!roster_path.starts_with(&work), "{}", roster_path.display());
+    assert!(
+        !roster_path.exists(),
+        "{} was left behind",
+        roster_path.display()
+    );
+    assert!(!work.join("ssh/roster").exists());
+    nothing_under_holds(&work, "hunter2");
+    // No key, so no agent; the password is in no argument, variable or line.
+    assert!(!dir.join("ssh-agent.args").exists());
+    let shown = format!(
+        "{}\n{}\n{}",
+        args(&dir),
+        fs::read_to_string(dir.join("env")).unwrap(),
+        log.text().join("\n")
+    );
+    assert!(!shown.contains("hunter2"), "{shown}");
+}
+
+#[test]
+fn a_credential_with_agent_true_uses_the_users_own_agent() {
+    let dir = scratch(TMP, "credential-own-agent");
+    let mut salt = runner(&dir, &keeping_roster(&dir, &remote_result()));
+    salt.agent = agent_stand_ins(&dir);
+    let mut context = context(&dir, "web01.example.com");
+    let mut held = credential("ssh", "deploy", &[]);
+    held.declared.flags.insert("agent".to_owned(), true);
+    context.credential = Some(held);
+    salt.plan(&context, &compiled(), &KeptLog::default())
+        .unwrap();
+    assert!(fs::read_to_string(dir.join("roster"))
+        .unwrap()
+        .ends_with("  user: \"deploy\"\n  priv: agent-forwarding\n"));
+    assert!(!dir.join("ssh-agent.args").exists());
+}
+
+#[test]
+fn a_credential_for_this_machine_is_refused() {
+    let dir = scratch(TMP, "credential-local");
+    let mut context = context(&dir, "localhost");
+    context.credential = Some(credential("ssh", "deploy", &[("privateKey", KEY)]));
+    let err = runner(&dir, &print(DRY_RUN))
+        .plan(&context, &compiled(), &KeptLog::default())
+        .unwrap_err();
+    assert!(
+        err.msg.contains(
+            "the host is this machine, which salt-call configures as the user running Meridian"
+        ),
+        "{}",
+        err.msg
+    );
+    assert!(!dir.join("args").exists(), "salt-call was started");
+}
+
+/// Nothing under `dir` holds `value`.
+fn nothing_under_holds(dir: &Path, value: &str) {
+    for entry in fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            nothing_under_holds(&path, value);
+        } else if let Ok(text) = fs::read_to_string(&path) {
+            assert!(!text.contains(value), "{} holds the secret", path.display());
+        }
+    }
 }

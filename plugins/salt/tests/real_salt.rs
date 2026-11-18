@@ -19,10 +19,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use meridian_plugin_testkit::{
-    fixture, graph_from_file, graph_from_text, scratch, secret_in_param, secrets,
+    credential, fixture, graph_from_file, graph_from_text, scratch, secret_in_param, secrets,
     without_positions, KeptLog,
 };
-use meridian_sdk::{Artifact, Data, Emitter, RunContext, Runner};
+use meridian_sdk::{AgentPrograms, Artifact, Data, Emitter, RunContext, Runner};
 use meridian_target_salt::{Salt, SaltRunner, Transport};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -81,6 +81,7 @@ fn runner_for(dir: &Path, program: String, user: &str) -> SaltRunner {
             "--log-level".into(),
             "error".into(),
         ],
+        agent: AgentPrograms::default(),
     }
 }
 
@@ -375,6 +376,7 @@ fn another_host_is_configured_over_ssh() {
         extra_args: std::env::var("MERIDIAN_TEST_REAL_SALT_SSH_ARGS")
             .map(|v| v.split_whitespace().map(str::to_owned).collect())
             .unwrap_or_default(),
+        agent: AgentPrograms::default(),
     };
     let ctx = RunContext {
         host: std::env::var("MERIDIAN_TEST_REAL_SALT_SSH_HOST")
@@ -403,6 +405,79 @@ fn another_host_is_configured_over_ssh() {
         "over ssh\n"
     );
     assert!(runner.plan(&ctx, &artifact, &log).unwrap().in_sync());
+}
+
+/// The same host, reached as a credential: the key `MERIDIAN_TEST_REAL_SALT_SSH_KEY`
+/// names is read into a secret and handed to `salt-ssh` through an agent
+/// Meridian starts, and the user running the test is the credential's user.
+/// `MERIDIAN_TEST_REAL_SALT_SSH_ARGS` is not used: it names a key file, which
+/// would stand in for the agent.
+#[ignore = "needs a real salt-call or salt-ssh; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn another_host_is_reached_as_a_credential_whose_key_is_in_an_agent() {
+    let (Some(program), Some(key_path)) = (
+        std::env::var("MERIDIAN_TEST_REAL_SALT_SSH")
+            .ok()
+            .filter(|v| !v.is_empty()),
+        std::env::var("MERIDIAN_TEST_REAL_SALT_SSH_KEY")
+            .ok()
+            .filter(|v| !v.is_empty()),
+    ) else {
+        return;
+    };
+    let key = fs::read_to_string(&key_path).unwrap();
+    let user = std::env::var("USER")
+        .ok()
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| {
+            String::from_utf8(
+                std::process::Command::new("id")
+                    .arg("-un")
+                    .output()
+                    .unwrap()
+                    .stdout,
+            )
+            .unwrap()
+            .trim()
+            .to_owned()
+        });
+    let dir = scratch(TMP, "real-ssh-credential");
+    let runner = SaltRunner {
+        salt_call: "salt-call".into(),
+        salt_ssh: program,
+        transport: Some(Transport::Ssh),
+        // The host's key is not known yet; nothing else is said about how
+        // to sign in, which is the credential's to say.
+        extra_args: vec!["-i".into()],
+        agent: AgentPrograms::default(),
+    };
+    let ctx = RunContext {
+        host: std::env::var("MERIDIAN_TEST_REAL_SALT_SSH_HOST")
+            .unwrap_or_else(|_| "127.0.0.1".into()),
+        credential: Some(credential("ssh", &user, &[("privateKey", key.trim_end())])),
+        ..context(&dir)
+    };
+    let base = dir.join("node");
+    let artifact = compile(&format!(
+        "    - id: made\n      type: file\n      state: directory\n      params: {{path: {0}/etc}}\n",
+        base.display()
+    ));
+    let log = KeptLog::default();
+
+    let plan = runner
+        .plan(&ctx, &artifact, &log)
+        .unwrap_or_else(|e| panic!("planning: {e}\n{}", log.text().join("\n")));
+    assert_eq!(ids(&plan.changes), ["made"]);
+    let applied = runner
+        .apply(&ctx, &artifact, &log)
+        .unwrap_or_else(|e| panic!("applying: {e}\n{}", log.text().join("\n")));
+    assert_eq!(ids(&applied.changes), ["made"]);
+    assert!(base.join("etc").is_dir());
+    assert!(runner.plan(&ctx, &artifact, &log).unwrap().in_sync());
+    // The key is in nothing the plugin wrote or printed.
+    let fingerprint = key.lines().nth(1).unwrap().trim();
+    nothing_under_work_holds(&dir, fingerprint);
+    assert!(!log.text().iter().any(|l| l.contains(fingerprint)));
 }
 
 /// Nothing the plugin wrote to its work directory holds `value`.

@@ -14,8 +14,9 @@ use std::sync::{Mutex, OnceLock};
 use meridian_import::Rendered;
 use meridian_ir::{Bundle, Document};
 use meridian_sdk::{
-    Artifact, Data, Emitted, Emitter, ImportSource, Imported, Importer, LogLine, Position,
-    ResourceGraph, SecretName, SecretRef, SecretValue, Secrets, Value,
+    AgentPrograms, Artifact, Credential, Data, Emitted, Emitter, HeldCredential, ImportSource,
+    Imported, Importer, LogLine, Position, ResourceGraph, SecretName, SecretRef, SecretValue,
+    Secrets, Value,
 };
 
 /// The repository root.
@@ -602,4 +603,70 @@ fn executable_in(message: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// A credential of `kind` for `user`, with the value of each secret field
+/// given, as a runner receives one at plan and apply.
+pub fn credential(kind: &str, user: &str, fields: &[(&str, &str)]) -> HeldCredential {
+    let mut text = BTreeMap::new();
+    if !user.is_empty() {
+        text.insert("user".to_owned(), user.to_owned());
+    }
+    HeldCredential::from_values(
+        Credential {
+            name: "deploy".to_owned(),
+            kind: kind.to_owned(),
+            text,
+            ..Credential::default()
+        },
+        fields
+            .iter()
+            .map(|(field, value)| {
+                (
+                    (*field).to_owned(),
+                    SecretValue::from_reader(value.as_bytes(), 1 << 16)
+                        .expect("a test value fits in a secret"),
+                )
+            })
+            .collect(),
+    )
+}
+
+/// Stand-ins for `ssh-agent` and `ssh-add` that record what they are given.
+/// The agent creates a plain file where its socket is asked for and waits to
+/// be stopped; `ssh-add` keeps the key it reads on standard input in
+/// `added-key`, its arguments in `ssh-add.args`, its environment in
+/// `ssh-add.env`, and what its askpass program answers in `added-passphrase`.
+pub fn agent_stand_ins(dir: &Path) -> AgentPrograms {
+    let d = dir.display();
+    let ssh_agent = stand_in(
+        dir,
+        "ssh-agent",
+        &format!(
+            r#"echo "$@" >> "{d}/ssh-agent.args"
+sock=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-a" ]; then sock="$a"; fi
+  prev="$a"
+done
+: > "$sock"
+trap 'exit 0' TERM INT
+while :; do sleep 1; done"#
+        ),
+    );
+    let ssh_add = stand_in(
+        dir,
+        "ssh-add",
+        &format!(
+            r#"echo "$@" >> "{d}/ssh-add.args"
+env > "{d}/ssh-add.env"
+cat > "{d}/added-key"
+if [ -n "$SSH_ASKPASS" ]; then "$SSH_ASKPASS" > "{d}/added-passphrase"; fi"#
+        ),
+    );
+    AgentPrograms {
+        ssh_agent: ssh_agent.to_string_lossy().into_owned(),
+        ssh_add: ssh_add.to_string_lossy().into_owned(),
+    }
 }
