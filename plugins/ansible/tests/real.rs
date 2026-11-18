@@ -415,6 +415,8 @@ fn a_module_named_in_full_runs_with_its_own_arguments_and_is_run_again_when_noti
     let dir = scratch(TMP, "real-modules");
     let first = with_modules(&dir, "workers = 4");
 
+    // The stamp is a task of its own too, so it is written once in its
+    // place, and once more as the handler the changed line notifies.
     let preview = plan(&runner, &dir, &first);
     assert!(!preview.unknown, "{preview:?}");
     assert_eq!(
@@ -422,6 +424,8 @@ fn a_module_named_in_full_runs_with_its_own_arguments_and_is_run_again_when_noti
         [
             ("conf", ChangeAction::Update),
             ("workers", ChangeAction::Update),
+            ("stamp", ChangeAction::Update),
+            ("run stamp", ChangeAction::Update),
         ]
     );
     let applied = apply(&runner, &dir, &first);
