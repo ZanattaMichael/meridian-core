@@ -459,9 +459,12 @@ fn a_secret_reaches_the_cluster_as_a_secret_and_is_in_no_file() {
         .unwrap()
         .contains("\"${meridian_secret_token}\""));
 
-    // A second plan sees nothing to change.
+    // A second plan reports the Secret as an update, as kubectl does for
+    // every Secret written with stringData: the cluster stores it as data,
+    // so the stringData the manifest carries is a patch every time, whether
+    // or not the stored value changes. The target documents this.
     let plan = runner
         .plan(&context, &artifact, &KeptLog::default())
         .unwrap();
-    assert!(plan.changes.is_empty(), "{:?}", plan.changes);
+    assert_eq!(changes(&plan.changes), [(ChangeAction::Update, "login")]);
 }

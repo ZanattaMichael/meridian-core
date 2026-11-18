@@ -121,6 +121,14 @@ rest only when the cluster is configured for it. Anyone who may `get secrets` in
 namespace reads it. An output that reads a Secret's `data` is marked sensitive and
 masked wherever Meridian shows it.
 
+**What the plan says.** A Secret written with `stringData` is planned as an update on
+every run after the first, whether or not its values changed. The cluster stores
+`stringData` as `data` and keeps no `stringData`, so the manifest's `stringData` is a
+patch every time `kubectl apply` compares the two. That is kubectl's behaviour for any
+Secret written this way, with or without Meridian; a document whose plan has to be in sync
+can write a Secret's other fields in `data`, base64-encoded, but a secret's value cannot go
+there, so a Secret that holds one is always reported as an update.
+
 **What is refused.** A secret anywhere else is refused at compile, rule
 `unsupported-secret-place`: in the `cluster` resource it would be on `kubectl`'s command
 line; in any other object it would be written into the object for every reader to see;
