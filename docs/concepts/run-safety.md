@@ -6,24 +6,7 @@ shared between people, picked up where it stopped, or put back, how to find
 out whether what was applied is still what is there, and how a policy is
 asked whether a change may be made before it is.
 
-```mermaid
-flowchart TB
-    CMD["meridian plan / apply"] --> LOCK{"take the state lock"}
-    LOCK -->|"another run holds it"| REFUSED["refused, and told who holds it<br/>nothing is run"]
-    LOCK -->|"taken"| POLICY{"--policy:<br/>is every change allowed?"}
-    POLICY -->|"no"| DENIED["the run fails<br/>nothing was applied"]
-    POLICY -->|"yes, or no policy"| STAGES["run the stages in order"]
-    STAGES -->|"every change of state"| EVENTS["events"]
-    EVENTS --> RECORD["the run's record<br/>runs/&lt;id&gt;/run.json<br/>runs/&lt;id&gt;/events.jsonl"]
-    STAGES -->|"each apply"| STATE["the run-state<br/>state.json"]
-    RECORD --> BACKEND[("backend<br/>the state directory,<br/>or a shared store")]
-    STATE --> BACKEND
-    STAGES --> DONE{"all stages done?"}
-    DONE -->|"yes"| RELEASE["release the lock"]
-    DONE -->|"a stage failed"| FAIL{"--on-failure"}
-    FAIL -->|"stop (the default)"| RESUME["release the lock<br/>meridian apply --resume<br/>continues from the stage that failed"]
-    FAIL -->|"rollback"| BACK["put back every stage this run changed,<br/>last first, then release the lock"]
-```
+<p align="center"><img src="../graphics/meridian-run-safety.svg" alt="Running safely: the lock, the policy check, the record of every event, the run-state, and what happens when a stage fails" width="100%"></p>
 
 Three rules hold throughout:
 

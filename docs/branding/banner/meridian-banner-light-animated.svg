@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" width="1280" height="320" role="img" aria-label="Meridian: one DSL for everything">
+<style>.m-light{stroke-dasharray:14 86;animation:m-travel 2.6s linear infinite}
+.m-glow{stroke-dasharray:14 86;opacity:.5;animation:m-travel 2.6s linear infinite}
+.m-point{animation:m-breathe 2.6s ease-in-out infinite;transform-origin:center;transform-box:fill-box}
+@keyframes m-travel{to{stroke-dashoffset:-100}}
+@keyframes m-breathe{0%,100%{opacity:.25;transform:scale(1)}50%{opacity:.6;transform:scale(1.35)}}
+@media (prefers-reduced-motion:reduce){.m-light,.m-glow{display:none}.m-point{animation:none}}</style><title>Meridian: one DSL for everything</title>
+<defs>
+<linearGradient id="mb-bg-light-animated" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E9EEFF"/></linearGradient>
+<clipPath id="mb-clip-light-animated"><rect width="1280" height="320" rx="24"/></clipPath>
+</defs>
+<g clip-path="url(#mb-clip-light-animated)">
+<rect width="1280" height="320" fill="url(#mb-bg-light-animated)"/>
+<g fill="none" stroke="#0F1B3D" stroke-width="3" opacity=".08" stroke-linecap="round"><path d="M930 160A260 101 0 0 0 1450 160"/><path d="M930 160A260 101 0 0 1 1450 160"/><path d="M930 160H1280"/></g>
+<g fill="none" stroke-width="9" stroke-linecap="round"><path d="M930 160A260 150 0 0 1 1450 160" stroke="#2457F5"/><path d="M930 160A260 52 0 0 1 1450 160" stroke="#C2410C"/><path d="M930 160A260 52 0 0 0 1450 160" stroke="#0F766E"/><path d="M930 160A260 150 0 0 0 1450 160" stroke="#6D28D9"/></g>
+<g fill="none" stroke-linecap="round"><path d="M930 160A260 150 0 0 1 1450 160" stroke="#2457F5" stroke-width="10" pathLength="100" class="m-glow" style="animation-delay:0s"/><path d="M930 160A260 150 0 0 1 1450 160" stroke="#FFFFFF" stroke-width="5" pathLength="100" class="m-light" style="animation-delay:0s"/><path d="M930 160A260 52 0 0 1 1450 160" stroke="#C2410C" stroke-width="10" pathLength="100" class="m-glow" style="animation-delay:-0.65s"/><path d="M930 160A260 52 0 0 1 1450 160" stroke="#FFFFFF" stroke-width="5" pathLength="100" class="m-light" style="animation-delay:-0.65s"/><path d="M930 160A260 52 0 0 0 1450 160" stroke="#0F766E" stroke-width="10" pathLength="100" class="m-glow" style="animation-delay:-1.3s"/><path d="M930 160A260 52 0 0 0 1450 160" stroke="#FFFFFF" stroke-width="5" pathLength="100" class="m-light" style="animation-delay:-1.3s"/><path d="M930 160A260 150 0 0 0 1450 160" stroke="#6D28D9" stroke-width="10" pathLength="100" class="m-glow" style="animation-delay:-1.95s"/><path d="M930 160A260 150 0 0 0 1450 160" stroke="#FFFFFF" stroke-width="5" pathLength="100" class="m-light" style="animation-delay:-1.95s"/></g><circle cx="930" cy="160" r="32.3" fill="#0F1B3D" class="m-point"/><circle cx="930" cy="160" r="17" fill="#0F1B3D"/>
+</g>
+<rect x=".5" y=".5" width="1279" height="319" rx="23.5" fill="none" stroke="#C9D2F0"/>
+<g font-family="'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif">
+<text x="70" y="136" font-size="88" font-weight="700" letter-spacing="-2" fill="#0F1B3D">Meridian</text>
+<text x="72" y="190" font-size="30" font-weight="600" fill="#0F1B3D">One DSL for everything.</text>
+<text x="72" y="224" font-size="19" fill="#3B4874">Write it once. Compile it to the tools you already run.</text>
+<circle cx="79" cy="262" r="7" fill="#2457F5"/><text x="96" y="268" font-size="17" fill="#263056">Infrastructure as code</text><circle cx="326" cy="262" r="7" fill="#C2410C"/><text x="343" y="268" font-size="17" fill="#263056">Configuration management</text><circle cx="591" cy="262" r="7" fill="#0F766E"/><text x="608" y="268" font-size="17" fill="#263056">Containers</text><circle cx="732" cy="262" r="7" fill="#6D28D9"/><text x="749" y="268" font-size="17" fill="#263056">Orchestration</text>
+</g>
+</svg>

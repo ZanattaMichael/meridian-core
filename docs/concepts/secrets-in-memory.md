@@ -8,12 +8,17 @@ in [the language plan](../plans/language-expansion.md#115-holding-a-secret-in-me
 Everything here lives in one crate, `meridian-secret`. No other crate holds
 the bytes of a secret.
 
+<p align="center"><img src="../graphics/meridian-secrets-flow.svg" alt="How a secret moves: from a provider into locked memory, as a reference everywhere else, and to the tool by a private file at run time" width="100%"></p>
+
 > **Where this stands.** A document can declare secrets and read them: see
 > [the secrets reference](../reference/dsl/secrets.md). A secret can decide a
 > `when` today, `meridian secret check` says whether each would be found, and
 > a credential can be resolved outside a run, a secret can name several
 > places and be kept in the operating system's own stores, and
-> `meridian secret set` puts it there. Handing a secret to a tool comes next.
+> `meridian secret set` puts it there. A secret in a resource's params is
+> handed to the tool by a private file on the targets that
+> [take one](../reference/dsl/secrets.md#handing-a-secret-to-a-tool), and a
+> [credential's](../reference/dsl/credentials.md) secret fields the same way.
 
 ## The promise, and its limit
 

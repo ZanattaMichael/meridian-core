@@ -6,6 +6,8 @@ a version. A project says which modules it needs and where each comes from.
 Meridian fetches them, records exactly what it fetched, and checks on every run
 that nothing has changed since.
 
+<p align="center"><img src="../graphics/meridian-modules-flow.svg" alt="Modules: a manifest names what a project needs, install fetches and pins it in the lockfile, and every run verifies the pin without fetching" width="100%"></p>
+
 **What it does**
 
 - Reads modules from a directory on disk, a git repository or an OCI registry.

@@ -1,4 +1,10 @@
-/* Meridian's colours on top of mdBook's stock themes. See docs/branding/README.md. */
+/* Meridian's look on top of mdBook's stock themes. See docs/branding/README.md
+   and docs/contributing/documentation-site.md.
+
+   Everything that moves is inside `@media (prefers-reduced-motion:
+   no-preference)`, so a reader who has asked their system for less motion gets
+   the same site, still. The graphics under docs/graphics/ carry their own
+   motion and honour the same setting on their own. */
 
 :root {
     --meridian-navy: #22357a;
@@ -7,10 +13,25 @@
     --meridian-cm: #ff8a4c;
     --meridian-containers: #35d0c2;
     --meridian-orchestration: #b48cff;
+    --meridian-sweep: linear-gradient(90deg,
+        var(--meridian-iac), var(--meridian-cm), var(--meridian-containers), var(--meridian-orchestration));
 }
 
-/* The core mark beside the title in the top bar. */
-.menu-title::before {
+.light, html:not(.js) {
+    --links: #2a49b8;
+    --sidebar-active: #2a49b8;
+    --meridian-shadow: rgba(10, 17, 43, 0.22);
+}
+
+.navy, .coal, .ayu {
+    --links: #8fb0ff;
+    --sidebar-active: #ffa26e;
+    --meridian-shadow: rgba(0, 0, 0, 0.55);
+}
+
+/* The core mark beside the title in the top bar. theme/meridian.js puts the
+   animated mark there; without scripts, the still one is drawn by CSS. */
+.menu-title:not(.has-mark)::before {
     content: "";
     display: inline-block;
     width: 1.5em;
@@ -20,14 +41,29 @@
     background: url("../branding/logos/meridian-core.svg") center / contain no-repeat;
 }
 
-.light, html:not(.js) {
-    --links: #2a49b8;
-    --sidebar-active: #2a49b8;
+.menu-title .meridian-mark {
+    width: 1.5em;
+    height: 1.5em;
+    margin-right: 0.45em;
+    vertical-align: -0.35em;
+    border-radius: 0.33em;
 }
 
-.navy, .coal, .ayu {
-    --links: #8fb0ff;
-    --sidebar-active: #ffa26e;
+.menu-title a.meridian-home {
+    color: inherit;
+    text-decoration: none;
+}
+
+/* A line of the four meridians under each page's title. */
+.content main > h1:first-child::after {
+    content: "";
+    display: block;
+    width: 5em;
+    height: 3px;
+    margin-top: 0.35em;
+    border-radius: 2px;
+    background: var(--meridian-sweep);
+    background-size: 300% 100%;
 }
 
 /* Section headings in the sidebar. */
@@ -36,6 +72,15 @@
     font-size: 0.8em;
     letter-spacing: 0.06em;
     text-transform: uppercase;
+}
+
+/* The home-page banner and the explanatory graphics sit on the tile, so they
+   get the tile's corners and a little lift. */
+.content picture img,
+.content img[src*="graphics/"],
+.content img[src*="generated/"] {
+    border-radius: 16px;
+    box-shadow: 0 10px 30px -14px var(--meridian-shadow);
 }
 
 /* Wide tables (the capability matrix) scroll inside the page, not the page itself. */
@@ -56,4 +101,83 @@
 .content pre.mermaid {
     background: none;
     text-align: center;
+}
+
+/* -------------------------------------------------------------------------
+   Motion
+   ------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+    /* Each page rises in as it opens. */
+    .content main {
+        animation: meridian-rise 0.4s ease-out both;
+    }
+
+    /* The meridian line under the title drifts through the four colours. */
+    .content main > h1:first-child::after {
+        animation: meridian-sweep 7s linear infinite;
+    }
+
+    /* Links underline themselves from the left. */
+    .content a:not(.header) {
+        text-decoration: none;
+        background-image: linear-gradient(currentColor, currentColor);
+        background-size: 0 1px;
+        background-position: 0 100%;
+        background-repeat: no-repeat;
+        transition: background-size 0.25s ease;
+    }
+
+    .content a:not(.header):hover,
+    .content a:not(.header):focus-visible {
+        background-size: 100% 1px;
+    }
+
+    /* The sidebar's entries slide a little as the pointer finds them. */
+    .chapter li a {
+        transition: color 0.2s ease, padding-left 0.2s ease;
+    }
+
+    .chapter li a:hover,
+    .chapter li a:focus-visible {
+        padding-left: 0.3em;
+    }
+
+    .chapter li a.active {
+        animation: meridian-rise 0.4s ease-out both;
+    }
+
+    /* Graphics lift when looked at closely. */
+    .content picture img,
+    .content img[src*="graphics/"],
+    .content img[src*="generated/"] {
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .content picture img:hover,
+    .content img[src*="graphics/"]:hover,
+    .content img[src*="generated/"]:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 18px 40px -14px var(--meridian-shadow);
+    }
+
+    /* The top-bar mark brightens under the pointer. */
+    .menu-title .meridian-mark {
+        transition: transform 0.3s ease, filter 0.3s ease;
+    }
+
+    .menu-title a.meridian-home:hover .meridian-mark {
+        transform: rotate(-8deg) scale(1.08);
+        filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.55));
+    }
+
+    @keyframes meridian-rise {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: none; }
+    }
+
+    @keyframes meridian-sweep {
+        from { background-position: 0 0; }
+        to { background-position: 300% 0; }
+    }
 }

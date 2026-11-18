@@ -23,7 +23,7 @@ flowchart TD
 | Property tests | `crates/meridian-cli/tests/properties.rs` | `cargo test -p meridian-cli --test properties` |
 | Placement tests | `crates/meridian-cli/tests/placement.rs`, `placement_properties.rs` | `cargo test -p meridian-cli --test placement --test placement_properties` |
 | Secret tests | `crates/meridian-cli/tests/secret_places.rs`, `secret_properties.rs`, `secrets.rs` | `cargo test -p meridian-cli --test secret_places --test secret_properties --test secrets` |
-| Conformance tests | `crates/meridian-cli/tests/conformance.rs`, `condition_conformance.rs` | `cargo test -p meridian-cli --test conformance --test condition_conformance` |
+| Conformance tests | `crates/meridian-cli/tests/conformance.rs`, `condition_conformance.rs`, `secret_conformance.rs` | `cargo test -p meridian-cli --test conformance --test condition_conformance --test secret_conformance` |
 | Robustness tests | `crates/meridian-cli/tests/robustness.rs` | `cargo test -p meridian-cli --test robustness` |
 | Examples | `crates/meridian-cli/tests/examples.rs` | `cargo test -p meridian-cli --test examples` |
 | Real tools | a workflow per tool under `.github/workflows/` | in CI; [Real-tool tests](real-tool-tests.md) lists what each one runs and how to run it yourself |
@@ -128,6 +128,11 @@ What these tests have found so far, each fixed with a test of its own:
 - A document nested a few hundred levels deep could overflow the stack of a
   thread with a small one. The limit is now 64 levels, in YAML and in JSON, and
   holds on a 1 MiB stack.
+- A condition with quoted text that holds the opening of an interpolation,
+  such as `data.motd != '${{'`, was taken for an interpolation nobody closed
+  and refused. It showed up as a test that failed about once in a few
+  thousand runs. In a bare condition that text is now text, and the case is a
+  fixed test beside the property.
 
 ### Placement: what data supplies is text
 
@@ -197,6 +202,12 @@ and name it. With no password, every row must stop the same way. And after
 `plan`, `apply` and `plan` again, the password must be in nothing printed and
 in no file the run left behind, the state directory included. To cover a new
 place, add a `Place`.
+
+One more test there is a workflow: three documents that each declare the same
+environment variable as a secret. The first stage takes the variable out of
+Meridian's environment so that no tool inherits it, and every later stage must
+still be given the secret. Writing the table found that the second stage was
+not, and stopped with "is not set".
 
 `secrets.rs` covers the providers and what each command does. The two examples
 that use secrets are tested in `examples.rs`: one is planned and applied for
@@ -276,6 +287,20 @@ like a reference but is marked literal, and with the reference itself. Where
 the target accepts the text at all, the literal reaches the output as the
 characters it is, and never as what the reference compiles to. No target may
 read text as a reference because of what it holds.
+
+Secrets and credentials are held to it in `secret_conformance.rs`, again on
+each target's own example with the real command and plugin. A secret is placed
+in a param, bare and joined to text, and the document is compiled and planned
+with every plugin loaded. A target that takes a secret must write the tool's
+own reference for it (an Ansible variable, a sensitive Terraform or OpenTofu
+variable; a joined value under a derived name) and never the compile-time
+placeholder. Every other target must write the placeholder, and `plan` must
+stop in the same words on all of them, naming the targets that do take one. A
+named credential on the target host is validated everywhere; where the target
+cannot pass it to a host, compile and plan refuse in the same words. In both
+halves, the value itself is a made-up string, and no file written and nothing
+printed may hold it. A target that gains a way to take a secret or a credential
+moves from one list to the other in the test, and nothing else changes.
 
 To add a case, add a `case(...)` to `CASES` and record the page:
 

@@ -22,7 +22,7 @@ edit-url-template = "https://github.com/ZanattaMichael/meridian-core/edit/main/{
 site-url = "/meridian-core/"
 no-section-label = true
 additional-css = ["theme/meridian.css"]
-additional-js = ["mermaid.min.js", "mermaid-init.js"]
+additional-js = ["mermaid.min.js", "mermaid-init.js", "theme/meridian.js"]
 
 [output.html.fold]
 enable = true
