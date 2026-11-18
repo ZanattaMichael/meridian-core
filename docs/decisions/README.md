@@ -63,3 +63,4 @@ page it affects. The pull request template asks for it.
 | [A configuration management target takes its tool's own types beside the six, and a colliding name is written `native/<name>`](0032-native-types-beside-the-six-and-a-prefix-for-colliding-names.md) | Targets | proposed |
 | [A tool's published schema file is fetched over HTTPS, pinned by its hash, and the last copy stands in offline](0036-a-published-schema-file-is-fetched-over-https-pinned-by-hash-and-reused-offline.md) | Tooling | proposed |
 | [Tool schemas travel as signed OCI bundles, chosen by the types the documents use and pinned by digest](0041-tool-schemas-travel-as-signed-oci-bundles-chosen-by-the-types-the-documents-use.md) | Tooling | proposed |
+| [`adopt` is a field of the resource, and each target says how it adopts](0042-adopt-is-a-resource-field-and-a-target-says-how-it-adopts.md) | Language | proposed |

@@ -173,6 +173,24 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Config, CompileError> {
             _ => {}
         }
 
+        if !r.adopt.is_empty() {
+            if kind != Kind::Managed {
+                return Err(refuse(
+                    r,
+                    &rules::INVALID_ADOPT,
+                    format!(
+                        "adopt {:?}: only a managed resource can be adopted, and {:?} is \
+                         not one: OpenTofu imports what it manages, not providers, data \
+                         sources, modules, variables or locals",
+                        r.adopt, r.r#type
+                    ),
+                ));
+            }
+            config
+                .imports
+                .push((format!("{tofu_type}.{}", r.id), r.adopt.clone()));
+        }
+
         config.blocks.push(Block {
             kind,
             r#type: tofu_type,

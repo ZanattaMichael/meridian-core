@@ -351,6 +351,9 @@ fn list_targets(server: &Server) -> Value {
             if t.capabilities.credentials {
                 capabilities.push("credentials");
             }
+            if t.capabilities.adopt != meridian_sdk::Adoption::None {
+                capabilities.push("adopt");
+            }
             let mut entry = json!({
                 "name": t.name,
                 "category": t.category.as_str(),

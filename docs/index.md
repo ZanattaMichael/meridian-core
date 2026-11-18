@@ -22,6 +22,7 @@ The core knows the language; each plugin knows one tool.
 | [A two-stage workflow](quickstart/first-two-stage.md) | one tool creates a machine, another configures it |
 | [Worked workflows](quickstart/workflows.md) | eight workflows across every target |
 | [Importing existing configuration](operations/importing.md) | `meridian import` |
+| [Adopting what exists](reference/dsl/resources.md#adopting-what-exists) | `adopt` an existing thing instead of creating another |
 
 | Concepts | |
 |---|---|

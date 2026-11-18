@@ -14,6 +14,7 @@ Compiles a ResourceSet into a Puppet class and node statement, applied with
 | `dependsOn` | Yes, as `require`. Puppet orders by declared relationships, so the dependency graph survives into the manifest intact |
 | `notifies` | Native: `notify`. A service can be restarted (`restart` or `refresh`); an exec can be `run`; a Puppet type of its own can be refreshed (`refresh`) |
 | `runtimeWhen` | No. A catalog is compiled before it reaches the node, so there is nothing left to evaluate at apply time. Refused |
+| `adopt` | Accepted, and changes nothing: Puppet keeps no state and makes each thing what the document says whether it exists or not. The compile warns |
 | Secrets | Yes: by Hiera. The manifest looks each up as a `Sensitive` value, and the run is given a data file and a `hiera.yaml` only the user can read. See [Secrets](#secrets) |
 | References | `${id.param}` is settled from the document when it is compiled; anything else in `${...}` is refused, and `$${` is a literal `${` ([rules](../reference/resource-types.md#references)) |
 | Plan | Yes: `--noop`, with `--detailed-exitcodes`. Every resource reports whether it would change |

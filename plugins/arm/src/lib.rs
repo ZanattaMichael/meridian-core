@@ -41,7 +41,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
-    holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter,
+    holds_secret, Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter,
     PlacedEscape, Position, Resource, ResourceGraph, Value,
 };
 
@@ -220,6 +220,7 @@ impl Emitter for Arm {
             // A secret reaches Resource Manager as a securestring parameter
             // whose value is read from a private file.
             secrets: true,
+            adopt: Adoption::Converge,
             ..Capabilities::default()
         }
     }

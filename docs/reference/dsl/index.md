@@ -380,6 +380,7 @@ compiled: `document "web" declares no targetHost`.
 | `notifies` | no | a list. See [`notifies`](#notifies) |
 | `when` | no | text: a condition Meridian decides before compiling. A resource whose condition is false is left out. See [`when` and `runtimeWhen`](#when-and-runtimewhen) |
 | `runtimeWhen` | no | text, in the tool's own language. Only on targets that can check a condition while applying |
+| `adopt` | no | text: the tool's own identifier of a thing that already exists, for the tool to take under management instead of creating. See [adopting what exists](resources.md#adopting-what-exists) |
 
 In depth: [resources](resources.md).
 

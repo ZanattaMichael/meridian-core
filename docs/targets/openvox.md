@@ -16,6 +16,7 @@ of Puppet: `puppet apply` on the machine itself, or OpenBolt for another machine
 | `notifies` | Native: `notify`. A service can be restarted (`restart` or `refresh`); an exec can be `run`; a Puppet type of its own can be refreshed (`refresh`) |
 | Not supported | `action: reload`, `start` or `stop` on a service, and notifying a `package`, `file`, `user` or `group`. A refresh restarts a service and takes no argument, and the other types do nothing on one. The compile refuses these and says why; it does not turn a reload into a restart |
 | `runtimeWhen` | No. A catalog is compiled before it reaches the node, so there is nothing left to evaluate at apply time. Refused |
+| `adopt` | Accepted, and changes nothing: OpenVox keeps no state and makes each thing what the document says whether it exists or not. The compile warns |
 | `state: restarted` | No. It is not a state a node can be left in. Notify the service instead |
 | Secrets | Yes: by Hiera, as a `Sensitive` lookup, exactly as the Puppet target does. See [Secrets](#secrets) |
 | Editor schemas | Yes: `meridian schema sync` asks `puppet describe` what each type takes, as the Puppet target does. See [Editor schemas](#editor-schemas) |

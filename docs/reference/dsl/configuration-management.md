@@ -217,6 +217,13 @@ does not read it, and it does not move between tools.
 | `puppet`, `openvox` | refused. A catalog is compiled before it reaches the node, so nothing is left to evaluate at apply time | |
 | `cloud-init` | refused. cloud-init evaluates nothing per resource | |
 
+## `adopt`
+
+Accepted with a warning on every target but `cloud-init`, and changes nothing:
+these tools keep no state, and make each thing what the document says whether
+it existed or not. `cloud-init` refuses it. See
+[adopting what exists](resources.md#adopting-what-exists).
+
 ## Plan and apply
 
 `meridian plan` uses the tool's dry run (`--check --diff`, `--noop`, `--why-run`, the DSC

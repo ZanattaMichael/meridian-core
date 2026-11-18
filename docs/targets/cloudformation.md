@@ -14,6 +14,7 @@ with `aws` through a change set, so what is applied is what was previewed.
 | `dependsOn` | Yes, as `DependsOn`, unless a reference already implies the order |
 | `notifies` | No. CloudFormation has no way to react to a change in another resource. Refused |
 | `runtimeWhen` | No. A CloudFormation condition is decided from the template's parameters, not at deploy time. Refused |
+| `adopt` | No. Refused: CloudFormation adopts only through a resource-import change set, which this target does not make yet |
 | `state: absent` | No. Remove the resource from the document; CloudFormation deletes what the template no longer declares, subject to its `DeletionPolicy` |
 | References | `${id}` is `Ref`, `${id.Attribute}` is `Fn::GetAtt`, inside longer text `Fn::Sub`; see [References](#references) |
 | Plan | Yes: a change set, described and then discarded |

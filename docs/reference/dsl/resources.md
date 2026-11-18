@@ -1,4 +1,4 @@
-# Resources: `id`, `type`, `state`, `params`
+# Resources: `id`, `type`, `state`, `params`, `adopt`
 
 `spec.resources` is a list of at least one resource.
 
@@ -11,6 +11,7 @@
     content: "worker_processes 4;\n"
 ```
 
+Covers the four fields that say what a resource is, and [`adopt`](#adopting-what-exists).
 Related fields: [`dependsOn`](dependson.md), [`notifies`](notifies.md),
 [`when` and `runtimeWhen`](conditions.md).
 
@@ -127,6 +128,39 @@ param.yaml:8:7: ansible: resource "a" [unsupported-param]: resource type "packag
 
 On passthrough targets, names are the tool's: `instance_type` for Terraform,
 `InstanceType` for CloudFormation. Text may hold [references](references.md).
+
+## Adopting what exists
+
+<p align="center"><img src="../../graphics/meridian-adopt.svg" alt="adopt: a resource names the tool's identifier of a thing that exists; a stateful target compiles it into the tool's import and the plan reports adopt, a converging target accepts it and changes nothing, and any other target is refused before its plugin is asked" width="100%"></p>
+
+`adopt` says the resource already exists, and gives the tool's own identifier
+for it. The tool takes it under management instead of creating a second one:
+
+```yaml
+- id: logs
+  type: aws_s3_bucket
+  adopt: example-logs        # the identifier `terraform import` takes
+  params:
+    bucket: example-logs
+```
+
+What it does depends on the target, and the
+[capability matrix](../capability-matrix.md) has the column `adopt`:
+
+| Target says | What happens | Targets |
+|---|---|---|
+| `import` | The identifier is compiled into the tool's own import. The first `meridian plan` reports the resource as `adopt`, and the apply records it in the tool's state | Terraform, OpenTofu, Pulumi |
+| `converge` | Accepted, and changes nothing: the tool keeps no state and makes the thing what the document says whether it exists or not. The compile warns | Ansible, Puppet, OpenVox, Chef, Salt, DSC, Kubernetes, Bicep, ARM |
+| no | Refused before the plugin is asked, so the tool never creates a second thing beside the one that exists | the rest |
+
+- `adopt` is text, and may be placed from data: `adopt: "${{ data.vpc_id }}"`.
+  It cannot hold a secret.
+- `adopt` with `state: absent` is refused: one takes the thing under
+  management, the other deletes it.
+- A target refuses `adopt` on something its tool cannot import, such as a
+  Terraform data source, with `invalid-adopt`.
+- Once the thing is adopted, `adopt` can stay: the tool's import does nothing
+  for a thing already in its state.
 
 ## A resource in each flavour
 

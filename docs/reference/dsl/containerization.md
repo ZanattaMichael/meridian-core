@@ -132,6 +132,11 @@ One action, `restart`, aimed at a service.
 
 Refused.
 
+## `adopt`
+
+Refused. Compose and Quadlet units both refuse a container of the same name
+that they did not create.
+
 ## Plan and apply
 
 On `docker`, `plan` compares each service's Compose configuration hash with the running

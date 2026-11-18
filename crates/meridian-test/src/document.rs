@@ -510,10 +510,12 @@ fn expectation(r: &Reader<'_>, value: &Value, path: &str) -> Result<Expect, Stri
             let mut change = ChangeExpect::default();
             if let Some(v) = fields.get("action") {
                 let word = r.text(v, &format!("{at}.action"))?;
-                if !["create", "update", "delete", "replace"].contains(&word.as_str()) {
+                if !["create", "update", "delete", "replace", "adopt"].contains(&word.as_str()) {
                     return Err(r.refuse(
                         &format!("{at}.action"),
-                        format!("expected create, update, delete or replace, found {word:?}"),
+                        format!(
+                            "expected create, update, delete, replace or adopt, found {word:?}"
+                        ),
                     ));
                 }
                 change.action = Some(word);

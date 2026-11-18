@@ -14,6 +14,7 @@ applies it with `salt-call --local`, or `salt-ssh` for another machine.
 | `dependsOn` | Yes, as `require`. The states are also written in apply order, so the dependency graph survives into the state file intact and nothing is flattened |
 | `notifies` | Native: `watch` and `onchanges`. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec, `watch` on a state function of Salt's own |
 | `runtimeWhen` | Yes: a Jinja expression over grains and pillar, which the minion evaluates when it renders the file |
+| `adopt` | Accepted, and changes nothing: Salt keeps no state and makes each thing what the document says whether it exists or not. The compile warns |
 | Secrets | Yes: as pillar data, from a pillar root only the user can read. A file state given one shows no diff; an `exec` is refused one, because Salt prints the command line. See [Secrets](#secrets) |
 | References | `${id.param}` is settled from the document when it is compiled; anything else in `${...}` is refused, and `$${` is a literal `${` ([rules](../reference/resource-types.md#references)) |
 | Plan | Yes: Salt's dry run, `test=True`. Every state reports whether it would change, so a plan is never "unknown" |

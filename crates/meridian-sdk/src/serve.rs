@@ -273,8 +273,7 @@ impl EmitterService for EmitterHandler {
         // An emitter is ordinary blocking code, and a panic in it must reach
         // the host as this call failing, not take the whole plugin down.
         let outcome = tokio::task::spawn_blocking(move || {
-            crate::check_settings(emitter.as_ref(), &graph)?;
-            emitter.emit(&graph, &data)
+            crate::emit_checked(emitter.as_ref(), &graph, &data)
         })
         .await
         .map_err(|e| Status::internal(format!("the emitter panicked: {e}")))?;

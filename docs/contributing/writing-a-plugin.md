@@ -224,7 +224,10 @@ In `lib.rs` (published in the [capability matrix](../reference/capability-matrix
   `<Namespace>/<type>@<api-version>`.
 - `capabilities()`: `native_notify`, `synthetic_notify`, `runtime_condition`, `secrets`,
   `credentials`, each proven by a test. `secrets` and `credentials` commit the runner to
-  [private handover](#secrets) and [host credentials](#credentials).
+  [private handover](#secrets) and [host credentials](#credentials). `adopt` is
+  `Adoption::Import` (stateful tool; compile `Resource::adopt` into the tool's import and
+  report `ChangeAction::Adopt`), `Adoption::Converge` (stateless; the SDK adds the warning)
+  or `Adoption::None` (the host refuses `adopt`).
 - `category()`: decides the document kind.
 - `target_versions()`: only if output differs by tool version (DSC); otherwise versions are
   refused.

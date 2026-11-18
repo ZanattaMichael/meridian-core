@@ -511,6 +511,7 @@ fn change_from_value(value: &Value) -> Result<Change, String> {
         "update" => ChangeAction::Update,
         "delete" => ChangeAction::Delete,
         "replace" => ChangeAction::Replace,
+        "adopt" => ChangeAction::Adopt,
         other => return Err(format!("a change has the action {other:?}")),
     };
     Ok(Change {

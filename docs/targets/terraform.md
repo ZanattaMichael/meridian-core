@@ -14,6 +14,7 @@ with `terraform`. OpenTofu's `tofu` takes the same commands.
 | `dependsOn` | Yes, as `depends_on`, unless a reference already implies the order |
 | `notifies` | Synthetic, and blunt: the action `replace` only. See [Notifications](#notifications) |
 | `runtimeWhen` | No. Refused |
+| `adopt` | Yes: an `import` block. See [Adopting what exists](#adopting-what-exists) |
 | `state: absent` | No. Terraform removes what the configuration no longer declares, so remove the resource from the document |
 | Plan | Yes: Terraform's own plan |
 | Outputs | Yes |
@@ -123,6 +124,39 @@ The plan shows "must be replaced".
   }
 }
 ```
+
+## Adopting what exists
+
+A resource's `adopt` is the provider's own import identifier of a thing that
+already exists. The target compiles it to an `import` block, so Terraform takes the
+thing into its state on the next apply instead of creating it:
+
+```yaml
+    - id: logs
+      type: aws_s3_bucket
+      adopt: example-logs
+      params:
+        bucket: example-logs
+```
+
+```json
+"import": [
+  { "id": "example-logs", "to": "aws_s3_bucket.logs" }
+]
+```
+
+- `meridian plan` reports the resource as `adopt`, or as `update` with
+  `adopted` in its summary when the params differ from what exists. After the
+  apply the block does nothing, so it can stay.
+- Only a managed resource can be adopted. `adopt` on a provider, a backend, a
+  `data.<type>`, a module, a variable or a local is refused with
+  `invalid-adopt`.
+- The identifier is the one `terraform import` takes for that type, as the
+  provider's documentation gives it. It may be placed from data:
+  `adopt: "${{ data.bucket }}"`.
+- Import blocks need Terraform 1.5 or later.
+
+See [`examples/terraform/adopt.yaml`](../../examples/terraform/adopt.yaml).
 
 ## Importing
 

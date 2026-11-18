@@ -145,3 +145,4 @@ order resources. Anything unresolvable is `invalid-reference`. `$${` is a litera
 | `dependsOn` | order | every target ([how](../concepts/dependencies.md)) |
 | `notifies` | react to a change | where the tool can ([matrix](capability-matrix.md)) |
 | `runtimeWhen` | a condition checked on the node during the apply, written in the tool's own language | Ansible (a `when:` expression), Chef (the Ruby of an `only_if` guard), Salt (a Jinja expression over grains and pillar). Puppet refuses it: a catalog is compiled before it reaches the node. cloud-init refuses it: it evaluates nothing per resource |
+| `adopt` | the tool's identifier of a thing that already exists, to take under management instead of creating ([how](dsl/resources.md#adopting-what-exists)) | Terraform, OpenTofu and Pulumi import it; the configuration management targets, Kubernetes, Bicep and ARM accept it and change nothing; the rest refuse it ([matrix](capability-matrix.md)) |

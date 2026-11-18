@@ -16,6 +16,7 @@ overlay, which is applied to what the chart renders before Helm installs it.
 | `dependsOn` | Only where Helm's own install order already agrees; otherwise refused. See [Ordering](#ordering) |
 | `notifies` | Synthetic: the action `restart`, aimed at a Deployment, StatefulSet or DaemonSet. Any other action is refused. See [Notifications](#notifications) |
 | `runtimeWhen` | No. Refused |
+| `adopt` | No. Refused: Helm refuses an object that no release of its own owns |
 | `state: absent` | No. Refused. Remove the resource; Helm deletes what the chart no longer declares |
 | Plan | Yes: what would be installed, compared with what Helm last installed. It does not detect changes made to the cluster behind Helm's back |
 | Apply | Yes: `helm upgrade --install`. An unchanged document adds no revision |

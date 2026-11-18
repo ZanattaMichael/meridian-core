@@ -14,6 +14,7 @@ build template and runs it with `packer`, to build machine and container images.
 | `dependsOn` | Yes, inside the fixed shape of a build: it orders provisioners and chains post-processors into a sequence. A dependency that contradicts the shape is refused. See [Order](#order) |
 | `notifies` | No. Refused: a build runs each step once on a machine it then discards. See [Notifications](#notifications) |
 | `runtimeWhen` | No. Refused. Use a step's own `only` or `except` param |
+| `adopt` | No. Refused: Packer builds a new image on every run and manages nothing that exists |
 | `state: absent` | No. A build only creates images; remove the resource from the document |
 | References | Yes, to a `variable`, a `local` or a `data.<type>`, checked at compile time. See [References](#references) |
 | Plan | Yes, but Packer has no plan of its own: Packer validates the template, and the plan lists one image to create per source. A plan is never "in sync" |

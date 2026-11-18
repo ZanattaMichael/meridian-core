@@ -9,6 +9,8 @@ Each plugin declares:
 
 - whether it can react to a change natively, synthetically or not at all (`notifies`)
 - whether it can check a condition on the node at apply time (`runtimeWhen`)
+- whether it can take an existing thing under management (`adopt`): by import, by
+  converging, or not at all
 - whether it can plan, apply and report outputs
 - its category: infrastructure as code, configuration management, containerization or
   container orchestration
@@ -57,6 +59,7 @@ The rule name is in brackets and a hint follows in parentheses. Rules are listed
 | `unsupported-state` | the type cannot be in that state on this target |
 | `unsupported-action` | a notify asks for something the tool cannot do to that resource |
 | `unsupported-runtime-condition` | `runtimeWhen` on a target that cannot check at apply time |
+| `unsupported-adopt` | `adopt` on a target that cannot take an existing thing under management |
 | `invalid-reference` | `${...}` names something that is not there, or a value the tool cannot know at that point |
 | `missing-param` | something the tool requires was not given |
 
@@ -70,6 +73,7 @@ A warning means the output does what the document says, but how is worth knowing
   the end of first boot.
 - The output relies on something the document cannot check. cloud-init has no services
   module, so a service becomes `systemctl` commands and the image must use systemd.
+- A field changes nothing here: `adopt` on a stateless tool, which converges anyway.
 
 ## Unknown plans
 

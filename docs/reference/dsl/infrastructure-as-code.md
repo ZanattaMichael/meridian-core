@@ -124,6 +124,19 @@ No handlers. Instead:
 
 Refused.
 
+## `adopt`
+
+The tool's own identifier of a thing that already exists, so the tool takes it
+into its state instead of creating it. See
+[adopting what exists](resources.md#adopting-what-exists).
+
+| Target | `adopt` is |
+|---|---|
+| `terraform`, `opentofu` | an `import` block. Only on a managed resource |
+| `pulumi` | the resource's `import` option |
+| `bicep`, `arm` | accepted with a warning, and changes nothing: Resource Manager updates a resource of the same name in place |
+| `cloudformation`, `packer` | refused |
+
 ## Outputs
 
 A value the tool reports after apply:

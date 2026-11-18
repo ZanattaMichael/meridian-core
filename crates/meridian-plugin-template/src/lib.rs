@@ -44,8 +44,8 @@ mod validate;
 
 use meridian_sdk::rules::Rule;
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph,
+    Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph,
 };
 
 pub use emit::MANIFEST_PATH;
@@ -129,7 +129,10 @@ impl Emitter for Template {
     /// when the tool has its own way to react to a change, `synthetic_notify`
     /// when you build that reaction out of something else, and
     /// `runtime_condition` when the tool can check a condition on the node at
-    /// the moment it applies a resource.
+    /// the moment it applies a resource. `adopt` is `Adoption::Import` when
+    /// the tool keeps a state and your emitter compiles `Resource::adopt`
+    /// into the tool's import, `Adoption::Converge` when the tool keeps no
+    /// state and simply makes each thing what the document says.
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             native_notify: false,
@@ -137,6 +140,7 @@ impl Emitter for Template {
             runtime_condition: false,
             secrets: false,
             credentials: false,
+            adopt: Adoption::None,
         }
     }
 

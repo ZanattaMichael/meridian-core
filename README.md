@@ -56,8 +56,9 @@ meridian fmt . / meridian lint .            # format and lint
 meridian lsp / meridian mcp                 # language server, MCP server
 ```
 
-- Runs are locked, recorded, resumable (`apply --resume`) and can roll back. See
-  [running safely](docs/concepts/run-safety.md) and [policy checks](docs/reference/policy.md).
+- Runs are locked, recorded, resumable (`apply --resume`) and can roll back. `adopt` takes an
+  existing thing under management ([adopting what exists](docs/reference/dsl/resources.md#adopting-what-exists)).
+  See [running safely](docs/concepts/run-safety.md) and [policy checks](docs/reference/policy.md).
 - `--report` writes JUnit, JSON, Markdown or HTML; `--sink` streams events. See
   [reports](docs/reference/reporting.md).
 - In CI, a job runs `meridian apply`; `plan --out` and `apply --plan` apply exactly what was

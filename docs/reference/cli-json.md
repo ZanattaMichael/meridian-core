@@ -162,8 +162,8 @@ goes back to, or `null`).
 | `failed` | the stage failed and the run stopped here | `error`, the text; `changes`, what the tool had already done before failing; `reason`, the code |
 | `not-run` | an earlier stage failed | `becauseOf` (`name` and `kind`) |
 
-A `change` is `resource`, `action` (`create`, `update`, `delete` or
-`replace`) and `summary`, which may be empty.
+A `change` is `resource`, `action` (`create`, `update`, `delete`,
+`replace` or `adopt`) and `summary`, which may be empty.
 
 **A rollback** has `name`, `kind`, `target`, `host` and a `status`:
 `rolled-back` (with `to`, the artifact hash, and `changes`), `unchanged`,

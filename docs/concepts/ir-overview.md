@@ -41,6 +41,7 @@ Every field is in [the language reference](../reference/dsl/index.md).
     - resource: nginx_svc
       action: restart
   runtimeWhen: "..."        # optional; only on targets that can check at apply time
+  adopt: "..."              # optional; the tool's identifier of a thing that exists
 ```
 
 ## Two families of types

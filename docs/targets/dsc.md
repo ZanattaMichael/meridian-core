@@ -17,6 +17,7 @@ setting.
 | `dependsOn` | Yes, as the runner's own `dependsOn` |
 | `notifies` | Native: the runner's `notify`. The action is `refresh`: when the notifier really changed, the notified resource's `Set` runs even if its `Test` says there is nothing to do |
 | `runtimeWhen` | Yes: a `preCondition` |
+| `adopt` | Accepted, and changes nothing: DSC keeps no state and makes each thing what the document says whether it exists or not. The compile warns |
 | `state` | No. A DSC resource carries its desired state in its own properties (`Ensure`, `_exist`), so set it in `params` |
 | Plan | Yes: the runner's `Test` mode |
 | Outputs | No |

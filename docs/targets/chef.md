@@ -14,6 +14,7 @@ or `chef-run` for another machine.
 | `dependsOn` | Yes, as recipe order. A recipe runs top to bottom, so the dependency graph is flattened into one sequence |
 | `notifies` | Native: `notifies`, delayed to the end of the run. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec, any action word on a Chef resource of its own. The action is kept: a reload stays a reload |
 | `runtimeWhen` | Yes: one line of Ruby in an `only_if` guard |
+| `adopt` | Accepted, and changes nothing: Chef keeps no state and makes each thing what the document says whether it exists or not. The compile warns |
 | Secrets | On this machine, yes: as node attributes from a JSON file only the user can read, with `sensitive true` on the resource. Through `chef-run`, no: it takes attributes on its command line only, so the apply stops. See [Secrets](#secrets) |
 | References | `${id.param}` is settled from the document when it is compiled; anything else in `${...}` is refused, and `$${` is a literal `${` ([rules](../reference/resource-types.md#references)) |
 | Plan | On this machine, yes: `--why-run`. For another machine, no: `chef-run` has no dry run, so the plan is reported as unknown |

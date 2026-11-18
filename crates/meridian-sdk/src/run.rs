@@ -160,6 +160,10 @@ pub enum ChangeAction {
     /// Destroyed and created again. It is kept apart from an update because it
     /// is the one that loses data.
     Replace,
+    /// Taken under management as it is, with nothing else changed: what a
+    /// resource's `adopt` does on its first plan. An adoption that also
+    /// changes the thing is reported as the change.
+    Adopt,
 }
 
 impl ChangeAction {
@@ -169,6 +173,7 @@ impl ChangeAction {
             ChangeAction::Update => "update",
             ChangeAction::Delete => "delete",
             ChangeAction::Replace => "replace",
+            ChangeAction::Adopt => "adopt",
         }
     }
 }
