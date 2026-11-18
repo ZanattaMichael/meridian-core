@@ -256,7 +256,8 @@ second one collide with it.
 
 Lists every plugin Meridian can find: its category, what it can do, the resource
 types it takes, the versions of its tool it compiles for (when it declares any),
-where its binary is, and what checking its signature found.
+the keys of a document's `spec.settings` it reads (when it takes any), where its
+binary is, and what checking its signature found.
 
 ```
 dsc
@@ -264,6 +265,7 @@ dsc
   can:       compile, plan, apply, import
   resources: <Module>/<Resource>, runner
   versions:  2, 3
+  settings:  credential, engine, target
   imports:   PowerShell DSC configurations (*.ps1)
   imports:   DSC v3 configuration documents and DscPipelineRunner projects (*.dsc.yaml, *.dsc.yml, *.dsc.json, *.dsc.config.yaml, *.dsc.config.yml, *.dsc.config.json, Datum.yml, *.yaml, *.yml, *.json)
   sdk:       0.1.0 (protocol 2)
@@ -275,8 +277,10 @@ dsc
 document's [`spec.imports`](dsl/outputs-and-hand-offs.md#imports) brings from
 other documents.
 
-The category decides which kind of document the plugin is handed, and the
-versions decide which `targetVersion` a document may ask it for. A plugin that
+The category decides which kind of document the plugin is handed, the
+versions decide which `targetVersion` a document may ask it for, and the
+settings keys decide what a document may write under
+[`spec.settings`](dsl/index.md#settings); a plugin that lists none takes none. A plugin that
 can read its tool's existing configuration lists `import` under `can`, and the
 file names each of its formats claims under `imports`.
 

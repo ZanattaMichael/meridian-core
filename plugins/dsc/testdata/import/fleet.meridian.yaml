@@ -18,6 +18,11 @@
 #   this is PowerShell that runs when the configuration is compiled, and it
 #   was not read, nor anything declared inside it: if ($Role -eq 'web') {
 #   WindowsFeature IIS { Name = 'Web-Serv...
+# TODO(meridian-import): changed: Fleet.ps1:6: configuration: the
+#   configuration does not say how its machine is reached.
+#   spec.settings.target was set to WinRM, which is how a PowerShell
+#   configuration is pushed; change it to SSH if that is how this machine is
+#   managed
 apiVersion: meridian/v1
 kind: ResourceSet
 metadata:
@@ -28,17 +33,9 @@ spec:
   targetHost:
     from: inline
     host: CHANGE-ME.invalid
+  settings:
+    target: WinRM
   resources:
-    # From Fleet.ps1:6
-    # TODO(meridian-import): changed: Fleet.ps1:6: configuration: the
-    #   configuration does not say how its machine is reached. The runner was
-    #   given target: WinRM, which is how a PowerShell configuration is
-    #   pushed; change it to SSH if that is how this machine is managed
-    - id: runner
-      type: runner
-      params:
-        target: WinRM
-
     # From Fleet.ps1:7
     # TODO(meridian-import): changed: Fleet.ps1:7: ModuleA/Thing "One": the
     #   configuration imports several modules (ModuleA, ModuleB) and does not

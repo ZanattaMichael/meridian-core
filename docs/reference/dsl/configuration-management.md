@@ -122,7 +122,7 @@ are too many, with too many properties each, to hide behind six words.
 | `type` | the DSC resource, `Module/Resource`: `PSDscResources/Service`, `Microsoft.Windows/Registry` |
 | `params` | the resource's properties, exactly as the resource documents them |
 | `state` | not used, and refused. A DSC resource carries its desired state in its own properties (`Ensure`, `_exist`) |
-| Settings resource | one optional resource of type `runner`: the engine (DSC v2 or v3), and how the host is reached |
+| Settings | [`spec.settings`](index.md#settings): the engine (DSC v2 or v3), how the host is reached, and the name of a credential the runner resolves. A resource of type `runner`, the old way to say the same, still compiles with a warning |
 | References | `${id.Property}` reads a property another resource reported; the reader is ordered after it |
 
 See [the `dsc` target](../../targets/dsc.md) and

@@ -37,9 +37,11 @@ aimed at a tool that provisions, or an Infrastructure document aimed at a tool
 that configures one machine, is refused
 ([the pairing](../reference/dsl/index.md#the-document)). The versions decide
 which [`targetVersion`](../reference/dsl/index.md#targetversion) a document may
-ask for; a plugin that declares none is never asked for one. A plugin author
-states them by implementing `category()` and `target_versions()` on the SDK's
-`Emitter`.
+ask for; a plugin that declares none is never asked for one. The settings keys
+decide which [`spec.settings`](../reference/dsl/index.md#settings) a document
+may set; a plugin that declares none takes none. A plugin author states them by
+implementing `category()`, `target_versions()` and `settings_keys()` on the
+SDK's `Emitter`.
 
 The same rule covers the fields of the language that belong to Meridian and not
 to a tool. `metadata.labels`, `when`, `ifMissing` and a notify's `on` each do

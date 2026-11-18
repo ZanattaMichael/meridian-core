@@ -26,9 +26,6 @@ use meridian_sdk::{
 
 use crate::runner::PROGRAM_VARIABLE;
 
-/// The resource type that configures the runner, not a DSC resource.
-const RUNNER_TYPE: &str = "runner";
-
 /// Marks the line of PowerShell's output that holds the answer.
 const RESULT_MARK: &str = "MERIDIAN-SCHEMAS:";
 
@@ -81,7 +78,7 @@ impl SchemaSource for DscSchemas {
             .types
             .iter()
             .map(String::as_str)
-            .filter(|t| *t != RUNNER_TYPE && t.contains('/'))
+            .filter(|t| *t != crate::transform::RUNNER_TYPE && t.contains('/'))
             .collect();
 
         // DSC v3, when it is installed: the version, every native resource

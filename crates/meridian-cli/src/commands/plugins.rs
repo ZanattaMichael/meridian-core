@@ -116,6 +116,9 @@ pub(crate) fn list_plugins(plugins: &PluginDirs, with_settings: bool) -> Result<
         if !info.target_versions.is_empty() {
             outln!("  versions:  {}", info.target_versions.join(", "));
         }
+        if !info.settings_keys.is_empty() {
+            outln!("  settings:  {}", info.settings_keys.join(", "));
+        }
         for format in &info.import_formats {
             outln!(
                 "  imports:   {} ({})",

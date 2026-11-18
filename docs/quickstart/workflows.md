@@ -168,9 +168,9 @@ flowchart LR
   the tool as written.
 - **DSC resources are DSC's own.** `PSDscResources/WindowsFeature` is the
   module and the resource, and `Ensure: Present` is the resource's own
-  property. The `runner` resource is settings: which engine, how the host is
-  reached, and the name of a credential the runner resolves itself. No secret
-  is in the file.
+  property. `spec.settings` says how the configuration is run: which engine,
+  how the host is reached, and the name of a credential the runner resolves
+  itself. No secret is in the file.
 
 ## Edge site
 

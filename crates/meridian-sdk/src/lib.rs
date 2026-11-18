@@ -90,6 +90,7 @@ pub use secrets::{holds_secret, Written};
 pub use secrets::{SecretName, Secrets};
 pub use serve::{serve, Plugin, ServeError};
 pub use settings::Setting;
+pub use types::check_settings;
 pub use types::{
     Artifact, Capabilities, CompileError, Data, Edge, EdgeKind, Emitted, Emitter,
     OutputDeclaration, Position, Resource, ResourceGraph, Warning,

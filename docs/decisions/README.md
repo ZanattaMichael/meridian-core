@@ -30,6 +30,7 @@ page it affects. The pull request template asks for it.
 | [With no data given, editors treat every `when` as true](0003-editors-treat-every-when-as-true.md) | Language | proposed |
 | [A value placed by interpolation is always literal text](0004-placed-values-are-literal.md) | Language | proposed |
 | [YAML tags other than `!!str` are refused, and `08` is text](0027-yaml-tags-are-refused-and-08-is-text.md) | Language | proposed |
+| [Tool-wide settings live under `spec.settings`, not in a resource](0031-tool-wide-settings-live-under-spec-settings.md) | Language | proposed |
 | [Packer sits under infrastructure as code](0005-packer-is-infrastructure-as-code.md) | Categories | proposed |
 | [cloud-init sits under configuration management](0006-cloud-init-is-configuration-management.md) | Categories | proposed |
 | [Containerization accepts both document kinds](0007-containerization-accepts-both-kinds.md) | Categories | proposed |
