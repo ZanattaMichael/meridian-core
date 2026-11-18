@@ -1,7 +1,7 @@
 # Conditions: `when` and `runtimeWhen`
 
-A resource can carry two conditions. They look alike and are decided at two
-different times, by two different parties, in two different languages.
+`when` is decided by Meridian before compiling. `runtimeWhen` is checked by the tool at
+apply time.
 
 ```mermaid
 flowchart LR
@@ -46,8 +46,7 @@ does not move between tools.
 | `chef` | an `only_if` guard | Ruby, with node attributes | `"node['platform_family'] == 'debian'"` |
 | `dsc` | a `preCondition` | the DSC runner's function language | `"equals (nodeName) 'web'"` |
 
-Every other target refuses a resource that carries `runtimeWhen`, because its
-tool has no such moment:
+Every other target refuses it:
 
 ```
 rw.yaml:8:7: puppet: resource "a" [unsupported-runtime-condition]: resource carries runtimeWhen "x", which this target cannot express: a Puppet catalog is compiled before it reaches the node, so there is no apply-time conditional to compile it into
@@ -64,12 +63,8 @@ rw.yaml:8:7: puppet: resource "a" [unsupported-runtime-condition]: resource carr
 
 The [capability matrix](../capability-matrix.md) has the `runtimeWhen` column.
 
-**What it does to a plan.** A condition checked at apply time cannot be known
-in advance, so a plan shows the resource as the tool's own dry run shows it.
-
-**With `notifies`.** A notified resource's own `runtimeWhen` is not copied onto
-the reaction. On Ansible, for example, the handler built for a notified service
-does not carry the service task's `when:`.
+A plan shows the resource as the tool's dry run does. A notified resource's
+`runtimeWhen` is not copied onto the reaction (an Ansible handler has no `when:`).
 
 ## `when`
 
@@ -86,10 +81,8 @@ works on every target.
 
 ### The condition language
 
-A condition is an [expression](expressions.md) that comes out `true` or
-`false`. It reads the values given to the command with `--data` and `--set`,
-as `data.<key>`. Quote the whole condition in YAML, because `!`, `'`, `[` and
-`>` mean something to YAML.
+An [expression](expressions.md) that gives `true` or `false`, reading `--data` and
+`--set` values as `data.<key>`. Quote it in YAML.
 
 | You write | Meaning |
 |---|---|
@@ -125,8 +118,7 @@ as `data.<key>`. Quote the whole condition in YAML, because `!`, `'`, `[` and
   when: "length(filter(data.subnets, 's', !s.public)) > 1 && data.account != 'sandbox'"
 ```
 
-The full language, with every operator, every function and every error, is on
-[expressions and functions](expressions.md).
+Full language: [expressions and functions](expressions.md).
 
 | Rule | Checked by | Message |
 |---|---|---|
@@ -141,16 +133,10 @@ The full language, with every operator, every function and every error, is on
 Guard an optional key with `data.x ?? false`, or with
 `defined(data.x) && data.x == 'y'`.
 
-**The same on every target.** A condition is decided before the document's
-plugin is handed anything, so the target takes no part in it. The resources
-kept are the same whether the document names `ansible`, `terraform` or
-`kubernetes`, and a test asserts that for every target.
+The resources kept are the same on every target; a test asserts it.
 
-**Bare, or wrapped.** A condition is written bare. Wrapped whole in an
-interpolation it means the same, so `when: ${{ data.env == 'prod' }}` is
-`when: data.env == 'prod'`. An interpolation mixed with other text is refused.
-Inside a quoted text the opening is only three characters, so
-`when: data.motd != '${{'` is a bare condition that compares with that text.
+`when: ${{ data.env == 'prod' }}` is the same as `when: data.env == 'prod'`. An
+interpolation mixed with other text is refused. `'${{'` inside quotes is text.
 
 ### Giving the data
 
@@ -158,10 +144,8 @@ Inside a quoted text the opening is only three characters, so
 meridian apply site.yaml --data common.yaml --data prod.yaml --set replicas=5
 ```
 
-A data file is YAML or JSON holding one mapping. `--data` may be repeated; a
-key in a later file replaces the same key from an earlier file, whole.
-
-`--set KEY=VALUE` gives one value, after every data file, so it wins:
+A data file is one YAML or JSON mapping. A later `--data` key replaces an earlier one
+whole. `--set KEY=VALUE` applies after every file:
 
 | You write | Sets |
 |---|---|
@@ -172,18 +156,15 @@ key in a later file replaces the same key from an earlier file, whole.
 | `--set 'ports=[80, 443]'` | a list |
 | `--set note=` | null |
 
-A later `--set` of the same key wins. A dotted key whose start is already set
-to something that is not a mapping is refused: `--set env.name=x: env is
+A later `--set` wins. A dotted key into a non-mapping is refused: `--set env.name=x: env is
 already set to a string, so it cannot hold the key "name"`.
 
-With no `--data` and no `--set` there is no data, and a condition that reads a
-key is refused, not taken as false.
+With no data, a condition that reads a key is refused.
 
 ### `ifMissing`
 
-A resource whose `when` is false is not in the output, and neither are its own
-`dependsOn` and `notifies`. An entry of *another* resource that names it has
-lost its other end, and `ifMissing` on that entry says what happens:
+A resource whose `when` is false is left out with its own `dependsOn` and `notifies`.
+`ifMissing` decides what happens to *another* resource's entry that names it:
 
 ```yaml
 - id: legacy_dir
@@ -213,11 +194,8 @@ flowchart LR
 | `error` (the default) | refused: `resource "app_conf" depends on "legacy_dir", which its when removed from this run; set ifMissing: skip on this entry if the resource should carry on without it` |
 | `skip` | the entry is dropped and the resource carries on without it |
 
-It is the same on `dependsOn` and on `notifies`. The default is `error` because
-a resource depending on something that is not there is far more often a mistake
-than an intention. `ifMissing` does nothing to an entry whose resource is
-present, and never excuses an entry naming a resource the document does not
-declare.
+The same on `dependsOn` and `notifies`. The default is `error`. It never excuses a
+resource the document does not declare.
 
 Also:
 
@@ -234,8 +212,7 @@ Also:
 
 ## Where a `when` can be written
 
-A `when` is not only for resources. It is the same language, decided at the
-same moment, in each of these places:
+The same language, decided at the same moment, in each of these places:
 
 | Place | When false |
 |---|---|
@@ -274,17 +251,11 @@ spec:
       when: cond.public                    # an output
 ```
 
-**A document.** `spec.when` is decided after the document's variables and named
-conditions and before anything else in it. A skipped document is not read
-further: its resources are not decided and its interpolations are not placed,
-so data only that document needs does not have to be given. Another document
-that takes its host from a skipped one finds it from that document's last
-apply, exactly as it does for a document a selector left out.
+**A document.** `spec.when` is decided after variables and named conditions. A skipped
+document is not read further, so its data need not be given. A document taking its host
+from it uses that document's last apply.
 
-**An edge.** A `when` on a `dependsOn` or `notifies` entry is decided before
-`ifMissing` is looked at. An entry its own `when` drops is gone whatever became
-of the resource it named, so it needs no `ifMissing`. It is how an order, or a
-reaction, is made to hold only where it matters:
+**An edge.** Decided before `ifMissing`. A dropped entry needs no `ifMissing`:
 
 ```yaml
 dependsOn:
@@ -296,14 +267,12 @@ notifies:
     when: "data.env != 'dev'"
 ```
 
-**An output.** An output whose `when` is false is not declared, so a document
-that asks for it is told it does not exist. Give an output a `when` when the
-resource it reads has one.
+**An output.** A false `when` means the output is not declared. Give an output the same
+`when` as the resource it reads.
 
 ### What is reported
 
-Every decision is printed with the stage, so something missing from the
-compiled output is never a surprise:
+Every decision is printed with the stage:
 
 ```
 site (ResourceSet, target ansible on shop-dev.example.com)
@@ -317,10 +286,8 @@ monitoring (Infrastructure, target kubernetes)
 
 ### Named conditions
 
-A condition used more than once is given a name under `spec.conditions` and
-read as `cond.<name>`, so a document agrees with itself on what "production"
-means. Named conditions, and the variables they can read, are on the
-[interpolation](interpolation.md#named-conditions) page.
+`spec.conditions` names a condition, read as `cond.<name>`. See
+[interpolation](interpolation.md#named-conditions).
 
 ```yaml
 spec:
@@ -341,8 +308,6 @@ spec:
 ## A worked example
 
 [`examples/workflow/environments.yaml`](../../../examples/workflow/environments.yaml)
-is one workflow for development and production: a Terraform document, an
-Ansible one and a Kubernetes one, with the same conditions in each, two data
-files, `ifMissing: skip`, a guarded optional key and one `runtimeWhen`.
-[Worked workflows](../../quickstart/workflows.md#environments) goes through it,
-with what each condition keeps in each environment.
+covers development and production across Terraform, Ansible and Kubernetes, with two data
+files, `ifMissing: skip`, a guarded optional key and one `runtimeWhen`
+([walk-through](../../quickstart/workflows.md#environments)).
