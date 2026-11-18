@@ -47,8 +47,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use meridian_ir::Bundle;
 use meridian_orchestrator::{
     describe_duration, file_hash, lock, record, run_selected, selected, Asked, Backend, Decisions,
-    Drift, Event, ExecBackend, LocalBackend, LockInfo, Mode, Observer, OnFailure, Options, Outcome,
-    PlanFile, Policy, Reason, Refusal, Resume, RollbackOutcome, RollbackReport, RunRecord,
+    Drift, Event, ExecBackend, Keeper, LocalBackend, LockInfo, Mode, Observer, OnFailure, Options,
+    Outcome, PlanFile, Policy, Reason, Refusal, Resume, RollbackOutcome, RollbackReport, RunRecord,
     RunReport, RunState, Selector, StageId, StageReport, Stop, MASK,
 };
 use meridian_plugin_host::{
@@ -206,6 +206,30 @@ fn run() -> ExitCode {
         Command::Status { state } => status(&state),
         Command::Runs { state } => runs(&state),
         Command::Events { run, types, state } => events(&state, run.as_deref(), &types),
+        Command::Logs {
+            run,
+            step,
+            endpoint,
+            stream,
+            grep,
+            tail,
+            all,
+            state,
+        } => show_logs(
+            &state,
+            &LogQuery {
+                run: run.as_deref(),
+                step: step.as_deref(),
+                endpoint: endpoint.as_deref(),
+                stream,
+                grep: grep.as_deref(),
+                tail,
+                all,
+            },
+        ),
+        Command::BugReport { run, out, state } => {
+            bug_report(&state, run.as_deref(), out.as_deref())
+        }
         Command::Report {
             run,
             format,

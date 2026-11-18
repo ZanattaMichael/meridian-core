@@ -745,7 +745,11 @@ when the job ends, so the record must be somewhere the next job can reach:
   takes it, a resume takes the failed run's. It is simple and it is enough
   while one pipeline owns the documents and runs one job at a time (every
   snippet has a concurrency group for that). It carries no secret: the
-  record names things and never holds a value.
+  record names things and never holds a value. The state directory also
+  holds each step's [tool output](../reference/state.md#runsidlogs), masked
+  as the job's log is, so a failed step can be read with `meridian logs`
+  after the runner is gone. To leave it out of the artifact, exclude
+  `.meridian/runs/*/logs/` or run with `--no-logs`.
 - **A shared backend**, `--backend NAME`, keeps the record in a store every
   runner reaches, and holds the lock there, so two pipelines, or a pipeline
   and a laptop, cannot apply the same documents at once. A backend is a

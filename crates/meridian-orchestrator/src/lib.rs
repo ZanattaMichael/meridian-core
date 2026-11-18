@@ -40,6 +40,7 @@ pub mod event;
 pub mod history;
 mod journal;
 pub mod lock;
+pub mod logs;
 mod options;
 pub mod plan;
 pub mod policy;
@@ -75,6 +76,7 @@ use meridian_secret::Masker;
 pub use backend::{Backend, ExecBackend, LocalBackend, MemoryBackend};
 pub use event::Event;
 pub use lock::{LockError, LockInfo};
+pub use logs::{Keeper, DEFAULT_LOG_LIMIT};
 pub use options::{mask, Observer, OnFailure, Options, Quiet, Resume, DEFAULT_KEEP_RUNS, MASK};
 pub use plan::{file_hash, Asked, PlanFile, PlannedStage, PlannedStatus, PLAN_FILE_VERSION};
 pub use policy::{Decisions, Policy};
@@ -453,6 +455,14 @@ pub fn run_selected(
             journal
                 .warnings
                 .push(format!("removing old run records: {why}"));
+        }
+        // The logs on this machine go with the records they belong to.
+        let kept = record::list_runs(backend.as_ref())
+            .and_then(|ids| logs::prune(&options.state_dir, &ids));
+        if let Err(why) = kept {
+            journal
+                .warnings
+                .push(format!("removing old tool logs: {why}"));
         }
         guard.held = false;
         if let Err(why) = lock::release(backend.as_ref(), &run_id) {

@@ -11,6 +11,7 @@ flowchart TB
         W1["infrastructure/&lt;document&gt;/&lt;target&gt;/<br/>the tool's working directory"]
         W2["resourceset/&lt;document&gt;/&lt;target&gt;/<br/>the tool's working directory"]
         H["history/&lt;kind&gt;/&lt;document&gt;/&lt;hash&gt;.json<br/>snapshots for rollback"]
+        G["runs/&lt;id&gt;/logs/&lt;kind&gt;/&lt;document&gt;[@&lt;endpoint&gt;].log<br/>tool output, masked"]
     end
     subgraph BE["the backend (--backend; local means the state directory too)"]
         L["lock"]
@@ -36,7 +37,9 @@ it, so a crash never leaves half a file, and are readable only by their owner
 
 **No secret value is kept in the record, in any form.** The record holds
 names, ids, hashes of artifacts, counts and times. It does not hold a param,
-an output's value, a data file, or anything a tool printed.
+an output's value, a data file, or anything a tool printed. What a tool
+printed is kept apart, masked and only on this machine:
+[`runs/<id>/logs/`](#runsidlogs).
 
 ## `history/`
 
@@ -55,6 +58,45 @@ back, and says so.
 
 A snapshot is loaded by its hash and checked against it. One that has been
 changed is refused.
+
+## `runs/<id>/logs/`
+
+Each step's tool output, written as the tool prints it, one file per step:
+`runs/<id>/logs/<kind>/<document>[@<endpoint>].log` under the state
+directory, as in `resourceset/web@203.0.113.10.log`. A character of the
+endpoint other than a letter, a digit, `.`, `-` or `_` becomes `_`. Each line
+is
+
+```
+2026-11-17T09:15:11.102Z stderr fatal: [203.0.113.10]: FAILED! => {"msg": "No package matching 'nginx'"}
+```
+
+the time in UTC, the stream, and the text. The stream is `stdout` or `stderr`
+for the tool's own lines, and `meridian` for what Meridian adds: the failure
+of a step (`step failed (<reason>): <message>`) or of its rollback, and where
+lines were cut.
+
+- **Masked.** Every secret the stage fetched and every sensitive output of an
+  earlier stage is replaced by `(sensitive)` before the line is written, as on
+  the terminal.
+- **Local only.** Like `history/`, the logs stay in the state directory on
+  the machine that ran and are never sent to a backend. With the local backend
+  they sit beside `run.json`. Files are readable only by their owner (mode
+  `0600`).
+- **Capped.** `--log-limit` (default `10MiB`) bounds each step's file. Past
+  the first half of it, only the last half is kept, held in memory until the
+  step ends, and a `meridian cut N lines (M bytes) ...` line marks the gap.
+  A run that is killed keeps the start of the step's output, not its end.
+- **Kept with the run.** When old run records are removed (`--keep-runs`),
+  their logs are removed too.
+- `--no-logs` (or `MERIDIAN_NO_LOGS`) keeps none. `compile` keeps none.
+
+The endpoint is known once a step ends. Until then, and in a run that was
+killed, the file has no `@<endpoint>`. A rollback adds its lines to the end of
+the step's file.
+
+[`meridian logs`](cli.md#logs) reads these files, and
+[`meridian bug-report`](cli.md#bug-report) packs them with the run's record.
 
 ## `lock`
 

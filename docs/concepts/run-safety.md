@@ -6,7 +6,7 @@ shared between people, picked up where it stopped, or put back, how to find
 out whether what was applied is still what is there, and how a policy is
 asked whether a change may be made before it is.
 
-<p align="center"><img src="../graphics/meridian-run-safety.svg" alt="Running safely: the lock, the policy check, the record of every event, the run-state, and what happens when a stage fails" width="100%"></p>
+<p align="center"><img src="../graphics/meridian-run-safety.svg" alt="Running safely: the lock, the policy check, the record of every event, the run-state, the tool logs kept on the machine, and what happens when a stage fails" width="100%"></p>
 
 Three rules hold throughout:
 
@@ -15,7 +15,8 @@ Three rules hold throughout:
   stored in it: they are read back from the tool that produced them.
 - **Nothing kept holds a secret value.** The record names things: a step, a
   resource id, an output, the hash of an artifact. It never holds a param, an
-  output's value, or what a tool printed.
+  output's value, or what a tool printed. What a tool printed is kept apart,
+  masked, on the machine that ran.
 - **`compile` and `validate` are outside all of this.** They contact nothing,
   so they take no lock and leave no record.
 
@@ -67,6 +68,8 @@ not locked
 | `meridian runs` | every recorded run, oldest first, with its mode and how it ended |
 | `meridian events [run]` | the run's events, one JSON object per line; `--type step.failed` or `--type 'step.*'` narrows them |
 | `--events json` on `plan` or `apply` | the same events on standard output while the run is going, for CI |
+| `meridian logs [run]` | the tool output each step printed, kept on this machine; by default the failed steps |
+| `meridian bug-report [run]` | one archive of the run's record, events, tool output and versions, to attach to an issue; it sends nothing |
 
 A run that was killed never says how it ended. `status` shows it as
 `interrupted`, with the last step it had started.
@@ -74,8 +77,10 @@ A run that was killed never says how it ended. `status` shows it as
 A failed step is recorded with a fixed word for the kind of failure
 (`tool-failed`, `plugin-failed`, `compile-refused` and so on), never with what
 the tool said. A tool can quote a value in an error message, and the record
-is not the place to find that out. What the tool said is on the terminal of
-the run that failed.
+is not the place to find that out. What the tool said is kept, masked, in
+the state directory of the machine that ran
+([`runs/<id>/logs/`](../reference/state.md#runsidlogs)); `meridian logs`
+prints it.
 
 The newest 50 runs are kept; `--keep-runs N` changes that. Every file and
 field is in [the state reference](../reference/state.md).
