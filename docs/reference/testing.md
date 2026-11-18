@@ -359,4 +359,4 @@ plan case needs its tool, as the plan job does.
   line.
 
 The design choices are recorded in
-[decision 0035](../decisions/0035-a-test-is-a-document-of-cases-over-compile-and-plan.md).
+[decision 0037](../decisions/0037-a-test-is-a-document-of-cases-over-compile-and-plan.md).
