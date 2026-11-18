@@ -174,16 +174,17 @@ pub(crate) fn read_resources(document: &Value, wanted: &[&str], source: &str) ->
             read.named += 1;
             ResourceSchema::open(&written, &description)
         };
-        schema.actions = resource
-            .get("actions")
-            .and_then(Value::as_list)
-            .map(|l| {
-                l.iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_owned)
-                    .collect()
-            })
-            .unwrap_or_default();
+        // The actions are a map of name to description (Chef 18), or a
+        // list of names in older output.
+        schema.actions = match resource.get("actions") {
+            Some(Value::Map(m)) => m.keys().cloned().collect(),
+            Some(Value::List(l)) => l
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect(),
+            _ => Vec::new(),
+        };
         schema.actions.retain(|a| a != "nothing");
         schema.source = source.to_owned();
         read.schemas.push(schema);
@@ -234,7 +235,9 @@ fn property(value: &Value) -> Option<ParamSchema> {
         kind
     };
     let mut param = ParamSchema::new(name, kind, &first_paragraph(text(map, "description")));
+    // `name` is the resource's id, which the recipe always writes.
     param.required = match map.get("required") {
+        _ if name == "name" => false,
         Some(Value::Bool(b)) => *b,
         Some(Value::List(l)) => !l.is_empty(),
         _ => false,
@@ -284,7 +287,7 @@ mod tests {
   "apt_repository": {
     "description": "Use the **apt_repository** resource to specify additional APT repositories.\n\nMore text.",
     "default_action": ["add"],
-    "actions": ["nothing", "add", "remove"],
+    "actions": {"nothing": null, "add": "Creates a repository file.", "remove": "Removes the repository listing."},
     "introduced": "12.9",
     "properties": [
       {"name": "repo_name", "description": "An optional property to set the repository name if it differs from the resource block's name.", "introduced": "14.1", "is": "String", "name_property": true, "required": false},
