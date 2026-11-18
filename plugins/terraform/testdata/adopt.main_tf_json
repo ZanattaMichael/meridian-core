@@ -1,0 +1,43 @@
+{
+  "import": [
+    {
+      "id": "vpc-0abc1234def567890",
+      "to": "aws_vpc.network"
+    },
+    {
+      "id": "example-logs",
+      "to": "aws_s3_bucket.logs"
+    }
+  ],
+  "provider": {
+    "aws": {
+      "region": "us-east-1"
+    }
+  },
+  "resource": {
+    "aws_s3_bucket": {
+      "logs": {
+        "bucket": "example-logs"
+      }
+    },
+    "aws_subnet": {
+      "app": {
+        "cidr_block": "10.0.1.0/24",
+        "vpc_id": "${aws_vpc.network.id}"
+      }
+    },
+    "aws_vpc": {
+      "network": {
+        "cidr_block": "10.0.0.0/16"
+      }
+    }
+  },
+  "terraform": {
+    "required_providers": {
+      "aws": {
+        "source": "hashicorp/aws",
+        "version": "~> 5.0"
+      }
+    }
+  }
+}

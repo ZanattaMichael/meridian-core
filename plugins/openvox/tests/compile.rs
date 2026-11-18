@@ -59,6 +59,7 @@ fn the_plugin_describes_itself_as_openvox() {
             runtime_condition: false,
             secrets: true,
             credentials: true,
+            adopt: meridian_sdk::Adoption::Converge,
         }
     );
     assert_eq!(

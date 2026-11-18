@@ -21,6 +21,7 @@ with the `pulumi` command line. The plugin's category is **infrastructure as cod
 | Plan, apply and outputs | Yes: `pulumi preview`, `pulumi up`, `pulumi stack output`. |
 | `notifies` | **No.** Refused at compile time. See [Notifications](#notifications). |
 | `runtimeWhen` | **No.** Refused at compile time. |
+| `adopt` | Yes: the `import` resource option. See [Adopting what exists](#adopting-what-exists) |
 | `state: absent` | **No.** Refused: remove the resource from the document instead. |
 | Expressions inside `${}` | **No.** Pulumi YAML reads a name and its properties there, nothing computed. Use Pulumi's `fn::` functions. |
 | Reading an existing resource (`get`) and component packages | **Not yet.** `resourceOptions.import` adopts an existing resource. |
@@ -466,6 +467,37 @@ input of a random string: it comes back as a secret output holding the value, th
 does not, the value is in nothing Pulumi printed and in no file in the work directory in
 the open, and the settings file no longer names the key when the run is over.
 
+## Adopting what exists
+
+A resource's `adopt` is the provider's own import identifier of a thing that
+already exists. The target writes it as the resource's `import` option, so
+`pulumi up` takes the thing into the stack instead of creating it:
+
+```yaml
+    - id: logs
+      type: aws:s3/bucket:Bucket
+      adopt: example-logs
+      params:
+        bucket: example-logs
+```
+
+```yaml
+  logs:
+    type: aws:s3/bucket:Bucket
+    properties:
+      bucket: example-logs
+    options:
+      import: example-logs
+```
+
+- `meridian plan` reports the resource as `adopt`.
+- Pulumi refuses the import when the properties differ from what exists, and
+  `pulumi preview` says which. Make the params match, then change them once the
+  resource is in the stack.
+- Only a resource can be adopted: `adopt` on a `config`, an `invoke.<function>`,
+  a `stack` or a `pulumi:providers:<name>` is refused with `invalid-adopt`, and
+  so is an `adopt` that names another identifier than `resourceOptions.import`.
+
 ## What is refused
 
 Every refusal carries a rule and, where it is about one resource, that resource with its file and line.
@@ -476,6 +508,7 @@ Every refusal carries a rule and, where it is about one resource, that resource 
 | `invalid-reference` | `${...}` names an id the document does not declare, holds something computed, reads a provider setting, or appears in a `config` declaration. | Fix the id, or use a `fn::` function. |
 | `unsupported-action` | The resource has `notifies`. Nothing in a Pulumi YAML program makes one resource react to a change in another. | Pass the changing value into a property of the other resource and name that property in its `replaceOnChanges` option. |
 | `unsupported-runtime-condition` | The resource has `runtimeWhen`. A Pulumi YAML program has no conditional. | Decide before compiling, with `when`. |
+| `invalid-adopt` | `adopt` on something that is not a resource, or beside a `resourceOptions.import` that names another identifier. | Put `adopt` on the resource, and remove the option. |
 | `unsupported-state` | `state: absent`. | Remove the resource from the document; Pulumi deletes what its program no longer declares. |
 | `unsupported-dependency` | A `dependsOn` to or from a `config`, a `stack` or an `invoke.<function>` that no reference implies. | Make the dependent refer to what it needs. |
 | `invalid-param` | `resourceOptions` or `invokeOptions` is not a map, an unknown setting on a `stack` or `config`, or a `stack` setting that is not plain text. | |

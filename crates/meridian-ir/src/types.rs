@@ -119,6 +119,10 @@ pub struct Resource {
     pub notifies: Vec<Notification>,
     pub when: String,
     pub runtime_when: String,
+    /// `adopt`: the tool's own identifier of a thing that already exists,
+    /// which the tool takes under management instead of creating it. Empty
+    /// for a resource that is created as usual.
+    pub adopt: String,
     /// Position in the document's declaration order. It is the sole tiebreak
     /// for topological sort, so downstream ordering never depends on anything
     /// but what the author wrote.

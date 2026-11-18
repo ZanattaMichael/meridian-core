@@ -634,6 +634,37 @@ impl Run<'_> {
                 ));
             }
         }
+        // An adoption. A target that cannot adopt, which is every plugin
+        // built before `adopt` existed, would ignore the field and create a
+        // second thing beside the one the document says exists.
+        if let Some(r) = document.resources().iter().find(|r| !r.adopt.is_empty()) {
+            let adopts = |name: &str| {
+                self.registry
+                    .target(name)
+                    .is_some_and(|t| t.info().capabilities.adopt != meridian_sdk::Adoption::None)
+            };
+            if !adopts(document.target()) {
+                let takers: Vec<&str> = self
+                    .registry
+                    .names()
+                    .into_iter()
+                    .filter(|name| adopts(name))
+                    .collect();
+                let takers = if takers.is_empty() {
+                    "no loaded target does".to_owned()
+                } else {
+                    format!("targets that do: {}", takers.join(", "))
+                };
+                return Read::Failed(format!(
+                    "resource {:?} adopts {:?}, and target {:?} cannot take a thing that \
+                     already exists under management, so it would create another beside \
+                     it. Remove adopt; {takers}",
+                    r.id,
+                    r.adopt,
+                    document.target()
+                ));
+            }
+        }
         Read::Kept {
             document: Box::new(document),
             removed,

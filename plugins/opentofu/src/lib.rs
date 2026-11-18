@@ -65,8 +65,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::rules::Rule;
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, Value,
+    Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph, Value,
 };
 
 pub use emit::CONFIG_PATH;
@@ -202,6 +202,9 @@ pub(crate) struct Config {
     pub blocks: Vec<Block>,
     /// `required_providers`, by local name.
     pub required_providers: BTreeMap<String, Value>,
+    /// The `import` blocks a resource's `adopt` compiles to: the address it
+    /// is taken under and the tool's own identifier, in declaration order.
+    pub imports: Vec<(String, String)>,
     pub outputs: Vec<OutputBlock>,
 }
 
@@ -269,6 +272,7 @@ impl Emitter for OpenTofu {
             runtime_condition: false,
             secrets: true,
             credentials: false,
+            adopt: Adoption::Import,
         }
     }
 

@@ -32,8 +32,8 @@ use std::collections::BTreeMap;
 
 use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, SshTakes, Value,
+    Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph, SshTakes, Value,
 };
 
 /// What `chef-run` can take of the credential a document reaches its host
@@ -166,6 +166,7 @@ impl Emitter for Chef {
             runtime_condition: true,
             secrets: true,
             credentials: true,
+            adopt: Adoption::Converge,
         }
     }
 

@@ -46,6 +46,7 @@ A resource is one thing the document wants to be true.
     - resource: nginx_svc
       action: restart
   runtimeWhen: "..."        # optional; only on targets that can check at apply time
+  adopt: "..."              # optional; the tool's identifier of a thing that exists
 ```
 
 ## Two families of types

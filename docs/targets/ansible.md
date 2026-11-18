@@ -16,6 +16,7 @@ on it.
 | `dependsOn` | Yes, as task order. A play runs top to bottom, so independent resources still run in sequence; a warning says which |
 | `notifies` | Native: handlers. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec or on a module. The action is kept: a reload stays a reload |
 | `runtimeWhen` | Yes: a task's `when:`, as an Ansible expression |
+| `adopt` | Accepted, and changes nothing: Ansible keeps no state and makes each thing what the document says whether it exists or not. The compile warns |
 | Secrets | Yes: by an extra-vars file only the user can read, with `no_log` on the task |
 | Credentials | Yes: an `ssh` or `usernamePassword` credential for the host, the user in the inventory and the key or password by a private file. See [Reaching the host as a credential](#reaching-the-host-as-a-credential) |
 | References | `${id.param}` is settled from the document when it is compiled; anything else in `${...}` is refused, and `$${` is a literal `${` ([rules](../reference/resource-types.md#references)) |

@@ -57,8 +57,8 @@ use std::collections::BTreeMap;
 
 use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
-    holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
-    Resource, ResourceGraph, Value,
+    holds_secret, Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter,
+    Position, Resource, ResourceGraph, Value,
 };
 
 pub use check::known_keys;
@@ -249,6 +249,7 @@ impl Emitter for Docker {
             runtime_condition: false,
             secrets: true,
             credentials: false,
+            adopt: Adoption::None,
         }
     }
 
