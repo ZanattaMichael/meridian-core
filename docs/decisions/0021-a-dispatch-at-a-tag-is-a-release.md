@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Area | Releases |
-| Status | **proposed**: made during the work and merged, not yet accepted or changed by the owner |
+| Status | **accepted** 2026-11-18 |
 | Made in | the `cut release` workflow |
 | Where it shows | [Releasing](../contributing/releasing.md#cutting-a-release) |
 
