@@ -70,11 +70,17 @@ const COLUMNS: &[Column] = &[
         settings: "",
         preamble: "    - id: target\n      type: deployment\n      params: {resourceGroup: rg}\n",
     },
+    Column {
+        title: "arm",
+        target: "arm",
+        settings: "",
+        preamble: "    - id: target\n      type: deployment\n      params: {resourceGroup: rg}\n",
+    },
 ];
 
 /// The targets that take the common types. A target added here must be
 /// given a column.
-const COMMON_TARGETS: &[&str] = &["bicep", "opentofu", "terraform"];
+const COMMON_TARGETS: &[&str] = &["arm", "bicep", "opentofu", "terraform"];
 
 #[derive(Clone, Copy, PartialEq)]
 enum Agreement {

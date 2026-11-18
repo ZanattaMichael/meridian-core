@@ -55,6 +55,25 @@ pub use emit::{DEPLOYMENT_PATH, TEMPLATE_PATH};
 pub use runner::BicepRunner;
 pub use schemas::{AzureSchemas, Dialect};
 
+/// Replaces the common infrastructure types with Azure resources written in
+/// `dialect`, refusing as `target`. The ARM target lowers through this.
+pub fn lower_common(
+    graph: &ResourceGraph,
+    dialect: Dialect,
+    target: &'static str,
+) -> Result<ResourceGraph, CompileError> {
+    common::lower_for(graph, dialect, target)
+}
+
+/// The common infrastructure types as the Azure targets take them, described
+/// for editors.
+pub fn common_schemas() -> Vec<meridian_sdk::ResourceSchema> {
+    meridian_sdk::infra::common_type_names()
+        .into_iter()
+        .map(|name| meridian_sdk::infra::common_schema(name, &common::params(name)))
+        .collect()
+}
+
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "bicep";
 
