@@ -1,21 +1,17 @@
 # The language server
 
 `meridian lsp` is a [Language Server Protocol](https://microsoft.github.io/language-server-protocol/)
-server. An editor starts it, sends it the files you have open, and shows what
-it answers. It reads and writes standard input and output, and it never runs a
-tool or changes a file on its own.
+server on stdin and stdout. It never runs a tool or changes a file on its own.
 
 - In Visual Studio Code, install [the extension](vscode.md).
 - In another editor, see [Other editors](other-editors.md).
 
-It serves any YAML or JSON file with an `apiVersion` that starts with
-`meridian/`. Other files are ignored, so it can be attached to every YAML file
-without getting in the way.
+It serves YAML and JSON files whose `apiVersion` starts with `meridian/` and ignores the
+rest.
 
 ## Completion
 
-The server offers what can be written at the cursor, in the order the language
-lists it, with its documentation.
+What can be written at the cursor, in language order:
 
 | Where | What is offered |
 |---|---|
@@ -39,42 +35,26 @@ lists it, with its documentation.
 
 ![Completion of a resource's type, with the type's params shown beside it](images/completion-types.png)
 
-Resource types come from the target the document names. Change `target` from
-`ansible` to `terraform` and the list changes with it.
+Types follow the document's `target`.
 
 ![Completion of the params a file takes on the ansible target](images/completion-params.png)
 
 ![Completion of the resources a dependency can name](images/completion-references.png)
 
-A field is inserted with what usually follows it: `params` opens a mapping, a
-boolean param offers `true` and `false`, and `mode` is inserted quoted so that
-YAML does not read it as a number.
+`params` opens a mapping, booleans offer `true` and `false`, and `mode` is inserted
+quoted.
 
 ## Hover
 
-Hovering shows the documentation of what is under the pointer:
-
-- a field of the language: its path, whether it is required, what it holds;
-- a target: its category, what it can do, the versions it compiles for;
-- a resource type: its description and a table of its params and states on
-  this target;
-- a param: its kind, whether it is required, the values it takes, and for
-  a tool's own type whether the tool sets it, whether it is sensitive or
-  deprecated, and its nested params;
-- a built-in function in `${{ ... }}`: its signature, what it does and what
-  it returns;
-- a value with a fixed set of choices, such as `ifMissing: skip`: what the
-  choice means;
-- a resource id in `dependsOn`, `notifies` or `${...}`: the resource it names;
-- `targetHost.ref` and `targetHost.output`: the Infrastructure document and
-  its outputs, or the output and its value.
+Hover documents fields, targets, resource types (params and states), params (kind,
+required, values, computed, sensitive, deprecated, nested), functions, choice values such
+as `ifMissing: skip`, resource ids, and `targetHost.ref` and `.output`.
 
 ![Hover documentation for a field](images/hover.png)
 
 ## Errors and warnings
 
-Diagnostics appear as you type, for every Meridian file you have open. They
-come from four places, and each says which in its code:
+Diagnostics appear as you type, from four sources:
 
 | Source | Example | Where it comes from |
 |---|---|---|
@@ -85,36 +65,20 @@ come from four places, and each says which in its code:
 
 ![An unknown param, an unknown resource and an unsupported state, each underlined where it is](images/diagnostics.png)
 
-Two things are different from `meridian compile`, both because an editor has
-less to go on:
+Differences from `meridian compile`:
 
-- **Conditions and interpolation.** The server has no `--data` files. A
-  document that needs none (conditions and `${{ ... }}` read only
-  `spec.variables` and literals) is compiled exactly as `meridian compile`
-  would. A document that needs data is checked with every `when` true; if it
-  interpolates values, it is checked against the language only, since the
-  values are unknown. Malformed conditions are still reported. See
-  [conditions and data](linter.md#conditions-and-data).
-- **Secrets.** Neither the server nor `meridian lint` fetches a secret: opening
-  or checking a document reads no environment variable, opens no file and runs
-  no `exec` command.
-- **Module manifests.** A `meridian.yaml` with `kind: Module` is not compiled,
-  and the server ignores it.
-- **A missing plugin.** A document whose target has no plugin gets one
-  `unknown-target` error on `spec.target` listing the installed targets, and is
-  otherwise checked against the language only. With no plugins installed at
-  all, targets are not reported, so the language is still checked on a machine
-  with only the `meridian` binary.
+- **No data.** Handled as in [the linter](linter.md#conditions-and-data).
+- **No secrets fetched.**
+- **`kind: Module` is ignored.**
+- **A missing plugin** gives one `unknown-target` error; with no plugins at all, targets are
+  not reported.
 
-Documents in other files of the workspace are read too, so a ResourceSet whose
-`targetHost` refers to an Infrastructure in another file is checked against it.
-Each file is otherwise checked on its own: two files that both define a
-document called `web` are two projects, not a mistake.
+Other workspace files are read for `targetHost` references; otherwise each file stands
+alone.
 
 ## Quick fixes
 
-Where a problem has one safe fix, the server offers it as a quick fix. At
-present that is quoting a file mode.
+Quoting a file mode is offered as a quick fix.
 
 ![A quick fix that quotes a file mode](images/quick-fix.png)
 
@@ -129,12 +93,11 @@ present that is quoting a file mode.
 
 ## Formatting
 
-Format Document runs [`meridian fmt`](formatter.md) on the file. If the file
-does not parse it is left alone and the error is shown as a diagnostic.
+Format Document runs [`meridian fmt`](formatter.md); unparseable files are left alone.
 
 ## Options
 
-The editor passes these in `initializationOptions` when it starts the server.
+Passed in `initializationOptions`.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -143,40 +106,27 @@ The editor passes these in `initializationOptions` when it starts the server.
 | `sortFields` | `true` | when formatting, write fields in the language's own order |
 | `stateDir` | `.meridian` | where each workspace folder's [synced tool schemas](schema-sync.md) are read from, relative to the folder |
 
-Plugins are looked for, in order, in `pluginDirs`, in each `--plugin-dir` given
-to `meridian lsp` and in `MERIDIAN_PLUGIN_DIR`, and in the directory the
-`meridian` binary is in. A plugin that fails to load is reported once as a
-warning and the rest are used.
+Plugins are found in `pluginDirs`, `--plugin-dir`, `MERIDIAN_PLUGIN_DIR`, then `meridian`'s
+directory. A failed plugin is warned about once.
 
 ### Plugin signatures
 
-The server checks [plugin signatures](../reference/plugin-signatures.md) the
-way `lint` and every other command does: `--plugin-signatures` and
-`--trusted-key` (or `MERIDIAN_PLUGIN_SIGNATURES` and `MERIDIAN_TRUSTED_KEYS`)
-apply to `meridian lsp` too, with the same defaults, and a plugin that does not
-pass is reported to the editor instead of started.
+[Plugin signatures](../reference/plugin-signatures.md) are checked as for every command
+(`--plugin-signatures`, `--trusted-key`, or their environment variables).
 
-`pluginDirs` directories have a stricter rule. They come from editor settings,
-which a project can ship, so plugins there start only if signed by a trusted
-key, whatever the policy. To load any plugin from them (such as one you are
-building), start the server with `meridian lsp --trust-editor-plugin-dirs` (or
-set `MERIDIAN_LSP_TRUST_EDITOR_PLUGIN_DIRS=true`); the command-line policy then
-applies to them too.
+Plugins in `pluginDirs` start only if signed by a trusted key, since projects can ship
+editor settings. `--trust-editor-plugin-dirs` (or
+`MERIDIAN_LSP_TRUST_EDITOR_PLUGIN_DIRS=true`) applies the normal policy instead.
 
-The server loads plugins when it starts. After installing or rebuilding one,
-run the `meridian.reloadPlugins` command (in VS Code, **Meridian: Reload Target
-Plugins**) or restart the server.
+After installing a plugin, run `meridian.reloadPlugins` (**Meridian: Reload Target
+Plugins**) or restart.
 
-The server reads the tool schemas cached by `meridian schema sync` in each
-workspace folder's state directory, at start and whenever the cache changes, so
-a sync in a terminal shows up without a restart. It never syncs itself. If
-`meridian.lock` records schemas not cached here, or the cache differs from the
-lock, it shows one message.
+Cached tool schemas are reread when they change; the server never syncs. A cache that
+differs from `meridian.lock` gives one message.
 
 ## What the server supports
 
-For connecting an editor by hand: the server uses full-document sync and UTF-16
-positions, and answers `textDocument/completion`,
+Full-document sync, UTF-16 positions, `textDocument/completion`,
 `hover`, `definition`, `references`, `prepareRename`, `rename`,
 `documentSymbol`, `formatting` and `codeAction` (kind `quickfix`),
 `workspace/executeCommand` for `meridian.reloadPlugins`, and publishes
