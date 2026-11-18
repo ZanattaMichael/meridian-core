@@ -21,6 +21,7 @@ it, previews it with `what-if` and deploys it.
 | Plan | Yes: `what-if`. Where Azure cannot analyse a resource type, the plan is reported as unknown |
 | Apply | Yes: the same preview, then `create` |
 | Outputs | Yes, always as strings |
+| Editor schemas | Yes: `meridian schema sync` reads the Azure type definitions Bicep compiles against, published as files; no account and no compiler. See [Editor schemas](#editor-schemas) |
 | Compiles to | `main.bicep` and `deployment.json` |
 | Runs with | `az deployment group` |
 
@@ -44,6 +45,7 @@ Contents: [Requirements](#requirements) ·
 [References and expressions](#references-and-expressions) ·
 [Ordering](#ordering) ·
 [What a compile writes](#what-a-compile-writes) ·
+[Editor schemas](#editor-schemas) ·
 [Running](#running) ·
 [Settings](#settings) ·
 [What is refused](#what-is-refused) ·
@@ -162,7 +164,7 @@ file. It says where the file goes:
 | `name` | the deployment's name in Azure: letters, digits, hyphens, underscores, periods and parentheses | the document's name |
 | `subscription` | the subscription, when it is not the `az` command's current one | the current one |
 
-A second `deployment` resource is refused (`duplicate-deployment`), and a
+A second `deployment` resource is refused (`duplicate-resource`), and a
 `deployment` may not take part in `dependsOn` (`unsupported-dependency`).
 
 ## References and expressions
@@ -211,6 +213,34 @@ Strings are written as single-quoted Bicep strings, with `\\`, `\'`, `\n`,
 `\r` and `\t` escaped and a `${` in literal text written `\${`, so only
 what the document meant as an expression is one. A key that is not a plain
 identifier, such as `cost-center`, is quoted.
+
+## Editor schemas
+
+`meridian schema sync` reads the type definitions the Bicep compiler itself
+compiles against, so an editor completes and checks a resource's properties
+at its API version ([Tool schemas](../tooling/schema-sync.md)). They are
+published as files in
+[Azure/bicep-types-az](https://github.com/Azure/bicep-types-az), generated
+from the Azure REST API specifications: an index of every
+`Namespace/type@api-version`, and a `types.json` per provider and version
+holding the type graph. The sync fetches the index and the files the
+documents' types live in; no account and no compiler is needed.
+
+| | |
+|---|---|
+| Described in full | the `Namespace/type@api-version` types the documents use: every property with its kind, whether it is required, the values it allows (a union of literals), its nested properties; properties Azure sets, such as `id`, as read-only; write-only properties as sensitive. `type` and `apiVersion` are left out because the type gives them |
+| Listed by name | every other API version of a used type, and the newest stable API version of every other type in the index |
+| Pinned | the index and each `types.json` read, to their SHA-256 |
+
+A type is matched without regard to case, as Azure matches resource types.
+An extensible enum, literals beside a plain string, is a string with no
+values listed, because Azure takes values beyond the known ones. A
+discriminated object, whose properties depend on a `kind`, takes the base
+properties and every variant's, open. The files are kept in the work
+directory and fetched again only when they changed; when GitHub cannot be
+reached, the last copy is used and the sync says so. The source is tested
+against the real files in the `azure` workflow. The [ARM target](arm.md)
+reads the same files.
 
 ## Running
 
@@ -321,21 +351,21 @@ target can raise, and what to do:
 | Rule | Meaning | What to do |
 |---|---|---|
 | `unsupported-resource-type` | a type without `@api-version`, or not of the form `Namespace/type` | write the Azure type with its API version |
-| `missing-deployment` | no resource of type `deployment`, or one without `resourceGroup` | add one with the resource group |
-| `duplicate-deployment` | two resources of type `deployment` | keep one |
-| `invalid-deployment-name` | a deployment name Azure does not accept | letters, digits, hyphens, underscores, periods and parentheses |
+| `missing-resource` | no resource of type `deployment`, or one without `resourceGroup` | add one with the resource group |
+| `duplicate-resource` | two resources of type `deployment` | keep one |
+| `invalid-name` | a deployment name Azure does not accept | letters, digits, hyphens, underscores, periods and parentheses |
 | `unsupported-param` | a param the `deployment` resource does not take | only `resourceGroup`, `name` and `subscription` |
 | `invalid-param` | a `deployment` param that is not a string | quote it |
 | `missing-param` | a resource without `name` | add the resource's name in Azure |
 | `invalid-name` | a resource or output id that cannot be a Bicep name | start with a letter; use letters, digits and underscores |
-| `duplicate-name` | an output with the same name as a resource | rename one; Bicep keeps both in one namespace |
+| `duplicate-resource` | an output with the same name as a resource | rename one; Bicep keeps both in one namespace |
 | `duplicate-output` | two outputs with the same name | rename one |
 | `invalid-reference` | `${id.x}` where `id` is a resource and the path cannot be read | fix the path |
 | `unsupported-state` | `state: absent`, or any state but `present` | remove the resource from the document, and delete it in Azure |
 | `unsupported-runtime-condition` | `runtimeWhen` on any resource | decide with a compile-time `when` instead |
 | `unsupported-action` | `notifies` on any resource | drop it; a deployment has no notifications |
 | `unsupported-dependency` | a `dependsOn` to or from the `deployment` resource | the deployment is not a resource of the file |
-| `empty-template` | a document with no resources but the deployment | add a resource |
+| `empty-document` | a document with no resources but the deployment | add a resource |
 
 ## Troubleshooting
 

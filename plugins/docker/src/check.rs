@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{CompileError, Value, Warning};
 
 use crate::{refuse_at, Composition, Element, Section, NAME};
@@ -43,7 +44,6 @@ const SERVICE_KEYS: &[&str] = &[
     "dns_opt",
     "dns_search",
     "domainname",
-    "driver_opts",
     "entrypoint",
     "env_file",
     "environment",
@@ -143,6 +143,18 @@ const SECRET_KEYS: &[&str] = &[
     "template_driver",
 ];
 
+/// The attribute names the compile checks a section's params against,
+/// for the real-tool test that holds them against the Compose schema.
+pub fn known_keys(section: Section) -> &'static [&'static str] {
+    match section {
+        Section::Service => SERVICE_KEYS,
+        Section::Network => NETWORK_KEYS,
+        Section::Volume => VOLUME_KEYS,
+        Section::Config => CONFIG_KEYS,
+        Section::Secret => SECRET_KEYS,
+    }
+}
+
 /// What a dependency can wait for.
 const CONDITIONS: &[&str] = &[
     "service_completed_successfully",
@@ -169,7 +181,7 @@ pub(crate) fn attributes(element: &Element) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &element.id,
                 &element.pos,
-                "unsupported-param",
+                &rules::UNSUPPORTED_PARAM,
                 unknown_key(element.section, name),
             ));
         }
@@ -249,11 +261,11 @@ pub(crate) fn references(composition: &Composition) -> Result<(), CompileError> 
         .iter()
         .filter(|e| e.section == Section::Service)
     {
-        let refuse = |rule: &str, msg: String| refuse_at(&service.id, &service.pos, rule, msg);
+        let refuse = |rule: &Rule, msg: String| refuse_at(&service.id, &service.pos, rule, msg);
         for (name, condition) in dependencies(service) {
             if name == service.id {
                 return Err(refuse(
-                    "invalid-reference",
+                    &rules::INVALID_REFERENCE,
                     "a service cannot depend on itself".to_owned(),
                 ));
             }
@@ -261,7 +273,7 @@ pub(crate) fn references(composition: &Composition) -> Result<(), CompileError> 
                 Some(other) if other.section == Section::Service => other,
                 Some(other) => {
                     return Err(refuse(
-                        "invalid-reference",
+                        &rules::INVALID_REFERENCE,
                         format!(
                             "depends_on names {name:?}, which is a {} and not a service",
                             other.section.type_name()
@@ -270,7 +282,7 @@ pub(crate) fn references(composition: &Composition) -> Result<(), CompileError> 
                 }
                 None => {
                     return Err(refuse(
-                        "invalid-reference",
+                        &rules::INVALID_REFERENCE,
                         format!(
                             "depends_on names {name:?}, which is not a service in this document"
                         ),
@@ -279,7 +291,7 @@ pub(crate) fn references(composition: &Composition) -> Result<(), CompileError> 
             };
             if !CONDITIONS.contains(&condition) {
                 return Err(refuse(
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     format!(
                         "{condition:?} is not something a dependency can wait for (accepted: {})",
                         CONDITIONS.join(", ")
@@ -288,7 +300,7 @@ pub(crate) fn references(composition: &Composition) -> Result<(), CompileError> 
             }
             if condition == "service_healthy" && !has_healthcheck(other) {
                 return Err(refuse(
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     format!(
                         "depends_on waits for {name:?} to be healthy, and that service declares \
                          no healthcheck, so it never would be"
@@ -306,7 +318,7 @@ pub(crate) fn references(composition: &Composition) -> Result<(), CompileError> 
                 Some(other) if other.section == section => {}
                 Some(other) => {
                     return Err(refuse(
-                        "invalid-reference",
+                        &rules::INVALID_REFERENCE,
                         format!(
                             "uses {name:?} as a {}, and the document declares it as a {}",
                             section.type_name(),
@@ -316,7 +328,7 @@ pub(crate) fn references(composition: &Composition) -> Result<(), CompileError> 
                 }
                 None => {
                     return Err(refuse(
-                        "invalid-reference",
+                        &rules::INVALID_REFERENCE,
                         format!(
                             "uses the {kind} {name:?}, which the document does not declare. Add \
                              a resource of type {kind:?} with that id",
@@ -333,7 +345,7 @@ pub(crate) fn references(composition: &Composition) -> Result<(), CompileError> 
         return Err(refuse_at(
             &first.id,
             &first.pos,
-            "dependency-cycle",
+            &rules::DEPENDENCY_CYCLE,
             format!(
                 "the services depend on each other in a circle ({}), so Compose could start \
                  none of them first. A notify counts: the notified service starts after the \

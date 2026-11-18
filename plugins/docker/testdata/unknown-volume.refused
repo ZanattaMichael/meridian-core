@@ -1,1 +1,1 @@
-plugins/docker/testdata/documents/unknown-volume.yaml:11:7: docker: resource "db" [invalid-reference]: uses the volume "dbdata", which the document does not declare. Add a resource of type "volume" with that id
+plugins/docker/testdata/documents/unknown-volume.yaml:11:7: docker: resource "db" [invalid-reference]: uses the volume "dbdata", which the document does not declare. Add a resource of type "volume" with that id (hint: reference a resource of this document and a value it declares; see the references page)

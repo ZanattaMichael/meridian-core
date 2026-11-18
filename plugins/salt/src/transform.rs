@@ -3,9 +3,12 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use meridian_sdk::{CompileError, EdgeKind, Resource, ResourceGraph, Value, Warning};
+use meridian_sdk::rules;
+use meridian_sdk::{
+    CompileError, EdgeKind, Resource, ResourceGraph, ResourceSchema, TypeName, Value, Warning,
+};
 
-use crate::{refuse, Reference, Sls, State, NAME};
+use crate::{own, refuse, Reference, Sls, State, NAME};
 
 /// What one IR state of a resource type compiles to.
 struct Shape {
@@ -276,42 +279,194 @@ fn mapping(resource_type: &str) -> Option<Mapping> {
 
 /// What each resource type takes, read from the same table a resource is
 /// checked against, so an editor is never told something `emit` refuses.
-pub fn resource_schemas() -> Vec<meridian_sdk::ResourceSchema> {
-    supported_resource_types()
-        .iter()
-        .filter_map(|name| {
-            let m = mapping(name)?;
-            // Which params a type takes depends on its state; an editor is
-            // offered every param some state takes.
-            let mut params = Vec::new();
-            for (_, shape) in m.states {
-                params.extend(shape.params.iter().map(|(param, _)| *param));
-                params.extend(shape.moot.iter().copied());
-            }
-            let states: Vec<&str> = m
-                .states
-                .iter()
-                .map(|(state, _)| *state)
-                .filter(|state| !state.is_empty())
-                .collect();
-            let actions: Vec<&str> = m.actions.iter().map(|(action, _)| *action).collect();
-            Some(meridian_sdk::schema::shared(
-                name,
-                &params,
-                m.required,
-                &states,
-                m.default_state,
-                &actions,
-            ))
-        })
-        .collect()
+pub fn resource_schemas() -> Vec<ResourceSchema> {
+    let mut schemas = vec![ResourceSchema::open(
+        NATIVE_PATTERN,
+        "Any Salt state function, by its dotted name: pkgrepo.managed, \
+         docker_container.running, file.symlink. The params are the function's arguments, \
+         passed through as written; it takes no state, since the function is the state. \
+         When notified it watches the notifier. The document then compiles for Salt only.",
+    )
+    .actions(&["watch"])];
+    schemas.extend(SHARED.iter().filter_map(|name| {
+        let m = mapping(name)?;
+        // Which params a type takes depends on its state; an editor is
+        // offered every param some state takes.
+        let mut params = Vec::new();
+        for (_, shape) in m.states {
+            params.extend(shape.params.iter().map(|(param, _)| *param));
+            params.extend(shape.moot.iter().copied());
+        }
+        let states: Vec<&str> = m
+            .states
+            .iter()
+            .map(|(state, _)| *state)
+            .filter(|state| !state.is_empty())
+            .collect();
+        let actions: Vec<&str> = m.actions.iter().map(|(action, _)| *action).collect();
+        Some(meridian_sdk::schema::shared(
+            name,
+            &params,
+            m.required,
+            &states,
+            m.default_state,
+            &actions,
+        ))
+    }));
+    schemas
 }
 
-/// Every IR resource type this target maps, sorted.
+/// The six shared types, sorted.
+const SHARED: &[&str] = &["exec", "file", "group", "package", "service", "user"];
+
+/// How an editor is told that any state function is a type: a state module
+/// and a function, joined by a dot.
+pub const NATIVE_PATTERN: &str = "<module>.<function>";
+
+/// Every IR resource type this target maps: the pattern every state
+/// function fits, then the shared six, sorted.
 pub fn supported_resource_types() -> Vec<String> {
-    ["exec", "file", "group", "package", "service", "user"]
-        .map(str::to_owned)
-        .to_vec()
+    let mut types = vec![NATIVE_PATTERN.to_owned()];
+    types.extend(SHARED.iter().map(|t| (*t).to_owned()));
+    types
+}
+
+/// The state function a native type names, when the type is one: a module
+/// and a function, each lower-case letters, digits and underscores, joined
+/// by one dot. A Salt state is always dotted, so `native/<name>` reaches
+/// nothing here, and is refused with the dotted name to write.
+pub(crate) fn native_function(r: &Resource) -> Result<Option<(&str, &str)>, CompileError> {
+    match TypeName::read(&r.r#type) {
+        TypeName::Shared(_) => Ok(None),
+        TypeName::NativeNamedLikeShared(bare) => {
+            let instead = match bare {
+                "package" => "pkg.installed",
+                "service" => "service.running",
+                "file" => "file.managed",
+                "user" => "user.present",
+                "group" => "group.present",
+                "exec" => "cmd.run",
+                _ => "",
+            };
+            let hint = if instead.is_empty() {
+                "such as file.managed".to_owned()
+            } else {
+                format!("{instead} or another function of its module")
+            };
+            Err(refuse(
+                r,
+                &rules::UNSUPPORTED_RESOURCE_TYPE,
+                format!(
+                    "resource type {:?} is not how a state is reached on this target: a Salt \
+                     state is written by its dotted name, {hint}",
+                    r.r#type
+                ),
+            ))
+        }
+        TypeName::Native(name) => match name.split_once('.') {
+            Some((module, function)) if is_word(module) && is_word(function) => {
+                Ok(Some((module, function)))
+            }
+            _ => Err(unsupported_type(r)),
+        },
+    }
+}
+
+/// Whether `name` is shaped like a state module or function name: one
+/// lower-case word.
+fn is_word(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_ascii_lowercase())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// A resource whose type is a state function of Salt's own: the params are
+/// the function's arguments as written, and there is no state to take,
+/// since the function is the state. Nothing is checked against a list of
+/// what the function takes; an argument it does not have is Salt's to
+/// refuse when the state is applied, until the module's schema is synced
+/// and the editor reports it in place.
+fn native_state(r: &Resource, module: &str, function: &str) -> Result<State, CompileError> {
+    if !r.state.is_empty() {
+        return Err(refuse(
+            r,
+            &rules::UNSUPPORTED_STATE,
+            format!(
+                "resource type {:?} accepts no state on this target: the function is the \
+                 state, got {:?}",
+                r.r#type, r.state
+            ),
+        ));
+    }
+    let mut args = BTreeMap::new();
+    for (name, value) in &r.params {
+        if *value == Value::Null {
+            return Err(refuse(
+                r,
+                &rules::EMPTY_PARAM,
+                format!("param {name:?} on state {module}.{function} has no value"),
+            ));
+        }
+        args.insert(name.clone(), value.clone());
+    }
+    quiet_secrets(r, module, &mut args)?;
+    Ok(State {
+        id: r.id.clone(),
+        module: module.to_owned(),
+        function: function.to_owned(),
+        args: name_first(args),
+        require: Vec::new(),
+        watch: Vec::new(),
+        onchanges: Vec::new(),
+        when: r.runtime_when.clone(),
+        native: true,
+        resource_id: r.id.clone(),
+        pos: r.pos.clone(),
+    })
+}
+
+/// A state handed a secret is not allowed to show it: a managed file
+/// prints no diff. The runner hands the value over through the pillar;
+/// here only its name is written. A command is refused one: Salt writes
+/// the command line into its result's comment, in a dry run ("Command
+/// ... would have been executed") and in a real one, and no setting
+/// keeps it out, so the value would be in the report Meridian reads.
+fn quiet_secrets(
+    r: &Resource,
+    module: &str,
+    args: &mut BTreeMap<String, Value>,
+) -> Result<(), CompileError> {
+    if args.values().any(holds_secret) {
+        match module {
+            "file" => {
+                args.insert("show_changes".to_owned(), Value::Bool(false));
+            }
+            "cmd" => {
+                return Err(refuse(
+                    r,
+                    &rules::UNSUPPORTED_SECRET_PLACE,
+                    "a secret cannot be used in a command on this target: Salt prints the \
+                     command line in its report, and nothing turns that off. Put the \
+                     secret in a file the command reads, or in a runtimeWhen"
+                        .to_owned(),
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// `name` leads, as a person would write it; the rest keep their sorted
+/// order, so the same resource always renders to the same bytes.
+fn name_first(mut args: BTreeMap<String, Value>) -> Vec<(String, Value)> {
+    let mut ordered = Vec::with_capacity(args.len());
+    if let Some(name) = args.remove("name") {
+        ordered.push(("name".to_owned(), name));
+    }
+    ordered.extend(args);
+    ordered
 }
 
 fn keys<T>(pairs: &[(&str, T)]) -> String {
@@ -321,11 +476,12 @@ fn keys<T>(pairs: &[(&str, T)]) -> String {
 fn unsupported_type(r: &Resource) -> CompileError {
     refuse(
         r,
-        "unsupported-resource-type",
+        &rules::UNSUPPORTED_RESOURCE_TYPE,
         format!(
-            "unsupported resource type {:?} on this target (supported: {})",
+            "unsupported resource type {:?} on this target: it is not one of the shared types \
+             ({}), and a Salt state is written by its dotted name, such as pkgrepo.managed",
             r.r#type,
-            supported_resource_types().join(", ")
+            SHARED.join(", ")
         ),
     )
 }
@@ -351,8 +507,10 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<(Sls, Vec<Warning>), Co
         // The shared types are checked the same way on every configuration
         // management target, so a document moves between tools without the
         // type rules changing under it.
-        meridian_sdk::schema::check_shared(resource)
-            .map_err(|e| refuse(resource, &e.rule, e.msg))?;
+        meridian_sdk::schema::check_shared(resource).map_err(|e| CompileError {
+            target: NAME.to_owned(),
+            ..e
+        })?;
         states.push(state_for(resource, &resource.state, Some(&mut warnings))?);
     }
     let reactions = notifications(graph, &mut states)?;
@@ -376,6 +534,9 @@ fn state_for(
     state: &str,
     mut warnings: Option<&mut Vec<Warning>>,
 ) -> Result<State, CompileError> {
+    if let Some((module, function)) = native_function(r)? {
+        return native_state(r, module, function);
+    }
     let m = mapping(&r.r#type).ok_or_else(|| unsupported_type(r))?;
     let shape = shape_for(r, state, &m)?;
     let shown_state = if state.is_empty() {
@@ -407,7 +568,7 @@ fn state_for(
         if *value == Value::Null {
             return Err(refuse(
                 r,
-                "empty-param",
+                &rules::EMPTY_PARAM,
                 format!(
                     "param {:?} on resource type {:?} has no value",
                     name, r.r#type
@@ -421,7 +582,7 @@ fn state_for(
         if !r.params.contains_key(*need) {
             return Err(refuse(
                 r,
-                "missing-param",
+                &rules::MISSING_PARAM,
                 format!(
                     "resource type {:?} requires param {:?} on this target",
                     r.r#type, need
@@ -444,48 +605,18 @@ fn state_for(
         _ => {}
     }
 
-    // A state handed a secret is not allowed to show it: a managed file
-    // prints no diff. The runner hands the value over through the pillar;
-    // here only its name is written. A command is refused one: Salt writes
-    // the command line into its result's comment, in a dry run ("Command
-    // ... would have been executed") and in a real one, and no setting
-    // keeps it out, so the value would be in the report Meridian reads.
-    if args.values().any(holds_secret) {
-        match m.module {
-            "file" => {
-                args.insert("show_changes".to_owned(), Value::Bool(false));
-            }
-            "cmd" => {
-                return Err(refuse(
-                    r,
-                    "unsupported-secret-place",
-                    "a secret cannot be used in an exec on this target: Salt prints the \
-                     command line in its report, and nothing turns that off. Put the \
-                     secret in a file the command reads, or in a runtimeWhen"
-                        .to_owned(),
-                ));
-            }
-            _ => {}
-        }
-    }
-
-    // `name` leads, as a person would write it; the rest keep their sorted
-    // order, so the same resource always renders to the same bytes.
-    let mut ordered = Vec::with_capacity(args.len());
-    if let Some(name) = args.remove("name") {
-        ordered.push(("name".to_owned(), name));
-    }
-    ordered.extend(args);
+    quiet_secrets(r, m.module, &mut args)?;
 
     Ok(State {
         id: r.id.clone(),
-        module: m.module,
-        function: shape.function,
-        args: ordered,
+        module: m.module.to_owned(),
+        function: shape.function.to_owned(),
+        args: name_first(args),
         require: Vec::new(),
         watch: Vec::new(),
         onchanges: Vec::new(),
         when: r.runtime_when.clone(),
+        native: false,
         resource_id: r.id.clone(),
         pos: r.pos.clone(),
     })
@@ -498,7 +629,7 @@ fn shape_for<'m>(r: &Resource, state: &str, m: &'m Mapping) -> Result<&'m Shape,
         if !state.is_empty() {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!(
                     "resource type {:?} accepts no state on this target, got {:?}",
                     r.r#type, state
@@ -519,7 +650,7 @@ fn shape_for<'m>(r: &Resource, state: &str, m: &'m Mapping) -> Result<&'m Shape,
         .ok_or_else(|| {
             refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!(
                     "resource type {:?} does not accept state {:?} on this target (accepted: {})",
                     r.r#type,
@@ -555,7 +686,7 @@ fn unaccepted_param(
         accepted.dedup();
         return refuse(
             r,
-            "unsupported-param",
+            &rules::UNSUPPORTED_PARAM,
             format!(
                 "resource type {:?} does not accept param {:?} on this target (accepted: {})",
                 r.r#type,
@@ -566,7 +697,7 @@ fn unaccepted_param(
     }
     refuse(
         r,
-        "param-conflicts-with-state",
+        &rules::PARAM_CONFLICTS_WITH_STATE,
         format!(
             "param {:?} cannot be used with state {:?}, which compiles to {}.{} \
              (it is accepted with state: {})",
@@ -595,7 +726,7 @@ fn exec_details(r: &Resource, args: &mut BTreeMap<String, Value>) -> Result<(), 
             if let Some(found) = command.chars().find(|c| SHELL_SYNTAX.contains(c)) {
                 return Err(refuse(
                     r,
-                    "shell-required",
+                    &own::SHELL_REQUIRED,
                     format!(
                         "the command contains {found:?}, which a shell gives a meaning to, and \
                          Salt always runs a command through a shell; set param \"shell\" to true \
@@ -644,18 +775,54 @@ fn notifications(graph: &ResourceGraph, states: &mut [State]) -> Result<Vec<Stat
             let from = graph.resource(&edge.from).cloned().unwrap_or_default();
             return Err(refuse(
                 &from,
-                "unknown-notify-target",
+                &rules::UNKNOWN_NOTIFY_TARGET,
                 format!("notifies an unknown resource {:?}", edge.to),
             ));
         };
         let Some(&from_at) = index.get(&edge.from) else {
             return Err(refuse(
                 to,
-                "unknown-notifier",
+                &rules::UNKNOWN_NOTIFY_TARGET,
                 format!("is notified by an unknown resource {:?}", edge.from),
             ));
         };
         let notifier = states[from_at].reference();
+
+        // A state of Salt's own watches the notifier: what the function does
+        // when something it watches changes is the function's own business
+        // (a running service restarts, a managed file is written again).
+        // `watch` is the one action that asks exactly that.
+        if let Some((module, function)) = native_function(to)? {
+            if edge.action != "watch" {
+                return Err(refuse(
+                    to,
+                    &rules::UNSUPPORTED_ACTION,
+                    format!(
+                        "resource type {:?} is a Salt state, which can only watch the \
+                         notifier when notified (action \"watch\"), got action {:?}",
+                        to.r#type, edge.action
+                    ),
+                ));
+            }
+            // A watch orders the notifier first. When the notifier is
+            // applied later than the resource, the same state is declared
+            // once more, after both, as a reaction.
+            if from_at > to_at {
+                let id = reaction_id(&edge.action, &to.id);
+                if !reactions.contains_key(&id) {
+                    let mut state = native_state(to, module, function)?;
+                    state.id.clone_from(&id);
+                    state.when = String::new();
+                    state.require.push(states[to_at].reference());
+                    reactions.insert(id.clone(), state);
+                }
+                let state = reactions.get_mut(&id).expect("just inserted");
+                push_unique(&mut state.watch, notifier);
+            } else {
+                push_unique(&mut states[to_at].watch, notifier);
+            }
+            continue;
+        }
 
         let m = mapping(&to.r#type).ok_or_else(|| unsupported_type(to))?;
         let found = m.actions.iter().find(|(a, _)| *a == edge.action);
@@ -673,7 +840,7 @@ fn notifications(graph: &ResourceGraph, states: &mut [State]) -> Result<Vec<Stat
                     keys(m.actions)
                 )
             };
-            return Err(refuse(to, "unsupported-action", msg));
+            return Err(refuse(to, &rules::UNSUPPORTED_ACTION, msg));
         };
 
         if matches!(reaction, Reaction::Watch | Reaction::WatchingState(..)) {
@@ -686,7 +853,7 @@ fn notifications(graph: &ResourceGraph, states: &mut [State]) -> Result<Vec<Stat
                     };
                     return Err(refuse(
                         to,
-                        "unsupported-action",
+                        &rules::UNSUPPORTED_ACTION,
                         format!(
                             "cannot be notified with action {:?} while its state is {:?}: {why}",
                             edge.action, state

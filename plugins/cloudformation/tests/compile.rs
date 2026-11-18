@@ -101,7 +101,7 @@ fn two_ids_that_collapse_to_one_logical_id_are_refused() {
     let err = refusal(
         "  resources:\n    - id: web_vm\n      type: AWS::EC2::Instance\n      params: {ImageId: a}\n    - id: web-vm\n      type: AWS::EC2::Instance\n      params: {ImageId: b}\n",
     );
-    assert_eq!(err.rule, "duplicate-logical-id");
+    assert_eq!(err.rule, "duplicate-resource");
     assert_eq!(
         err.msg,
         "resource ids \"web_vm\" and \"web-vm\" both become the logical id \"WebVm\"; \
@@ -118,7 +118,7 @@ fn the_stack_is_named_by_the_document_unless_told() {
     assert!(files["stack.json"].contains("\"name\": \"web-vm\""));
 
     let err = compile_named("web_vm", &format!("  resources:\n{BUCKET}")).unwrap_err();
-    assert_eq!(err.rule, "invalid-stack-name");
+    assert_eq!(err.rule, "invalid-name");
 
     let files = compile_named(
         "web_vm",

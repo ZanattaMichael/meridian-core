@@ -12,15 +12,16 @@ person would have written and runs Puppet on it.
 | | |
 |---|---|
 | Category | Configuration management |
-| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)) |
+| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)), and any Puppet type beside them: `cron`, `mysql::db`, `native/file` ([Puppet types beside the six](#puppet-types-beside-the-six)) |
 | `dependsOn` | Yes, as `require`. Puppet orders by declared relationships, so the dependency graph survives into the manifest intact |
-| `notifies` | Native: `notify`. A service can be restarted (`restart` or `refresh`); an exec can be `run` |
+| `notifies` | Native: `notify`. A service can be restarted (`restart` or `refresh`); an exec can be `run`; a Puppet type of its own can be refreshed (`refresh`) |
 | `runtimeWhen` | No. A catalog is compiled before it reaches the node, so there is nothing left to evaluate at apply time. Refused |
 | Secrets | Yes: by Hiera. The manifest looks each up as a `Sensitive` value, and the run is given a data file and a `hiera.yaml` only the user can read. See [Secrets](#secrets) |
 | References | `${id.param}` is settled from the document when it is compiled; anything else in `${...}` is refused, and `$${` is a literal `${` ([rules](../reference/resource-types.md#references)) |
 | Plan | Yes: `--noop`, with `--detailed-exitcodes`. Every resource reports whether it would change |
 | Apply | Yes |
 | Outputs | No. A manifest produces no values for a later stage to read |
+| Editor schemas | Yes: `meridian schema sync` asks `puppet describe` what each type takes. See [Editor schemas](#editor-schemas) |
 | Compiles to | `manifests/init.pp` and `site.pp` |
 | Runs with | `puppet apply` on the node itself, `bolt apply` for another host |
 
@@ -33,8 +34,10 @@ What it does not do:
 - **No Puppet master, no PuppetDB.** Plan and apply are masterless, and Hiera
   is used for one thing, [handing over the document's secrets](#secrets). The
   compiled class works on a master, but you copy it there yourself.
-- **No resource types beyond the six.** There is no passthrough to arbitrary
-  Puppet types. Anything else is refused at compile time.
+- **A Puppet type of its own is passed through unchecked.** Its attributes
+  are written as the document gives them, and an attribute the type does not
+  take is Puppet's to refuse when the catalog is compiled, not Meridian's.
+  See [Puppet types beside the six](#puppet-types-beside-the-six).
 - **`package.version` and `exec.removes` are refused**, though Puppet could
   express them; see [What is refused](#what-is-refused).
 - **It creates no infrastructure.** It configures a node that already exists.
@@ -42,11 +45,13 @@ What it does not do:
 Contents: [Requirements](#requirements) ·
 [A first document](#a-first-document) ·
 [Resource types](#resource-types) ·
+[Puppet types beside the six](#puppet-types-beside-the-six) ·
 [Ordering and notifications](#ordering-and-notifications) ·
 [What a compile writes](#what-a-compile-writes) ·
 [Running](#running) ·
 [Settings](#settings) ·
 [Secrets](#secrets) ·
+[Editor schemas](#editor-schemas) ·
 [What is refused](#what-is-refused) ·
 [Troubleshooting](#troubleshooting) ·
 [How it is tested](#how-it-is-tested)
@@ -159,7 +164,7 @@ Notes on how they map:
 - A resource's **id is the Puppet title**; the Puppet name or path comes from
   `name` or `path`. Puppet identifies a managed thing by that name, not by the
   title, so two resources that manage the same package, file, service, user
-  or group are refused at compile time (`duplicate-namevar`), where Puppet
+  or group are refused at compile time (`duplicate-resource`), where Puppet
   would only have refused them on the node.
 - `file` with `state: directory` and `content` is refused
   (`param-conflicts-with-state`): a directory has no content.
@@ -171,6 +176,97 @@ Notes on how they map:
   `runtimeWhen` for that, and this target refuses it.
 - A `mode` is written as Puppet reads it: quote it in the document
   (`"0644"`), or the YAML reads it as a number and the compile refuses it.
+
+## Puppet types beside the six
+
+Any Puppet type is a resource type, written as a declaration names it: a
+core type by its bare name (`cron`, `mount`, `host`), a defined type or a
+module's type by its qualified name (`mysql::db`, `apache::vhost`). The
+type's attributes are the resource's `params`, written into the declaration
+exactly as given; Meridian checks nothing against a list of what the type
+takes. An attribute the type does not have, or a type from a module that is
+not installed, is Puppet's to refuse when the catalog is compiled, as a
+provider's type is Terraform's, until the type's schema is synced and the
+editor reports it in place.
+
+Six Puppet types have the names of the shared types: `package`, `service`,
+`file`, `user`, `group` and `exec`. The bare word is always the shared type,
+so a document moves between tools unchanged. Puppet's own `file`, with
+`source`, `recurse` and every other attribute the shared type does not take,
+is written `native/file`; the same for the other five. The prefix is only
+for those six names: `native/cron` is refused, because `cron` has one
+spelling.
+
+```yaml
+resources:
+  - id: html
+    type: native/file
+    state: directory
+    params:
+      path: /var/www/html
+      source: puppet:///modules/web/html
+      recurse: true
+  - id: logrotate
+    type: cron
+    params:
+      command: /usr/sbin/logrotate /etc/logrotate.conf
+      user: root
+      hour: 2
+      minute: 0
+    notifies:
+      - resource: app_db
+        action: refresh
+  - id: app_db
+    type: mysql::db
+    params:
+      user: app
+      password: placeholder
+```
+
+compiles to
+
+```puppet
+  file { 'html':
+    ensure  => directory,
+    path    => '/var/www/html',
+    recurse => true,
+    source  => 'puppet:///modules/web/html',
+  }
+
+  cron { 'logrotate':
+    command => '/usr/sbin/logrotate /etc/logrotate.conf',
+    hour    => 2,
+    minute  => 0,
+    user    => 'root',
+    notify  => Mysql::Db['app_db'],
+  }
+
+  mysql::db { 'app_db':
+    password => 'placeholder',
+    user     => 'app',
+  }
+```
+
+| | |
+|---|---|
+| `type` | a Puppet type name: lower-case words of letters, digits and underscores, joined by `::`. `native/<name>` for the six colliding names. A wrong case (`Cron`), a dotted name, or `native/` on any other name is refused |
+| `params` | the type's attributes, as written. A type that takes none is declared by its title alone |
+| `state` | written as the type's `ensure`, whatever values the type gives it: a word is written bare (`present`, `running`), anything else quoted (a version). Writing both `state:` and `params.ensure` is refused (`param-conflicts-with-state`) |
+| `notifies` to a Puppet type | action `refresh`: Puppet refreshes the declaration when a notifier changed, and whether the type does anything on refresh is the type's own business. Any other action is refused (`unsupported-action`) |
+| `notifies` from a Puppet type | as from any resource |
+| `runtimeWhen` | refused, as for the six |
+| Secrets | as for the six: a `Sensitive` lookup the runner answers through Hiera |
+| References | `${id.param}` is settled from the document, as for the six |
+| `native/file` and a shared `file` on one path | refused (`duplicate-resource`), as two shared files would be: they are one Puppet type |
+
+[`examples/puppet/native-types.yaml`](../../examples/puppet/native-types.yaml)
+is a whole document of both kinds. A document that names a Puppet type
+compiles for Puppet and [OpenVox](openvox.md) only. The
+[`native-type`](../reference/lint.md#native-type) lint rule marks each such
+resource. The six shared types stay the portable way to say what they can
+say; a Puppet type is for everything else. The split, and why the prefix is
+one word on every target, is
+[decision 0032](../decisions/0032-native-types-beside-the-six-and-a-prefix-for-colliding-names.md).
 
 ## Ordering and notifications
 
@@ -185,6 +281,7 @@ end of the run if the notifier changed:
 |---|---|---|
 | `service` | `restart`, `refresh` | restarts the service |
 | `exec` | `run` | runs the command again, even if `creates` says it already ran |
+| a Puppet type of its own | `refresh` | refreshes the declaration; what that does is the type's |
 | anything else | none | refused: `unsupported-action` |
 
 `reload`, `start` and `stop` on a service are refused with the reason: Puppet's
@@ -377,6 +474,25 @@ user deploy)`, and never a value. `ssh-agent` and `ssh-add` are run from `PATH`,
 
 The handover is tested against stand-ins for `bolt`, `ssh-agent` and `ssh-add` that keep what they are given (the inventory and its mode, the environment, the key and the passphrase). The real `bolt` is not driven in CI.
 
+## Editor schemas
+
+`meridian schema sync` asks `puppet describe` what the Puppet types the
+documents use take, so an editor completes and checks a `cron` or a
+`native/file`'s params as it does the six types'
+([Tool schemas](../tooling/schema-sync.md)). Until a type is synced, the
+editor knows it by name only, as [Puppet types beside the six](#puppet-types-beside-the-six)
+says.
+
+| | |
+|---|---|
+| Described in full | each Puppet type the documents use, under the name the document writes (`cron`, or `native/file` for one of the six names): every parameter and property with its description, the values it lists (`Valid values are ...`) as the param's values. The `Providers` and `Features` sections end the attributes: a provider's own attributes are not listed, and Puppet refuses one the type lacks at apply time. Read from `puppet describe <type>`, one run a type, with the target's own settings (`MERIDIAN_PUPPET`, `MERIDIAN_PUPPET_ARGS`). A defined type from a module (`mysql::db`) has no description `describe` can read, so it is a note and not the end of the sync |
+| Listed by name | every other type `puppet describe --list` knows, with its short description; the six shared names under `native/`, since the bare words are the shared types |
+| Pinned | Puppet's version, from `puppet --version` |
+
+A param's kind is text unless `describe` lists its values, because Puppet's
+descriptions do not type their parameters. Every type takes the `refresh`
+action, which is what `notifies` sends it.
+
 ## What is refused
 
 Every refusal names the resource, the line and the rule. The rules this
@@ -384,22 +500,22 @@ target can raise, and what to do:
 
 | Rule | Meaning | What to do |
 |---|---|---|
-| `unsupported-resource-type` | a type outside the six, or in the wrong case (`Package`) | use one of the six; there is no passthrough |
+| `unsupported-resource-type` | a type in the wrong case (`Package`, `Cron`), a dotted name, or `native/` on a name that is not one of the six | use one of the six, or a Puppet type as a declaration names it ([beside the six](#puppet-types-beside-the-six)) |
 | `unsupported-param` | a param this type does not take on Puppet, including `package.version` and `exec.removes` | drop it, or put it in a Puppet module |
 | `missing-param` | no `name`, `path` or `command` | add it |
 | `empty-param` | a required param that is empty text | give it a value |
 | `invalid-param` | a param of the wrong kind: a list for `name`, a number for `mode` | quote the mode; give a single name |
 | `unsupported-state` | a state this type does not have, or any state on an `exec` | see the table under [Resource types](#resource-types) |
-| `param-conflicts-with-state` | `content` on a `directory` | drop one |
+| `param-conflicts-with-state` | `content` on a `directory`; `state` and `params.ensure` on a Puppet type of its own | drop one |
 | `unsupported-runtime-condition` | `runtimeWhen` on any resource | decide with a compile-time `when` instead |
-| `unsupported-action` | a notify action the type does not take: `reload`, `start`, `stop` on a service, anything on a package | use `restart`, or declare the state you want |
+| `unsupported-action` | a notify action the type does not take: `reload`, `start`, `stop` on a service, anything on a package, anything but `refresh` on a Puppet type of its own | use `restart` or `refresh`, or declare the state you want |
 | `unknown-notify-target`, `unknown-dependency` | an edge names a resource the document does not declare | fix the id |
 | `ordering-violated` | the order the core handed over puts a resource before its dependency | a core bug; report it |
-| `duplicate-resource`, `duplicate-title` | two resources with the same id | rename one |
-| `duplicate-namevar` | two resources that manage the same package, file, service, user or group | merge them |
-| `empty-title`, `multiline-title`, `quoted-title` | an id that cannot be a Puppet title | use letters, digits and underscores |
-| `empty-resource` | a resource with nothing to declare | give it params |
-| `dangling-reference` | `${id.param}` names a resource or a param that is not there | fix the reference |
+| `duplicate-resource` | two resources with the same id | rename one |
+| `duplicate-resource` | two resources that manage the same package, file, service, user or group | merge them |
+| `invalid-name` | an id that cannot be a Puppet title | use letters, digits and underscores |
+| `missing-param` | a shared resource with nothing to declare | give it params |
+| `invalid-reference` | `${id.param}` names a resource or a param that is not there | fix the reference |
 | `invalid-host` | a host that is not a name, so it cannot be written into a node statement | the core refuses one first ([`targetHost`](../reference/dsl/outputs-and-hand-offs.md#rules)) |
 | `missing-host` | a ResourceSet with no host to write the node statement for | give it a `targetHost` |
 
@@ -417,7 +533,8 @@ target can raise, and what to do:
 ## How it is tested
 
 - **Golden files** under `plugins/puppet/testdata/` record what every fixture
-  and the example compile to, byte for byte, and what each refusal says.
+  and the example compile to, byte for byte, and what each refusal says;
+  `native_types.*` is the document of Puppet's own types.
 - **The conformance tests** compile the same documents for every shared-type
   target and generate the [conformance matrix](../reference/conformance-matrix.md),
   which fails when this target starts accepting or refusing something new.

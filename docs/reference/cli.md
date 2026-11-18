@@ -3,7 +3,7 @@
 ```
 meridian validate <files>...
 meridian compile  <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--out DIR]
-meridian plan     <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets]
+meridian plan     <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets] [--detailed-exitcode]
 meridian apply    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets] [--resume | --resume=RUN] [--on-failure stop|rollback] [--stage-timeout DURATION]
 meridian drift    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE]
 meridian rollback <files>... [--run RUN]
@@ -26,7 +26,12 @@ meridian schema   sync <paths>... [--target TARGET] [--data FILE] [--set KEY=VAL
 meridian schema   status [--state-dir DIR] [--json]
 meridian schema   clean [TARGET]... [--state-dir DIR]
 meridian lsp
+meridian mcp      [--allow-plan] [--root DIR] [--state-dir DIR]
 ```
+
+Every command also takes `--output text|json`: with `json` it prints one JSON
+object instead of text, for a pipeline or a wrapping tool.
+[Machine-readable output](cli-json.md) describes every object.
 
 The files given to one command are one workflow. A file may hold several
 documents separated by `---`. Infrastructure documents run before ResourceSets
@@ -103,10 +108,28 @@ instead of empty.
 A plan runs each tool, so it takes the [state lock](../concepts/run-safety.md#one-run-at-a-time)
 and is recorded like an apply.
 
+A plan exits `0` whether or not an apply would change anything. With
+`--detailed-exitcode` it exits `2` when an apply would do something (a stage
+with changes, a tool that cannot preview, or a stage deferred until an
+infrastructure output exists), `0` when every stage is in sync, and `1` on an
+error, as `drift` does; a pipeline can then ask "is there anything to apply?"
+without reading the plan. With `--output json` the plan is one object a tool
+can read ([the run object](cli-json.md#compile-plan-apply-drift-rollback)).
+
 With `--policy`, every stage is put to the [policy](policy.md), and its
 warnings and its decision are shown above the plan. A stage the policy denies
 is reported as failed and the command exits `1`; the stages after it are
 still planned, so one plan shows every denial.
+
+`--out FILE` (or `-o`) saves the plan: one JSON file holding what was asked,
+the id of the run, and for each stage the hash of the artifact it compiled
+to, the changes, the policy's decision and, where the tool saves a plan of
+its own, that plan. `apply --plan FILE` then carries out exactly that plan.
+The file is written only when every stage planned; a failed or denied stage
+leaves nothing to apply, and the command says the plan was not saved and
+exits `1`. The file never holds a value: a tool's saved plan is left out
+when it would carry one. [A saved plan](../operations/pull-requests.md) has
+the file, the checks and the pull request automation built on it.
 
 ### `apply`
 
@@ -135,6 +158,20 @@ that a file after `--resume` is always a file; `--resume` may come before or
 after the documents. Stages that run already applied, from documents
 that still compile to the same artifact, are left alone; the rest are applied.
 [Picking up where a run stopped](../concepts/run-safety.md#picking-up-where-a-run-stopped)
+has the rules.
+
+`--plan FILE` applies a plan saved by `plan --out`, and nothing else. The
+documents, data, values and selector come from the file and may be left off
+the command line; any that is given must be what the plan was taken with.
+Before anything runs, the plan is held against the run: it must name the
+same stages, and no stage may have been applied since it was taken, by any
+run; otherwise the apply is refused (`kind: plan`, exit `1`) before it holds
+anything but the lock. Then each stage is compiled again and must compile to
+the artifact hash the plan recorded, or it fails with the reason
+`plan-differs` and the stages after it are not run. Where the tool saved a
+plan, it is handed that plan back and applies it. A stage the plan could not
+preview is applied unchecked, with a warning. `--plan` and `--resume` cannot
+be combined. [What `apply --plan` checks](../operations/pull-requests.md#what-apply---plan-checks)
 has the rules.
 
 With `--policy`, the [policy](policy.md) is asked about every stage before
@@ -256,6 +293,8 @@ second one collide with it.
 
 Lists every plugin Meridian can find: its category, what it can do, the resource
 types it takes, the versions of its tool it compiles for (when it declares any),
+the keys of a document's `spec.settings` it reads (when it takes any), the
+[refusal rules](refusal-rules.md) it has of its own (when it declares any),
 where its binary is, and what checking its signature found.
 
 ```
@@ -264,6 +303,7 @@ dsc
   can:       compile, plan, apply, import
   resources: <Module>/<Resource>, runner
   versions:  2, 3
+  settings:  credential, engine, target
   imports:   PowerShell DSC configurations (*.ps1)
   imports:   DSC v3 configuration documents and DscPipelineRunner projects (*.dsc.yaml, *.dsc.yml, *.dsc.json, *.dsc.config.yaml, *.dsc.config.yml, *.dsc.config.json, Datum.yml, *.yaml, *.yml, *.json)
   sdk:       0.1.0 (protocol 2)
@@ -275,14 +315,19 @@ dsc
 document's [`spec.imports`](dsl/outputs-and-hand-offs.md#imports) brings from
 other documents.
 
-The category decides which kind of document the plugin is handed, and the
-versions decide which `targetVersion` a document may ask it for. A plugin that
+The category decides which kind of document the plugin is handed, the
+versions decide which `targetVersion` a document may ask it for, and the
+settings keys decide what a document may write under
+[`spec.settings`](dsl/index.md#settings); a plugin that lists none takes none. A plugin that
 can read its tool's existing configuration lists `import` under `can`, and the
 file names each of its formats claims under `imports`.
 
 `meridian plugins --settings` adds, under each plugin, every setting its
 runner declares: the short name to use under `spec.settings` in
 `meridian.yaml`, the environment variable, the default and what it does.
+`meridian plugins --rules` adds each plugin's own [refusal rules](refusal-rules.md),
+with what each refuses and what to write instead; a plugin that has none says
+so, and refuses only under the general rules of that page.
 
 ```
 ansible
@@ -447,6 +492,26 @@ is shown with the first place that would answer, or with every place's reason
 when none would. The Secret Service and the keychain are `not checked`, since
 asking them can open a prompt.
 
+A credential declared [`from: ambient`](dsl/credentials.md#from-ambient) is
+looked for too, where the tool itself would look, so that a job whose
+identity is missing stops here and not an hour later inside the tool:
+
+```
+$ meridian secret check site.yaml
+site (site.yaml)
+  db_password  env    ok: the environment variable SITE_DB_PASSWORD is set
+  deployer     aws    ambient, ok: the environment holds AWS_WEB_IDENTITY_TOKEN_FILE and AWS_ROLE_ARN (web identity, such as a pipeline's OIDC token)
+```
+
+An `aws`, `azure` or `gcp` credential is looked for in the cloud's own
+order: the environment, the files a login leaves behind, and last the
+machine's identity endpoint, which is asked one question with a one-second
+timeout. An `ssh` credential is the agent `SSH_AUTH_SOCK` names, a
+`kubeconfig` one the file `KUBECONFIG` names; any other type is
+`not checked`. A credential that would not be found is `MISSING`, or
+`REFUSED` when what is set points at a file that is not there, and fails the
+check. [The places, type by type](../operations/running-in-a-pipeline.md#checking-the-jobs-identity-first).
+
 It takes `--state-dir`, for a file written `@<module>:<path>`, and loads no
 plugin.
 
@@ -470,6 +535,33 @@ From a pipe the value is everything read without its last line ending; at a
 terminal it is the line typed. An empty value stores nothing. A secret that
 names no writable place, or one that is not declared, is refused and the
 value is not read. It takes `--state-dir` as `secret check` does.
+
+### `test`
+
+Runs [`Test` documents](testing.md): for each case, compiles the documents the
+test names with the case's data, or plans them from a scratch state when the
+case says `run: plan`, and checks what came out against the case's
+expectations and assertions. Nothing is applied and no record is kept.
+
+```
+$ meridian test
+tests/site.test.yaml (site)
+  ok    dev compiles nginx and the message (compile, 1 document)
+  FAIL  production says so (compile, 1 document)
+        - assert contains(stages.web.files['playbook.yml'], 'welcome to prod'): false
+  ok    a site with no web tier compiles nothing (compile, 1 document)
+3 cases: 2 passed, 1 failed
+```
+
+With no files, every `*.test.yaml` under `tests/` in the current directory is
+run. `--case TEXT` runs only the cases whose name holds the text. `--junit
+FILE` also writes the results as JUnit XML, which a pipeline engine shows as
+tests. Every case of every file runs; the command exits `1` when any case
+failed or could not run, when a test file does not read, or when nothing was
+run. Each case plans in its own directory under `tests/` in `--state-dir`,
+emptied first, so no test touches the project's state. The plugins are found
+as for every other command. [The reference](testing.md) has every field of a
+test and what an assertion can read.
 
 ### `fmt`
 
@@ -542,6 +634,17 @@ plus `--trust-editor-plugin-dirs` to load unsigned plugins from directories the
 editor names. Full description:
 [The language server](../tooling/language-server.md).
 
+### `mcp`
+
+Runs the Model Context Protocol server on standard input and output. An AI
+client starts it; there is nothing to see when it is run by hand. It takes
+the plugin options like every command, `--root DIR` for the directory file
+arguments are confined to (the current directory by default), `--state-dir`
+for the cached tool schemas, and `--allow-plan` to offer the `plan` tool,
+which runs the real tool and takes the state lock; without it the server
+changes nothing anywhere. Full description:
+[The MCP server](../tooling/mcp-server.md).
+
 ### `signing`
 
 Makes signing keys, signs plugin binaries and checks their signatures. It is
@@ -564,6 +667,8 @@ meridian signing verify --trusted-key acme.pub meridian-target-acme
 
 | Option | Environment | Default | Meaning |
 |---|---|---|---|
+| `--output FORMAT` | `MERIDIAN_OUTPUT` | `text` | `text` for a person, or `json`: one JSON object per command on standard output, the report for people on standard error. [Machine-readable output](cli-json.md) has every object; may be given to any command |
+| `--detailed-exitcode` | | | `plan` only: exit `2` when an apply would do something, `0` when nothing would change, `1` on an error |
 | `--plugin-dir DIR` | `MERIDIAN_PLUGIN_DIR` (separated by `:`, or `;` on Windows) | the directory `meridian` is really in, following a link to it | where to look for plugins; may be repeated |
 | `--plugin-signatures POLICY` | `MERIDIAN_PLUGIN_SIGNATURES` | `require` in a released `meridian`, `off` in one built from source | what to do about [plugin signatures](plugin-signatures.md): `off` does not look, `warn` starts an unsigned or wrongly signed plugin and says so, `require` starts only plugins signed by a trusted key |
 | `--trusted-key FILE` | `MERIDIAN_TRUSTED_KEYS` (separated by `:`, or `;` on Windows) | the key a released `meridian` was built with | a public key whose signatures on plugins and on [modules](modules.md#signatures) are trusted, or a directory of `*.pub` files; may be repeated, and given to any command |
@@ -589,6 +694,40 @@ meridian signing verify --trusted-key acme.pub meridian-target-acme
 | `--data FILE` | | no data | `compile`, `plan`, `apply`: a YAML or JSON mapping of values that [`when`](dsl/index.md#when-and-runtimewhen) conditions and [interpolations](dsl/interpolation.md) read as `data.<key>`. May be repeated; a later file's key replaces an earlier file's |
 | `--strict-secrets` | `MERIDIAN_STRICT_SECRETS` | off | `plan`, `apply`: stop a stage whose secret cannot be [locked in memory](#secrets), instead of warning once and going on |
 | `--set KEY=VALUE` | | | `compile`, `plan`, `apply`: one value for `when` conditions and interpolations, applied after every `--data` file, so it wins. `KEY` may be dotted to set one key inside a mapping (`region.name=eu-west-1`). The value is typed as YAML types it. May be repeated. See [giving the data](dsl/conditions.md#giving-the-data) |
+| `--annotations MODE` | `MERIDIAN_ANNOTATIONS` | `auto` | any command: inside a [pipeline engine](#inside-a-pipeline-engine), also write each problem in the engine's annotation syntax and the run's report as the job's summary. `auto` does so when standard output is not a terminal, `on` does so regardless, `off` never does |
+
+### Inside a pipeline engine
+
+Every engine sets one variable in the jobs it runs: `GITHUB_ACTIONS`,
+`TF_BUILD` (Azure Pipelines), `GITLAB_CI`, `BUILDKITE`, `JENKINS_URL`, any
+`ARGO_*` (Argo Workflows) or any `TEKTON_*`. When one is set and standard
+output is not a terminal, `meridian` also writes for the engine:
+
+- each problem in the engine's own annotation syntax, on standard error
+  beside the error for a person: a refused document at its file, line and
+  column, a failed step at its document, a refused run with no place. GitHub
+  Actions shows it on the pull request; Azure Pipelines as an issue of the
+  job. GitLab CI, Jenkins, Argo and Tekton have no such syntax, and get the
+  log;
+- the run's report, the same Markdown that `--report markdown=FILE` writes,
+  as the job's summary: appended to `$GITHUB_STEP_SUMMARY`, uploaded with
+  `##vso[task.uploadsummary]` on Azure, or handed to `buildkite-agent
+  annotate` on Buildkite when the agent is on the `PATH`. A command that
+  failed before it had a run summarises its problems instead.
+
+```
+$ GITHUB_ACTIONS=true meridian validate site.yaml 2>&1 | cat
+error: site.yaml:34:7: spec.resources[0]: unknown field "colour"
+::error file=site.yaml,line=34,col=7,title=Meridian%3A validate::spec.resources[0]: unknown field "colour"
+```
+
+Standard output is untouched, so `--events json` and `--output json` work as
+they do anywhere. Nothing is coloured, inside an engine or out of it, and
+nothing is masked, because no value is ever printed. `--annotations off`
+turns it off; `--annotations on` keeps it on when standard output is a
+terminal, which is how Buildkite runs a job.
+[Running Meridian in a pipeline](../operations/running-in-a-pipeline.md)
+has a snippet per engine and the table of what each engine shows.
 
 ### Running part of a workflow
 
@@ -685,21 +824,17 @@ No version is deprecated today.
 
 ## Exit status
 
-`0` when everything asked for succeeded. `1` when a document was invalid, did
-not compile, a tool failed, a policy denied a change or could not be asked, a
-stage could not be rolled back, or the run was
-refused because the state is locked or there was nothing to resume or roll
-back, or a [sink](reporting.md#sinks) marked `required` failed; when
-`fmt --check` found a file that is not formatted; and when `lint` found an
-error, or a warning with `--strict`. `2` for a mistake in the command line
-itself, and from `drift` when a stage has drifted. `130` when the run was
-[stopped with Ctrl-C](../concepts/run-safety.md#stopping-a-run), as a shell
-reports a command ended that way; a run stopped by `--stage-timeout` is a
-failure and exits `1`.
+| Status | When |
+|---|---|
+| `0` | everything asked for succeeded. For `plan` without `--detailed-exitcode`, whether or not an apply would change anything; for `drift`, nothing drifted; for `import`, the documents were written, whatever was reported about them |
+| `1` | an error: a document was invalid or did not compile; a tool failed; a policy denied a change or could not be asked; a stage could not be rolled back; the run was refused because the state is locked or there was nothing to resume or roll back; a [sink](reporting.md#sinks) marked `required` failed; a run was stopped by `--stage-timeout`; `fmt --check` found a file that is not formatted; `lint` found an error, or a warning with `--strict`; `migrate --check` found a file that would change; `import` could not read the source, no plugin imports it, or, with `--strict`, something was changed or not translated; `module verify`, `signing verify`, `secret check` or `rules check` found something wrong; `test` had a case that failed or could not run, or ran none |
+| `2` | `drift`: a stage has drifted. `plan --detailed-exitcode`: an apply would do something. Any command: a mistake in the command line itself |
+| `130` | the run was [stopped with Ctrl-C](../concepts/run-safety.md#stopping-a-run), as a shell reports a command ended that way |
 
-`import` exits `0` when it wrote its documents, whatever it reported about
-them; `1` when the source could not be read or no plugin imports it, and, with
-`--strict`, when anything was changed or not translated.
+With `--output json` the object on standard output says the same: `ok` is
+false for `1` and `130`, and the `summary` of a run carries `drifted` and
+`hasChanges` for the two meanings of `2`
+([machine-readable output](cli-json.md#what-every-object-has)).
 
 A reader that stops early, as in `meridian plugins | head`, ends the printing
 and nothing else: the command still runs to its end and exits with the status

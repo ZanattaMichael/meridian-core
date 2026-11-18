@@ -76,7 +76,7 @@ fn a_type_the_tool_does_not_have_is_refused_at_the_authors_line() {
 #[test]
 fn a_param_the_tool_does_not_take_is_refused_not_dropped() {
     let err = refusal(&format!("{MOTD}        owner: root\n"));
-    assert_eq!(err.rule, "unknown-param");
+    assert_eq!(err.rule, "unsupported-param");
     assert!(err.msg.contains("\"owner\""), "{}", err.msg);
 }
 
@@ -109,7 +109,7 @@ fn two_resources_cannot_manage_one_path() {
     let err = refusal(&format!(
         "{MOTD}    - id: again\n      type: file\n      params:\n        path: /etc/motd\n"
     ));
-    assert_eq!(err.rule, "duplicate-path");
+    assert_eq!(err.rule, "duplicate-resource");
     assert!(err.msg.contains("\"motd\""), "{}", err.msg);
 }
 

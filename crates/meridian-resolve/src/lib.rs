@@ -11,4 +11,6 @@ mod merge;
 mod resolve;
 
 pub use hierarchy::{Hierarchy, KeyRule, Scope, Strategy, Strictness};
-pub use resolve::{resolve, Data, Error, FsLoader, Layer, LoadError, Loader, MapLoader, Resolved};
+pub use resolve::{
+    resolve, Data, Error, FsLoader, Kind, Layer, LoadError, Loader, MapLoader, Resolved,
+};

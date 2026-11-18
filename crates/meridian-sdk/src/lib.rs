@@ -47,8 +47,10 @@ pub mod agent;
 pub mod cloud;
 mod credential;
 pub mod expr;
+pub mod fetch;
 mod import;
 mod listen;
+pub mod rules;
 mod run;
 pub mod schema;
 mod schemas;
@@ -73,6 +75,7 @@ pub use cloud::{check_cloud_credential, cloud_for, CloudHandover, CloudTakes};
 pub use credential::{
     check_ssh_credential, credential_for_this_machine, Credential, HeldCredential, SshTakes,
 };
+pub use fetch::{fetch, Fetched};
 pub use import::{
     DocumentKind, ImportError, ImportFormat, ImportNote, ImportSource, Imported, ImportedDocument,
     ImportedNotify, ImportedOutput, ImportedResource, Importer, NoteLevel,
@@ -82,16 +85,18 @@ pub use meridian_value::host::check as check_host;
 pub use meridian_value::{
     canonical_map, decode_map, decode_value, PlacedEscape, SecretRef, Value, SENSITIVE,
 };
+pub use rules::{DescribedRule, Rule};
 pub use run::{
     Applied, Category, Change, ChangeAction, Log, LogLine, LogStream, NoLog, Operations, Output,
-    Plan, RunContext, RunError, Runner,
+    Plan, RunContext, RunError, Runner, SavedPlan,
 };
-pub use schema::{ParamKind, ParamSchema, ResourceSchema};
+pub use schema::{is_shared_type, ParamKind, ParamSchema, ResourceSchema, TypeName, NATIVE_PREFIX};
 pub use schemas::{version_in, SchemaExport, SchemaRequest, SchemaSource};
 pub use secrets::{holds_secret, Written};
 pub use secrets::{SecretName, Secrets};
 pub use serve::{serve, Plugin, ServeError};
 pub use settings::Setting;
+pub use types::check_settings;
 pub use types::{
     Artifact, Capabilities, CompileError, Data, Edge, EdgeKind, Emitted, Emitter,
     OutputDeclaration, Position, Resource, ResourceGraph, Warning,

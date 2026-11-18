@@ -22,6 +22,7 @@ previewed.
 | Plan | Yes: a change set, described and then discarded |
 | Apply | Yes: the same change set, executed |
 | Outputs | Yes: the template's `Outputs`, read back from the stack |
+| Editor schemas | Yes: `meridian schema sync` reads the resource provider schemas CloudFormation publishes for the stack's region, with no account and no `aws`. See [Editor schemas](#editor-schemas) |
 | Compiles to | `template.yaml` and `stack.json` |
 | Runs with | `aws cloudformation` |
 
@@ -44,6 +45,7 @@ Contents: [Requirements](#requirements) ·
 [References](#references) ·
 [Ordering](#ordering) ·
 [What a compile writes](#what-a-compile-writes) ·
+[Editor schemas](#editor-schemas) ·
 [Running](#running) ·
 [Settings](#settings) ·
 [What is refused](#what-is-refused) ·
@@ -173,7 +175,7 @@ holds how the stack is deployed:
 | `region` | the region to deploy to | the `aws` command's own default |
 | `capabilities` | the capabilities the deployment acknowledges: `CAPABILITY_IAM`, `CAPABILITY_NAMED_IAM`, `CAPABILITY_AUTO_EXPAND` | none |
 
-A second `stack` resource is refused (`duplicate-stack`), and a `stack` may
+A second `stack` resource is refused (`duplicate-resource`), and a `stack` may
 not take part in `dependsOn` (`unsupported-dependency`).
 
 Logical ids hold only letters and digits, so a resource id such as `web_vm`
@@ -220,6 +222,33 @@ the runner needs and the template does not say: the stack's name, region and
 capabilities, and the map from logical ids back to the ids you wrote, so a
 change set's rows are reported by your names.
 
+## Editor schemas
+
+`meridian schema sync` reads the registry of resource types CloudFormation
+publishes for a region, so an editor completes and checks `AWS::S3::Bucket`'s
+properties as it does a plugin's own types
+([Tool schemas](../tooling/schema-sync.md)). The registry is one zip per
+region of resource provider schemas, the JSON Schema CloudFormation itself
+validates a template against, at
+`https://schema.cloudformation.<region>.amazonaws.com/CloudformationSchema.zip`.
+No account and no `aws` command is needed to read it. The region is the
+`stack` resource's `region`, else `--region` in `MERIDIAN_AWS_ARGS`, else
+`AWS_REGION` or `AWS_DEFAULT_REGION`, else `us-east-1`.
+
+| | |
+|---|---|
+| Described in full | the `Vendor::Service::Type` types the documents use: every property with its kind, whether it is required, the values it allows and its nested properties; the `readOnlyProperties` as set by CloudFormation (read with `${id.Arn}`, never written); the `createOnlyProperties` marked as replacing the resource when changed; the `writeOnlyProperties` as sensitive |
+| Listed by name | every other type of the region's registry, with the first paragraph of its description |
+| Pinned | the region, to the SHA-256 of the zip it was read from |
+
+A type that is not in the public registry, a private or third-party type
+the account activated, is asked of `aws cloudformation describe-type`, which
+needs the command and credentials; a type neither has is a note. The zip is
+kept in the work directory and fetched again only when the registry says it
+changed; when the registry cannot be reached, the last copy is used and the
+sync says so. The source is tested against the real registry in the
+`cloudformation` workflow.
+
 ## Running
 
 Both plan and apply go through a change set, so what is applied is what was
@@ -229,6 +258,7 @@ previewed. A change set's name is `meridian-<time>`.
 |---|---|
 | Plan | `describe-stacks` to learn whether the stack exists, `create-change-set` (`CREATE` for a new stack, `UPDATE` otherwise), `wait change-set-create-complete`, `describe-change-set`, then `delete-change-set`. For a stack that does not exist yet, the empty stack in review that creating the change set left behind is deleted too |
 | Apply | the same preview, then `execute-change-set`, `wait stack-create-complete` or `stack-update-complete`, and `describe-stacks` for the outputs. A preview with nothing to change is discarded and nothing is executed |
+| Saved plan | `meridian plan --out` keeps the change set instead of discarding it and records its name; `meridian apply --plan` executes that change set, so what is applied is what the reviewer read. The change set's values stay with CloudFormation; the plan file holds only its name ([a saved plan](../operations/pull-requests.md)) |
 | Outputs later | `describe-stacks` |
 
 Changes are read from the change set's description, resource by resource,
@@ -402,12 +432,12 @@ target can raise, and what to do:
 | `unsupported-dependency` | a `dependsOn` to or from the `stack` resource | the stack is not a resource of the template |
 | `unsupported-param` | a param the `stack` resource does not take | only `name`, `region` and `capabilities` |
 | `invalid-param` | a `stack` param of the wrong kind, or a capability CloudFormation does not know | a string for `name` and `region`, a list of `CAPABILITY_*` strings for `capabilities` |
-| `invalid-stack-name` | a stack name that does not start with a letter or holds something other than letters, digits and hyphens | rename it |
-| `duplicate-stack` | two resources of type `stack` | keep one |
+| `invalid-name` | a stack name that does not start with a letter or holds something other than letters, digits and hyphens | rename it |
+| `duplicate-resource` | two resources of type `stack` | keep one |
 | `invalid-name` | a resource or output id with no letters or digits to make a logical id from | rename it |
-| `duplicate-logical-id`, `duplicate-output` | two resources, or two outputs, that become the same logical id (`web_vm` and `WebVm`) | rename one |
+| `duplicate-resource`, `duplicate-output` | two resources, or two outputs, that become the same logical id (`web_vm` and `WebVm`) | rename one |
 | `invalid-reference` | `${...}` that is not a resource of the document, one attribute of it, or a pseudo parameter | fix the reference |
-| `empty-template` | a document with no resources but the stack | add a resource, or delete the stack yourself |
+| `empty-document` | a document with no resources but the stack | add a resource, or delete the stack yourself |
 
 ## Troubleshooting
 

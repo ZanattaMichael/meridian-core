@@ -15,10 +15,12 @@
 
 mod emit;
 mod runner;
+mod schemas;
 mod sort;
 mod transform;
 mod validate;
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
     Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
     ResourceGraph, SshTakes, Value,
@@ -28,7 +30,8 @@ pub use emit::{sls_path, STATES_DIR, TOP_PATH};
 pub use runner::{
     SaltRunner, Transport, ARGS_VARIABLE, SALT_CALL_VARIABLE, SALT_SSH_VARIABLE, TRANSPORT_VARIABLE,
 };
-pub use transform::supported_resource_types;
+pub use schemas::SaltSchemas;
+pub use transform::{supported_resource_types, NATIVE_PATTERN};
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "salt";
@@ -69,7 +72,8 @@ fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
     meridian_sdk::check_ssh_credential(credential, &SSH_TAKES).map_err(|msg| CompileError {
         target: NAME.to_owned(),
         resource: String::new(),
-        rule: "unsupported-credential".to_owned(),
+        rule: rules::UNSUPPORTED_CREDENTIAL.name.to_owned(),
+        hint: rules::UNSUPPORTED_CREDENTIAL.hint.to_owned(),
         msg: format!("the credential {:?}: {msg}", credential.name),
         pos: Position::default(),
     })
@@ -79,7 +83,7 @@ fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
 /// ID, which Salt writes `- pkg: nginx_pkg`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Reference {
-    pub module: &'static str,
+    pub module: String,
     pub id: String,
 }
 
@@ -92,9 +96,9 @@ pub(crate) struct State {
     /// unique within the file.
     pub id: String,
     /// The state module, for example `pkg`.
-    pub module: &'static str,
+    pub module: String,
     /// The function within it, for example `installed`.
-    pub function: &'static str,
+    pub function: String,
     /// The function's arguments in the order they are written: `name` first,
     /// then the rest by native name.
     pub args: Vec<(String, Value)>,
@@ -111,6 +115,10 @@ pub(crate) struct State {
     /// `when` is pruned long before this stage and must never reach the
     /// output.
     pub when: String,
+    /// Whether the function is Salt's own rather than one of the shared
+    /// six's, so its arguments are the document's as written and its name,
+    /// when none is written, is its ID, as Salt reads it.
+    pub native: bool,
     /// Provenance, kept so a validation failure can name the resource the
     /// author wrote and not the state it became.
     pub resource_id: String,
@@ -120,7 +128,7 @@ pub(crate) struct State {
 impl State {
     pub(crate) fn reference(&self) -> Reference {
         Reference {
-            module: self.module,
+            module: self.module.clone(),
             id: self.id.clone(),
         }
     }
@@ -148,8 +156,23 @@ impl Sls {
     }
 }
 
+/// The refusal rules only this target has. Everything else it refuses carries
+/// a general rule from `meridian_sdk::rules`.
+pub(crate) mod own {
+    use meridian_sdk::rules::Rule;
+
+    pub(crate) const SHELL_REQUIRED: Rule = Rule::new(
+        "shell-required",
+        "an `exec` command holds shell syntax, and Salt always runs a command through a shell",
+        "set param `shell` to true to say the shell syntax is intended, or quote the command",
+    );
+
+    /// Every rule here, for `Emitter::rules` and the reference page.
+    pub(crate) const ALL: &[Rule] = &[SHELL_REQUIRED];
+}
+
 /// A refusal of one resource, stamped with this target.
-pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         ..CompileError::for_resource(r, rule, msg)
@@ -190,6 +213,9 @@ impl Emitter for Salt {
             credentials: true,
             cloud_credentials: false,
         }
+    }
+    fn rules(&self) -> Vec<Rule> {
+        own::ALL.to_vec()
     }
 
     fn category(&self) -> Category {

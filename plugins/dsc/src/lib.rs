@@ -14,12 +14,14 @@
 //! documents them. Desired state is one of those properties (`Ensure`,
 //! `_exist`), so a resource takes no `state`.
 //!
-//! One resource may have the type `runner`. It is not a DSC resource: it
-//! chooses the engine and says how the runner reaches the document's host
-//! (`engine`, `target`, `credential`).
+//! How the configuration is run is not a resource: `spec.settings` chooses
+//! the engine and says how the runner reaches the document's host (`engine`,
+//! `target`, `credential`). A resource of type `runner`, the old way to say
+//! the same, is still read with a warning, and refused where it contradicts
+//! the settings.
 //!
 //! A document's `targetVersion` chooses the engine too: `"2"` is `DscV2` and
-//! `"3"` is `DscV3`. A `runner` that names a different engine is refused.
+//! `"3"` is `DscV3`. A setting that names a different engine is refused.
 //!
 //! # References
 //!
@@ -49,6 +51,7 @@ mod validate;
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules::Rule;
 use meridian_sdk::{
     Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
     ResourceGraph, Value,
@@ -81,7 +84,7 @@ pub(crate) struct Instance {
     pub pos: Position,
 }
 
-/// How the configuration is run, from the document's `runner` resource.
+/// How the configuration is run, from the document's `spec.settings`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Settings {
     /// `DscV2`, `DscV3` or `Auto`.
@@ -115,18 +118,19 @@ impl Configuration {
 }
 
 /// A refusal of one resource, stamped with this target.
-pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         ..CompileError::for_resource(r, rule, msg)
     }
 }
 
-pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         resource: resource.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         pos: pos.clone(),
     }
@@ -141,9 +145,15 @@ impl Emitter for Dsc {
     }
 
     fn supported_resource_types(&self) -> Vec<String> {
-        ["<Module>/<Resource>", "runner"]
+        ["<Module>/<Resource>", transform::RUNNER_TYPE]
             .map(str::to_owned)
             .to_vec()
+    }
+
+    /// How the configuration is run: the engine, how the host is reached,
+    /// and the name of a credential the runner resolves itself.
+    fn settings_keys(&self) -> Vec<String> {
+        transform::SETTINGS_KEYS.map(str::to_owned).to_vec()
     }
 
     /// The two generations of DSC the runner drives. A document that asks
@@ -170,14 +180,15 @@ impl Emitter for Dsc {
     }
 
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
-        let mut configuration = transform::transform(graph)?;
+        let mut warnings = Vec::new();
+        let mut configuration = transform::transform(graph, &mut warnings)?;
         sort::apply_ordering(graph, &mut configuration)?;
         validate::validate(&configuration)?;
         Ok(Emitted {
             artifact: Artifact {
                 files: emit::serialise(&configuration),
             },
-            warnings: Vec::new(),
+            warnings,
         })
     }
 }

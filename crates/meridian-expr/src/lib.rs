@@ -18,6 +18,7 @@
 //!   together and a value that is not a yes or a no are errors, not `false`
 //!   and not an empty string.
 
+pub mod error;
 mod eval;
 mod funcs;
 mod parse;
@@ -30,6 +31,7 @@ use meridian_secret::SecretTable;
 
 use meridian_value::Value;
 
+pub use error::{Error, Kind, Span};
 pub use funcs::{function, function_names, functions, FunctionInfo};
 use parse::Node;
 pub use template::{has_interpolation, Template};
@@ -121,14 +123,14 @@ impl Scope {
 
 impl Expr {
     /// Reads a `when` condition. Diagnostics call it "the condition".
-    pub fn parse_condition(text: &str) -> Result<Expr, String> {
+    pub fn parse_condition(text: &str) -> Result<Expr, Error> {
         Ok(Expr {
             node: parse::parse(text, "condition")?,
         })
     }
 
     /// Reads an expression. Diagnostics call it "the expression".
-    pub fn parse(text: &str) -> Result<Expr, String> {
+    pub fn parse(text: &str) -> Result<Expr, Error> {
         Ok(Expr {
             node: parse::parse(text, "expression")?,
         })
@@ -137,7 +139,7 @@ impl Expr {
     /// Checks everything that can be known without data: every name is one
     /// this place can read, every function exists and is given a number of
     /// arguments it takes.
-    pub fn check(&self, names: &Names) -> Result<(), String> {
+    pub fn check(&self, names: &Names) -> Result<(), Error> {
         eval::check(&self.node, names, &mut Vec::new())
     }
 
@@ -158,17 +160,17 @@ impl Expr {
     }
 
     /// Decides the expression.
-    pub fn eval(&self, scope: &Scope) -> Result<Value, String> {
+    pub fn eval(&self, scope: &Scope) -> Result<Value, Error> {
         eval::Evaluator::new(scope)
             .value(&self.node)
-            .map_err(|e| e.message())
+            .map_err(eval::Failure::into_error)
     }
 
     /// Decides the expression as a yes or a no. Only a boolean is one: text,
     /// a number or null deciding whether something exists would be a guess.
-    pub fn truth(&self, scope: &Scope) -> Result<bool, String> {
+    pub fn truth(&self, scope: &Scope) -> Result<bool, Error> {
         eval::Evaluator::new(scope)
             .truth(&self.node)
-            .map_err(|e| e.message())
+            .map_err(eval::Failure::into_error)
     }
 }

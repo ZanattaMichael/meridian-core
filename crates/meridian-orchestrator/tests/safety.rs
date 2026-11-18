@@ -15,7 +15,7 @@ use meridian_orchestrator::backend::{Backend, ExecBackend, LocalBackend, MemoryB
 use meridian_orchestrator::record::{self, RunStatus, StepStatus};
 use meridian_orchestrator::{
     event, lock, run, work_dir, Event, LockInfo, Mode, Observer, OnFailure, Options, Outcome,
-    Quiet, Refusal, Resume, RunState, StageId, StageKind, StageReport, Stop,
+    Quiet, Reason, Refusal, Resume, RunState, StageId, StageKind, StageReport, Stop,
 };
 use meridian_plugin_host::{Registry, StartOptions};
 use meridian_sdk::LogLine;
@@ -380,7 +380,7 @@ fn a_failed_run_records_the_failure_as_a_fixed_word_and_releases_the_lock() {
     );
     let failed = record.step(&web()).unwrap();
     assert_eq!(failed.status, StepStatus::Failed);
-    assert_eq!(failed.reason, "tool-failed");
+    assert_eq!(failed.reason, Reason::ToolFailed.as_str());
 
     // The terminal is told what the tool said. The record is not: a tool
     // can quote a value in its error.
@@ -574,7 +574,7 @@ fn an_interrupt_before_a_stage_starts_does_not_start_its_tool() {
         &mut Quiet,
     );
     assert!(report.interrupted());
-    assert_eq!(report.stages[0].reason, "interrupted");
+    assert_eq!(report.stages[0].reason, Some(Reason::Interrupted));
     let Outcome::Failed(why) = &report.stages[0].outcome else {
         panic!("{:?}", report.stages[0].outcome);
     };

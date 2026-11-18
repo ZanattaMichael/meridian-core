@@ -66,6 +66,7 @@ itself is specified in the [language reference](../reference/dsl/index.md).
 | `dependsOn` | cycles and unknown resources are refused; the resources arrive in a valid order |
 | `notifies[].on` | only `changed` is accepted |
 | `spec.targetVersion` | refused unless your plugin declares versions with `Emitter::target_versions`. If it does, the version arrives as `graph.target_version` |
+| `spec.settings` | refused unless your plugin declares the keys it reads with `Emitter::settings_keys`, and refused for any key outside them. What it declares arrives as `graph.settings`, with interpolation placed, and the values are yours to check |
 
 ## Before you start
 
@@ -184,22 +185,61 @@ Maps each `Resource` to your model, or refuses it. A resource is plain data:
 | `runtime_when` | a condition to check on the node during the apply; empty when there is none |
 | `pos` | the file, line and column the author wrote it at |
 
+#### Refusals
+
 Almost every refusal lives in this stage. Build one with the `refuse` helper
-the template gives you. It carries a stable rule name, a message and the
-author's position, so the operator is pointed at their own line:
+the template gives you. It carries a rule, a message and the author's
+position, so the operator is pointed at their own line:
 
 ```rust
+use meridian_sdk::rules;
+
 return Err(refuse(
     r,
-    "unsupported-state",
+    &rules::UNSUPPORTED_STATE,
     format!("has the state {other:?} (supported: present, absent)"),
 ));
 ```
 
-Use the rule names the other plugins already use where they fit:
-`unsupported-resource-type`, `unsupported-state`, `unsupported-action`,
-`unsupported-runtime-condition`, `missing-param`. Say what is supported in the
-message, as above, so the author knows what to write instead.
+The rule is a value, not a string: one of the constants in
+[`meridian_sdk::rules`](../../crates/meridian-sdk/src/rules.rs), each with a
+stable name, what it refuses and a hint. The same mistake carries the same
+name on every target, which is what lets a policy check, an editor or a test
+key off it, and the [refusal rules](../reference/refusal-rules.md) page is
+generated from the registry. Use a general rule wherever one fits:
+`unsupported-resource-type`, `unsupported-state`, `unsupported-param`,
+`missing-param`, `invalid-param`, `duplicate-resource`, `invalid-reference`,
+`unsupported-action`, `unsupported-runtime-condition` cover most of what a
+plugin refuses. Say what is supported in the message, as above, so the author
+knows what to write instead; the rule's own hint says it in general terms, and
+`.with_hint(...)` on the error replaces it with a specific one.
+
+A mistake that exists on your tool only, such as Salt's `shell-required`,
+gets a rule of the plugin's own. Declare it once, in a table in `lib.rs`, and
+return the table from `Emitter::rules`:
+
+```rust
+pub(crate) mod own {
+    use meridian_sdk::rules::Rule;
+
+    pub(crate) const SHELL_REQUIRED: Rule = Rule::new(
+        "shell-required",
+        "an `exec` command holds shell syntax, and Salt always runs a command through a shell",
+        "set param `shell` to true to say the shell syntax is intended",
+    );
+
+    pub(crate) const ALL: &[Rule] = &[SHELL_REQUIRED];
+}
+
+fn rules(&self) -> Vec<Rule> {
+    own::ALL.to_vec()
+}
+```
+
+A test fails when a plugin's own rule has a general rule's name, and the
+conformance suite fails when a refusal carries a rule neither the registry nor
+the plugin declares. Run the tests with `UPDATE_GOLDEN=1` once to add your
+rules to the reference page.
 
 #### References
 
@@ -286,6 +326,18 @@ them, so each one is a promise:
 - `target_versions()`: only if the tool comes in versions that need different
   output, as DSC does. Leave it out otherwise, and a document that asks your
   target for a version is refused instead of being silently ignored.
+- `settings_keys()`: the keys of `spec.settings` your target reads, if the
+  tool has settings that belong to the whole document and to no resource of
+  it: which engine runs it, how the host is reached. DSC declares `engine`,
+  `target` and `credential`. The core refuses a document that sets any other
+  key before `emit` is called, so `graph.settings` holds only keys you listed;
+  check the values as you check params, and document each key on your
+  target's page. Leave it out, and a document that sets any is refused. A
+  tool-wide setting is not a resource: do not add a resource type for it.
+- `rules()`: the [refusal rules](../reference/refusal-rules.md) your target
+  has of its own, if a mistake exists on your tool and no other. Most targets
+  leave it out and refuse only under the general rules; see
+  [Refusals](#refusals).
 - `placed_text()`: the openings of your tool's own expression syntax, if it
   has any beyond `${`, and how each is written as literal text. The core
   applies them to every value an interpolation places from data before `emit`
@@ -367,6 +419,8 @@ refuses what it left out.
 | `inputs` | values handed over from earlier stages of a workflow |
 | `secrets` | the value of each secret the document's params hold, for a target that declared `secrets`; see [Secrets](#secrets) |
 | `credential` | the credential the host is reached as, with the values of its secret fields, for a target that declared `credentials`; `None` when the document names none. See [Credentials](#credentials) |
+| `save_plan` | on a plan: the operator asked for a saved plan (`plan --out`), and the host will keep what `Plan::saved` returns; see [Saved plans](#saved-plans) |
+| `saved_plan` | on an apply: the plan this runner saved when the plan was taken, handed back by `apply --plan`; `None` when there is none |
 
 and you implement up to three operations. Declare only the ones you implement
 in `operations()`; the host never calls the others.
@@ -416,6 +470,36 @@ Three rules for a runner:
 
 Let the operator point at the program with an environment variable named
 `MERIDIAN_<TOOL>`, as the template does. The tests rely on it too.
+
+### Saved plans
+
+`meridian plan --out` saves one plan for the whole workflow, and
+`meridian apply --plan` carries out exactly that plan
+([a saved plan](../operations/pull-requests.md)). The host checks every
+stage by its artifact hash; your runner takes part only if its tool can save
+a plan of its own and apply it later, as Terraform's `-out` file does:
+
+```rust
+fn saves_plans(&self) -> bool {
+    true
+}
+```
+
+Then, in `plan`, when `context.save_plan` is set, put the tool's plan in
+`Plan::saved` as `SavedPlan::new(bytes)` with the changes it lists; in
+`apply`, when `context.saved_plan` is `Some`, hand those bytes to the tool
+and apply that and nothing else, and let the tool refuse a stale one. Two
+rules:
+
+- **Save nothing that holds a value.** A Terraform plan file holds every
+  variable, so the Terraform runner saves none when `context.secrets` is not
+  empty, and the apply plans again for that stage. The file a saved plan is
+  written to is kept as a pipeline artifact, by design.
+- **The saved plan is the tool's, the check is the host's.** Do not read
+  the saved bytes for the changes to report; report what the tool did.
+
+The default is `false`, and a runner that leaves it so is checked by its
+artifact hash and plans again at apply.
 
 ### Settings
 
@@ -809,6 +893,16 @@ The rules a schema source keeps:
   following `$ref`s through a resolver you give it, and stops at a depth so
   a recursive schema ends. `meridian_sdk::version_in` finds the version in
   what `tool --version` prints.
+- **Fetch a published file through `meridian_sdk::fetch`.** When the vendor
+  publishes the catalogue as a file instead of a command (CloudFormation's
+  registry zip, the Azure type definitions, a JSON Schema in a repository),
+  `fetch(url, &request.work_dir, name, what, log)` downloads it over HTTPS
+  into the work directory, keeps it with the server's `ETag` so the next
+  sync downloads nothing when it is unchanged, uses the last copy with a
+  note when the server cannot be reached, and gives you its SHA-256 to pin
+  (`Fetched::pin`). The rules are
+  [decision 0036](../decisions/0036-a-published-schema-file-is-fetched-over-https-pinned-by-hash-and-reused-offline.md);
+  the CloudFormation and Compose plugins are the shortest examples.
 
 Test it twice: a unit test that reads a saved sample of the tool's output
 into schemas, and a [real-tool test](real-tool-tests.md) in `tests/real.rs`

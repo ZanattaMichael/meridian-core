@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-use crate::scalar::{resolve_plain, Scalar};
+use crate::scalar::{is_leading_zero_digits, resolve_plain, Scalar};
 
 /// A YAML value to write. A mapping keeps the order it is given, so the
 /// caller decides whether keys are sorted or follow a convention.
@@ -351,8 +351,11 @@ fn string(value: &str, indent: usize) -> Text {
         return Text::Plain(double_quoted(value));
     }
     // Written plainly, would this be read back as something other than the
-    // string it is?
+    // string it is? Not by this crate's own rules only: `08` is text here
+    // but the number 8 to the YAML 1.1 readers the tools use, so it is
+    // quoted as well.
     let can_use_plain = matches!(resolve_plain(value), Scalar::Str)
+        && !is_leading_zero_digits(&value.replace('_', ""))
         && value != "<<"
         && !is_timestamp(value)
         && !is_base60_float(value)

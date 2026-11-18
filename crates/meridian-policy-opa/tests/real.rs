@@ -10,8 +10,7 @@ use std::path::{Path, PathBuf};
 
 use meridian_ir::Bundle;
 use meridian_orchestrator::{
-    run, work_dir, Mode, Options, Outcome, Policy, Quiet, RunReport, StageId, StageKind,
-    REASON_POLICY_DENIED,
+    run, work_dir, Mode, Options, Outcome, Policy, Quiet, Reason, RunReport, StageId, StageKind,
 };
 use meridian_plugin_host::{Registry, StartOptions};
 
@@ -132,7 +131,7 @@ fn the_example_policy_allows_a_create_and_denies_a_delete_in_prod() {
     let one = workflow("{env: prod}", &[("index", "changed")]);
     let second = run(&one, &registry, Mode::Apply, &options, &mut Quiet);
     assert!(!second.succeeded());
-    assert_eq!(second.stages[0].reason, REASON_POLICY_DENIED);
+    assert_eq!(second.stages[0].reason, Some(Reason::PolicyDenied));
     let why = failed_with(&second);
     assert!(why.contains("would be a delete in prod"), "{why}");
     assert_eq!(on_disk(&options, "index").as_deref(), Some("hello"));
@@ -194,7 +193,7 @@ deny contains {"msg": msg} if {
         &options,
         &mut Quiet,
     );
-    assert_eq!(report.stages[0].reason, REASON_POLICY_DENIED);
+    assert_eq!(report.stages[0].reason, Some(Reason::PolicyDenied));
     assert!(failed_with(&report).contains("index holds a password"));
     assert_eq!(on_disk(&options, "index"), None);
 }
@@ -215,7 +214,7 @@ fn a_policy_that_does_not_parse_or_names_another_package_is_a_denial() {
         &options_broken,
         &mut Quiet,
     );
-    assert_eq!(report.stages[0].reason, REASON_POLICY_DENIED);
+    assert_eq!(report.stages[0].reason, Some(Reason::PolicyDenied));
     let why = failed_with(&report);
     assert!(why.contains("could not be asked"), "{why}");
     assert!(why.contains("eval failed"), "{why}");
@@ -234,7 +233,7 @@ fn a_policy_that_does_not_parse_or_names_another_package_is_a_denial() {
         &options_elsewhere,
         &mut Quiet,
     );
-    assert_eq!(report.stages[0].reason, REASON_POLICY_DENIED);
+    assert_eq!(report.stages[0].reason, Some(Reason::PolicyDenied));
     let why = failed_with(&report);
     assert!(
         why.contains("define nothing in the package `meridian`"),

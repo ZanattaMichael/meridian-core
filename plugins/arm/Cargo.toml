@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 meridian-sdk = { path = "../../crates/meridian-sdk" }
+meridian-target-bicep = { path = "../bicep" }
 
 [dev-dependencies]
 meridian-plugin-host = { path = "../../crates/meridian-plugin-host" }

@@ -4,6 +4,7 @@ use std::fmt::{self, Write as _};
 use meridian_value::{canonical_map, PlacedEscape, SecretRef, Value};
 
 use crate::credential::Credential;
+use crate::rules::{self, Rule};
 use crate::run::Category;
 use crate::schema::ResourceSchema;
 use crate::secrets::SecretName;
@@ -129,6 +130,11 @@ pub struct ResourceGraph {
     /// secret fields, never a value. The host sends one only to a target
     /// whose [`Capabilities::credentials`] is true.
     pub credential: Option<Credential>,
+    /// `spec.settings`: the tool's own settings for the whole document, such
+    /// as which engine runs it or how its host is reached. The SDK refuses a
+    /// key the target does not list in [`Emitter::settings_keys`] before
+    /// `emit` is called, so an emitter only checks the values.
+    pub settings: BTreeMap<String, Value>,
 }
 
 /// A value a document promises to later stages, such as the address of a
@@ -197,6 +203,9 @@ impl ResourceGraph {
         );
         if !self.target_version.is_empty() {
             let _ = writeln!(out, "targetVersion={}", self.target_version);
+        }
+        if !self.settings.is_empty() {
+            let _ = writeln!(out, "settings={}", canonical_map(&self.settings));
         }
         for s in &self.secrets {
             let _ = writeln!(out, "secret {} slot={}", s.name, s.secret.slot());
@@ -334,22 +343,47 @@ pub struct CompileError {
     /// The offending resource id.
     pub resource: String,
     /// A stable, machine-readable name for what was violated, for example
-    /// `unsupported-resource-type`.
+    /// `unsupported-resource-type`: the name of a [`rules::Rule`], general
+    /// or the target's own.
     pub rule: String,
     pub msg: String,
     pub pos: Position,
+    /// What to write instead, as data: the rule's own hint unless the
+    /// refusal gave a more specific one with [`CompileError::with_hint`].
+    /// Empty when there is nothing general to say.
+    pub hint: String,
 }
 
 impl CompileError {
     /// A refusal of one resource.
-    pub fn for_resource(r: &Resource, rule: &str, msg: impl Into<String>) -> Self {
+    pub fn for_resource(r: &Resource, rule: &Rule, msg: impl Into<String>) -> Self {
         CompileError {
             target: String::new(),
             resource: r.id.clone(),
-            rule: rule.to_owned(),
+            rule: rule.name.to_owned(),
             msg: msg.into(),
             pos: r.pos.clone(),
+            hint: rule.hint.to_owned(),
         }
+    }
+
+    /// A refusal of something that is not a resource, or of a resource that
+    /// has already been transformed: a notify edge, an output, the document.
+    pub fn at(resource: &str, pos: &Position, rule: &Rule, msg: impl Into<String>) -> Self {
+        CompileError {
+            target: String::new(),
+            resource: resource.to_owned(),
+            rule: rule.name.to_owned(),
+            msg: msg.into(),
+            pos: pos.clone(),
+            hint: rule.hint.to_owned(),
+        }
+    }
+
+    /// The same refusal with a hint of its own in place of the rule's.
+    pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = hint.into();
+        self
     }
 }
 
@@ -365,7 +399,11 @@ impl fmt::Display for CompileError {
         if !self.rule.is_empty() {
             write!(f, " [{}]", self.rule)?;
         }
-        write!(f, ": {}", self.msg)
+        write!(f, ": {}", self.msg)?;
+        if !self.hint.is_empty() {
+            write!(f, " (hint: {})", self.hint)?;
+        }
+        Ok(())
     }
 }
 
@@ -378,6 +416,37 @@ impl std::error::Error for CompileError {}
 pub struct Emitted {
     pub artifact: Artifact,
     pub warnings: Vec<Warning>,
+}
+
+/// Refuses a document whose `spec.settings` names a key the emitter does not
+/// take. The SDK calls it before every `emit`, in process or over the wire,
+/// so an emitter sees only the keys it listed in [`Emitter::settings_keys`].
+pub fn check_settings(
+    emitter: &(impl Emitter + ?Sized),
+    graph: &ResourceGraph,
+) -> Result<(), CompileError> {
+    let taken = emitter.settings_keys();
+    let Some(key) = graph.settings.keys().find(|k| !taken.contains(k)) else {
+        return Ok(());
+    };
+    let msg = if taken.is_empty() {
+        format!(
+            "spec.settings.{key}: target {:?} takes no settings. Remove spec.settings; what \
+             this target takes is on its page",
+            graph.target
+        )
+    } else {
+        format!(
+            "spec.settings.{key}: target {:?} does not take a setting of this name \
+             (accepted: {})",
+            graph.target,
+            taken.join(", ")
+        )
+    };
+    Err(CompileError {
+        target: graph.target.clone(),
+        ..CompileError::at("", &Position::default(), &rules::UNSUPPORTED_SETTING, msg)
+    })
 }
 
 /// Compiles a target-agnostic resource tree into one target's native syntax.
@@ -422,6 +491,27 @@ pub trait Emitter {
     /// that asks such a target for a version is refused, because accepting a
     /// version nothing checks would be a silent loss.
     fn target_versions(&self) -> Vec<String> {
+        Vec::new()
+    }
+    /// The keys this target reads in `spec.settings`: the tool's own settings
+    /// for the whole document, such as the engine that runs it. The target's
+    /// page documents each key and what it takes.
+    ///
+    /// The default, an empty list, means the target takes no settings. A
+    /// document that sets any is refused by [`check_settings`] before `emit`
+    /// is called, and a key outside the list is refused the same way, so a
+    /// misspelt key never becomes a silent loss.
+    fn settings_keys(&self) -> Vec<String> {
+        Vec::new()
+    }
+    /// The refusal rules only this target has, beside the general ones in
+    /// [`rules`]: a mistake that exists on one tool, such as a command that
+    /// needs a shell. Each is listed on the refusal rules reference page
+    /// under the target, and `meridian plugins` prints their names.
+    ///
+    /// The default, an empty list, means every refusal the target makes
+    /// carries a general rule, which is right for most targets.
+    fn rules(&self) -> Vec<Rule> {
         Vec::new()
     }
     /// What each resource type takes, for editors: its params, states and

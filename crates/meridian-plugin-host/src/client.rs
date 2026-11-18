@@ -131,7 +131,7 @@ impl Client {
             .map_err(|cause| Error {
                 path: path.to_owned(),
                 msg: "the plugin was not started".to_owned(),
-                cause,
+                cause: cause.into(),
                 ..Error::default()
             })?;
         let process = Process::spawn(path, options)?;
@@ -225,6 +225,8 @@ impl Client {
             placed_text: wire::placed_text_from_wire(reply.placed_text),
             category: wire::category_from_wire(reply.category),
             target_versions: reply.target_versions,
+            settings_keys: reply.settings_keys,
+            rules: wire::rules_from_wire(reply.rules),
             resource_schemas: reply
                 .resource_schemas
                 .into_iter()
@@ -232,6 +234,7 @@ impl Client {
                 .collect(),
             operations: wire::operations_from_wire(reply.operations),
             accepts_inputs: reply.accepts_inputs,
+            saves_plans: reply.saves_plans,
             import_formats: wire::import_formats_from_wire(reply.import_formats),
             exports_schemas: reply.exports_schemas,
             settings: wire::settings_from_wire(reply.settings),

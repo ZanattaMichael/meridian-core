@@ -29,7 +29,7 @@ flowchart TD
     CORE --> IAC["Infrastructure as code<br/>kind: Infrastructure"]
     CORE --> CON["Containerization<br/>kind: Infrastructure"]
     CORE --> ORC["Container orchestration<br/>kind: Infrastructure"]
-    CM --> CM1["shared dialect: six types<br/>ansible, puppet, openvox, chef, salt, cloud-init"]
+    CM --> CM1["shared dialect: six types, and the tool's own beside them<br/>ansible, puppet, openvox, chef, salt, cloud-init"]
     CM --> CM2["native dialect<br/>dsc"]
     IAC --> IAC1["the tool's own types<br/>terraform, opentofu, pulumi, cloudformation, bicep, arm, packer"]
     CON --> CON1["elements of a project<br/>docker, podman"]
@@ -52,6 +52,7 @@ flowchart TD
 | [Credentials](credentials.md) | `spec.credentials`: an identity declared by name and type, its secret fields, and reaching a host as one with `targetHost.credential` |
 | [References](references.md) | `${...}`: syntax, how each target rewrites it, what can be read where |
 | [Outputs and hand-offs](outputs-and-hand-offs.md) | `outputs`, `targetHost` and `imports`: the ties between documents |
+| [YAML pitfalls](yaml-pitfalls.md) | what Meridian does about each YAML trap: booleans, octal, version numbers, dates, tags, tabs, flow style, KYAML and JSON |
 | The four flavour pages above | how all of it is written for each segment |
 
 ## Contents
@@ -76,7 +77,9 @@ flowchart TD
 ## Files
 
 A file is YAML or JSON. Meridian decides which from the content, not from the
-file's extension.
+file's extension. YAML in flow style, including
+[KYAML](https://kubernetes.io/docs/reference/encodings/kyaml/) as `kubectl`
+prints it, is YAML and reads the same as the block form.
 
 | | YAML | JSON |
 |---|---|---|
@@ -102,10 +105,15 @@ handed to the tool with its type:
 | `yes`, `no`, `on`, `off` | text. Only `true` and `false` are booleans |
 | `42`, `-7`, `1_000`, `0x1F`, `0o17`, `0b101` | an integer |
 | `0644` | the integer 420: a leading zero means octal. Quote a file mode: `"0644"` |
-| `1.5`, `1e3`, `.inf`, `.nan` | a floating point number |
+| `08`, `09` | text: not octal, and no number was meant |
+| `1.5`, `1e3`, `.inf`, `.nan` | a floating point number. `1.10` is 1.1 and `3.0` is 3: quote a version number. The [`lossy-number`](../lint.md#lossy-number) lint points these out |
 | `~`, `null`, or nothing | null |
 | `2026-11-17` | text. A date is not converted |
-| anything quoted | text |
+| anything quoted, or tagged `!!str` | text |
+| any other tag (`!!int`, `!!binary`, `!custom`) | an error: write the value plainly, or quote it |
+
+Every one of these traps, and what to do about it, is on
+[YAML pitfalls](yaml-pitfalls.md).
 
 ## The document
 
@@ -257,6 +265,7 @@ every `-l` given. Rules:
 | `secrets` | no | a list of secrets, each a name and where it comes from, read as `secret.<name>`. See [secrets](secrets.md) |
 | `credentials` | no | a list of credentials, each a name, a type and the type's fields, used by name. See [credentials](credentials.md) |
 | `endpoint` | no | the cloud the document is applied to and the credential it is reached as. See [`endpoint`](#endpoint) |
+| `settings` | no | a mapping of the tool's own settings for the whole document. See [`settings`](#settings) |
 | `imports` | no | a list of [imports](#imports): values handed to this document from others |
 | `resources` | yes | a list of at least one [resource](#resources) |
 | `outputs` | no | a list of [outputs](#outputs) |
@@ -276,6 +285,7 @@ every `-l` given. Rules:
 | `credentials` | no | a list of credentials, each a name, a type and the type's fields, used by name. See [credentials](credentials.md) |
 | `targetHost` | yes, to compile | the machine, and the credential it is reached as. See [`targetHost`](#targethost) |
 | `endpoint` | no | the cloud the document is applied to and the credential it is reached as, for a target that reaches no host. See [`endpoint`](#endpoint) |
+| `settings` | no | a mapping of the tool's own settings for the whole document. See [`settings`](#settings) |
 | `imports` | no | a list of [imports](#imports): values handed to this document from others |
 | `resources` | yes | a list of at least one [resource](#resources) |
 
@@ -322,6 +332,48 @@ Which targets declare versions today:
 
 The check needs the plugin, so `compile`, `plan` and `apply` make it and
 `validate` does not.
+
+## `settings`
+
+```yaml
+spec:
+  target: dsc
+  settings:
+    engine: DscV2
+    target: WinRM
+```
+
+A tool has settings that belong to the whole document and to no resource of
+it: which engine runs it, how its host is reached. `settings` is one mapping
+for them. The target checks it exactly as it checks a resource's `params`: each
+target's page lists the keys it takes and what each accepts, and a value may
+hold interpolation.
+
+The rules:
+
+- A plugin declares the keys it reads, and `meridian plugins` lists them on
+  its `settings:` line. A document that sets any other key is refused before
+  the plugin is asked: `the document sets spec.settings.transport, and target
+  "dsc" takes only: credential, engine, target`. A plugin that declares no keys
+  takes no settings, so a document that sets any is refused the same way,
+  which is also what happens with a plugin built before `settings` existed.
+  Dropping a setting nothing reads would be a silent loss.
+- The values are the plugin's to check. What each accepts is on the target's
+  page, with the rule it refuses under.
+- A setting is not a resource: it has no `id`, no `when` of its own, and takes
+  no `dependsOn` or `notifies`. `spec.when` skips the whole document, settings
+  included.
+
+Which targets take settings today:
+
+| Target | Keys | What they say |
+|---|---|---|
+| `dsc` | `engine`, `target`, `credential` | [how the configuration is run](../../targets/dsc.md#how-the-configuration-is-run) |
+| every other target | none | the tool's own settings are a [settings resource](resources.md#type) for now, such as `stack` or `cluster` |
+
+The settings resources will move under `settings`, one target at a time, and
+each keeps compiling with a warning until the next `apiVersion` removes it. The
+`dsc` target's `runner` resource is the first to have moved.
 
 ## `targetHost`
 

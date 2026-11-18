@@ -69,10 +69,15 @@ Two rules keep a green job honest:
 | `terraform` | `terraform.yml` | `terraform`, and the same tests again with `tofu` | `MERIDIAN_TEST_REAL_TERRAFORM=1` |
 
 Each target's page says, under its running section, what its real-tool test covers.
-A target that exports [tool schemas](../tooling/schema-sync.md) (terraform,
-opentofu, kubernetes, pulumi, dsc) has a schema export test in the same file,
-switched on by the same variable, that runs the export against the installed
-tool and checks a type it knows.
+A target that exports [tool schemas](../tooling/schema-sync.md) has a schema
+export test in the same file, switched on by the same variable, that runs the
+export and checks a type it knows: against the installed tool for terraform,
+opentofu, kubernetes, helm, pulumi, dsc, ansible, puppet, openvox, chef and
+salt; against the file the
+vendor publishes, fetched over the network, for cloudformation, bicep, arm,
+cloud-init and docker, which need no tool and no account for it. The docker
+test also holds the attribute names the compile checks against to the
+Compose schema, so a name the specification drops fails the build.
 
 ## The vertical slice
 

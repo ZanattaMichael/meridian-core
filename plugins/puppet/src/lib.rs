@@ -32,12 +32,14 @@
 
 mod emit;
 mod runner;
+mod schemas;
 mod sort;
 mod transform;
 mod validate;
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
     Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
     ResourceGraph, SshTakes, Value,
@@ -59,7 +61,8 @@ fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
     meridian_sdk::check_ssh_credential(credential, &SSH_TAKES).map_err(|msg| CompileError {
         target: NAME.to_owned(),
         resource: String::new(),
-        rule: "unsupported-credential".to_owned(),
+        rule: rules::UNSUPPORTED_CREDENTIAL.name.to_owned(),
+        hint: rules::UNSUPPORTED_CREDENTIAL.hint.to_owned(),
         msg: format!("the credential {:?}: {msg}", credential.name),
         pos: Position::default(),
     })
@@ -67,7 +70,8 @@ fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
 
 pub use emit::{MANIFEST_PATH, SITE_PATH};
 pub use runner::{PuppetRunner, Transport};
-pub use transform::supported_resource_types;
+pub use schemas::PuppetSchemas;
+pub use transform::{supported_resource_types, NATIVE_PATTERNS};
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "puppet";
@@ -95,9 +99,10 @@ pub fn secret_reference(name: &str) -> String {
     format!("Sensitive(lookup('{}'))", secret_key(name))
 }
 
-/// A Puppet resource reference, written `Type['title']` with the type
-/// capitalised. It is a type and not a preformatted string so the emit stage
-/// stays the only place that decides how one is written.
+/// A Puppet resource reference, written `Type['title']` with each segment of
+/// the type capitalised (`Mysql::Db['x']`). It is a type and not a
+/// preformatted string so the emit stage stays the only place that decides
+/// how one is written.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Reference {
     pub r#type: String,
@@ -106,9 +111,14 @@ pub(crate) struct Reference {
 
 impl std::fmt::Display for Reference {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut chars = self.r#type.chars();
-        if let Some(first) = chars.next() {
-            write!(f, "{}{}", first.to_ascii_uppercase(), chars.as_str())?;
+        for (i, segment) in self.r#type.split("::").enumerate() {
+            if i > 0 {
+                f.write_str("::")?;
+            }
+            let mut chars = segment.chars();
+            if let Some(first) = chars.next() {
+                write!(f, "{}{}", first.to_ascii_uppercase(), chars.as_str())?;
+            }
         }
         write!(f, "['{}']", self.title)
     }
@@ -129,6 +139,9 @@ pub(crate) struct Declaration {
     pub require: Vec<Reference>,
     /// References this resource refreshes when it changes.
     pub notify: Vec<Reference>,
+    /// Whether the type is Puppet's own rather than one of the shared six,
+    /// so its attributes are the document's as written.
+    pub native: bool,
     /// Provenance, so a validation failure names the resource the author
     /// wrote.
     pub resource_id: String,
@@ -144,8 +157,23 @@ pub(crate) struct Manifest {
     pub resources: Vec<Declaration>,
 }
 
+/// The refusal rules only this target has. Everything else it refuses carries
+/// a general rule from `meridian_sdk::rules`.
+pub(crate) mod own {
+    use meridian_sdk::rules::Rule;
+
+    pub(crate) const UNNAMED_SECRET: Rule = Rule::new(
+        "unnamed-secret",
+        "a param holds a secret the resource tree does not name, so the manifest cannot refer to it",
+        "this is a defect in the host that sent the tree, not in the document: report it",
+    );
+
+    /// Every rule here, for `Emitter::rules` and the reference page.
+    pub(crate) const ALL: &[Rule] = &[UNNAMED_SECRET];
+}
+
 /// A refusal of one resource, stamped with this target.
-pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         ..CompileError::for_resource(r, rule, msg)
@@ -153,11 +181,12 @@ pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
 }
 
 /// A refusal raised against a declaration.
-pub(crate) fn refuse_declaration(d: &Declaration, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse_declaration(d: &Declaration, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         resource: d.resource_id.clone(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         pos: d.pos.clone(),
     }
@@ -194,6 +223,9 @@ impl Emitter for Puppet {
             credentials: true,
             cloud_credentials: false,
         }
+    }
+    fn rules(&self) -> Vec<Rule> {
+        own::ALL.to_vec()
     }
 
     fn category(&self) -> Category {

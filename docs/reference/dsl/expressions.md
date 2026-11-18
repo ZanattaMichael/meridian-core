@@ -343,7 +343,9 @@ Inside a document it is reported with the file, line and field.
 | Too long | `the condition has more than 1000 operators` |
 
 The first five are found by `meridian validate`, with no data. The rest need
-the values, so `compile`, `plan` and `apply` find them.
+the values, so `compile`, `plan` and `apply` find them. Each error has a kind
+with a fixed code, such as `expr-unknown-name`; they are listed in
+[error kinds and codes](../errors.md#expressions-meridian-expr).
 
 ## Writing an expression in YAML
 

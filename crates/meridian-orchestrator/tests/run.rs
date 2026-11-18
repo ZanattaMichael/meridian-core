@@ -379,7 +379,8 @@ fn a_refusal_to_compile_fails_the_stage_at_the_authors_line() {
     assert_eq!(
         why,
         "workflow.yaml:11:7: fake: resource \"motd\" [unsupported-resource-type]: \
-         the fake target has no mapping for type \"firewall_rule\""
+         the fake target has no mapping for type \"firewall_rule\" (hint: use a type from \
+         the target's resource types; `meridian plugins` lists them)"
     );
 }
 
@@ -701,6 +702,56 @@ fn a_target_version_reaches_the_plugin_or_the_document_is_refused() {
             &registry,
             "version-none"
         ),
+        Outcome::Compiled
+    );
+}
+
+#[test]
+fn settings_reach_the_plugin_or_the_document_is_refused() {
+    let with = |target: &str, settings: &str| {
+        PROVISION.replace(
+            "target: TARGET\n",
+            &format!("target: {target}\n  settings: {settings}\n"),
+        )
+    };
+
+    // Through a real plugin process: the fake reads `mode`.
+    let registry = registry();
+    let report = run(
+        &bundle(&with("fake", "{mode: fast}")),
+        &registry,
+        Mode::Compile,
+        &options("settings-ok"),
+        &mut Quiet,
+    );
+    assert_eq!(report.stages[0].outcome, Outcome::Compiled);
+    let files = &report.stages[0].artifact.as_ref().unwrap().files;
+    assert_eq!(files["settings.txt"], "{\"mode\":\"fast\"}\n");
+
+    // A key the plugin does not read is refused before it is asked.
+    assert_eq!(
+        failure(outcome_of(
+            &with("fake", "{mode: fast, speed: 9}"),
+            &registry,
+            "settings-no"
+        )),
+        "the document sets spec.settings.speed, and target \"fake\" takes only: mode"
+    );
+
+    // A target that declares no keys takes no settings, and says so.
+    let registry = in_process(&[]);
+    assert_eq!(
+        failure(outcome_of(
+            &with("iac", "{mode: fast}"),
+            &registry,
+            "settings-none"
+        )),
+        "the document sets spec.settings.mode, and target \"iac\" takes no settings; remove \
+         spec.settings, or use a plugin that takes them"
+    );
+    // And a document that sets none is unaffected.
+    assert_eq!(
+        outcome_of(&with("iac", "{}"), &registry, "settings-empty"),
         Outcome::Compiled
     );
 }

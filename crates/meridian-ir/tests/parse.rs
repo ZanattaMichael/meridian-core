@@ -151,6 +151,150 @@ fn an_unknown_api_version_or_kind_is_explicit() {
     }
 }
 
+/// KYAML, the strict YAML subset kubectl can print (`kubectl get -o kyaml`):
+/// a `---` header, `{}` and `[]` flow collections one entry per line,
+/// trailing commas, every string double-quoted. It is YAML, so it parses to
+/// the same document as the block-style twin; this pins that.
+#[test]
+fn a_kyaml_document_reads_the_same_as_its_block_twin() {
+    let block = "\
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: web
+  labels:
+    tier: web
+spec:
+  target: ansible
+  targetHost:
+    from: inline
+    host: web01
+  resources:
+    - id: nginx
+      type: package
+      params:
+        name: nginx
+    - id: conf
+      type: file
+      params:
+        path: /etc/nginx/nginx.conf
+        mode: \"0644\"
+        content: |
+          worker_processes 2;
+      dependsOn:
+        - resource: nginx
+";
+    let kyaml = "\
+---
+{
+  apiVersion: \"meridian/v1\",
+  kind: \"ResourceSet\",
+  metadata: {
+    labels: {
+      tier: \"web\",
+    },
+    name: \"web\",
+  },
+  spec: {
+    resources: [{
+      id: \"nginx\",
+      params: {
+        name: \"nginx\",
+      },
+      type: \"package\",
+    }, {
+      dependsOn: [{
+        resource: \"nginx\",
+      }],
+      id: \"conf\",
+      params: {
+        content: \"worker_processes 2;\\n\",
+        mode: \"0644\",
+        path: \"/etc/nginx/nginx.conf\",
+      },
+      type: \"file\",
+    }],
+    target: \"ansible\",
+    targetHost: {
+      from: \"inline\",
+      host: \"web01\",
+    },
+  },
+}
+";
+    let from_block = parse("block.yaml", block.as_bytes()).unwrap();
+    let from_kyaml = parse("kyaml.yaml", kyaml.as_bytes()).unwrap();
+    assert_eq!(from_block.len(), 1);
+    let (b, k) = (
+        from_block[0].as_resource_set().unwrap(),
+        from_kyaml[0].as_resource_set().unwrap(),
+    );
+    assert_eq!(b.metadata, k.metadata);
+    assert_eq!(b.spec.target, k.spec.target);
+    let host = |t: &Option<meridian_ir::TargetHost>| {
+        t.as_ref()
+            .map(|h| (h.from.clone(), h.host.clone(), h.r#ref.clone()))
+    };
+    assert_eq!(host(&b.spec.target_host), host(&k.spec.target_host));
+    assert_eq!(b.spec.resources.len(), k.spec.resources.len());
+    for (rb, rk) in b.spec.resources.iter().zip(&k.spec.resources) {
+        assert_eq!(
+            (&rb.id, &rb.r#type, &rb.params),
+            (&rk.id, &rk.r#type, &rk.params)
+        );
+        assert_eq!(rb.depends_on.len(), rk.depends_on.len());
+    }
+    // A stream of several KYAML documents is a YAML stream like any other.
+    let stream = format!("{kyaml}{}", kyaml.replace("name: \"web\"", "name: \"api\""));
+    let docs = parse("stream.yaml", stream.as_bytes()).unwrap();
+    assert_eq!(docs.len(), 2);
+    assert_eq!(docs[1].name(), "api");
+}
+
+/// `!!str` is the one tag a document may carry. Any other tag is refused
+/// with its position, never ignored: an ignored `!!int "12"` would read as
+/// the text `12`, the opposite of what was written.
+#[test]
+fn a_tag_other_than_str_is_refused() {
+    for (tag, written) in [
+        ("!!int \"12\"", "!!int"),
+        ("!!float 1", "!!float"),
+        ("!!bool yes", "!!bool"),
+        ("!!binary aGk=", "!!binary"),
+        ("!custom x", "!custom"),
+        ("!!set {a, b}", "!!set"),
+        ("!!seq [1]", "!!seq"),
+    ] {
+        let yaml = format!(
+            "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata: {{name: a}}\nspec:\n  target: ansible\n  \
+             resources:\n    - id: a\n      type: file\n      params:\n        tagged: {tag}\n"
+        );
+        let err = parse("doc.yaml", yaml.as_bytes()).expect_err(tag);
+        let e = err.first().unwrap();
+        assert!(
+            e.msg
+                .contains(&format!("the tag {written} is not supported")),
+            "{tag}: {}",
+            e.msg
+        );
+        assert_eq!((e.pos.line, e.pos.column), (10, 17), "{tag}");
+    }
+}
+
+/// A leading zero means octal, as a file mode is written; `08` and `09` are
+/// not octal and no number was meant, so they stay text.
+#[test]
+fn digits_with_a_leading_zero_that_are_not_octal_are_text() {
+    let p = params(concat!(
+        "        mode: 0644\n",
+        "        build: 08\n",
+        "        day: 09\n",
+    ));
+    assert_eq!(p["mode"], Value::Int(0o644));
+    assert_eq!(p["build"], Value::from("08"));
+    assert_eq!(p["day"], Value::from("09"));
+}
+
 #[test]
 fn an_unknown_field_is_an_error() {
     let yaml = VALID_RESOURCE_SET.replacen(

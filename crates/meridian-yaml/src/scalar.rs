@@ -6,10 +6,12 @@
 //! `on` are strings), integers accept `0x`, `0o`, `0b` and a leading-zero
 //! octal, and underscores are digit separators.
 //!
-//! One rule is deliberately not carried over. That library turned a plain
+//! Two rules are deliberately not carried over. That library turned a plain
 //! scalar shaped like a date (`2001-12-14`) into a timestamp, which then
-//! reached a target rewritten as `2001-12-14T00:00:00Z`. Here it stays the
-//! string the author wrote.
+//! reached a target rewritten as `2001-12-14T00:00:00Z`; here it stays the
+//! string the author wrote. And it read `08` and `09`, which are not octal,
+//! as the floats 8 and 9; here a run of digits with a leading zero that is
+//! not a valid octal number is text, since no number was meant.
 
 /// What a scalar resolved to. `Str` carries no payload: the text is the
 /// scalar's own raw value.
@@ -44,6 +46,9 @@ pub fn resolve_plain(s: &str) -> Scalar {
         Some(Int::Signed(i)) => return Scalar::Int(i),
         Some(Int::Unsigned(u)) => return Scalar::Uint(u),
         None => {}
+    }
+    if is_leading_zero_digits(&plain) {
+        return Scalar::Str;
     }
     if is_yaml_float(&plain) {
         if let Ok(f) = plain.parse::<f64>() {
@@ -88,6 +93,13 @@ fn parse_int(s: &str) -> Option<Int> {
     } else {
         Some(Int::Unsigned(magnitude))
     }
+}
+
+/// `^[-+]?0[0-9]+$`: digits with a leading zero that did not parse as octal,
+/// such as `08`, which the float rule would otherwise accept.
+pub(crate) fn is_leading_zero_digits(s: &str) -> bool {
+    let body = s.strip_prefix(['-', '+']).unwrap_or(s);
+    body.len() > 1 && body.starts_with('0') && body.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// `^[-+]?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?$`
@@ -157,8 +169,13 @@ mod tests {
             ("0b101", Int(5)),
             // A bare leading zero is octal, as file modes are usually written.
             ("0644", Int(420)),
-            // Not valid octal, so it falls through to the float rule.
-            ("08", Float(8.0)),
+            // Not valid octal, and no number was meant: text, not the
+            // float the reference library makes of it.
+            ("08", Str),
+            ("09", Str),
+            ("-08", Str),
+            ("0_9", Str),
+            ("08.5", Float(8.5)),
             ("-9223372036854775808", Int(i64::MIN)),
             ("18446744073709551615", Uint(u64::MAX)),
             ("1.5", Float(1.5)),

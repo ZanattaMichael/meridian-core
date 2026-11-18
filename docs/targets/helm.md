@@ -21,6 +21,7 @@ overlay, which is applied to what the chart renders before Helm installs it.
 | Apply | Yes: `helm upgrade --install`. An unchanged document adds no revision |
 | Outputs | Yes: anything a template can read, and any path into a live object, read with `kubectl` |
 | Subcharts, hand-written hooks, `lookup` | No. The chart holds only what the document declares |
+| Editor schemas | Yes: `meridian schema sync` asks the cluster what each kind's fields are, as the kubernetes target does. See [Editor schemas](#editor-schemas) |
 
 Nothing in this list degrades silently. A document that needs something the
 target lacks fails at compile time with the rule named in
@@ -408,7 +409,7 @@ be on `helm`'s command line; in an object's params it would be written into a te
 file as it stands. A document with a [Kustomize overlay](#kustomize-overlays) takes no
 secret in its values either: Kustomize reads the rendered manifests from a file in the
 work directory, where a secret cannot go. Text that reads as a token,
-`${meridian_secret_`, is refused too, rule `reserved-text`, so a document cannot make the
+`${meridian_secret_`, is refused too, rule `reserved-name`, so a document cannot make the
 runner fill a value in where the document wrote the token itself.
 
 The handover is tested against a stand-in `helm` that keeps what it reads
@@ -511,6 +512,26 @@ release.json                   for Meridian's runner; Helm never reads it
 installs it, with or without Meridian. `release.json` holds the release's settings, the
 object each resource became, and how to read each output.
 
+## Editor schemas
+
+`meridian schema sync` asks the cluster for its OpenAPI document through this
+target's `kubectl` (the `kubectl` and `kubectl-args` settings, so
+`--context` goes in `MERIDIAN_KUBECTL_ARGS`), exactly as the
+[kubernetes target](kubernetes.md#editor-schemas) does, so an editor
+completes and checks the fields of every object a chart's templates declare,
+custom resources included ([Tool schemas](../tooling/schema-sync.md)).
+
+| | |
+|---|---|
+| Described in full | the `<apiVersion>/<Kind>` types the documents use, as for kubernetes |
+| Listed by name | every other kind the server describes |
+| Pinned | the server's version |
+
+`chart`, `release`, `values` and `kustomization` are Meridian's own and are
+not asked of the cluster; the plugin describes them. What `values` holds is
+whatever the templates read, and no schema describes it. The source is
+tested against a kind cluster in the `helm` workflow.
+
 ## Running
 
 | Step | Command |
@@ -559,16 +580,16 @@ kubeconfig, or `KUBECONFIG`. Point both at the same cluster.
 | `invalid-param` | A setting has the wrong type or form, or `apiVersion` or `kind` is among the params. | The message names the param. |
 | `unsupported-param` | A settings resource has a param the target does not know, an overlay names a file, or an overlay sets `apiVersion` or `kind`, which Meridian writes. | The message lists what is accepted. |
 | `invalid-name` | An id cannot name a template, or a name cannot be a Kubernetes name. | Use letters, digits, `_` and `-` in ids; set `metadata.name`. |
-| `invalid-release-name`, `invalid-chart-name` | The document's name cannot be used as it is. | Add a `release` or `chart` resource with a `name`. |
-| `duplicate-settings` | Two resources of one settings type. | Keep one. |
-| `duplicate-object` | Two resources are the same object. | Give one a different `metadata.name`. |
+| `invalid-name` | The document's name cannot be used as it is. | Add a `release` or `chart` resource with a `name`. |
+| `duplicate-resource` | Two resources of one settings type. | Keep one. |
+| `duplicate-resource` | Two resources are the same object. | Give one a different `metadata.name`. |
 | `duplicate-output` | Two outputs share a name. | Rename one. |
-| `empty-chart` | The document has no Kubernetes object. | Add one. |
+| `empty-document` | The document has no Kubernetes object. | Add one. |
 | `unsupported-dependency` | A `dependsOn` Helm's install order does not honour, or one on a settings resource. | Remove it; see [Ordering](#ordering). |
 | `unsupported-action` | A notification other than a restart of a workload, or two objects that notify each other. | See [Notifications](#notifications). |
 | `unsupported-state`, `unsupported-runtime-condition` | `state: absent` or `runtimeWhen`. | Remove the resource or the condition. |
 | `unsupported-secret-place` | A secret anywhere but the `values`, or in the values of a document with a Kustomize overlay. | See [Secrets](#secrets). |
-| `reserved-text` | A value holds the text `${meridian_secret_`, which is how a secret's place is written. | Write the secret as `${{ secret.<name> }}`, or choose other text. |
+| `reserved-name` | A value holds the text `${meridian_secret_`, which is how a secret's place is written. | Write the secret as `${{ secret.<name> }}`, or choose other text. |
 
 ## Run errors
 

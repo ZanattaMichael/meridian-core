@@ -1,0 +1,56 @@
+# A web server configured with Chef, reaching past the six shared types.
+#
+# `service` is an abstract type every configuration management target
+# takes. `template`, `apt_update` and `systemd_unit` are Chef's own
+# resources, written as a recipe names them, and `native/package` is Chef's
+# own `package`, with the properties the shared `package` does not take:
+# their params are the resource's properties, passed through as written,
+# and `state` is the action the resource takes. From the first such
+# resource on, the document compiles for Chef only, and `meridian lint`
+# says so (rule native-type).
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: web_resources
+spec:
+  target: chef
+  targetHost:
+    from: inline
+    host: web01.example.com
+  resources:
+    - id: refresh_index
+      type: apt_update
+      runtimeWhen: "node['platform_family'] == 'debian'"
+    - id: nginx_pkg
+      type: native/package
+      state: upgrade
+      params:
+        package_name: nginx
+        options: "--no-install-recommends"
+      dependsOn:
+        - resource: refresh_index
+    - id: nginx_conf
+      type: template
+      params:
+        path: /etc/nginx/nginx.conf
+        source: nginx.conf.erb
+        variables: {workers: 4}
+        mode: "0644"
+      dependsOn:
+        - resource: nginx_pkg
+      notifies:
+        - resource: nginx_svc
+          action: reload
+    - id: nginx_svc
+      type: service
+      state: running
+      params:
+        name: nginx
+        enabled: true
+      dependsOn:
+        - resource: nginx_pkg
+    - id: reindex_timer
+      type: systemd_unit
+      state: enable
+      params:
+        unit_name: reindex.timer

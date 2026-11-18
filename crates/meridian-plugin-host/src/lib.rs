@@ -66,6 +66,10 @@ pub struct Info {
     /// Whether the target hands a run's inputs to its tool, which a
     /// document's `spec.imports` needs.
     pub accepts_inputs: bool,
+    /// Whether the target hands back its tool's own saved plan from a plan
+    /// asked to save one, and applies exactly that plan when handed it. A
+    /// plugin built before the field says no.
+    pub saves_plans: bool,
     /// The versions of its tool the target compiles for; empty when it does
     /// not say.
     pub target_versions: Vec<String>,
@@ -81,6 +85,13 @@ pub struct Info {
     /// What an operator can configure about the target's runner, as the
     /// plugin declares it; empty when it declares none.
     pub settings: Vec<meridian_sdk::Setting>,
+    /// The keys the target reads in a document's `spec.settings`; empty when
+    /// it takes none, which is also what a plugin built before the field says.
+    pub settings_keys: Vec<String>,
+    /// The refusal rules the target has of its own, beside the general ones
+    /// in `meridian_sdk::rules`; empty when every refusal it makes carries a
+    /// general rule, which is also what a plugin built before the field says.
+    pub rules: Vec<meridian_sdk::DescribedRule>,
     /// The binary the plugin was loaded from; empty for an in-process emitter.
     pub path: String,
     /// What checking the binary's signature found, before it was started.
@@ -354,6 +365,7 @@ pub fn to_sdk(graph: &meridian_ast::ResourceGraph) -> meridian_sdk::ResourceGrap
         host: graph.host.clone(),
         target: graph.target.clone(),
         target_version: graph.target_version.clone(),
+        settings: graph.settings.clone(),
         resources: graph
             .resources()
             .iter()

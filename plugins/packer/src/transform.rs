@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::expr::{self, Part};
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
 
 use crate::outputs;
@@ -43,7 +44,7 @@ fn classify(r: &Resource) -> Result<(Kind, String), CompileError> {
     }
     Err(refuse(
         r,
-        "unsupported-resource-type",
+        &rules::UNSUPPORTED_RESOURCE_TYPE,
         format!(
             "{t:?} is not part of a Packer build. Use source.<builder>, such as \
              source.amazon-ebs, or one of: provisioner.<type>, post-processor.<type>, \
@@ -102,8 +103,13 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
         let mut refs = BTreeSet::new();
         let mut body = BTreeMap::new();
         for (name, value) in &r.params {
-            let rewritten = rewrite(value, &addresses, &mut refs)
-                .map_err(|msg| refuse(r, "invalid-reference", format!("param {name:?}: {msg}")))?;
+            let rewritten = rewrite(value, &addresses, &mut refs).map_err(|msg| {
+                refuse(
+                    r,
+                    &rules::INVALID_REFERENCE,
+                    format!("param {name:?}: {msg}"),
+                )
+            })?;
             body.insert(name.clone(), rewritten);
         }
         refs.remove(&r.id);
@@ -131,7 +137,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
             refuse_at(
                 "",
                 &output.pos,
-                "invalid-reference",
+                &rules::INVALID_REFERENCE,
                 format!("output {:?}: {msg}", output.name),
             )
         })?;
@@ -162,7 +168,7 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
     if !r.runtime_when.is_empty() {
         return Err(refuse(
             r,
-            "unsupported-runtime-condition",
+            &rules::UNSUPPORTED_RUNTIME_CONDITION,
             format!(
                 "resource carries runtimeWhen {:?}, which this target cannot express: a Packer \
                  build runs every step it is given. To run a step for some sources only, use \
@@ -175,14 +181,14 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
         "" | "present" => Ok(()),
         "absent" => Err(refuse(
             r,
-            "unsupported-state",
+            &rules::UNSUPPORTED_STATE,
             "state \"absent\" has no meaning on this target: a build only creates images and \
              never removes one, so remove the resource from the document"
                 .to_owned(),
         )),
         other => Err(refuse(
             r,
-            "unsupported-state",
+            &rules::UNSUPPORTED_STATE,
             format!(
                 "resource type {:?} does not accept state {other:?} on this target \
                  (accepted: present)",

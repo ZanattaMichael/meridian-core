@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::expr::{self, Part};
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
 
 use crate::{
@@ -41,7 +42,7 @@ fn classify(r: &Resource) -> Result<Class, CompileError> {
             }
             return Err(refuse(
                 r,
-                "unsupported-resource-type",
+                &rules::UNSUPPORTED_RESOURCE_TYPE,
                 format!(
                     "{t:?} is not a Pulumi type. Use a provider's own type token, such as \
                      aws:ec2:Instance, or one of: config, stack, invoke.<function>"
@@ -95,7 +96,7 @@ fn string_param(r: &Resource, key: &str) -> Result<Option<String>, CompileError>
         Some(Value::String(s)) => Ok(Some(s.clone())),
         Some(other) => Err(refuse(
             r,
-            "invalid-param",
+            &rules::INVALID_PARAM,
             format!("param {key:?} must be a string, not {}", other.describe()),
         )),
     }
@@ -168,7 +169,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Program, CompileError> 
                 refuse_at(
                     "",
                     &output.pos,
-                    "invalid-reference",
+                    &rules::INVALID_REFERENCE,
                     format!("output {:?}: {msg}", output.name),
                 )
             },
@@ -185,7 +186,7 @@ fn stack(r: &Resource, settings: &mut Settings) -> Result<(), CompileError> {
     if let Some((first, _)) = &settings.declared {
         return Err(refuse(
             r,
-            "duplicate-stack",
+            &rules::DUPLICATE_RESOURCE,
             format!(
                 "a document deploys to one stack; {first:?} already holds its settings, so \
                  put these there"
@@ -195,7 +196,7 @@ fn stack(r: &Resource, settings: &mut Settings) -> Result<(), CompileError> {
     if let Some(unknown) = r.params.keys().find(|k| !STACK_KEYS.contains(&k.as_str())) {
         return Err(refuse(
             r,
-            "invalid-param",
+            &rules::INVALID_PARAM,
             format!(
                 "a stack has no setting {unknown:?} (settings: {})",
                 STACK_KEYS.join(", ")
@@ -207,7 +208,7 @@ fn stack(r: &Resource, settings: &mut Settings) -> Result<(), CompileError> {
             if expr::has_expr(text) || expr::parse(text).is_err() {
                 return Err(refuse(
                     r,
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     format!(
                         "setting {key:?} must be plain text: it is needed before Pulumi runs, \
                          when no resource has a value yet"
@@ -254,13 +255,18 @@ fn entry(
         config(r, &name, &body)?;
     } else {
         for (key, value) in &r.params {
-            let rewritten = rewrite(value, addresses, &mut refs)
-                .map_err(|msg| refuse(r, "invalid-reference", format!("param {key:?}: {msg}")))?;
+            let rewritten = rewrite(value, addresses, &mut refs).map_err(|msg| {
+                refuse(
+                    r,
+                    &rules::INVALID_REFERENCE,
+                    format!("param {key:?}: {msg}"),
+                )
+            })?;
             if Some(key.as_str()) == options_key {
                 let Value::Map(map) = rewritten else {
                     return Err(refuse(
                         r,
-                        "invalid-param",
+                        &rules::INVALID_PARAM,
                         format!(
                             "param {key:?} must be a map of Pulumi's options, not {}",
                             value.describe()
@@ -292,7 +298,7 @@ fn config(r: &Resource, name: &str, body: &BTreeMap<String, Value>) -> Result<()
     if let Some(unknown) = body.keys().find(|k| !CONFIG_KEYS.contains(&k.as_str())) {
         return Err(refuse(
             r,
-            "invalid-param",
+            &rules::INVALID_PARAM,
             format!(
                 "a configuration value has no setting {unknown:?} (settings: name, {})",
                 CONFIG_KEYS.join(", ")
@@ -302,7 +308,7 @@ fn config(r: &Resource, name: &str, body: &BTreeMap<String, Value>) -> Result<()
     if body.values().any(holds_reference) {
         return Err(refuse(
             r,
-            "invalid-reference",
+            &rules::INVALID_REFERENCE,
             "a configuration value is read before anything exists, so it cannot refer to a \
              resource"
                 .to_owned(),
@@ -314,7 +320,7 @@ fn config(r: &Resource, name: &str, body: &BTreeMap<String, Value>) -> Result<()
         if !body.contains_key("value") || body.keys().any(|k| k != "value" && k != "description") {
             return Err(refuse(
                 r,
-                "invalid-param",
+                &rules::INVALID_PARAM,
                 format!(
                     "{name:?} is a provider's setting and takes only \"value\"; \"type\" and \
                      \"default\" declare a value of the program's own"
@@ -324,7 +330,7 @@ fn config(r: &Resource, name: &str, body: &BTreeMap<String, Value>) -> Result<()
     } else if !body.contains_key("type") && !body.contains_key("default") {
         return Err(refuse(
             r,
-            "missing-param",
+            &rules::MISSING_PARAM,
             "a configuration value needs a \"type\" or a \"default\", so Pulumi knows what it \
              holds"
                 .to_owned(),
@@ -349,7 +355,7 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
     if !r.runtime_when.is_empty() {
         return Err(refuse(
             r,
-            "unsupported-runtime-condition",
+            &rules::UNSUPPORTED_RUNTIME_CONDITION,
             format!(
                 "resource carries runtimeWhen {:?}, which this target cannot express: a Pulumi \
                  YAML program declares every resource it manages and has no conditional to \
@@ -363,7 +369,7 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
         "absent" => {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 "state \"absent\" has no meaning on this target: Pulumi deletes whatever its \
                  program no longer declares, so remove the resource from the document"
                     .to_owned(),
@@ -372,7 +378,7 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
         other => {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!(
                     "resource type {:?} does not accept state {other:?} on this target \
                      (accepted: present)",

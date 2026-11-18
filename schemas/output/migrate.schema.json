@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ZanattaMichael/meridian-core/schemas/output/migrate.schema.json",
+  "title": "migrate",
+  "description": "Each file and whether it was, or would be, migrated.",
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "const": "migrate",
+      "description": "The subcommand as it is typed"
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "Whether the command did what was asked: false means it exited 1, or 130 when interrupted"
+    },
+    "to": {
+      "type": "string"
+    },
+    "check": {
+      "type": "boolean"
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "current",
+              "migrated",
+              "would-migrate",
+              "refused",
+              "needs-decisions",
+              "unreadable",
+              "unwritable"
+            ]
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "file",
+          "status",
+          "message",
+          "decisions"
+        ]
+      }
+    }
+  },
+  "required": [
+    "command",
+    "ok",
+    "to",
+    "check",
+    "files"
+  ],
+  "additionalProperties": false
+}

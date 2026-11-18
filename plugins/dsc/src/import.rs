@@ -208,7 +208,7 @@ impl Draft {
     fn finish(self, name: String, notes: &mut Notes) -> ImportedDocument {
         let subject = "configuration";
         // Ids first, so a dependency can be written as one.
-        let mut taken = BTreeSet::from(["runner".to_owned()]);
+        let mut taken = BTreeSet::new();
         let mut ids = Vec::new();
         for instance in &self.instances {
             let id = unique_id(&id_for(&instance.name), &mut taken);
@@ -241,10 +241,10 @@ impl Draft {
         };
 
         let mut resources = Vec::new();
-        // A runner resource says what a document alone cannot: the engine,
+        // spec.settings says what the resources alone cannot: the engine,
         // when it is not a targetVersion, and how the host is reached.
         let mut target_version = String::new();
-        let mut runner = BTreeMap::new();
+        let mut settings = BTreeMap::new();
         match self.engine.as_str() {
             "DscV2" => target_version = "2".to_owned(),
             "DscV3" => target_version = "3".to_owned(),
@@ -268,15 +268,15 @@ impl Draft {
             self.host.clone()
         };
         if !self.target.is_empty() && !(local && self.target == "Local") {
-            runner.insert("target".to_owned(), Value::String(self.target.clone()));
+            settings.insert("target".to_owned(), Value::String(self.target.clone()));
         } else if !local {
             notes.changed(
                 &self.origin,
                 subject,
-                "runner",
+                "",
                 format!(
-                    "the configuration does not say how {} is reached. The runner was \
-                     given target: WinRM, which is how a PowerShell configuration is pushed; \
+                    "the configuration does not say how {} is reached. spec.settings.target \
+                     was set to WinRM, which is how a PowerShell configuration is pushed; \
                      change it to SSH if that is how this machine is managed",
                     if host.is_empty() {
                         "its machine".to_owned()
@@ -285,22 +285,13 @@ impl Draft {
                     }
                 ),
             );
-            runner.insert("target".to_owned(), Value::String("WinRM".to_owned()));
+            settings.insert("target".to_owned(), Value::String("WinRM".to_owned()));
         }
         if !self.credential.is_empty() {
-            runner.insert(
+            settings.insert(
                 "credential".to_owned(),
                 Value::String(self.credential.clone()),
             );
-        }
-        if !runner.is_empty() {
-            resources.push(ImportedResource {
-                id: "runner".to_owned(),
-                r#type: "runner".to_owned(),
-                params: runner,
-                origin: self.origin.clone(),
-                ..ImportedResource::default()
-            });
         }
 
         for (instance, id) in self.instances.iter().zip(&ids) {
@@ -357,6 +348,7 @@ impl Draft {
             target: NAME.to_owned(),
             target_version,
             host,
+            settings,
             resources,
             ..ImportedDocument::default()
         }

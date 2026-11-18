@@ -9,7 +9,7 @@ use meridian_ir::{Value, VersionTable};
 use meridian_secret::{CredentialDeclaration, FieldSource};
 use semver::{Version, VersionReq};
 
-use crate::Error;
+use crate::{Error, Kind};
 
 /// The file that makes a directory a module.
 pub const MANIFEST_FILE: &str = "meridian.yaml";
@@ -156,7 +156,10 @@ struct Reader<'a> {
 
 impl Reader<'_> {
     fn err<T>(&self, field: &str, msg: impl fmt::Display) -> Result<T, Error> {
-        Err(Error::new(format!("{}: {field}: {msg}", self.file)))
+        Err(Error::new(
+            Kind::Manifest,
+            format!("{}: {field}: {msg}", self.file),
+        ))
     }
 
     fn map<'v>(
@@ -552,11 +555,14 @@ impl Manifest {
         let name = path.display().to_string();
         let data = std::fs::read(&path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                Error::new(format!(
-                    "{name}: not found; a module is a directory with a {MANIFEST_FILE} in it"
-                ))
+                Error::new(
+                    Kind::Manifest,
+                    format!(
+                        "{name}: not found; a module is a directory with a {MANIFEST_FILE} in it"
+                    ),
+                )
             } else {
-                Error::new(format!("{name}: cannot read file: {e}"))
+                Error::new(Kind::Manifest, format!("{name}: cannot read file: {e}"))
             }
         })?;
         Manifest::parse(&name, &data)
@@ -564,7 +570,8 @@ impl Manifest {
 
     /// Parses a manifest. `file` is used only in messages.
     pub fn parse(file: &str, data: &[u8]) -> Result<Manifest, Error> {
-        let value = meridian_ir::parse_value(file, data).map_err(|e| Error::new(e.to_string()))?;
+        let value = meridian_ir::parse_value(file, data)
+            .map_err(|e| Error::new(Kind::Manifest, e.to_string()))?;
         let r = Reader { file };
         let Some(top) = r.map(
             Some(&value),
@@ -572,7 +579,10 @@ impl Manifest {
             &["apiVersion", "kind", "metadata", "spec"],
         )?
         else {
-            return Err(Error::new(format!("{file}: the manifest is empty")));
+            return Err(Error::new(
+                Kind::Manifest,
+                format!("{file}: the manifest is empty"),
+            ));
         };
 
         match r.string(top.get("apiVersion"), "apiVersion")? {

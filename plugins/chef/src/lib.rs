@@ -23,12 +23,14 @@
 
 mod emit;
 mod runner;
+mod schemas;
 mod sort;
 mod transform;
 mod validate;
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
     Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
     ResourceGraph, SshTakes, Value,
@@ -53,7 +55,8 @@ fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
     meridian_sdk::check_ssh_credential(credential, &SSH_TAKES).map_err(|msg| CompileError {
         target: NAME.to_owned(),
         resource: String::new(),
-        rule: "unsupported-credential".to_owned(),
+        rule: rules::UNSUPPORTED_CREDENTIAL.name.to_owned(),
+        hint: rules::UNSUPPORTED_CREDENTIAL.hint.to_owned(),
         msg: format!("the credential {:?}: {msg}", credential.name),
         pos: Position::default(),
     })
@@ -61,7 +64,8 @@ fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
 
 pub use emit::{metadata_path, recipe_path};
 pub use runner::{ChefRunner, Transport};
-pub use transform::supported_resource_types;
+pub use schemas::ChefSchemas;
+pub use transform::{supported_resource_types, NATIVE_PATTERN};
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "chef";
@@ -90,13 +94,14 @@ pub(crate) struct Notify {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Block {
     /// The Chef resource: `package`, `execute`, `directory`.
-    pub resource: &'static str,
+    pub resource: String,
     /// The block's name, unique for its resource across the recipe.
     pub name: String,
     /// The properties, keyed by Chef's own name for each.
     pub properties: BTreeMap<String, Value>,
-    /// The actions, in the order Chef takes them.
-    pub actions: Vec<&'static str>,
+    /// The actions, in the order Chef takes them. Empty on a resource of
+    /// Chef's own that was given no state: it takes its default action.
+    pub actions: Vec<String>,
     /// The Ruby an `only_if` guard holds, or empty.
     pub only_if: String,
     pub notifies: Vec<Notify>,
@@ -118,18 +123,19 @@ pub(crate) struct Cookbook {
 }
 
 /// A refusal of one resource, stamped with this target.
-pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         ..CompileError::for_resource(r, rule, msg)
     }
 }
 
-pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         resource: resource.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         pos: pos.clone(),
     }

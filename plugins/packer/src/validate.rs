@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, Value};
 
 use crate::{refuse_at, Block, Kind, Template};
@@ -23,7 +24,7 @@ fn require_string(block: &Block, what: &str, param: &str) -> Result<(), CompileE
     Err(refuse_at(
         &block.name,
         &block.pos,
-        "missing-param",
+        &rules::MISSING_PARAM,
         format!("resource type {what:?} requires the string param {param:?} on this target"),
     ))
 }
@@ -35,7 +36,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &block.name,
                 &block.pos,
-                "invalid-name",
+                &rules::INVALID_NAME,
                 format!(
                     "resource id {:?} cannot be a Packer name: a name starts with a letter or \
                      underscore and holds only letters, digits, underscores and hyphens",
@@ -55,7 +56,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
                     return Err(refuse_at(
                         &block.name,
                         &block.pos,
-                        "invalid-param",
+                        &rules::INVALID_PARAM,
                         format!(
                             "a plugin requirement takes the params \"source\" and \"version\" \
                              only, not {extra:?}"
@@ -68,7 +69,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
                     return Err(refuse_at(
                         &block.name,
                         &block.pos,
-                        "missing-param",
+                        &rules::MISSING_PARAM,
                         "resource type \"local\" requires param \"value\" on this target"
                             .to_owned(),
                     ));
@@ -77,7 +78,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
                     return Err(refuse_at(
                         &block.name,
                         &block.pos,
-                        "invalid-param",
+                        &rules::INVALID_PARAM,
                         format!("a local takes the param \"value\" only, not {extra:?}"),
                     ));
                 }
@@ -87,7 +88,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
                     return Err(refuse_at(
                         &block.name,
                         &block.pos,
-                        "duplicate-error-cleanup",
+                        &rules::DUPLICATE_RESOURCE,
                         format!(
                             "a build has one error-cleanup provisioner, and {:?} is already it",
                             first.name
@@ -112,7 +113,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
                 .first()
                 .map(|b| b.pos.clone())
                 .unwrap_or_default(),
-            "missing-source",
+            &rules::MISSING_PARAM,
             "a build needs at least one source to build from: add a resource of type \
              source.<builder>, such as source.amazon-ebs or source.docker"
                 .to_owned(),
@@ -125,7 +126,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
             return Err(refuse_at(
                 "",
                 &output.pos,
-                "invalid-name",
+                &rules::INVALID_NAME,
                 "an output needs a name".to_owned(),
             ));
         }
@@ -133,7 +134,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
             return Err(refuse_at(
                 "",
                 &output.pos,
-                "duplicate-output",
+                &rules::DUPLICATE_OUTPUT,
                 format!("output {:?} is declared twice", output.name),
             ));
         }
@@ -254,14 +255,14 @@ mod rule_tables {
             ("invalid-param", "stamp", |t| {
                 at(t, "stamp").body.insert("type".to_owned(), text("x"));
             }),
-            ("duplicate-error-cleanup", "again", |t| {
+            ("duplicate-resource", "again", |t| {
                 t.blocks
                     .push(block(Kind::ErrorCleanup, "shell", "again", &[]));
             }),
-            ("missing-source", "", |t| {
+            ("missing-param", "", |t| {
                 t.blocks.retain(|b| b.kind != Kind::Source);
             }),
-            ("missing-source", "", |t| t.blocks.clear()),
+            ("missing-param", "", |t| t.blocks.clear()),
             ("invalid-name", "", |t| t.outputs[0].name.clear()),
             ("duplicate-output", "", |t| {
                 t.outputs.push(output("image_id"))

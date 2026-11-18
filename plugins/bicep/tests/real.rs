@@ -466,3 +466,81 @@ fn a_secret_is_a_secure_parameter_the_compiler_accepts() {
         template.canonical()
     );
 }
+
+/// The schema source against the published type definitions, which need
+/// the network and nothing else: no account, no compiler.
+#[ignore = "needs the network; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn the_azure_type_definitions_are_exported_for_an_editor() {
+    use meridian_sdk::{SchemaRequest, SchemaSource};
+    use meridian_target_bicep::{AzureSchemas, Dialect};
+    if std::env::var("MERIDIAN_TEST_REAL_BICEP").ok().as_deref() != Some("1") {
+        eprintln!("skipped: set MERIDIAN_TEST_REAL_BICEP=1 to fetch the real type definitions");
+        return;
+    }
+    let dir = scratch(TMP, "real-schemas");
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: site\nspec:\n  target: bicep\n  resources:\n    - id: deployment\n      type: deployment\n      params:\n        name: site\n        resourceGroup: rg\n    - id: storage\n      type: Microsoft.Storage/storageAccounts@2023-01-01\n      params:\n        name: site\n        location: westeurope\n    - id: nowhere\n      type: Example.Missing/thing@2020-01-01\n      params:\n        name: x\n";
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_text("site.yaml", text, "bicep")],
+    );
+    let log = KeptLog::default();
+    let source = AzureSchemas::new(Dialect::Bicep);
+    let export = source
+        .export(&request, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(export.tool, "bicep-types-az");
+    assert_eq!(export.pins.get("index"), Some(&export.tool_version));
+    assert!(
+        export
+            .pins
+            .keys()
+            .any(|k| k.contains("microsoft.storage/2023-01-01")),
+        "{:?}",
+        export.pins
+    );
+    let storage = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "Microsoft.Storage/storageAccounts@2023-01-01")
+        .unwrap_or_else(|| panic!("the storage account is described: {:?}", export.notes));
+    assert!(!storage.open);
+    assert!(storage.find_param("name").is_some_and(|p| p.required));
+    assert!(storage.find_param("id").is_some_and(|p| p.computed));
+    assert!(storage.find_param("apiVersion").is_none());
+    let sku = storage.find_param("sku").expect("sku");
+    assert_eq!(
+        sku.find_param("name").unwrap().kind,
+        meridian_sdk::ParamKind::String,
+        "the SKU name is an extensible enum: a string"
+    );
+    assert!(sku.find_param("name").unwrap().required);
+    assert!(
+        storage.source.starts_with("bicep-types-az "),
+        "{}",
+        storage.source
+    );
+    // Other versions of the used type, and the newest of every other
+    // type, are listed by name.
+    assert!(export
+        .schemas
+        .iter()
+        .any(|s| s.r#type == "Microsoft.Storage/storageAccounts@2022-09-01" && s.open));
+    assert!(export
+        .schemas
+        .iter()
+        .any(|s| s.r#type.starts_with("Microsoft.Network/virtualNetworks@") && s.open));
+    assert!(
+        export.schemas.len() > 1000,
+        "{} types",
+        export.schemas.len()
+    );
+    assert!(
+        export
+            .notes
+            .iter()
+            .any(|n| n.contains("Example.Missing/thing@2020-01-01")),
+        "{:?}",
+        export.notes
+    );
+}

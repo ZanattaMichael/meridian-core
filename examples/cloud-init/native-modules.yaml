@@ -1,0 +1,52 @@
+# A first boot configured with cloud-init, reaching past the six shared types.
+#
+# `package` and `service` are the abstract types every configuration
+# management target takes. `ntp`, `timezone`, `bootcmd` and `apt` are
+# cloud-init's own cloud-config modules, written by their keys: their
+# params are the module's keys, passed through as written, or the one
+# param `value` where the module's value is not a mapping. Nothing can be
+# ordered before or after a module: cloud-init applies it at the point of
+# the boot that is the module's own. From the first such resource on, the
+# document compiles for cloud-init only, and `meridian lint` says so (rule
+# native-type).
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: web_modules
+spec:
+  target: cloud-init
+  targetHost:
+    from: inline
+    host: web01.example.com
+  resources:
+    - id: early
+      type: bootcmd
+      params:
+        value: ["echo booting > /dev/kmsg"]
+    - id: clock
+      type: ntp
+      params:
+        enabled: true
+        servers: [0.pool.ntp.org, 1.pool.ntp.org]
+    - id: zone
+      type: timezone
+      params:
+        value: Europe/Amsterdam
+    - id: mirror
+      type: apt
+      params:
+        primary:
+          - arches: [default]
+            uri: http://deb.example.com/debian
+    - id: nginx_pkg
+      type: package
+      params:
+        name: nginx
+    - id: nginx_svc
+      type: service
+      state: running
+      params:
+        name: nginx
+        enabled: true
+      dependsOn:
+        - resource: nginx_pkg

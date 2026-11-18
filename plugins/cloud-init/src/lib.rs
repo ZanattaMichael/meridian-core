@@ -27,6 +27,7 @@
 
 mod emit;
 mod runner;
+mod schemas;
 mod shell;
 mod sort;
 mod transform;
@@ -34,6 +35,7 @@ mod validate;
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules::Rule;
 use meridian_sdk::{
     Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
     ResourceGraph, Value, Warning,
@@ -44,7 +46,8 @@ pub use runner::{
     CloudInitRunner, Wait, PROGRAM_VARIABLE, SSH_ARGS_VARIABLE, SSH_VARIABLE, VALIDATE_VARIABLE,
     WAIT_VARIABLE,
 };
-pub use transform::supported_resource_types;
+pub use schemas::CloudInitSchemas;
+pub use transform::{supported_resource_types, NATIVE_PATTERN};
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "cloud-init";
@@ -63,11 +66,12 @@ pub(crate) struct Placed<T> {
 }
 
 impl<T> Placed<T> {
-    fn refuse(&self, rule: &str, msg: String) -> CompileError {
+    fn refuse(&self, rule: &Rule, msg: String) -> CompileError {
         CompileError {
             target: NAME.to_owned(),
             resource: self.id.clone(),
-            rule: rule.to_owned(),
+            rule: rule.name.to_owned(),
+            hint: rule.hint.to_owned(),
             msg,
             pos: self.pos.clone(),
         }
@@ -121,6 +125,14 @@ pub(crate) struct WriteFile {
 /// the same way.
 pub(crate) type Command = String;
 
+/// One cloud-config module of cloud-init's own, written under its key with
+/// the value the document gave it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Module {
+    pub key: String,
+    pub value: Value,
+}
+
 /// What one resource became.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Item {
@@ -131,6 +143,8 @@ pub(crate) enum Item {
     /// cloud-init has no module for the resource, or the resource is a
     /// command: it runs at the end of the first boot.
     Commands(Vec<Command>),
+    /// A module of cloud-init's own, applied when cloud-init applies it.
+    Module(Module),
 }
 
 /// A whole `#cloud-config` document, each list in the order it is written.
@@ -144,10 +158,27 @@ pub(crate) struct CloudConfig {
     pub users: Vec<Placed<User>>,
     pub packages: Vec<Placed<Package>>,
     pub commands: Vec<Command>,
+    /// The modules of cloud-init's own, in document order.
+    pub modules: Vec<Placed<Module>>,
+}
+
+/// The refusal rules only this target has. Everything else it refuses carries
+/// a general rule from `meridian_sdk::rules`.
+pub(crate) mod own {
+    use meridian_sdk::rules::Rule;
+
+    pub(crate) const UNSATISFIABLE_ORDER: Rule = Rule::new(
+        "unsatisfiable-order",
+        "`dependsOn` asks for an order cloud-init cannot keep: the order of a first boot is cloud-init's own, and a document cannot change it",
+        "remove the `dependsOn`, or move the work to a resource cloud-init runs later",
+    );
+
+    /// Every rule here, for `Emitter::rules` and the reference page.
+    pub(crate) const ALL: &[Rule] = &[UNSATISFIABLE_ORDER];
 }
 
 /// A refusal of one resource, stamped with this target.
-pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         ..CompileError::for_resource(r, rule, msg)
@@ -195,6 +226,9 @@ impl Emitter for CloudInit {
             credentials: false,
             cloud_credentials: false,
         }
+    }
+    fn rules(&self) -> Vec<Rule> {
+        own::ALL.to_vec()
     }
 
     fn category(&self) -> Category {

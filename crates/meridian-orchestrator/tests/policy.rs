@@ -18,7 +18,7 @@ use meridian_ir::Bundle;
 use meridian_orchestrator::record;
 use meridian_orchestrator::{
     event, run, work_dir, Event, Mode, Observer, OnFailure, Options, Outcome, Policy, Quiet,
-    RunReport, RunState, StageId, StageKind, REASON_POLICY_DENIED,
+    Reason, RunReport, RunState, StageId, StageKind,
 };
 use meridian_plugin_host::{Registry, StartOptions};
 use meridian_sdk::{decode_value, Value};
@@ -220,7 +220,7 @@ fn a_denied_change_stops_the_apply_before_anything_is_applied() {
 
     assert!(!report.succeeded());
     assert_eq!(report.stages.len(), 2);
-    assert_eq!(report.stages[0].reason, REASON_POLICY_DENIED);
+    assert_eq!(report.stages[0].reason, Some(Reason::PolicyDenied));
     assert_eq!(
         failed_with(&report, 0),
         "the policy does not allow this change:\n  - that key is not allowed"
@@ -263,7 +263,7 @@ fn a_denied_change_stops_the_apply_before_anything_is_applied() {
     assert_eq!(denied.detail["asked"], Value::Bool(true));
     assert_eq!(
         recorder.events[4].detail["reason"],
-        Value::from(REASON_POLICY_DENIED)
+        Value::from(Reason::PolicyDenied.as_str())
     );
     let store = case.options.store();
     let kept = String::from_utf8(
@@ -303,7 +303,7 @@ fn a_stage_that_waits_on_an_output_is_asked_at_its_turn() {
 
     assert!(matches!(report.stages[0].outcome, Outcome::Applied { .. }));
     assert!(report.stages[0].policy.as_ref().unwrap().allowed());
-    assert_eq!(report.stages[1].reason, REASON_POLICY_DENIED);
+    assert_eq!(report.stages[1].reason, Some(Reason::PolicyDenied));
     assert_eq!(case.file(&network(), "key").as_deref(), Some("key-one"));
     assert_eq!(case.file(&web(), "motd"), None);
 
@@ -347,7 +347,7 @@ fn a_later_stage_that_is_denied_stops_an_earlier_one_from_being_applied() {
         second.stages[0].outcome,
         Outcome::NotRun { because_of: web() }
     );
-    assert_eq!(second.stages[1].reason, REASON_POLICY_DENIED);
+    assert_eq!(second.stages[1].reason, Some(Reason::PolicyDenied));
     // The key was not changed, and there was nothing to put back.
     assert_eq!(case.file(&network(), "key").as_deref(), Some("key-one"));
     assert_eq!(case.file(&web(), "motd").as_deref(), Some("one"));
@@ -465,7 +465,11 @@ fn an_engine_that_cannot_be_asked_is_a_denial() {
             &mut Quiet,
         );
         assert!(!report.succeeded(), "{name}");
-        assert_eq!(report.stages[0].reason, REASON_POLICY_DENIED, "{name}");
+        assert_eq!(
+            report.stages[0].reason,
+            Some(Reason::PolicyDenied),
+            "{name}"
+        );
         let why = failed_with(&report, 0);
         assert!(
             why.contains("could not be asked, and a policy that was not asked has not allowed"),
@@ -486,7 +490,7 @@ fn an_engine_that_cannot_be_asked_is_a_denial() {
         &case.options,
         &mut Quiet,
     );
-    assert_eq!(report.stages[0].reason, REASON_POLICY_DENIED);
+    assert_eq!(report.stages[0].reason, Some(Reason::PolicyDenied));
     assert!(failed_with(&report, 0).contains("starting"));
     assert_eq!(case.file(&network(), "vm"), None);
 }

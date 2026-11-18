@@ -99,6 +99,7 @@ fn fields_come_from_the_language_and_leave_out_what_is_already_there() {
             "credentials",
             "targetHost",
             "endpoint",
+            "settings",
             "imports",
             "resources"
         ]
@@ -114,6 +115,7 @@ fn fields_come_from_the_language_and_leave_out_what_is_already_there() {
             "secrets",
             "credentials",
             "endpoint",
+            "settings",
             "imports",
             "resources",
             "outputs"
@@ -131,6 +133,7 @@ fn fields_come_from_the_language_and_leave_out_what_is_already_there() {
             "credentials",
             "targetHost",
             "endpoint",
+            "settings",
             "imports",
             "resources"
         ]
@@ -209,7 +212,15 @@ fn targets_come_from_the_loaded_plugins_and_fit_the_kind() {
 fn types_states_and_params_come_from_the_target_plugin() {
     assert_eq!(
         labels(&format!("{HEAD}    - id: x\n      type: |")),
-        ["exec", "file", "group", "package", "service", "user"]
+        [
+            "<namespace>.<collection>.<module>",
+            "exec",
+            "file",
+            "group",
+            "package",
+            "service",
+            "user"
+        ]
     );
     assert_eq!(
         labels(&format!("{HEAD}      state: |")),

@@ -84,7 +84,7 @@ fn a_directory_is_its_own_resource_and_has_no_content() {
     let err = refusal(
         "    - id: root\n      type: file\n      state: directory\n      params: {path: /srv/app, content: x}\n",
     );
-    assert_eq!(err.rule, "invalid-param");
+    assert_eq!(err.rule, "param-conflicts-with-state");
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn states_params_and_types_outside_the_table_are_refused() {
     let err = refusal("    - id: p\n      type: package\n      params: {}\n");
     assert_eq!(err.rule, "missing-param");
 
-    let err = refusal("    - id: m\n      type: mount\n      params: {path: /mnt}\n");
+    let err = refusal("    - id: m\n      type: 'mysql::db'\n      params: {path: /mnt}\n");
     assert_eq!(err.rule, "unsupported-resource-type");
 }
 
@@ -183,7 +183,7 @@ fn a_document_name_that_cannot_be_a_cookbook_is_refused() {
         "    - id: a\n      type: package\n      params: {name: nginx}\n",
     )
     .unwrap_err();
-    assert_eq!(err.rule, "invalid-cookbook-name");
+    assert_eq!(err.rule, "invalid-name");
 }
 
 #[test]
@@ -303,4 +303,134 @@ fn what_chef_run_cannot_take_of_a_credential_is_refused_with_the_reason() {
         assert!(err.msg.contains(reason), "{entry}: {err}");
         assert!(err.msg.starts_with("the credential \"deploy\""), "{err}");
     }
+}
+
+// ---- Chef's own resources beside the six -----------------------------------
+
+/// The document behind the `native_resources` golden files: Chef's own
+/// resources beside the shared ones, with a state, a guard, notified and
+/// notifying, and the native `package` reached through `native/`.
+const NATIVE_RESOURCES: &str = "    - id: nginx_pkg\n      type: native/package\n      state: upgrade\n      params:\n        package_name: nginx\n        options: '--no-install-recommends'\n    - id: nginx_conf\n      type: template\n      params:\n        path: /etc/nginx/nginx.conf\n        source: nginx.conf.erb\n        variables: {workers: 4}\n        mode: '0644'\n      dependsOn:\n        - resource: nginx_pkg\n      notifies:\n        - resource: nginx_svc\n          action: reload\n        - resource: reindex\n          action: run\n    - id: nginx_svc\n      type: service\n      params:\n        name: nginx\n    - id: reindex\n      type: apt_update\n      runtimeWhen: \"node['platform_family'] == 'debian'\"\n    - id: timer\n      type: systemd_unit\n      state: enable\n      params:\n        unit_name: reindex.timer\n";
+
+#[test]
+fn a_chef_resource_is_written_with_its_properties_as_written() {
+    let emitted = compile_named("web", NATIVE_RESOURCES).unwrap_or_else(|e| panic!("{e}"));
+    assert_golden(&golden(), "native_resources", &emitted);
+    let text = &emitted.artifact.files[&recipe_path("meridian_web")];
+    // The properties are the resource's own, as written, and the state is
+    // its action.
+    assert!(
+        text.contains("package 'nginx_pkg' do\n  options '--no-install-recommends'\n  package_name 'nginx'\n  action :upgrade\nend\n"),
+        "{text}"
+    );
+    // A hash is written in parentheses, or Ruby reads it as a block.
+    assert!(text.contains("  variables({ 'workers' => 4 })\n"), "{text}");
+    // A resource with no state takes its default action: no action line.
+    assert!(
+        text.contains(
+            "apt_update 'reindex' do\n  only_if { node['platform_family'] == 'debian' }\nend\n"
+        ),
+        "{text}"
+    );
+    // A notified resource takes the action named.
+    assert!(
+        text.contains("  notifies :run, 'apt_update[reindex]', :delayed\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("  notifies :reload, 'service[nginx_svc]', :delayed\n"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_chef_resource_takes_its_action_once_and_as_a_word() {
+    let err = refusal(
+        "    - id: a\n      type: template\n      state: create\n      params:\n        path: /x\n        action: create\n",
+    );
+    assert_eq!(err.rule, "param-conflicts-with-state");
+
+    let err = refusal(
+        "    - id: a\n      type: template\n      state: Create\n      params:\n        path: /x\n",
+    );
+    assert_eq!(err.rule, "unsupported-state");
+
+    let err = refusal("    - id: a\n      type: template\n      params:\n        path: ~\n");
+    assert_eq!(err.rule, "empty-param");
+
+    let err = refusal(
+        "    - id: conf\n      type: file\n      params: {path: /a, content: a}\n      notifies:\n        - resource: t\n          action: Run\n    - id: t\n      type: template\n      params: {path: /x}\n",
+    );
+    assert_eq!(err.rule, "unsupported-action");
+    assert_eq!(err.resource, "conf");
+    assert!(err.msg.contains("not a Chef action"), "{}", err.msg);
+}
+
+#[test]
+fn a_name_that_is_not_a_chef_resource_is_refused() {
+    for r#type in [
+        "Template",
+        "ansible.builtin.cron",
+        "mysql::db",
+        "native/cron",
+    ] {
+        let err = refusal(&format!(
+            "    - id: a\n      type: '{type}'\n      params:\n        path: /x\n"
+        ));
+        assert_eq!(err.rule, "unsupported-resource-type", "{type}");
+    }
+    // Chef runs a command with execute, so there is no exec to reach.
+    let err = refusal(
+        "    - id: a\n      type: native/exec\n      params:\n        command: /bin/true\n",
+    );
+    assert_eq!(err.rule, "unsupported-resource-type");
+    assert!(err.msg.contains("execute"), "{}", err.msg);
+}
+
+#[test]
+fn a_native_package_and_the_shared_package_managing_one_name_are_refused_together() {
+    let err = refusal(
+        "    - id: a\n      type: package\n      params: {name: nginx}\n    - id: b\n      type: native/package\n      params: {package_name: nginx, version: '1.2'}\n",
+    );
+    assert_eq!(err.rule, "duplicate-resource");
+    assert_eq!(err.resource, "b");
+}
+
+#[test]
+fn a_secret_handed_to_a_chef_resource_is_read_from_the_node_and_the_block_is_sensitive() {
+    let graph = with_secret(
+        "    - id: db\n      type: mysql_database\n      params:\n        database_name: app\n        password: placeholder\n",
+        "db",
+        "password",
+        "db_password",
+    );
+    let text = emit(&graph).unwrap().artifact.files[&recipe_path("meridian_web")].clone();
+    assert!(
+        text.contains("  password node['meridian_secret_db_password']\n"),
+        "{text}"
+    );
+    assert!(text.contains("  sensitive true\n"), "{text}");
+    assert!(!text.contains("placeholder"), "{text}");
+}
+
+#[test]
+fn the_schemas_offer_any_chef_resource_as_an_open_pattern() {
+    let schemas = Chef.resource_schemas();
+    let pattern = schemas
+        .iter()
+        .find(|s| s.r#type == meridian_target_chef::NATIVE_PATTERN)
+        .expect("the resource pattern is declared");
+    assert!(pattern.open && pattern.is_pattern() && pattern.params.is_empty());
+    assert_eq!(
+        Chef.supported_resource_types(),
+        [
+            "<resource>",
+            "exec",
+            "file",
+            "group",
+            "package",
+            "service",
+            "user"
+        ]
+    );
 }

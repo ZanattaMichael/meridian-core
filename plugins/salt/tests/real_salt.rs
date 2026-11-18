@@ -565,3 +565,66 @@ fn a_secret_reaches_salt_as_pillar_data_and_is_in_nothing_salt_prints_or_the_plu
     assert_eq!(fs::read_to_string(&path).unwrap(), format!("{SECRET}\n"));
     nothing_under_work_holds(&dir, SECRET);
 }
+
+#[ignore = "needs a real salt-call; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn the_state_functions_schemas_are_exported_for_an_editor() {
+    use meridian_sdk::{SchemaRequest, SchemaSource};
+    use meridian_target_salt::SaltSchemas;
+
+    let dir = scratch(TMP, "real-schemas");
+    let Some(runner) = real(&dir) else {
+        eprintln!("skipped: set {VARIABLE} to a salt-call program");
+        return;
+    };
+    let text = "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: site\nspec:\n  target: salt\n  targetHost:\n    from: inline\n    host: localhost\n  resources:\n    - id: motd\n      type: file\n      params:\n        path: /etc/motd\n        content: hi\n    - id: line\n      type: file.append\n      params:\n        name: /etc/motd\n        text: hi\n    - id: nowhere\n      type: example.missing\n      params:\n        x: 1\n";
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_text("site.yaml", text, "salt")],
+    );
+    let log = KeptLog::default();
+    let export = SaltSchemas {
+        program: runner.salt_call.clone(),
+        extra_args: runner.extra_args.clone(),
+    }
+    .export(&request, &log)
+    .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(export.tool, "salt");
+    assert!(
+        export
+            .tool_version
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit()),
+        "{:?}",
+        export.tool_version
+    );
+    assert_eq!(export.pins.get("salt"), Some(&export.tool_version));
+    let append = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "file.append")
+        .unwrap_or_else(|| panic!("file.append is described: {:?}", export.notes));
+    assert!(
+        append.open,
+        "a state function takes keyword arguments: {append:?}"
+    );
+    assert!(append.find_param("text").is_some(), "{append:?}");
+    assert!(
+        append.find_param("name").is_none_or(|p| !p.required),
+        "name is the id: {append:?}"
+    );
+    assert_eq!(append.actions, ["watch"]);
+    assert!(append.source.starts_with("salt "), "{}", append.source);
+    let managed = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "file.managed")
+        .expect("file.managed is listed");
+    assert!(managed.open && managed.params.is_empty());
+    assert!(
+        export.notes.iter().any(|n| n.contains("example.missing")),
+        "{:?}",
+        export.notes
+    );
+}

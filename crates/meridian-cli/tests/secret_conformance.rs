@@ -299,6 +299,7 @@ fn meridian(dir: &Path, command: &str, document: &str) -> Outcome {
     let _ = fs::remove_dir_all(dir.join(".meridian"));
     fs::write(dir.join("doc.yaml"), document).unwrap();
     let mut meridian = Command::new(env!("CARGO_BIN_EXE_meridian"));
+    meridian.env("MERIDIAN_ANNOTATIONS", "off");
     meridian.args([command, "doc.yaml"]);
     if command != "validate" {
         // Every plugin is loaded, so a refusal can say which targets take

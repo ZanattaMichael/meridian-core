@@ -1756,7 +1756,7 @@ change. A secret may be a value of a `v1/Secret`'s `stringData` on
 `kubernetes`, and a value in the `values` on `helm`, and nowhere else: any
 other place is written into an object or onto the command line
 (`unsupported-secret-place`), and a document that writes the token's text
-itself is refused (`reserved-text`). A Helm document with a Kustomize overlay
+itself is refused (`reserved-name`). A Helm document with a Kustomize overlay
 takes no secret, because the rendered manifests go to Kustomize through a
 file. `docker` deviates from the table's rank 1: Compose's own `secrets` are
 only read from a file or the environment, engine secrets being Swarm's, so

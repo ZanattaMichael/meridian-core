@@ -5,6 +5,8 @@
 //! generated type.
 
 use meridian_secret::SecretValue;
+use std::collections::BTreeMap;
+
 use meridian_value::{
     canonical_map, decode_map, decode_value, PlacedEscape, SecretRef, Value, SENSITIVE,
 };
@@ -12,6 +14,7 @@ use meridian_value::{
 use crate::credential::{Credential, HeldCredential};
 use crate::import::*;
 use crate::pb;
+use crate::rules::{DescribedRule, Rule};
 use crate::run::*;
 use crate::schema::{ParamKind, ParamSchema, ResourceSchema};
 use crate::schemas::{SchemaExport, SchemaRequest};
@@ -53,6 +56,11 @@ pub fn graph_to_wire(g: &ResourceGraph) -> pb::ResourceGraph {
         host: g.host.clone(),
         target: g.target.clone(),
         target_version: g.target_version.clone(),
+        settings_json: if g.settings.is_empty() {
+            Vec::new()
+        } else {
+            canonical_map(&g.settings).into_bytes()
+        },
         resources: g
             .resources
             .iter()
@@ -133,6 +141,9 @@ pub fn graph_from_wire(g: pb::ResourceGraph) -> Result<ResourceGraph, String> {
         })
         .collect();
     out.credential = g.credential.map(credential_from_wire);
+    if !g.settings_json.is_empty() {
+        out.settings = decode_map(&g.settings_json).map_err(|e| format!("settings: {e}"))?;
+    }
     for r in g.resources {
         let mut params =
             decode_map(&r.params_json).map_err(|e| format!("resource {:?}: {e}", r.id))?;
@@ -372,6 +383,7 @@ pub fn emit_response(outcome: Result<Emitted, CompileError>) -> pb::EmitResponse
                 rule: e.rule,
                 msg: e.msg,
                 pos: Some(position_to_wire(&e.pos)),
+                hint: e.hint,
             }),
         },
     }
@@ -391,6 +403,7 @@ pub fn emit_response_from_wire(
             rule: e.rule,
             msg: e.msg,
             pos: position_from_wire(e.pos),
+            hint: e.hint,
         });
     }
     Ok(Emitted {
@@ -628,7 +641,23 @@ pub fn context_to_wire(c: &RunContext) -> pb::RunContext {
                 })
                 .collect(),
         }),
+        save_plan: c.save_plan,
+        saved_plan: c.saved_plan.as_ref().map(saved_plan_to_wire),
     }
+}
+
+pub fn saved_plan_to_wire(saved: &SavedPlan) -> pb::SavedPlan {
+    pb::SavedPlan {
+        data: saved.data.clone(),
+        changes: saved.changes.iter().cloned().map(change_to_wire).collect(),
+    }
+}
+
+pub fn saved_plan_from_wire(saved: pb::SavedPlan) -> Result<SavedPlan, String> {
+    Ok(SavedPlan {
+        data: saved.data,
+        changes: changes_from_wire(saved.changes)?,
+    })
 }
 
 /// Converts a run context without its secrets, for a call that needs none:
@@ -641,6 +670,8 @@ pub fn context_to_wire_without_secrets(c: &RunContext) -> pb::RunContext {
         inputs_json: canonical_map(&c.inputs).into_bytes(),
         secrets: Vec::new(),
         credential: None,
+        save_plan: c.save_plan,
+        saved_plan: c.saved_plan.as_ref().map(saved_plan_to_wire),
     }
 }
 
@@ -689,6 +720,11 @@ pub fn context_from_wire(c: Option<pb::RunContext>) -> Result<RunContext, String
         inputs: decode_map(&c.inputs_json).map_err(|e| format!("reading the inputs: {e}"))?,
         secrets: Secrets::from_values(secrets),
         credential,
+        save_plan: c.save_plan,
+        saved_plan: match c.saved_plan {
+            None => None,
+            Some(saved) => Some(saved_plan_from_wire(saved)?),
+        },
     })
 }
 
@@ -807,11 +843,13 @@ pub fn plan_result(outcome: Result<Plan, RunError>) -> pb::PlanResult {
             changes: plan.changes.into_iter().map(change_to_wire).collect(),
             unknown: plan.unknown,
             error: None,
+            saved: plan.saved.as_ref().map(saved_plan_to_wire),
         },
         Err(e) => pb::PlanResult {
             changes: Vec::new(),
             unknown: false,
             error: Some(run_error_to_wire(e)),
+            saved: None,
         },
     }
 }
@@ -824,6 +862,10 @@ pub fn plan_result_from_wire(r: pb::PlanResult) -> Result<Result<Plan, RunError>
     Ok(Ok(Plan {
         changes: changes_from_wire(r.changes)?,
         unknown: r.unknown,
+        saved: match r.saved {
+            None => None,
+            Some(saved) => Some(saved_plan_from_wire(saved)?),
+        },
     }))
 }
 
@@ -904,6 +946,28 @@ pub fn settings_from_wire(settings: Vec<pb::Setting>) -> Vec<Setting> {
         .collect()
 }
 
+pub fn rules_to_wire(rules: &[Rule]) -> Vec<pb::Rule> {
+    rules
+        .iter()
+        .map(|r| pb::Rule {
+            name: r.name.to_owned(),
+            meaning: r.meaning.to_owned(),
+            hint: r.hint.to_owned(),
+        })
+        .collect()
+}
+
+pub fn rules_from_wire(rules: Vec<pb::Rule>) -> Vec<DescribedRule> {
+    rules
+        .into_iter()
+        .map(|r| DescribedRule {
+            name: r.name,
+            meaning: r.meaning,
+            hint: r.hint,
+        })
+        .collect()
+}
+
 pub fn import_formats_to_wire(formats: Vec<ImportFormat>) -> Vec<pb::ImportFormat> {
     formats
         .into_iter()
@@ -971,6 +1035,11 @@ pub fn import_response(outcome: Result<Imported, ImportError>) -> pb::ImportResp
                 target: d.target,
                 target_version: d.target_version,
                 host: d.host,
+                settings_json: if d.settings.is_empty() {
+                    Vec::new()
+                } else {
+                    canonical_map(&d.settings).into_bytes()
+                },
                 resources: d
                     .resources
                     .into_iter()
@@ -1073,12 +1142,19 @@ pub fn import_response_from_wire(
                 origin: r.origin,
             });
         }
+        let settings = if d.settings_json.is_empty() {
+            BTreeMap::new()
+        } else {
+            decode_map(&d.settings_json)
+                .map_err(|e| format!("document {:?}: settings: {e}", d.name))?
+        };
         imported.documents.push(ImportedDocument {
             kind,
             name: d.name,
             target: d.target,
             target_version: d.target_version,
             host: d.host,
+            settings,
             resources,
             outputs: d
                 .outputs
@@ -1251,6 +1327,25 @@ mod tests {
             with_cloud
         );
         assert!(!capabilities_from_wire(None).cloud_credentials);
+    }
+
+    #[test]
+    fn settings_cross_the_wire_with_their_value_types() {
+        let graph = ResourceGraph {
+            name: "web".to_owned(),
+            settings: BTreeMap::from([
+                ("engine".to_owned(), Value::from("DscV2")),
+                ("depth".to_owned(), Value::Int(3)),
+            ]),
+            ..ResourceGraph::default()
+        };
+        let wire = graph_to_wire(&graph);
+        assert_eq!(wire.settings_json, br#"{"depth":3,"engine":"DscV2"}"#);
+        assert_eq!(graph_from_wire(wire).unwrap().settings, graph.settings);
+        // None set is no bytes at all, as a plugin before settings sent.
+        let wire = graph_to_wire(&ResourceGraph::default());
+        assert!(wire.settings_json.is_empty());
+        assert!(graph_from_wire(wire).unwrap().settings.is_empty());
     }
 
     fn declared_credential() -> Credential {

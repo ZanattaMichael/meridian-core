@@ -511,3 +511,66 @@ fn a_credential_the_providers_cannot_take_stops_the_run_before_the_tool_starts()
     );
     assert!(!dir.join("calls").exists(), "the tool was started");
 }
+
+/// Answers like `HAPPY`, and writes the update plan `preview --save-plan`
+/// is asked for, as the real tool would.
+fn saving_plans() -> String {
+    HAPPY.replace(
+        "\"preview \"*) echo",
+        "\"preview \"*) for a in \"$@\"; do case \"$a\" in meridian.plan.json) echo PLANDATA > meridian.plan.json;; esac; done; echo",
+    )
+}
+
+#[test]
+fn a_plan_asked_to_save_hands_back_the_update_plan_and_an_apply_handed_it_updates_with_it() {
+    let dir = scratch(TMP, "saved-plan");
+    let runner = runner(&dir, &saving_plans());
+    let mut context = context(&dir);
+    context.save_plan = true;
+    let plan = runner
+        .plan(&context, &compiled(), &KeptLog::default())
+        .unwrap();
+    let saved = plan.saved.clone().expect("the update plan is handed back");
+    assert_eq!(saved.data, b"PLANDATA\n");
+    assert!(
+        calls(&dir)[1].starts_with("preview --stack prod --json --save-plan meridian.plan.json")
+    );
+    // The plan file does not stay behind in the work directory.
+    assert!(!dir.join("work/meridian.plan.json").exists());
+
+    let _ = fs::remove_file(dir.join("calls"));
+    let mut context = context.clone();
+    context.save_plan = false;
+    context.saved_plan = Some(meridian_sdk::SavedPlan {
+        data: saved.data,
+        changes: plan.changes.clone(),
+    });
+    let applied = runner
+        .apply(&context, &compiled(), &KeptLog::default())
+        .unwrap();
+    // No second preview: the stack is selected and updated with the plan.
+    assert_eq!(
+        calls(&dir),
+        [
+            "stack select prod --create",
+            "up --stack prod --yes --skip-preview --plan meridian.plan.json --config region=us-east-1 --config replicas=3",
+            "stack output --stack prod --json",
+            "stack output --stack prod --json --show-secrets",
+        ]
+    );
+    assert_eq!(applied.changes, plan.changes);
+    assert!(!dir.join("work/meridian.plan.json").exists());
+}
+
+#[test]
+fn a_plan_that_handed_over_a_secret_saves_no_update_plan() {
+    let dir = scratch(TMP, "saved-plan-secret");
+    let runner = runner(&dir, &saving_plans());
+    let mut context = with_secret(&dir);
+    context.save_plan = true;
+    let plan = runner
+        .plan(&context, &compiled(), &KeptLog::default())
+        .unwrap();
+    assert!(plan.saved.is_none());
+    assert!(!calls(&dir).iter().any(|c| c.contains("--save-plan")));
+}

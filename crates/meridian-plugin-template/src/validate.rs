@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules;
 use meridian_sdk::CompileError;
 
 use crate::{refuse_at, Entry};
@@ -17,7 +18,7 @@ pub(crate) fn validate(entries: &[Entry]) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &entry.id,
                 &entry.pos,
-                "invalid-path",
+                &rules::INVALID_PATH,
                 format!(
                     "has the path {:?}, and filesync needs an absolute one",
                     entry.path
@@ -29,7 +30,7 @@ pub(crate) fn validate(entries: &[Entry]) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &entry.id,
                 &entry.pos,
-                "invalid-path",
+                &rules::INVALID_PATH,
                 "has a tab or a line break in its path or mode, which the manifest cannot hold"
                     .to_owned(),
             ));
@@ -38,7 +39,7 @@ pub(crate) fn validate(entries: &[Entry]) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &entry.id,
                 &entry.pos,
-                "duplicate-path",
+                &rules::DUPLICATE_RESOURCE,
                 format!(
                     "manages {:?}, which resource {first:?} already manages",
                     entry.path

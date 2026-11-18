@@ -25,6 +25,8 @@ pub const RUN_VARIABLE: &str = "MERIDIAN_CHEF_RUN";
 pub const TRANSPORT_VARIABLE: &str = "MERIDIAN_CHEF_TRANSPORT";
 /// Extra arguments for every run, split like a shell command line.
 pub const ARGS_VARIABLE: &str = "MERIDIAN_CHEF_ARGS";
+/// Names the resource inspector `meridian schema sync` runs.
+pub const INSPECTOR_VARIABLE: &str = "MERIDIAN_CHEF_INSPECTOR";
 
 /// What an operator can configure about this runner, in the order the
 /// settings are documented.
@@ -53,6 +55,12 @@ pub fn settings() -> Vec<Setting> {
             ARGS_VARIABLE,
             "",
             "Extra arguments for every run, split like a shell command line.",
+        ),
+        Setting::new(
+            "inspector",
+            INSPECTOR_VARIABLE,
+            "chef-resource-inspector",
+            "The resource inspector `meridian schema sync` runs to read what each resource takes, when it is not `chef-resource-inspector` on `PATH`; `cinc-resource-inspector`, then the copies the Cinc and Chef packages keep under `/opt/cinc` and `/opt/chef`, are tried when that does not run.",
         ),
     ];
     declared.extend(meridian_sdk::agent::settings());
@@ -293,6 +301,7 @@ impl Runner for ChefRunner {
             Transport::Local => Ok(Plan {
                 changes: self.converge_here(context, &cookbook, true, log)?,
                 unknown: false,
+                saved: None,
             }),
             Transport::Remote => {
                 log.out(&format!(
@@ -302,6 +311,7 @@ impl Runner for ChefRunner {
                 Ok(Plan {
                     changes: Vec::new(),
                     unknown: true,
+                    saved: None,
                 })
             }
         }

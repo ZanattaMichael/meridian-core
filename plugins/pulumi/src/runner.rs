@@ -7,11 +7,15 @@ use std::path::Path;
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
     cloud_for, decode_value, Applied, Artifact, Change, ChangeAction, CloudHandover, Log,
-    Operations, Output, Plan, RunContext, RunError, Runner, Value,
+    Operations, Output, Plan, RunContext, RunError, Runner, SavedPlan, Value,
 };
 
 use crate::{PROGRAM_PATH, STACK_PATH};
 use meridian_sdk::{settings, Setting};
+
+/// Where Pulumi's own saved plan is written while a run uses it. Pulumi
+/// calls these update plans; they are behind `PULUMI_EXPERIMENTAL`.
+const PLAN_FILE: &str = "meridian.plan.json";
 
 /// Names the program to run, when it is not `pulumi` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_PULUMI";
@@ -213,15 +217,15 @@ impl PulumiRunner {
         }
     }
 
-    /// Writes the program, makes sure the stack exists and asks Pulumi what
-    /// an update would change.
-    fn prepare(
+    /// Writes the program, makes sure the stack exists and hands it the
+    /// run's secrets.
+    fn select(
         &self,
         context: &RunContext,
         cloud: Option<&CloudHandover>,
         artifact: &Artifact,
         log: &dyn Log,
-    ) -> Result<(Stack, Vec<Change>), RunError> {
+    ) -> Result<Stack, RunError> {
         let (Some(_), Some(settings)) = (
             artifact.files.get(PROGRAM_PATH),
             artifact.files.get(STACK_PATH),
@@ -243,19 +247,38 @@ impl PulumiRunner {
         }
         select.run_ok("pulumi could not select or create the stack", log)?;
         self.set_secrets(context, cloud, &stack, log)?;
+        Ok(stack)
+    }
+
+    /// Writes the program, makes sure the stack exists and asks Pulumi what
+    /// an update would change, saving the update plan to [`PLAN_FILE`] when
+    /// `save` says to.
+    fn prepare(
+        &self,
+        context: &RunContext,
+        cloud: Option<&CloudHandover>,
+        artifact: &Artifact,
+        log: &dyn Log,
+        save: bool,
+    ) -> Result<(Stack, Vec<Change>), RunError> {
+        let stack = self.select(context, cloud, artifact, log)?;
 
         log.out(&format!(
             "stack {}: asking Pulumi what would change",
             stack.name
         ));
-        let preview = Self::with_inputs(
-            self.on_stack(context, cloud, &stack, &["preview"])
-                .args(self.extra_args.iter().cloned())
-                .arg("--json"),
-            context,
-        )
-        .capture_stdout()
-        .run(log);
+        let mut preview = self
+            .on_stack(context, cloud, &stack, &["preview"])
+            .args(self.extra_args.iter().cloned())
+            .arg("--json");
+        if save {
+            preview = preview
+                .args(["--save-plan", PLAN_FILE])
+                .env("PULUMI_EXPERIMENTAL", "true");
+        }
+        let preview = Self::with_inputs(preview, context)
+            .capture_stdout()
+            .run(log);
         let preview = match preview {
             Ok(preview) => preview,
             Err(e) => {
@@ -335,6 +358,10 @@ impl Runner for PulumiRunner {
         true
     }
 
+    fn saves_plans(&self) -> bool {
+        true
+    }
+
     fn plan(
         &self,
         context: &RunContext,
@@ -345,11 +372,30 @@ impl Runner for PulumiRunner {
         // call of the stage; the files a provider reads live to the end of it.
         let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
         let cloud = cloud.as_ref();
-        let (stack, changes) = self.prepare(context, cloud, artifact, log)?;
+        // Pulumi's update plan holds the inputs of every resource, secrets
+        // among them encrypted with the stack's provider, which with no
+        // passphrase chosen protects nothing; so a run that handed over a
+        // secret saves no plan, and the apply from the plan file previews
+        // again.
+        let save = context.save_plan && context.secrets.is_empty();
+        let (stack, changes) = self.prepare(context, cloud, artifact, log, save)?;
         self.forget_secrets(context, cloud, &stack, log);
+        let plan_file = context.work_dir.join(PLAN_FILE);
+        let saved = if save {
+            let bytes = std::fs::read(&plan_file).map_err(|e| {
+                RunError::new(format!(
+                    "the update plan {PLAN_FILE} could not be read back: {e}"
+                ))
+            })?;
+            Some(SavedPlan::new(bytes))
+        } else {
+            None
+        };
+        let _ = std::fs::remove_file(&plan_file);
         Ok(Plan {
             changes,
             unknown: false,
+            saved,
         })
     }
 
@@ -363,17 +409,40 @@ impl Runner for PulumiRunner {
         // call of the stage; the files a provider reads live to the end of it.
         let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
         let cloud = cloud.as_ref();
-        let (stack, changes) = self.prepare(context, cloud, artifact, log)?;
+        let (stack, changes, planned) = match &context.saved_plan {
+            // The update plan `meridian plan --out` kept constrains the
+            // update to what was previewed; Pulumi refuses one that no
+            // longer matches. There is no second preview.
+            Some(saved) => {
+                let stack = self.select(context, cloud, artifact, log)?;
+                std::fs::write(context.work_dir.join(PLAN_FILE), &saved.data).map_err(|e| {
+                    RunError::new(format!("writing the update plan {PLAN_FILE}: {e}"))
+                })?;
+                log.out(&format!(
+                    "stack {}: updating with the plan saved by `meridian plan --out`",
+                    stack.name
+                ));
+                (stack, saved.changes.clone(), true)
+            }
+            None => {
+                let (stack, changes) = self.prepare(context, cloud, artifact, log, false)?;
+                (stack, changes, false)
+            }
+        };
         // The preview above is the report; the update does not print a
         // second one.
-        let updated = Self::with_inputs(
-            self.on_stack(context, cloud, &stack, &["up"])
-                .args(self.extra_args.iter().cloned())
-                .args(["--yes", "--skip-preview"]),
-            context,
-        )
-        .run_ok("pulumi up failed", log);
+        let mut up = self
+            .on_stack(context, cloud, &stack, &["up"])
+            .args(self.extra_args.iter().cloned())
+            .args(["--yes", "--skip-preview"]);
+        if planned {
+            up = up
+                .args(["--plan", PLAN_FILE])
+                .env("PULUMI_EXPERIMENTAL", "true");
+        }
+        let updated = Self::with_inputs(up, context).run_ok("pulumi up failed", log);
         self.forget_secrets(context, cloud, &stack, log);
+        let _ = std::fs::remove_file(context.work_dir.join(PLAN_FILE));
         updated?;
         Ok(Applied {
             changes,

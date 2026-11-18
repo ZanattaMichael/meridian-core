@@ -151,7 +151,7 @@ proptest! {
         let decided = template.unwrap().eval_literal(&scope);
 
         if loses_a_reference(&pieces) {
-            let refused = decided.clone().err().unwrap_or_default();
+            let refused = decided.clone().err().map(String::from).unwrap_or_default();
             prop_assert!(
                 refused.contains("the reference would be lost"),
                 "{source:?} gave {decided:?}"

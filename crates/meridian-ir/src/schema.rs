@@ -928,6 +928,16 @@ const VARIABLES: Field = Field {
     role: Role::None,
 };
 
+const SETTINGS: Field = Field {
+    name: "settings",
+    doc: "The tool's own settings for the whole document, such as which engine runs \
+          it or how its host is reached. Each target says which keys it takes, on its \
+          page; a key the target does not take is refused.",
+    required: false,
+    ty: Type::Params,
+    role: Role::None,
+};
+
 const CONDITIONS: Field = Field {
     name: "conditions",
     doc: "Named conditions, read as `cond.<name>` by any `when` in the document.",
@@ -1027,6 +1037,7 @@ pub const INFRASTRUCTURE_SPEC: Shape = Shape {
         SECRETS,
         CREDENTIALS,
         ENDPOINT_FIELD,
+        SETTINGS,
         IMPORTS,
         RESOURCES,
         Field {
@@ -1060,6 +1071,7 @@ pub const RESOURCE_SET_SPEC: Shape = Shape {
             role: Role::None,
         },
         ENDPOINT_FIELD,
+        SETTINGS,
         IMPORTS,
         RESOURCES,
     ],

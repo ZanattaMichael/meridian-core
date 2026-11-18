@@ -546,14 +546,14 @@ Each refusal names the resource, the rule and the line of the document.
 | Rule | When |
 | --- | --- |
 | `unsupported-resource-type` | The type is not one of the [resource types](#resource-types), such as `package` or `aws_instance`. |
-| `missing-source` | The document declares no `source.<builder>`. |
+| `missing-param` | The document declares no `source.<builder>`. |
 | `invalid-reference` | A `${...}` names something the document does not declare, reads a source or a step inside a param, is never closed, or is an output that does not read a source's attribute. |
 | `unsupported-dependency` | A dependency contradicts the shape of a build: a provisioner depending on a post-processor, a source depending on a source, a post-processor depending on two others, two post-processors depending on the same one, a data source or local depending on another without referring to it, or anything depending on the error-cleanup provisioner. |
 | `unsupported-action` | The document uses `notifies`. A build runs each step once on a machine it then discards, so nothing in it can react to a change. |
 | `unsupported-runtime-condition` | The document uses `runtimeWhen`. To run a step for some sources only, use the step's `only` or `except` param. |
 | `unsupported-state` | `state` is anything but `present`. A build never removes an image. |
 | `missing-param`, `invalid-param` | A `plugin` without `source` and `version`, a `local` without `value`, or either with a param it does not take. |
-| `duplicate-error-cleanup` | A second `error-cleanup-provisioner`. |
+| `duplicate-resource` | A second `error-cleanup-provisioner`. |
 | `invalid-name` | A resource id that cannot be a Packer block name. |
 
 ## Examples

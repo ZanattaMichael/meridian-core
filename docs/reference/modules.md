@@ -130,6 +130,7 @@ Content is found by directory. Nothing has to be listed in the manifest.
 |---|---|
 | `documents/` | `Infrastructure` and `ResourceSet` documents |
 | `data/` | Data files, as given to `--data` |
+| `tests/` | `Test` documents for `meridian test`, naming the module's own files relative to themselves. See [testing a module](#testing-a-module) |
 | `composites/`, `functions/` | Reserved for the language's composites and functions |
 | `README.md` | What the module is for and how to use it |
 
@@ -724,6 +725,33 @@ A version is published once:
 
 `digest` is what a consumer's lockfile records as `resolved`, and `integrity`
 is the hash it records for the content.
+
+## Testing a module
+
+A module carries its tests under `tests/`, as `Test` documents that name the
+module's own files relative to themselves:
+
+```yaml
+# tests/proxy.test.yaml
+apiVersion: meridian/v1
+kind: Test
+metadata:
+  name: proxy
+spec:
+  documents: [../documents/proxy.yaml]
+  data: [../data/defaults.yaml]
+  cases:
+    - name: the defaults compile
+      expect:
+        proxy: {outcome: compiled}
+```
+
+`meridian test` run in the module's directory finds and runs them, so a
+module is tested as it is before it is tagged, signed or pushed. A project
+that uses the module can test it as it arrives by naming the module's files
+in its own tests, `@acme/nginx:documents/proxy.yaml`, as any command does.
+`module install` fetches no tests and runs none.
+[Testing documents and modules](testing.md) has every field.
 
 ## Publishing
 

@@ -2,9 +2,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use meridian_sdk::{CompileError, Edge, EdgeKind, Resource, ResourceGraph, Value};
+use meridian_sdk::rules::{self, Rule};
+use meridian_sdk::{
+    CompileError, Edge, EdgeKind, Resource, ResourceGraph, ResourceSchema, TypeName, Value,
+};
 
-use crate::{refuse, Attr, Declaration, Manifest, Reference, NAME};
+use crate::{own, refuse, Attr, Declaration, Manifest, Reference, NAME};
 
 /// How one IR resource type becomes a native Puppet declaration.
 ///
@@ -168,30 +171,102 @@ pub(crate) fn mapping(resource_type: &str) -> Option<Mapping> {
 
 /// What each resource type takes, read from the same table a resource is
 /// checked against, so an editor is never told something `emit` refuses.
-pub fn resource_schemas() -> Vec<meridian_sdk::ResourceSchema> {
-    TYPES
+pub fn resource_schemas() -> Vec<ResourceSchema> {
+    let mut schemas: Vec<ResourceSchema> = NATIVE_PATTERNS
         .iter()
-        .filter_map(|name| {
-            let m = mapping(name)?;
-            let params: Vec<&str> = m.params.iter().map(|(param, _)| *param).collect();
-            let states: Vec<&str> = m.ensure.iter().map(|(state, _)| *state).collect();
-            Some(meridian_sdk::schema::shared(
-                name,
-                &params,
-                m.required,
-                &states,
-                m.default_state,
-                m.actions,
-            ))
+        .map(|pattern| {
+            ResourceSchema::open(
+                pattern,
+                "Any Puppet type, core or defined, written as a declaration names it: cron, \
+                 mount, mysql::db. The params are the type's attributes, passed through as \
+                 written; a state is its ensure. When notified it is refreshed. A type whose \
+                 bare name is a shared type is written native/<name>: native/file is Puppet's \
+                 own file. The document then compiles for Puppet and OpenVox only.",
+            )
+            .actions(&["refresh"])
         })
-        .collect()
+        .collect();
+    schemas.extend(SHARED.iter().filter_map(|name| {
+        let m = mapping(name)?;
+        let params: Vec<&str> = m.params.iter().map(|(param, _)| *param).collect();
+        let states: Vec<&str> = m.ensure.iter().map(|(state, _)| *state).collect();
+        Some(meridian_sdk::schema::shared(
+            name,
+            &params,
+            m.required,
+            &states,
+            m.default_state,
+            m.actions,
+        ))
+    }));
+    schemas
 }
 
-const TYPES: [&str; 6] = ["exec", "file", "group", "package", "service", "user"];
+/// The six shared types, sorted.
+const SHARED: &[&str] = &["exec", "file", "group", "package", "service", "user"];
 
-/// Every IR resource type this target maps, sorted.
+/// How an editor is told that any Puppet type is a type: a defined type or
+/// a module's type by its qualified name, a core type by its bare name.
+/// Sorted, as the type list is.
+pub const NATIVE_PATTERNS: &[&str] = &["<module>::<type>", "<type>"];
+
+/// Every IR resource type this target maps: the patterns every Puppet type
+/// fits, then the shared six, sorted.
 pub fn supported_resource_types() -> Vec<String> {
-    TYPES.map(str::to_owned).to_vec()
+    let mut types: Vec<String> = NATIVE_PATTERNS.iter().map(|p| (*p).to_owned()).collect();
+    types.extend(SHARED.iter().map(|t| (*t).to_owned()));
+    types
+}
+
+/// The Puppet type a native type names, when the type is one: the bare
+/// name under `native/`, which Puppet has for every one of the six, or the
+/// name as written, which is a Puppet type name when each `::` segment is
+/// lower-case letters, digits and underscores.
+pub(crate) fn native_type(r: &Resource) -> Result<Option<&str>, CompileError> {
+    match TypeName::read(&r.r#type) {
+        TypeName::Shared(_) => Ok(None),
+        TypeName::NativeNamedLikeShared(bare) if meridian_sdk::schema::is_shared_type(bare) => {
+            Ok(Some(bare))
+        }
+        // The prefix is for the six names a shared type has taken; any
+        // other type has one spelling.
+        TypeName::NativeNamedLikeShared(_) => Err(refuse(
+            r,
+            &rules::UNSUPPORTED_RESOURCE_TYPE,
+            format!(
+                "resource type {:?} carries the native/ prefix, which reaches only a Puppet type \
+                 whose bare name is a shared type ({}); every other type is written as it is",
+                r.r#type,
+                SHARED.join(", ")
+            ),
+        )),
+        TypeName::Native(name) if is_type_name(name) => Ok(Some(name)),
+        TypeName::Native(_) => Err(unsupported_type(r)),
+    }
+}
+
+/// Whether `name` is shaped like a Puppet type name: `cron`, `mysql::db`.
+fn is_type_name(name: &str) -> bool {
+    let word = |w: &str| {
+        w.starts_with(|c: char| c.is_ascii_lowercase())
+            && w.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    };
+    name.split("::").all(word)
+}
+
+fn unsupported_type(r: &Resource) -> CompileError {
+    refuse(
+        r,
+        &rules::UNSUPPORTED_RESOURCE_TYPE,
+        format!(
+            "unsupported resource type {:?} on this target: it is not one of the shared types \
+             ({}), and a Puppet type is written as a declaration names it, such as cron or \
+             mysql::db",
+            r.r#type,
+            SHARED.join(", ")
+        ),
+    )
 }
 
 fn keys(pairs: &[(&str, &str)]) -> String {
@@ -223,8 +298,10 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Manifest, CompileError>
         // The shared types are checked the same way on every configuration
         // management target, so a document moves between tools without the
         // type rules changing under it.
-        meridian_sdk::schema::check_shared(resource)
-            .map_err(|e| refuse(resource, &e.rule, e.msg))?;
+        meridian_sdk::schema::check_shared(resource).map_err(|e| CompileError {
+            target: NAME.to_owned(),
+            ..e
+        })?;
         resources.push(declaration_for(resource, &graph.secrets)?);
     }
     let mut notify = notifications(graph, &resources)?;
@@ -238,7 +315,8 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Manifest, CompileError>
         meridian_sdk::check_host(&graph.host).map_err(|why| CompileError {
             target: NAME.to_owned(),
             resource: String::new(),
-            rule: "invalid-host".to_owned(),
+            rule: rules::INVALID_HOST.name.to_owned(),
+            hint: rules::INVALID_HOST.hint.to_owned(),
             msg: format!("the target host cannot be written into site.pp: {why}"),
             pos: Default::default(),
         })?;
@@ -254,16 +332,10 @@ fn declaration_for(
     r: &Resource,
     secrets: &[meridian_sdk::SecretName],
 ) -> Result<Declaration, CompileError> {
-    let Some(m) = mapping(&r.r#type) else {
-        return Err(refuse(
-            r,
-            "unsupported-resource-type",
-            format!(
-                "unsupported resource type {:?} on this target (supported: {})",
-                r.r#type,
-                TYPES.join(", ")
-            ),
-        ));
+    let native = native_type(r)?;
+    let m = match native {
+        Some(_) => None,
+        None => Some(mapping(&r.r#type).ok_or_else(|| unsupported_type(r))?),
     };
 
     // A catalog is compiled first and applied later, so there is no moment at
@@ -273,7 +345,7 @@ fn declaration_for(
     if !r.runtime_when.is_empty() {
         return Err(refuse(
             r,
-            "unsupported-runtime-condition",
+            &rules::UNSUPPORTED_RUNTIME_CONDITION,
             format!(
                 "resource carries runtimeWhen {:?}, which this target cannot express: \
                  a Puppet catalog is compiled before it reaches the node, so there is \
@@ -288,19 +360,24 @@ fn declaration_for(
     if r.r#type == "file" && r.state == "directory" && r.params.contains_key("content") {
         return Err(refuse(
             r,
-            "param-conflicts-with-state",
+            &rules::PARAM_CONFLICTS_WITH_STATE,
             "param \"content\" cannot be used with state \"directory\": a directory has no \
              content; remove the param or the state"
                 .to_owned(),
         ));
     }
 
+    if let Some(puppet_type) = native {
+        return native_declaration(r, puppet_type, secrets);
+    }
+    let m = m.expect("a type that is not native is one of the six");
+
     let mut attrs = BTreeMap::new();
     for (name, value) in &r.params {
         let Some(native) = lookup(m.params, name) else {
             return Err(refuse(
                 r,
-                "unsupported-param",
+                &rules::UNSUPPORTED_PARAM,
                 format!(
                     "resource type {:?} does not accept param {:?} on this target (accepted: {})",
                     r.r#type,
@@ -312,7 +389,7 @@ fn declaration_for(
         if *value == Value::Null {
             return Err(refuse(
                 r,
-                "empty-param",
+                &rules::EMPTY_PARAM,
                 format!(
                     "param {:?} on resource type {:?} has no value",
                     name, r.r#type
@@ -327,42 +404,14 @@ fn declaration_for(
             }
             continue;
         }
-        // A secret is handed over by the runner, through Hiera: the
-        // manifest looks it up under its name, as a Sensitive value, so
-        // Puppet redacts it from its report. It stands on its own as a
-        // param: inside a list or a hash, Puppet would hold the rest of the
-        // value in the open beside it.
-        let attr = match value {
-            Value::Secret(at) => {
-                let Some(secret) = secrets.iter().find(|s| s.secret == *at) else {
-                    return Err(refuse(
-                        r,
-                        "unnamed-secret",
-                        format!("param {name:?} holds a secret the graph does not name"),
-                    ));
-                };
-                Attr::Source(crate::secret_reference(&secret.name))
-            }
-            value if holds_secret(value) => {
-                return Err(refuse(
-                    r,
-                    "unsupported-secret-place",
-                    format!(
-                        "param {name:?} holds a secret inside a list or a map; on this target \
-                         a secret is a whole param, looked up as one Sensitive value"
-                    ),
-                ));
-            }
-            value => Attr::Value(value.clone()),
-        };
-        attrs.insert(native.to_owned(), attr);
+        attrs.insert(native.to_owned(), attribute(r, name, value, secrets)?);
     }
 
     for need in m.required {
         if !r.params.contains_key(*need) {
             return Err(refuse(
                 r,
-                "missing-param",
+                &rules::MISSING_PARAM,
                 format!(
                     "resource type {:?} requires param {:?} on this target",
                     r.r#type, need
@@ -375,7 +424,7 @@ fn declaration_for(
         if !r.state.is_empty() {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!(
                     "resource type {:?} accepts no state on this target, got {:?}",
                     r.r#type, r.state
@@ -391,7 +440,7 @@ fn declaration_for(
         let Some(native) = lookup(m.ensure, state) else {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!(
                     "resource type {:?} does not accept state {:?} on this target (accepted: {})",
                     r.r#type,
@@ -409,6 +458,97 @@ fn declaration_for(
         attrs,
         require: Vec::new(),
         notify: Vec::new(),
+        native: false,
+        resource_id: r.id.clone(),
+        pos: r.pos.clone(),
+    })
+}
+
+/// One attribute's value. A secret is handed over by the runner, through
+/// Hiera: the manifest looks it up under its name, as a Sensitive value, so
+/// Puppet redacts it from its report. It stands on its own as a param:
+/// inside a list or a hash, Puppet would hold the rest of the value in the
+/// open beside it.
+fn attribute(
+    r: &Resource,
+    name: &str,
+    value: &Value,
+    secrets: &[meridian_sdk::SecretName],
+) -> Result<Attr, CompileError> {
+    Ok(match value {
+        Value::Secret(at) => {
+            let Some(secret) = secrets.iter().find(|s| s.secret == *at) else {
+                return Err(refuse(
+                    r,
+                    &own::UNNAMED_SECRET,
+                    format!("param {name:?} holds a secret the graph does not name"),
+                ));
+            };
+            Attr::Source(crate::secret_reference(&secret.name))
+        }
+        value if holds_secret(value) => {
+            return Err(refuse(
+                r,
+                &rules::UNSUPPORTED_SECRET_PLACE,
+                format!(
+                    "param {name:?} holds a secret inside a list or a map; on this target \
+                     a secret is a whole param, looked up as one Sensitive value"
+                ),
+            ));
+        }
+        value => Attr::Value(value.clone()),
+    })
+}
+
+/// A resource whose type is Puppet's own: the params are the type's
+/// attributes as written, and a state is its `ensure`. Nothing is checked
+/// against a list of what the type takes; an attribute the type does not
+/// have is Puppet's to refuse when the catalog is compiled, until the
+/// type's schema is synced and the editor reports it in place.
+fn native_declaration(
+    r: &Resource,
+    puppet_type: &str,
+    secrets: &[meridian_sdk::SecretName],
+) -> Result<Declaration, CompileError> {
+    let mut attrs = BTreeMap::new();
+    for (name, value) in &r.params {
+        if *value == Value::Null {
+            return Err(refuse(
+                r,
+                &rules::EMPTY_PARAM,
+                format!("param {name:?} on type {puppet_type} has no value"),
+            ));
+        }
+        attrs.insert(name.clone(), attribute(r, name, value, secrets)?);
+    }
+    if !r.state.is_empty() {
+        if r.params.contains_key("ensure") {
+            return Err(refuse(
+                r,
+                &rules::PARAM_CONFLICTS_WITH_STATE,
+                format!(
+                    "state {:?} and param \"ensure\" both set the type's ensure; write one of them",
+                    r.state
+                ),
+            ));
+        }
+        // An ensure value is written bare when it is a word, as a Puppet
+        // author writes `present` or `running`; a path or a version is a
+        // string.
+        let ensure = if is_type_name(&r.state) {
+            Attr::Source(r.state.clone())
+        } else {
+            Attr::Value(Value::String(r.state.clone()))
+        };
+        attrs.insert("ensure".to_owned(), ensure);
+    }
+    Ok(Declaration {
+        r#type: puppet_type.to_owned(),
+        title: r.id.clone(),
+        attrs,
+        require: Vec::new(),
+        notify: Vec::new(),
+        native: true,
         resource_id: r.id.clone(),
         pos: r.pos.clone(),
     })
@@ -432,7 +572,7 @@ fn notifications(
             let from = graph.resource(&edge.from).cloned().unwrap_or_default();
             return Err(refuse(
                 &from,
-                "unknown-notify-target",
+                &rules::UNKNOWN_NOTIFY_TARGET,
                 format!("notifies an unknown resource {:?}", edge.to),
             ));
         };
@@ -440,7 +580,8 @@ fn notifications(
             return Err(CompileError {
                 target: NAME.to_owned(),
                 resource: edge.from.clone(),
-                rule: "unknown-notifier".to_owned(),
+                rule: rules::UNKNOWN_NOTIFY_TARGET.name.to_owned(),
+                hint: rules::UNKNOWN_NOTIFY_TARGET.hint.to_owned(),
                 pos: edge.pos.clone(),
                 msg: format!(
                     "a notifies edge starts at resource {:?}, which this document does not declare",
@@ -479,11 +620,12 @@ fn notifications(
 /// notified. The author wrote the action on the notifier, so that is the line
 /// they have to change.
 fn check_action(from: &Resource, to: &Resource, edge: &Edge) -> Result<(), CompileError> {
-    let fail = |rule: &str, msg: String| {
+    let fail = |rule: &Rule, msg: String| {
         Err(CompileError {
             target: NAME.to_owned(),
             resource: from.id.clone(),
-            rule: rule.to_owned(),
+            rule: rule.name.to_owned(),
+            hint: rule.hint.to_owned(),
             msg,
             pos: if edge.pos.known() {
                 edge.pos.clone()
@@ -493,20 +635,37 @@ fn check_action(from: &Resource, to: &Resource, edge: &Edge) -> Result<(), Compi
         })
     };
 
-    let Some(m) = mapping(&to.r#type) else {
+    // A type of Puppet's own is refreshed when notified, and whether it
+    // does anything on refresh is the type's own business: Puppet applies a
+    // refresh to a type that defines none without complaint. `refresh` is
+    // the one action that asks exactly that.
+    if let Some(puppet_type) = native_type(to).map_err(|e| CompileError {
+        resource: from.id.clone(),
+        pos: if edge.pos.known() {
+            edge.pos.clone()
+        } else {
+            from.pos.clone()
+        },
+        ..e
+    })? {
+        if edge.action == "refresh" {
+            return Ok(());
+        }
         return fail(
-            "unsupported-resource-type",
+            &rules::UNSUPPORTED_ACTION,
             format!(
-                "notifies resource {:?}, whose type {:?} this target does not support (supported: {})",
-                to.id,
-                to.r#type,
-                TYPES.join(", ")
+                "notifies resource {:?} with action {:?}, but {} is a Puppet type, which \
+                 can only be refreshed when notified (action \"refresh\")",
+                to.id, edge.action, puppet_type
             ),
         );
+    }
+    let Some(m) = mapping(&to.r#type) else {
+        return fail(&rules::UNSUPPORTED_RESOURCE_TYPE, unsupported_type(to).msg);
     };
     if !m.refreshable {
         return fail(
-            "unsupported-action",
+            &rules::UNSUPPORTED_ACTION,
             format!(
                 "notifies resource {:?}, which this target cannot refresh: Puppet refreshes \
                  only the types that define a refresh, and {} is not one of them",
@@ -519,7 +678,7 @@ fn check_action(from: &Resource, to: &Resource, edge: &Edge) -> Result<(), Compi
     }
     if let Some(why) = lookup(m.refused_actions, &edge.action) {
         return fail(
-            "unsupported-action",
+            &rules::UNSUPPORTED_ACTION,
             format!(
                 "notifies resource {:?} with action {:?}, which this target cannot express: {}",
                 to.id, edge.action, why
@@ -527,7 +686,7 @@ fn check_action(from: &Resource, to: &Resource, edge: &Edge) -> Result<(), Compi
         );
     }
     fail(
-        "unsupported-action",
+        &rules::UNSUPPORTED_ACTION,
         format!(
             "notifies resource {:?} with action {:?}, which resource type {:?} does not support \
              on this target (supported: {})",
@@ -550,7 +709,8 @@ pub(crate) fn class_name(document: &str) -> Result<String, CompileError> {
         if !ok {
             return Err(CompileError {
                 target: NAME.to_owned(),
-                rule: "invalid-class-name".to_owned(),
+                rule: rules::INVALID_NAME.name.to_owned(),
+                hint: rules::INVALID_NAME.hint.to_owned(),
                 msg: format!(
                     "document name {:?} cannot become a Puppet class name: \
                      {:?} is not allowed, and a class name may hold only lower-case \

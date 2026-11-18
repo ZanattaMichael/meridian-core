@@ -148,6 +148,12 @@ message ResourceGraph {
   // for Plan and Apply. Sent only to a target whose capabilities include
   // credentials.
   Credential credential = 9;
+  // settings_json is the document's spec.settings as a JSON object: the
+  // tool's own settings for the whole document, such as the engine that runs
+  // it. JSON bytes for the same reason Resource.params_json is. Empty when
+  // the document sets none. The SDK refuses a key the emitter does not list
+  // in settings_keys before emit is called.
+  bytes settings_json = 10;
 }
 
 // Credential is an identity a document declares, as a compile sees it: its
@@ -227,9 +233,23 @@ message Warning {
 // two apart.
 message CompileError {
   string resource = 1;
+  // rule is the name of the refusal rule: one of the SDK's general rules, or
+  // one the plugin declared in DescribeResponse.rules.
   string rule = 2;
   string msg = 3;
   Position pos = 4;
+  // hint is what to write instead, as data; empty when the message is the
+  // only guide. Added without a new protocol version: an older plugin sends
+  // none, and the host shows what it has.
+  string hint = 5;
+}
+
+// Rule is a refusal rule a plugin has of its own, beside the SDK's general
+// ones: the name a CompileError carries, what it refuses, what to do instead.
+message Rule {
+  string name = 1;
+  string meaning = 2;
+  string hint = 3;
 }
 
 // Category is the kind of tool a plugin drives. The core routes on it, to
@@ -318,6 +338,22 @@ message DescribeResponse {
   // declare. A plugin built before this field existed lists none, so the
   // protocol version did not change.
   repeated Setting settings = 23;
+  // settings_keys lists the keys the target reads in a document's
+  // spec.settings: the tool's own settings for the whole document. A host
+  // refuses a document whose settings name any other key, and a plugin
+  // built before this field lists none, so such a document never reaches it
+  // with settings silently dropped.
+  repeated string settings_keys = 24;
+  // rules is every refusal rule this plugin has of its own, beside the SDK's
+  // general ones. A plugin built before this field lists none, which the
+  // host reads as "only general rules".
+  repeated Rule rules = 25;
+  // saves_plans is true when the plugin's Runner hands back a SavedPlan from
+  // Plan when asked (RunContext.save_plan) and applies exactly that plan when
+  // handed one (RunContext.saved_plan). A plugin built before this field
+  // saves none: an apply from a saved plan then checks the artifact's hash
+  // and plans again, which the plan file says.
+  bool saves_plans = 26;
 }
 
 // Setting is one thing an operator can configure about a runner.
@@ -483,6 +519,26 @@ message RunContext {
   // each of its secret fields, sent as secrets are: only to a target whose
   // capabilities include credentials, and only for Plan and Apply.
   CredentialValues credential = 6;
+  // save_plan asks Plan to hand back the tool's own saved plan in its result,
+  // for `meridian plan --out`. A plugin that cannot, or whose saved plan would
+  // carry a secret value, leaves PlanResult.saved unset; it is never an error.
+  bool save_plan = 7;
+  // saved_plan is the plan Apply must carry out exactly: what Plan saved for
+  // this very artifact, in an earlier run. A plugin given one applies that
+  // plan and nothing else, and fails when the tool finds it stale. The host
+  // sends it only to a plugin whose Describe says saves_plans.
+  SavedPlan saved_plan = 8;
+}
+
+// SavedPlan is a tool's own saved plan, as the plugin chose to keep it: a
+// Terraform plan file, a Pulumi plan, the name of a CloudFormation change set.
+// The host never reads data; it keeps it in the plan file between the plan
+// and the apply, so data must hold no secret value. changes is what the plan
+// would do, as the plan reported it, so that an apply which the tool gives no
+// second account of can still report what it did.
+message SavedPlan {
+  bytes data = 1;
+  repeated Change changes = 2;
 }
 
 // CredentialValues is a credential with the value of each of its secret
@@ -587,6 +643,10 @@ message PlanResult {
   // list as "in sync" when it is set.
   bool unknown = 2;
   RunError error = 3;
+  // saved is the tool's own saved plan, when RunContext.save_plan asked for
+  // one and the plugin could save it. Its changes are left empty: they are
+  // the ones above.
+  SavedPlan saved = 4;
 }
 
 message ApplyRequest {
@@ -736,6 +796,9 @@ message ImportedDocument {
   string host = 5;
   repeated ImportedResource resources = 6;
   repeated ImportedOutput outputs = 7;
+  // settings_json is the document's spec.settings as a JSON object, by the
+  // keys the target takes; empty when the source expressed none.
+  bytes settings_json = 8;
 }
 
 // NoteLevel says how much an importer's note should worry the operator.

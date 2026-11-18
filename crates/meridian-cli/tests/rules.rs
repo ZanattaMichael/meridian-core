@@ -11,6 +11,7 @@ use meridian_plugin_testkit::repo_root;
 
 fn meridian(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(args)
         .current_dir(dir)
         .output()

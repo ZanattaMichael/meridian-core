@@ -178,7 +178,7 @@ proptest! {
         let without = expr.eval(&readings.plain);
         match (&with, &without) {
             (Ok(with), Ok(without)) => agree(&readings, with, without)?,
-            (Err(with), Err(_)) => prop_assert!(clean(with), "{}", with),
+            (Err(with), Err(_)) => prop_assert!(clean(&with.to_string()), "{}", with),
             _ => prop_assert!(false, "{}: {:?} with secrets, {:?} without", source, with, without),
         }
         // What can be printed of the answer says nothing.
@@ -218,7 +218,7 @@ proptest! {
         let without = template.eval(&readings.plain);
         match (&with, &without) {
             (Ok(with), Ok(without)) => agree(&readings, with, without)?,
-            (Err(with), Err(_)) => prop_assert!(clean(with), "{}", with),
+            (Err(with), Err(_)) => prop_assert!(clean(&with.to_string()), "{}", with),
             _ => prop_assert!(false, "{}: {:?} with secrets, {:?} without", source, with, without),
         }
     }
@@ -237,7 +237,7 @@ proptest! {
         let is_secret = matches!(inner.eval(&readings.secret), Ok(Value::Secret(_)));
         let with = outer.eval(&readings.secret);
         if is_secret {
-            let refused = with.err().unwrap_or_default();
+            let refused = with.err().map(String::from).unwrap_or_default();
             prop_assert!(
                 refused.contains(&format!("{function}(...) cannot be given a secret")),
                 "{}({}) gave {:?}", function, source, refused

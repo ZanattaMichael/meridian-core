@@ -50,6 +50,7 @@
 //! let same = a == b;
 //! ```
 
+mod ambient;
 mod credential;
 mod deliver;
 mod mask;
@@ -62,6 +63,7 @@ mod table;
 use std::fmt;
 use std::io::Read;
 
+pub use ambient::{environment as ambient_environment, probe_ambient, Env as AmbientEnv};
 pub use credential::{
     credential_type, credential_types, resolve_credential, Credential, CredentialDeclaration,
     CredentialError, CredentialField, CredentialType, FieldSource, CREDENTIAL_TYPES,

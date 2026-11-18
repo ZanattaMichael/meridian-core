@@ -179,6 +179,13 @@ credentials:
     user: ops
 ```
 
+Whether an ambient credential would be found is something
+[`meridian secret check`](../cli.md#secret-check) looks for, where the tool
+would look (the environment, the login files, the machine's identity
+endpoint), without reading a value; in a pipeline that is the job's identity,
+checked before anything runs
+([running in a pipeline](../../operations/running-in-a-pipeline.md#checking-the-jobs-identity-first)).
+
 An ambient credential needs no secret field and need not be complete: the tool
 has the rest. Its plain fields still go where they go, so the inventory above
 says `ansible_user=ops` and the SSH agent supplies the key. `from` takes no

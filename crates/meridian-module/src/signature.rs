@@ -18,7 +18,7 @@ use meridian_signing::{verify_bytes, Policy, SecretKey, Signature, Verification}
 
 use crate::integrity::hash_dir;
 use crate::manifest::Manifest;
-use crate::Error;
+use crate::{Error, Kind};
 
 /// Signatures off: nothing is checked. What a caller that has no trust
 /// settings passes as [`crate::Project::signatures`].
@@ -62,7 +62,8 @@ pub fn sign(dir: &Path, key: &SecretKey) -> Result<Signed, Error> {
     let integrity = hash_dir(dir)?;
     let text = key.sign_bytes(&statement(&manifest.name, &version, &integrity));
     let path = dir.join(SIGNATURE_FILE);
-    fs::write(&path, text).map_err(|e| Error::new(format!("writing {}: {e}", path.display())))?;
+    fs::write(&path, text)
+        .map_err(|e| Error::new(Kind::Signature, format!("writing {}: {e}", path.display())))?;
     Ok(Signed {
         name: manifest.name,
         version,
@@ -101,20 +102,26 @@ pub(crate) fn check(
     dir: &Path,
     label: &str,
     (name, version, integrity): (&str, &str, &str),
-) -> Result<Signature, String> {
+) -> Result<Signature, Error> {
     if trusted.policy == Policy::Off {
         return Ok(Signature::NotChecked);
     }
     let found = found(trusted, dir, name, version, integrity);
     match (&found, trusted.policy) {
-        (Signature::Unsigned, Policy::Require) => Err(format!(
-            "{label} is not signed: it holds no {SIGNATURE_FILE}. Module signatures are \
-             required; relax the check with --module-signatures warn, or ask its publisher to \
-             sign it with `meridian module sign`"
+        (Signature::Unsigned, Policy::Require) => Err(Error::new(
+            Kind::Signature,
+            format!(
+                "{label} is not signed: it holds no {SIGNATURE_FILE}. Module signatures are \
+                 required; relax the check with --module-signatures warn, or ask its publisher \
+                 to sign it with `meridian module sign`"
+            ),
         )),
-        (Signature::Invalid(why), Policy::Require) => Err(format!(
-            "{label}: its signature does not pass: {why}. Module signatures are required, so \
-             it was not used; trust its signer's key with --trusted-key"
+        (Signature::Invalid(why), Policy::Require) => Err(Error::new(
+            Kind::Signature,
+            format!(
+                "{label}: its signature does not pass: {why}. Module signatures are required, \
+                 so it was not used; trust its signer's key with --trusted-key"
+            ),
         )),
         _ => Ok(found),
     }

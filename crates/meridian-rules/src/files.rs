@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use meridian_resolve::{FsLoader, Hierarchy, Scope};
 
-use crate::{enforce, load, Error, Layer, Loaded, Refusal, Rules};
+use crate::{enforce, load, Error, Kind, Layer, Loaded, Refusal, Rules};
 
 /// The name the rules file is looked for under, beside the hierarchy file.
 pub const RULES_FILE: &str = "rules.yaml";
@@ -40,9 +40,13 @@ pub fn check_files(
     command_line: &[Layer],
 ) -> Result<Checked, Refusal> {
     let name = files.hierarchy.to_string_lossy();
-    let raw = std::fs::read(&files.hierarchy)
-        .map_err(|e| Error::new(format!("reading the hierarchy file {name}: {e}")))?;
-    let hierarchy = Hierarchy::parse(&name, &raw).map_err(|e| Error::new(e.to_string()))?;
+    let raw = std::fs::read(&files.hierarchy).map_err(|e| {
+        Error::new(
+            Kind::Hierarchy,
+            format!("reading the hierarchy file {name}: {e}"),
+        )
+    })?;
+    let hierarchy = Hierarchy::parse(&name, &raw).map_err(Error::from)?;
     let root = match files.hierarchy.parent() {
         Some(dir) if !dir.as_os_str().is_empty() => dir.to_path_buf(),
         _ => PathBuf::from("."),
@@ -55,10 +59,13 @@ pub fn check_files(
     };
     let Some(rules_path) = rules_path else {
         if files.require_rules {
-            return Err(Error::new(format!(
-                "compile rules are required for this run, and there is no {RULES_FILE} beside {name} \
-                 and no --rules file"
-            ))
+            return Err(Error::new(
+                Kind::File,
+                format!(
+                    "compile rules are required for this run, and there is no {RULES_FILE} beside \
+                     {name} and no --rules file"
+                ),
+            )
             .into());
         }
         let loaded = load(&hierarchy, scope, &loader, command_line)?;
@@ -70,22 +77,27 @@ pub fn check_files(
     };
 
     let rules_name = rules_path.to_string_lossy();
-    let raw = std::fs::read(&rules_path)
-        .map_err(|e| Error::new(format!("reading the rules file {rules_name}: {e}")))?;
+    let raw = std::fs::read(&rules_path).map_err(|e| {
+        Error::new(
+            Kind::File,
+            format!("reading the rules file {rules_name}: {e}"),
+        )
+    })?;
     let rules = Rules::parse(&rules_name, &raw)?;
 
     // The rules file must be outside what it constrains. A layer path that
     // resolves to it would put the rules into the merge, where a layer could
     // answer them.
-    let paths = hierarchy
-        .expand_paths(scope)
-        .map_err(|e| Error::new(e.to_string()))?;
+    let paths = hierarchy.expand_paths(scope).map_err(Error::from)?;
     for path in &paths {
         if same_file(&root.join(path), &rules_path) {
-            return Err(Error::new(format!(
-                "the rules file {rules_name} is also the hierarchy layer {path:?}; the rules file is \
-                 never a layer, so take it out of the hierarchy"
-            ))
+            return Err(Error::new(
+                Kind::File,
+                format!(
+                    "the rules file {rules_name} is also the hierarchy layer {path:?}; the rules \
+                     file is never a layer, so take it out of the hierarchy"
+                ),
+            )
             .into());
         }
     }

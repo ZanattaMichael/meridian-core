@@ -1,5 +1,6 @@
 //! Stage three: the constraints that are Compose's and not Meridian's.
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::CompileError;
 
 use crate::{check, refuse_at, Composition, Section, NAME};
@@ -14,15 +15,16 @@ fn is_project_name(name: &str) -> bool {
 }
 
 pub(crate) fn validate(composition: &Composition) -> Result<(), CompileError> {
-    let whole = |rule: &str, msg: String| CompileError {
+    let whole = |rule: &Rule, msg: String| CompileError {
         target: NAME.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         ..CompileError::default()
     };
     if !is_project_name(&composition.project.name) {
         return Err(whole(
-            "invalid-name",
+            &rules::INVALID_NAME,
             format!(
                 "{:?} cannot be the name of a Compose project: a name holds only lower-case \
                  letters, digits, hyphens and underscores, and starts with a letter or digit. \
@@ -33,7 +35,7 @@ pub(crate) fn validate(composition: &Composition) -> Result<(), CompileError> {
     }
     if !composition.project.host.is_empty() && !composition.project.context.is_empty() {
         return Err(whole(
-            "invalid-param",
+            &rules::INVALID_PARAM,
             "the project names both a host and a context; Docker takes one or the other".to_owned(),
         ));
     }
@@ -43,7 +45,7 @@ pub(crate) fn validate(composition: &Composition) -> Result<(), CompileError> {
         .any(|e| e.section == Section::Service)
     {
         return Err(whole(
-            "empty-project",
+            &rules::EMPTY_DOCUMENT,
             "there is nothing to run: the document declares no service".to_owned(),
         ));
     }
@@ -58,7 +60,7 @@ pub(crate) fn validate(composition: &Composition) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &element.id,
                 &element.pos,
-                "missing-param",
+                &rules::MISSING_PARAM,
                 "a service needs an image to run, or a build to make one".to_owned(),
             ));
         }
@@ -68,7 +70,7 @@ pub(crate) fn validate(composition: &Composition) -> Result<(), CompileError> {
     for (name, _) in &composition.outputs {
         if !outputs.insert(name) {
             return Err(whole(
-                "duplicate-output",
+                &rules::DUPLICATE_OUTPUT,
                 format!("output {name:?} is declared twice"),
             ));
         }
@@ -126,10 +128,10 @@ mod tests {
                 c.project.host = "ssh://web01".to_owned();
                 c.project.context = "remote".to_owned();
             }),
-            ("empty-project", "", |c| {
+            ("empty-document", "", |c| {
                 c.elements.retain(|e| e.section != Section::Service);
             }),
-            ("empty-project", "", |c| c.elements.clear()),
+            ("empty-document", "", |c| c.elements.clear()),
             ("missing-param", "web", |c| c.elements[0].body.clear()),
             ("duplicate-output", "", |c| {
                 c.outputs.push(("address".to_owned(), Vec::new()));

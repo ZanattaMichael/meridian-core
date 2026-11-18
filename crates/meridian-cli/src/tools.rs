@@ -14,6 +14,7 @@ use meridian_tooling::check::{self, Diagnostic, Env, Severity, Source, Workspace
 use meridian_tooling::schemas::{self, Cached, Freshness, Store};
 use meridian_tooling::{fmt, jsonschema, lint};
 
+use crate::output::{body, emit, json_output};
 use crate::{apply_sets, count, read_data, registry, trusted_keys, Failure, PluginDirs};
 
 #[derive(Args)]
@@ -169,6 +170,29 @@ pub struct LspArgs {
     trust_editor_plugin_dirs: bool,
 }
 
+#[derive(Args)]
+pub struct McpArgs {
+    #[command(flatten)]
+    plugins: PluginDirs,
+    /// Offer the `plan` tool, which runs the real tool and takes the state
+    /// lock. Off by default: the server then changes nothing anywhere
+    #[arg(long, env = "MERIDIAN_MCP_ALLOW_PLAN")]
+    allow_plan: bool,
+    /// The directory file arguments are confined to. Defaults to the
+    /// current directory
+    #[arg(long, value_name = "DIR")]
+    root: Option<PathBuf>,
+    /// Where `meridian schema sync` cached each tool's own schemas, which
+    /// describe native types
+    #[arg(
+        long,
+        value_name = "DIR",
+        env = "MERIDIAN_STATE_DIR",
+        default_value = ".meridian"
+    )]
+    state_dir: PathBuf,
+}
+
 /// Whether a path names a YAML or JSON file by its extension.
 fn is_document_file(path: &Path) -> bool {
     matches!(
@@ -245,6 +269,15 @@ pub fn format(args: &FmtArgs) -> Result<(), Failure> {
 
     let files = gather(&args.paths)?;
     let (mut changed, mut failed, mut skipped) = (0, 0, 0);
+    // One row per file for the JSON result.
+    let mut rows = Vec::new();
+    let mut row = |path: &Path, status: &str, message: Option<String>| {
+        rows.push(serde_json::json!({
+            "file": path.display().to_string(),
+            "status": status,
+            "message": message,
+        }));
+    };
     for (path, text) in &files {
         let name = path.to_string_lossy();
         // Only reached for a file named outright: a directory is searched
@@ -253,38 +286,65 @@ pub fn format(args: &FmtArgs) -> Result<(), Failure> {
         if !check::is_meridian(text) {
             skipped += 1;
             eprintln!("skipped {name}: not a Meridian document");
+            row(path, "skipped", Some("not a Meridian document".to_owned()));
             continue;
         }
         match fmt::format(&name, text, options) {
-            Ok(formatted) if formatted == *text => {}
+            Ok(formatted) if formatted == *text => row(path, "ok", None),
             Ok(formatted) => {
                 changed += 1;
                 if args.check {
-                    outln!("{name}");
+                    row(path, "not-formatted", None);
+                    if !json_output() {
+                        outln!("{name}");
+                    }
                 } else {
                     std::fs::write(path, formatted)
                         .map_err(|e| Failure::Message(format!("writing {name}: {e}")))?;
-                    outln!("formatted {name}");
+                    row(path, "formatted", None);
+                    if !json_output() {
+                        outln!("formatted {name}");
+                    }
                 }
             }
             Err(e) => {
                 failed += 1;
                 eprintln!("error: {name}: {e}");
+                row(path, "failed", Some(e.to_string()));
             }
         }
     }
     let checked = files.len() - skipped;
     let unchanged = checked - changed - failed;
+    if json_output() {
+        emit(
+            failed == 0 && !(args.check && changed > 0),
+            body([
+                ("check", args.check.into()),
+                ("files", rows.into()),
+                (
+                    "summary",
+                    serde_json::json!({
+                        "checked": checked,
+                        "changed": changed,
+                        "unchanged": unchanged,
+                        "failed": failed,
+                        "skipped": skipped,
+                    }),
+                ),
+            ]),
+        );
+    }
     if args.check {
         if changed > 0 {
             eprintln!(
                 "{} not formatted; run `meridian fmt` to format",
                 count(changed, "file")
             );
-        } else if failed == 0 {
+        } else if failed == 0 && !json_output() {
             outln!("{} formatted", count(checked, "file"));
         }
-    } else if failed == 0 {
+    } else if failed == 0 && !json_output() {
         outln!(
             "{} formatted, {} already formatted",
             count(changed, "file"),
@@ -373,14 +433,6 @@ pub fn lint(args: &LintArgs) -> Result<(), Failure> {
         eprintln!("warning: {e}");
     }
 
-    let mut out = crate::Stdout;
-    for d in &found {
-        let _ = if args.json {
-            writeln!(out, "{}", to_json(d))
-        } else {
-            writeln!(out, "{d}")
-        };
-    }
     let errors = found
         .iter()
         .filter(|d| d.severity == Severity::Error)
@@ -391,6 +443,45 @@ pub fn lint(args: &LintArgs) -> Result<(), Failure> {
         .count();
     let notes = found.len() - errors - warnings;
     let documents: usize = checked.files.iter().map(|f| f.docs.len()).sum();
+    let failed = errors > 0 || (args.strict && warnings > 0);
+    if json_output() {
+        // The whole result as one object; `--json` keeps its line per
+        // finding for the tools that already read it.
+        emit(
+            !failed,
+            body([
+                (
+                    "diagnostics",
+                    found.iter().map(to_json).collect::<Vec<_>>().into(),
+                ),
+                (
+                    "summary",
+                    serde_json::json!({
+                        "errors": errors,
+                        "warnings": warnings,
+                        "notes": notes,
+                        "fixed": fixed,
+                        "documents": documents,
+                        "files": files.len(),
+                        "pluginsFound": !catalog.is_empty(),
+                    }),
+                ),
+            ]),
+        );
+        return if failed {
+            Err(Failure::Reported)
+        } else {
+            Ok(())
+        };
+    }
+    let mut out = crate::Stdout;
+    for d in &found {
+        let _ = if args.json {
+            writeln!(out, "{}", to_json(d))
+        } else {
+            writeln!(out, "{d}")
+        };
+    }
     if !args.json {
         if fixed > 0 {
             let _ = writeln!(out, "fixed {}", count(fixed, "finding"));
@@ -526,6 +617,59 @@ pub fn lsp(args: &LspArgs) -> Result<(), Failure> {
         editor_options,
     })
     .map_err(|e| Failure::Message(e.to_string()))
+}
+
+/// `meridian mcp`: the compiler and the catalogue as tools for an AI model,
+/// over the Model Context Protocol on standard input and output.
+pub fn mcp(args: &McpArgs) -> Result<(), Failure> {
+    let root = args.root.clone().unwrap_or_else(|| PathBuf::from("."));
+    let registry = registry(&args.plugins)?;
+    let mut catalog = Catalog::from_registry(&registry);
+    let store = Store::new(&root.join(&args.state_dir));
+    let mut server_notes = Vec::new();
+    for problem in catalog.read_cache(&store, schemas::lock_in(&root).as_ref()) {
+        eprintln!("warning: {problem}");
+        server_notes.push(format!(
+            "A cached tool schema could not be read: {problem}."
+        ));
+    }
+    let mut server = meridian_mcp::Server::new(registry, catalog, &root);
+    for note in server_notes {
+        server = server.note(note);
+    }
+    if args.allow_plan {
+        // `plan` is the command itself, with the plugin options it was
+        // started with, so the result is the object `meridian plan --output
+        // json` prints.
+        let program = std::env::current_exe()
+            .map_err(|e| Failure::Message(format!("finding the meridian binary: {e}")))?;
+        let mut plan_args = Vec::new();
+        for dir in &args.plugins.dirs {
+            plan_args.push("--plugin-dir".to_owned());
+            plan_args.push(dir.to_string_lossy().into_owned());
+        }
+        if let Some(policy) = args.plugins.signatures {
+            plan_args.push("--plugin-signatures".to_owned());
+            plan_args.push(
+                match policy {
+                    SignaturePolicy::Off => "off",
+                    SignaturePolicy::Warn => "warn",
+                    SignaturePolicy::Require => "require",
+                }
+                .to_owned(),
+            );
+        }
+        server = server.allow_plan(meridian_mcp::PlanCommand {
+            program,
+            args: plan_args,
+        });
+    }
+    let registry = meridian_mcp::run_stdio(server).map_err(|e| Failure::Message(e.to_string()))?;
+    // A plugin that will not exit is not worth failing the client over.
+    if let Some(registry) = registry {
+        let _ = registry.close();
+    }
+    Ok(())
 }
 
 struct SyncArgs<'a> {

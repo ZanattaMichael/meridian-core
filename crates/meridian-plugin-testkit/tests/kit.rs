@@ -150,6 +150,7 @@ fn a_refusal_is_recorded_as_one_file() {
         rule: "unsupported-param".into(),
         msg: "no".into(),
         pos: Position::default(),
+        hint: String::new(),
     };
     recording(|| assert_golden_refusal(&dir, "web", &refusal));
     assert_eq!(

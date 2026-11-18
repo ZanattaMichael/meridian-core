@@ -12,15 +12,16 @@ and runs Chef on it.
 | | |
 |---|---|
 | Category | Configuration management |
-| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)) |
+| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)), and any Chef resource beside them: `template`, `cron`, `native/package` ([Chef resources beside the six](#chef-resources-beside-the-six)) |
 | `dependsOn` | Yes, as recipe order. A recipe runs top to bottom, so the dependency graph is flattened into one sequence |
-| `notifies` | Native: `notifies`, delayed to the end of the run. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec. The action is kept: a reload stays a reload |
+| `notifies` | Native: `notifies`, delayed to the end of the run. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec, any action word on a Chef resource of its own. The action is kept: a reload stays a reload |
 | `runtimeWhen` | Yes: one line of Ruby in an `only_if` guard |
 | Secrets | On this machine, yes: as node attributes from a JSON file only the user can read, with `sensitive true` on the resource. Through `chef-run`, no: it takes attributes on its command line only, so the apply stops. See [Secrets](#secrets) |
 | References | `${id.param}` is settled from the document when it is compiled; anything else in `${...}` is refused, and `$${` is a literal `${` ([rules](../reference/resource-types.md#references)) |
 | Plan | On this machine, yes: `--why-run`. For another machine, no: `chef-run` has no dry run, so the plan is reported as unknown |
 | Apply | Yes |
 | Outputs | No. A recipe produces no values for a later stage to read |
+| Editor schemas | Yes: `meridian schema sync` asks `chef-resource-inspector` what each resource takes. See [Editor schemas](#editor-schemas) |
 | Compiles to | `cookbooks/meridian_<name>/metadata.rb` and `recipes/default.rb` |
 | Runs with | `chef-client --local-mode` on the node itself, `chef-run` for another host |
 
@@ -29,9 +30,10 @@ What it does not do:
 - **No Chef server.** Plan and apply run in local mode from the cookbook on
   disk. The cookbook is an ordinary one, so you can upload it to a server with
   `knife` yourself.
-- **No resource types beyond the six.** There is no passthrough to Chef's
-  other resources (`template`, `cron`, `remote_file` and the rest). Anything
-  else is refused at compile time.
+- **A Chef resource of its own is passed through unchecked.** Its properties
+  are written as the document gives them, and a property the resource does
+  not have is Chef's to refuse when the recipe is compiled, not Meridian's.
+  See [Chef resources beside the six](#chef-resources-beside-the-six).
 - **No preview through `chef-run`.** A plan for another machine is reported as
   unknown, not as empty; see [Running](#running).
 - **`package.version` and `exec.removes` are refused**, though Chef could
@@ -41,11 +43,13 @@ What it does not do:
 Contents: [Requirements](#requirements) ·
 [A first document](#a-first-document) ·
 [Resource types](#resource-types) ·
+[Chef resources beside the six](#chef-resources-beside-the-six) ·
 [Ordering and notifications](#ordering-and-notifications) ·
 [What a compile writes](#what-a-compile-writes) ·
 [Running](#running) ·
 [Settings](#settings) ·
 [Secrets](#secrets) ·
+[Editor schemas](#editor-schemas) ·
 [What is refused](#what-is-refused) ·
 [Troubleshooting](#troubleshooting) ·
 [How it is tested](#how-it-is-tested)
@@ -168,6 +172,90 @@ Notes on how they map:
 - A `mode` is written as Chef reads it: quote it in the document (`"0644"`),
   or the YAML reads it as a number and the compile refuses it.
 
+## Chef resources beside the six
+
+Any Chef resource is a resource type, written by the name a recipe uses:
+`template`, `cron`, `remote_file`, `apt_repository`, `systemd_unit`, or a
+resource a cookbook of your own defines. The resource's properties are the
+resource's `params`, written into the block exactly as given; Meridian
+checks nothing against a list of what the resource takes. A property the
+resource does not have, or a resource no cookbook defines, is Chef's to
+refuse when the recipe is compiled, as a provider's type is Terraform's,
+until the resource's schema is synced and the editor reports it in place.
+
+Five Chef resources have the names of the shared types: `package`,
+`service`, `file`, `user` and `group`. The bare word is always the shared
+type, so a document moves between tools unchanged. Chef's own `package`,
+with `version`, `options` and every other property the shared type does not
+take, is written `native/package`; the same for the other four. Chef runs a
+command with `execute`, which has no shared name to collide with, so
+`native/exec` is refused and `execute` is written as it is. The prefix is
+only for those five names: `native/cron` is refused, because `cron` has one
+spelling.
+
+```yaml
+resources:
+  - id: nginx_pkg
+    type: native/package
+    state: upgrade
+    params:
+      package_name: nginx
+      options: "--no-install-recommends"
+  - id: nginx_conf
+    type: template
+    params:
+      path: /etc/nginx/nginx.conf
+      source: nginx.conf.erb
+      variables: {workers: 4}
+    notifies:
+      - resource: nginx_svc
+        action: reload
+  - id: refresh_index
+    type: apt_update
+    runtimeWhen: "node['platform_family'] == 'debian'"
+```
+
+compiles to
+
+```ruby
+package 'nginx_pkg' do
+  options '--no-install-recommends'
+  package_name 'nginx'
+  action :upgrade
+end
+
+template 'nginx_conf' do
+  path '/etc/nginx/nginx.conf'
+  source 'nginx.conf.erb'
+  variables({ 'workers' => 4 })
+  notifies :reload, 'service[nginx_svc]', :delayed
+end
+
+apt_update 'refresh_index' do
+  only_if { node['platform_family'] == 'debian' }
+end
+```
+
+| | |
+|---|---|
+| `type` | a Chef resource name: one lower-case word of letters, digits and underscores, as Ruby writes a method. `native/<name>` for the five colliding names. A wrong case (`Template`), a dotted or `::` name, `native/exec`, or `native/` on any other name is refused |
+| `params` | the resource's properties, as written. A hash is written in parentheses, as Ruby needs it. A resource that takes none is written with none |
+| `state` | written as the resource's `action`, whatever actions the resource has (`create`, `upgrade`, `enable`). No state means no `action` line: the resource takes its own default action. Writing both `state:` and `params.action` is refused (`param-conflicts-with-state`); a state that is not one lower-case word is refused (`unsupported-state`) |
+| `notifies` to a Chef resource | any action word the resource has, written as given: `notifies :run, 'apt_update[x]', :delayed`. Which actions the resource has is Chef's to know, until its schema is synced. An action that is not one lower-case word is refused (`unsupported-action`) |
+| `notifies` from a Chef resource | as from any resource |
+| `runtimeWhen` | an `only_if` guard, as for the six |
+| Secrets | as for the six: a node attribute the runner hands over, and `sensitive true` on the block |
+| References | `${id.param}` is settled from the document, as for the six |
+| `native/package` and a shared `package` of one name | refused (`duplicate-resource`), as two shared packages would be: they are one Chef resource |
+
+[`examples/chef/native-resources.yaml`](../../examples/chef/native-resources.yaml)
+is a whole document of both kinds. A document that names a Chef resource
+compiles for Chef only. The [`native-type`](../reference/lint.md#native-type)
+lint rule marks each such resource. The six shared types stay the portable
+way to say what they can say; a Chef resource is for everything else. The
+split, and why the prefix is one word on every target, is
+[decision 0032](../decisions/0032-native-types-beside-the-six-and-a-prefix-for-colliding-names.md).
+
 ## Ordering and notifications
 
 `dependsOn` becomes the order of the recipe. Chef converges a recipe top to
@@ -181,6 +269,7 @@ service notified by three files is reloaded once:
 |---|---|---|
 | `service` | `restart`, `reload`, `start`, `stop` | the action named, at the end of the run, if the notifier changed |
 | `exec` | `run` | runs the command again |
+| a Chef resource of its own | any action word | the action named, as the resource defines it |
 | anything else | none | refused: `unsupported-action` |
 
 `runtimeWhen` is the Ruby of an `only_if` guard, evaluated on the node, so it
@@ -201,7 +290,7 @@ policy as it is.
 
 Because the cookbook's name comes from the document name, the name may hold
 only lower-case letters, digits, hyphens and underscores. A name that cannot
-be a cookbook name is refused, not rewritten (`invalid-cookbook-name`).
+be a cookbook name is refused, not rewritten (`invalid-name`).
 
 Strings are written as Ruby strings: single-quoted where the text has no
 escape in it, double-quoted with `\n`, `\"` and `\#` where it has. A value
@@ -243,6 +332,7 @@ changes made before it.
 | `MERIDIAN_CHEF_RUN` | the program to run for another machine, when it is not `chef-run` on `PATH` |
 | `MERIDIAN_CHEF_TRANSPORT` | `local` or `remote`, to override the choice made from the host |
 | `MERIDIAN_CHEF_ARGS` | arguments added to every run, split like a shell command line (quotes hold a word together): `--chef-license accept`, or `chef-run`'s `--user deploy --identity-file ~/.ssh/deploy` |
+| `MERIDIAN_CHEF_INSPECTOR` | the resource inspector `meridian schema sync` runs, when it is not `chef-resource-inspector` on `PATH`; `cinc-resource-inspector`, then the copies the Cinc and Chef packages keep under `/opt/cinc` and `/opt/chef`, are tried when that does not run. See [Editor schemas](#editor-schemas) |
 | `MERIDIAN_SSH_AGENT` | the `ssh-agent` program, when it is not on `PATH`; started for a credential's key, see [Credentials](#credentials) |
 | `MERIDIAN_SSH_ADD` | the `ssh-add` program, when it is not on `PATH` |
 
@@ -368,6 +458,26 @@ user deploy)`, and never a value. `ssh-agent` and `ssh-add` are run from `PATH`,
 
 The handover is tested against stand-ins for `chef-run`, `ssh-agent` and `ssh-add` that keep what they are given: `chef-run` sees `--user deploy` and the socket, `ssh-add` the key and the passphrase, and the key is in nothing printed or left behind. The real `chef-run` is not driven in CI.
 
+## Editor schemas
+
+`meridian schema sync` asks `chef-resource-inspector` what the Chef resources
+the documents use take, so an editor completes and checks a `template` or a
+`native/package`'s properties as it does the six types' params
+([Tool schemas](../tooling/schema-sync.md)). Until a resource is synced, the
+editor knows it by name only, as [Chef resources beside the six](#chef-resources-beside-the-six)
+says.
+
+| | |
+|---|---|
+| Described in full | each Chef resource the documents use, under the name the document writes (`template`, or `native/package` for one of the six names): every property with its kind from the Ruby types the inspector lists (`String` as text, `Integer`, `true`/`false` as a flag, `Array`, `Hash`; anything else as any value), whether it is required, its `equal_to` values, the resource's description, and its actions beside `nothing`, which is what `notifies` can name. Read from the inspector's one JSON document, which comes with the Chef or Cinc client (`cinc-resource-inspector`, then the copies the Cinc and Chef packages keep under `/opt/cinc` and `/opt/chef`, are tried when `chef-resource-inspector` does not run). A custom resource from a cookbook is not in it, so it is a note and not the end of the sync |
+| Listed by name | every other resource the inspector knows, with its description; the six shared names under `native/` |
+| Pinned | the client's version, from `chef-client --version` |
+
+A property the inspector marks required for some actions only is marked
+required, since those are the actions a notify names. A sensitive property
+is Chef's `sensitive true` on the resource, not a property, so none is
+marked.
+
 ## What is refused
 
 Every refusal names the resource, the line and the rule. The rules this
@@ -375,20 +485,21 @@ target can raise, and what to do:
 
 | Rule | Meaning | What to do |
 |---|---|---|
-| `unsupported-resource-type` | a type outside the six, or in the wrong case (`Package`) | use one of the six; there is no passthrough |
+| `unsupported-resource-type` | a type in the wrong case (`Package`, `Template`), a dotted or `::` name, `native/exec`, or `native/` on a name that is not one of the six | use one of the six, or a Chef resource as a recipe names it ([beside the six](#chef-resources-beside-the-six)) |
 | `unsupported-param` | a param this type does not take on Chef, including `package.version` and `exec.removes` | drop it, or put it in a cookbook of your own |
 | `missing-param` | no `name`, `path` or `command` | add it |
 | `empty-param` | a required param that is empty text | give it a value |
 | `invalid-param` | a param of the wrong kind: a list for `name`, a number for `mode` | quote the mode; give a single name |
-| `unsupported-state` | a state this type does not have, or any state on an `exec` | see the table under [Resource types](#resource-types) |
+| `unsupported-state` | a state this type does not have, any state on an `exec`, or a state on a Chef resource of its own that is not one lower-case action word | see the table under [Resource types](#resource-types) |
+| `param-conflicts-with-state` | `state` and `params.action` both on a Chef resource of its own | drop one |
 | `invalid-runtime-condition` | a `runtimeWhen` that spans more than one line | write the guard on one line |
-| `unsupported-action` | a notify action the type does not take: anything on a package, file, user or group | notify a service or an exec |
+| `unsupported-action` | a notify action the type does not take: anything on a package, file, user or group; an action on a Chef resource of its own that is not one lower-case word | notify a service, an exec, or a Chef resource of its own |
 | `unknown-dependency` | an edge names a resource the document does not declare | fix the id |
 | `ordering-violated` | the order the core handed over puts a resource before its dependency | a core bug; report it |
 | `duplicate-resource` | two resources that manage the same package, service, file, user or group | merge them |
-| `invalid-cookbook-name` | a document name that cannot be a cookbook name | use lower-case letters, digits, hyphens and underscores |
-| `empty-cookbook` | a document with no resources | give it something to converge |
-| `dangling-reference` | `${id.param}` names a resource or a param that is not there | fix the reference |
+| `invalid-name` | a document name that cannot be a cookbook name | use lower-case letters, digits, hyphens and underscores |
+| `empty-document` | a document with no resources | give it something to converge |
+| `invalid-reference` | `${id.param}` names a resource or a param that is not there | fix the reference |
 
 ## Troubleshooting
 

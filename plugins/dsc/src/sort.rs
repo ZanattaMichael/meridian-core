@@ -1,5 +1,6 @@
 //! Stage two: the runner's ordering and notification semantics.
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, EdgeKind, ResourceGraph};
 
 use crate::{refuse_at, Configuration};
@@ -24,7 +25,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.from,
                 &edge.pos,
-                "unsupported-dependency",
+                &rules::UNSUPPORTED_DEPENDENCY,
                 "a notify must be between two DSC resources; the runner's own settings are not one"
                     .to_owned(),
             ));
@@ -33,7 +34,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.from,
                 &edge.pos,
-                "unsupported-action",
+                &rules::UNSUPPORTED_ACTION,
                 format!(
                     "notifies resource {:?} with action {:?}, which this target cannot express: \
                      a notified DSC resource has its Set run again, and that is the one thing \
@@ -56,7 +57,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.to,
                 &edge.pos,
-                "unsupported-dependency",
+                &rules::UNSUPPORTED_DEPENDENCY,
                 "a dependency must be between two DSC resources; the runner's own settings are \
                  not one"
                     .to_owned(),

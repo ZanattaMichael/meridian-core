@@ -1,5 +1,6 @@
 //! Stage two: what Helm can and cannot do with the document's edges.
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, EdgeKind, ResourceGraph, Warning};
 
 use crate::{refuse_at, Chart, Node, NAME};
@@ -79,7 +80,7 @@ pub(crate) fn apply_edges(
             return Err(refuse_at(
                 &edge.from,
                 &edge.pos,
-                "unsupported-action",
+                &rules::UNSUPPORTED_ACTION,
                 format!(
                     "notifies resource {:?}, which in turn notifies it back: a restart is \
                      triggered by a checksum of the watched object, and two objects cannot \
@@ -98,7 +99,7 @@ pub(crate) fn apply_edges(
                     &edge.to
                 },
                 &edge.pos,
-                "unsupported-dependency",
+                &rules::UNSUPPORTED_DEPENDENCY,
                 "a dependency or a notification must be between two objects of the chart; the \
                  chart's settings are not objects"
                     .to_owned(),
@@ -113,7 +114,7 @@ pub(crate) fn apply_edges(
                     return Err(refuse_at(
                         &to_id,
                         &edge.pos,
-                        "unsupported-dependency",
+                        &rules::UNSUPPORTED_DEPENDENCY,
                         format!(
                             "depends on {from_id:?}, an order this target cannot keep: Helm \
                              creates everything in a release in one pass, sorted by kind, and \
@@ -129,7 +130,7 @@ pub(crate) fn apply_edges(
                     return Err(refuse_at(
                         &from_id,
                         &edge.pos,
-                        "unsupported-action",
+                        &rules::UNSUPPORTED_ACTION,
                         format!(
                             "notifies resource {to_id:?} with action {:?}, which this target \
                              cannot express: the one thing a chart can do when an object \
@@ -142,7 +143,7 @@ pub(crate) fn apply_edges(
                     return Err(refuse_at(
                         &from_id,
                         &edge.pos,
-                        "unsupported-action",
+                        &rules::UNSUPPORTED_ACTION,
                         format!(
                             "notifies resource {to_id:?} to restart, but a {to_kind} has no \
                              pods to roll (restartable: {})",
@@ -168,7 +169,7 @@ pub(crate) fn apply_edges(
                     return Err(refuse_at(
                         &from_id,
                         &edge.pos,
-                        "unsupported-action",
+                        &rules::UNSUPPORTED_ACTION,
                         format!(
                             "notifies resource {to_id:?} to restart, but its \
                              spec.template.metadata.annotations is not a mapping the checksum \

@@ -35,7 +35,15 @@ const TARGETS: &[Target] = &[
     Target {
         name: "ansible",
         refused: &[],
-        resource_types: &["exec", "file", "group", "package", "service", "user"],
+        resource_types: &[
+            "<namespace>.<collection>.<module>",
+            "exec",
+            "file",
+            "group",
+            "package",
+            "service",
+            "user",
+        ],
         capabilities: Capabilities {
             native_notify: true,
             synthetic_notify: false,
@@ -48,7 +56,16 @@ const TARGETS: &[Target] = &[
     Target {
         name: "puppet",
         refused: &["web_stack", "runtime_condition"],
-        resource_types: &["exec", "file", "group", "package", "service", "user"],
+        resource_types: &[
+            "<module>::<type>",
+            "<type>",
+            "exec",
+            "file",
+            "group",
+            "package",
+            "service",
+            "user",
+        ],
         capabilities: Capabilities {
             native_notify: true,
             synthetic_notify: false,
@@ -306,7 +323,7 @@ fn an_unsupported_resource_type_is_refused_by_every_target() {
         let client = start(target);
         let mut graph = compilable(target);
         let first = &mut graph.resources[0];
-        first.r#type = "firewall_rule".to_owned();
+        first.r#type = "Firewall.Rule".to_owned();
         first.pos = Position {
             file: "site.yaml".to_owned(),
             doc_idx: 0,

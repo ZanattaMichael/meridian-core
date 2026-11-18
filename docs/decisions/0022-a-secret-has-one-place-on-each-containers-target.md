@@ -32,7 +32,7 @@ for a secret, and refuses it everywhere else at compile (`unsupported-secret-pla
   `Secret=` line.
 
 On `kubernetes` and `helm` the compiled file holds a token the runner fills in, so a document
-that writes the token's text itself is refused (`reserved-text`).
+that writes the token's text itself is refused (`reserved-name`).
 
 ## Alternatives
 

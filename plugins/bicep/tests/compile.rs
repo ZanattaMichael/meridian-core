@@ -80,7 +80,7 @@ fn a_function_call_that_mentions_a_resource_still_orders_after_it() {
 #[test]
 fn the_document_must_say_where_it_deploys() {
     let err = refusal(STORAGE);
-    assert_eq!(err.rule, "missing-deployment");
+    assert_eq!(err.rule, "missing-resource");
     assert!(
         err.msg.contains("resource of type \"deployment\""),
         "{}",

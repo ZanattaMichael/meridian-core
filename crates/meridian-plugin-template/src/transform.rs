@@ -5,6 +5,7 @@
 //! it says, or it does not compile and the author is told why. Never drop a
 //! field you do not understand, and never guess.
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
 
 use crate::{refuse, refuse_at, Entry};
@@ -20,7 +21,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Vec<Entry>, CompileErro
         return Err(refuse_at(
             "",
             &output.pos,
-            "unsupported-output",
+            &rules::UNSUPPORTED_OUTPUT,
             format!(
                 "declares the output {:?}, and filesync reports no values",
                 output.name
@@ -34,7 +35,7 @@ fn entry(r: &Resource) -> Result<Entry, CompileError> {
     if r.r#type != "file" {
         return Err(refuse(
             r,
-            "unsupported-resource-type",
+            &rules::UNSUPPORTED_RESOURCE_TYPE,
             format!(
                 "has the type {:?}, which this target cannot express (supported: file)",
                 r.r#type
@@ -44,7 +45,7 @@ fn entry(r: &Resource) -> Result<Entry, CompileError> {
     if !r.runtime_when.is_empty() {
         return Err(refuse(
             r,
-            "unsupported-runtime-condition",
+            &rules::UNSUPPORTED_RUNTIME_CONDITION,
             format!(
                 "has the runtime condition {:?}, and filesync evaluates nothing on the node",
                 r.runtime_when
@@ -57,7 +58,7 @@ fn entry(r: &Resource) -> Result<Entry, CompileError> {
         other => {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!("has the state {other:?} (supported: present, absent)"),
             ))
         }
@@ -65,15 +66,20 @@ fn entry(r: &Resource) -> Result<Entry, CompileError> {
     if let Some(unknown) = r.params.keys().find(|k| !PARAMS.contains(&k.as_str())) {
         return Err(refuse(
             r,
-            "unknown-param",
+            &rules::UNSUPPORTED_PARAM,
             format!(
                 "has the param {unknown:?}, which a file does not take (supported: {})",
                 PARAMS.join(", ")
             ),
         ));
     }
-    let path = text(r, "path")?
-        .ok_or_else(|| refuse(r, "missing-param", "needs the param \"path\"".to_owned()))?;
+    let path = text(r, "path")?.ok_or_else(|| {
+        refuse(
+            r,
+            &rules::MISSING_PARAM,
+            "needs the param \"path\"".to_owned(),
+        )
+    })?;
     Ok(Entry {
         id: r.id.clone(),
         path,
@@ -91,7 +97,7 @@ fn text(r: &Resource, name: &str) -> Result<Option<String>, CompileError> {
         Some(Value::String(s)) => Ok(Some(s.clone())),
         Some(other) => Err(refuse(
             r,
-            "invalid-param",
+            &rules::INVALID_PARAM,
             format!(
                 "has the param {name:?} as {}, and it must be text",
                 other.describe()

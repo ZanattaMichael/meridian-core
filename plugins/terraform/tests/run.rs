@@ -360,3 +360,52 @@ fn a_credential_the_providers_cannot_take_stops_the_run_before_the_tool_starts()
     );
     assert!(!dir.join("calls").exists(), "the tool was started");
 }
+
+#[test]
+fn a_plan_asked_to_save_hands_back_the_plan_file_and_an_apply_handed_it_applies_that() {
+    let dir = scratch(TMP, "saved-plan");
+    let runner = runner(&dir, &keeping_secrets(&dir));
+    let mut context = context(&dir);
+    context.save_plan = true;
+    let plan = runner
+        .plan(&context, &compiled(), &KeptLog::default())
+        .unwrap();
+    let saved = plan.saved.expect("the plan file is handed back");
+    assert_eq!(saved.data, b"PLANDATA\n");
+
+    // The apply is handed the plan back: no `plan`, the file put where
+    // the tool saved it, shown and applied.
+    let _ = fs::remove_file(dir.join("calls"));
+    let _ = fs::remove_file(dir.join("work/meridian.tfplan"));
+    let mut context = context.clone();
+    context.save_plan = false;
+    context.saved_plan = Some(saved);
+    let log = KeptLog::default();
+    runner.apply(&context, &compiled(), &log).unwrap();
+    assert_eq!(
+        calls(&dir),
+        [
+            "init -input=false -no-color",
+            "show -json meridian.tfplan",
+            "apply -input=false -no-color meridian.tfplan",
+            "output -json -no-color",
+        ]
+    );
+    assert!(log
+        .text()
+        .contains(&"applying the plan saved by `meridian plan --out`".to_owned()));
+}
+
+#[test]
+fn a_plan_that_handed_over_a_secret_saves_nothing() {
+    let dir = scratch(TMP, "saved-plan-secret");
+    let runner = runner(&dir, &keeping_secrets(&dir));
+    let mut context = context(&dir);
+    context.save_plan = true;
+    context.secrets = secrets(&[(SecretRef::new(1), "db_password", "hunter2")]);
+    let plan = runner
+        .plan(&context, &compiled(), &KeptLog::default())
+        .unwrap();
+    assert!(plan.saved.is_none());
+    assert!(!dir.join("work").join("meridian.tfplan").exists());
+}

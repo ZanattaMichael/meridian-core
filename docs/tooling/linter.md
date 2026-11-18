@@ -53,9 +53,11 @@ $ meridian lint --fix web.yaml
 fixed 1 finding
 ```
 
-At present one rule has a fix: [`unquoted-mode`](../reference/lint.md#unquoted-mode)
-adds the quotes. That one also clears the `invalid-param` error the plugin
-reports on the same line, since the two describe one mistake.
+Two rules have a fix: [`unquoted-mode`](../reference/lint.md#unquoted-mode)
+and [`lossy-number`](../reference/lint.md#lossy-number) both add quotes around
+a number that was meant as text. The `unquoted-mode` fix also clears the
+`invalid-param` error the plugin reports on the same line, since the two
+describe one mistake.
 
 ## Silencing a rule
 
@@ -106,11 +108,13 @@ project's fetched modules are, for `--data` files named inside a module, and
 where the [tool schemas](schema-sync.md) `meridian schema sync` cached are
 read from, so a tool's own params are checked as a plugin's are.
 
-## Module manifests
+## Module manifests and tests
 
 A `meridian.yaml` with `kind: Module` describes a module and is not a document
 to compile. `meridian lint` and `meridian fmt` leave it alone;
-`meridian module` checks it.
+`meridian module` checks it. A document of `kind: Test` is left alone the
+same way; [`meridian test`](../reference/testing.md) reads it, and refuses a
+mistake in it before any case runs.
 
 ## Plugins
 

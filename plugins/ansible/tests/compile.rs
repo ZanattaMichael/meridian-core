@@ -61,10 +61,121 @@ fn an_unknown_type_names_the_types_that_work_and_the_line() {
     assert_eq!(err.target, "ansible");
     assert_eq!(
         err.msg,
-        "unsupported resource type \"firewall_rule\" on this target \
-         (supported: exec, file, group, package, service, user)"
+        "unsupported resource type \"firewall_rule\" on this target: it is not one of the \
+         shared types (exec, file, group, package, service, user), and an Ansible module is \
+         written by its full name, such as ansible.builtin.lineinfile"
     );
     assert_eq!((err.pos.file.as_str(), err.pos.line), ("site.yaml", 11));
+}
+
+// ---- a module named in full ---------------------------------------------
+
+/// The document behind the `native_modules` golden files: modules beside
+/// the shared types, notified and notifying, with a state, a condition and
+/// no arguments at all.
+const NATIVE_MODULES: &str = "    - id: nginx_pkg\n      type: package\n      params:\n        name: nginx\n    - id: facts\n      type: ansible.builtin.setup\n    - id: worker_count\n      type: ansible.builtin.lineinfile\n      state: present\n      params:\n        path: /etc/nginx/nginx.conf\n        regexp: '^worker_processes'\n        line: worker_processes 4;\n      dependsOn:\n        - resource: nginx_pkg\n      notifies:\n        - resource: nginx_svc\n          action: reload\n        - resource: reindex\n          action: run\n    - id: nginx_svc\n      type: service\n      params:\n        name: nginx\n    - id: reindex\n      type: community.general.ufw\n      runtimeWhen: ansible_facts['os_family'] == 'Debian'\n      params:\n        rule: allow\n        port: '80'\n        proto: tcp\n";
+
+#[test]
+fn a_module_named_in_full_is_passed_through_with_its_arguments() {
+    let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata");
+    let emitted = compile(NATIVE_MODULES).unwrap_or_else(|e| panic!("{e}"));
+    assert_golden(&golden, "native_modules", &emitted);
+    let playbook = &emitted.artifact.files["playbook.yml"];
+    // The arguments are the module's own, as written, and the state is its
+    // state argument.
+    assert!(
+        playbook.contains("ansible.builtin.lineinfile:\n        line: worker_processes 4;"),
+        "{playbook}"
+    );
+    assert!(playbook.contains("        state: present\n"), "{playbook}");
+    // A module with nothing to say is still a task.
+    assert!(playbook.contains("ansible.builtin.setup: {}"), "{playbook}");
+    // A notified module runs again as a handler, without its condition.
+    assert!(playbook.contains("- name: run reindex\n"), "{playbook}");
+    assert_eq!(playbook.matches("when:").count(), 1, "{playbook}");
+}
+
+#[test]
+fn a_module_name_that_is_not_in_full_is_refused_with_the_full_name_to_write() {
+    let err = refusal("    - id: a\n      type: lineinfile\n      params:\n        path: /x\n");
+    assert_eq!(err.rule, "unsupported-resource-type");
+    assert!(err.msg.contains("full name"), "{}", err.msg);
+
+    // The case Ansible would not accept either.
+    let err = refusal(
+        "    - id: a\n      type: Ansible.Builtin.Lineinfile\n      params:\n        path: /x\n",
+    );
+    assert_eq!(err.rule, "unsupported-resource-type");
+
+    // The shared types are the only bare names, so `native/` reaches nothing
+    // here, and the refusal says what to write.
+    let err = refusal("    - id: a\n      type: native/file\n      params:\n        path: /x\n");
+    assert_eq!(err.rule, "unsupported-resource-type");
+    assert_eq!(
+        err.msg,
+        "resource type \"native/file\" is not how a module is reached on this target: an \
+         Ansible module is written by its full name, ansible.builtin.file"
+    );
+}
+
+#[test]
+fn a_module_takes_its_state_once_and_runs_again_when_notified() {
+    let err = refusal(
+        "    - id: a\n      type: ansible.builtin.lineinfile\n      state: absent\n      params:\n        path: /x\n        state: present\n",
+    );
+    assert_eq!(err.rule, "param-conflicts-with-state");
+
+    let err = refusal(
+        "    - id: a\n      type: ansible.builtin.lineinfile\n      params:\n        path: /x\n        line: ~\n",
+    );
+    assert_eq!(err.rule, "empty-param");
+
+    let err = refusal(
+        "    - id: conf\n      type: file\n      params: {path: /a, content: a}\n      notifies:\n        - resource: fw\n          action: restart\n    - id: fw\n      type: community.general.ufw\n      params: {rule: allow, port: '80'}\n",
+    );
+    assert_eq!(err.rule, "unsupported-action");
+    assert_eq!(err.resource, "fw");
+    assert_eq!(
+        err.msg,
+        "resource type \"community.general.ufw\" is a module, which can only be run again \
+         when notified (action \"run\"), got action \"restart\""
+    );
+}
+
+#[test]
+fn a_secret_handed_to_a_module_is_the_variable_and_the_task_is_quiet() {
+    let text = "apiVersion: meridian/v1\nkind: ResourceSet\nmetadata:\n  name: web\nspec:\n  target: ansible\n  targetHost:\n    from: inline\n    host: web01.example.com\n  resources:\n    - id: db\n      type: community.mysql.mysql_user\n      params:\n        name: app\n        password: placeholder\n";
+    let mut graph = graph_from_text("site.yaml", text, "ansible");
+    secret_in_param(&mut graph, "db", "password", "db_password");
+    let playbook = emit(&graph).unwrap().artifact.files["playbook.yml"].clone();
+    assert!(
+        playbook.contains("password: '{{ meridian_secret_db_password }}'"),
+        "{playbook}"
+    );
+    assert!(playbook.contains("    no_log: true\n"), "{playbook}");
+}
+
+#[test]
+fn the_schemas_offer_any_module_as_an_open_pattern() {
+    let schemas = Ansible.resource_schemas();
+    let pattern = schemas
+        .iter()
+        .find(|s| s.r#type == meridian_target_ansible::NATIVE_PATTERN)
+        .expect("the module pattern is declared");
+    assert!(pattern.open && pattern.is_pattern() && pattern.params.is_empty());
+    assert_eq!(pattern.actions, ["run"]);
+    assert_eq!(
+        Ansible.supported_resource_types(),
+        [
+            "<namespace>.<collection>.<module>",
+            "exec",
+            "file",
+            "group",
+            "package",
+            "service",
+            "user"
+        ]
+    );
 }
 
 #[test]
@@ -107,10 +218,11 @@ fn literal_content_cannot_be_a_directory() {
     let err = refusal(
         "    - id: conf\n      type: file\n      state: directory\n      params:\n        path: /etc/app\n        content: hello\n",
     );
-    assert_eq!(err.rule, "unsupported-state");
+    assert_eq!(err.rule, "param-conflicts-with-state");
     assert_eq!(
         err.msg,
-        "resource type \"file\" cannot have state \"directory\" as compiled to ansible.builtin.copy on this target"
+        "param \"content\" cannot be used with state \"directory\": a file with content is \
+         written as it is given, and only a file in state \"file\" or \"present\" has content"
     );
 }
 

@@ -8,6 +8,7 @@ that is allowed and likely to hurt later.
 | Rule | Severity | Fix | What it finds |
 |---|---|---|---|
 | [`unquoted-mode`](#unquoted-mode) | warning | yes | a `mode` param written as a number |
+| [`lossy-number`](#lossy-number) | warning | yes | a param holding a number that is not the one the author wrote |
 | [`literal-secret`](#literal-secret) | warning | | a param that looks like a secret, holding a literal value |
 | [`duplicate-resource`](#duplicate-resource) | warning | | two resources of one type that manage the same thing |
 | [`redundant-dependency`](#redundant-dependency) | info | | a `dependsOn` entry that adds nothing |
@@ -15,6 +16,7 @@ that is allowed and likely to hurt later.
 | [`unguarded-exec`](#unguarded-exec) | info | | an `exec` that runs on every apply |
 | [`unreferenceable-id`](#unreferenceable-id) | warning | | a resource id that cannot be used in a `${...}` reference |
 | [`unsafe-document-name`](#unsafe-document-name) | warning | | a `metadata.name` with characters that do not belong in a file name |
+| [`native-type`](#native-type) | info | | a resource using the tool's own type on a target that shares the six types |
 | [`unused-resource-set-host`](#unused-resource-set-host) | info | | `targetHost` fields its `from` does not read |
 
 Any rule can be silenced where a finding is deliberate, with a
@@ -45,6 +47,41 @@ string:
 Compilation refuses the unquoted mode as well (`invalid-param`; see
 [the resource types](resource-types.md)), so `lint` reports the line twice:
 once as the plugin's refusal and once as this rule, which carries the fix.
+
+`meridian lint --fix`, and the quick fix in an editor, add the quotes around
+exactly what was typed.
+
+## `lossy-number`
+
+**Warning, with a fix.** A param holds a plain number whose spelling is not
+what reaches the tool.
+
+```yaml
+params:
+  image: nginx
+  version: 1.10       # read as the number 1.1
+  release: 3.0        # read as the number 3
+  build: 1_000        # read as the number 1000
+```
+
+YAML reads a plain `1.10` as the floating point number 1.1, `3.0` as 3,
+`1_000` as 1000 and `+7` as 7, and the text the author typed is gone before
+any tool sees it. For a version, an image tag or a build number that is the
+wrong value. Write it as a quoted string:
+
+```yaml
+  version: "1.10"
+```
+
+The rule reports only a number whose canonical spelling differs from the
+text: `42`, `-3` and `1.5` are left alone, as is anything quoted and any
+`${{ ... }}` interpolation. A `mode` param is left to
+[`unquoted-mode`](#unquoted-mode), which knows what a mode is. A param the
+target declares as a number (such as `uid` on the configuration management
+types) is never reported, because the tool gets the number and the spelling
+does not matter. Values inside block lists and nested mappings are checked
+too; a number inside a `[...]` or `{...}` flow collection is not, because the
+rule cannot point at it.
 
 `meridian lint --fix`, and the quick fix in an editor, add the quotes around
 exactly what was typed.
@@ -175,6 +212,31 @@ metadata:
 The name becomes a directory under `--out` and under the state directory. Keep
 it to letters, digits, `.`, `_` and `-`. `meridian validate` refuses such a
 name outright; the lint points at it in the editor first.
+
+## `native-type`
+
+**Info.** A resource uses the tool's own type on a target that shares the
+six configuration management types.
+
+```yaml
+- id: workers
+  type: ansible.builtin.lineinfile
+  params:
+    path: /etc/nginx/nginx.conf
+    regexp: "^worker_processes"
+    line: worker_processes 4;
+```
+
+The six shared types (`package`, `file`, `service`, `user`, `group`, `exec`)
+compile for every target that takes them, so a document written with them
+moves between tools by changing `spec.target`. A type such as
+`ansible.builtin.lineinfile`, `mysql::db`, `pkgrepo.managed` or
+`native/file` is one tool's own
+([native types beside the six](dsl/configuration-management.md#native-types-beside-the-six)),
+so from this resource on the document compiles for that target only. That is
+often exactly what is wanted; the rule says where the document stopped being
+portable. Silence it with `# meridian-lint: disable=native-type` where that is
+deliberate.
 
 ## `unused-resource-set-host`
 

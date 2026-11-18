@@ -614,12 +614,12 @@ prints with it.
 | `unsupported-resource-type` | `type` is not one of the seven above |
 | `unsupported-state` | `state` is `absent` or anything but `present` and `running` |
 | `unsupported-runtime-condition` | the resource has a `runtimeWhen` |
-| `unknown-param` | a key is a known Quadlet key in the wrong capitalisation (`image`), or starts with a lower-case letter and is not `unit`, `service`, `install` or `quadlet` |
+| `unsupported-param` | a key is a known Quadlet key in the wrong capitalisation (`image`), or starts with a lower-case letter and is not `unit`, `service`, `install` or `quadlet` |
 | `invalid-param` | a value has a line break or no value; a list holds a list; a map holds a list or a map; `unit`, `service`, `install` or `quadlet` is not a map; `ServiceName`, `ContainerName`, `PodName`, `VolumeName`, `NetworkName` or an image's `Image` is not a non-empty string |
 | `invalid-reference` | `${...}` names something that is not a resource of the document, reads something other than `.name`, `.service` or `.inspect.<Field>`, reads `.name` where it cannot be known, uses `.inspect.` in a param, or is never closed |
 | `missing-param` | a required param from the [resource types](#resource-types) table is missing |
 | `invalid-name` | the `id` cannot be a unit file name |
-| `duplicate-service` | two resources would run as the same service |
+| `duplicate-resource` | two resources would run as the same service |
 | `unsupported-action` | a `notifies` action is not `restart` |
 | `unknown-dependency` | an edge names a resource the document does not declare |
 | `unsupported-secret-place` | a [secret](#secrets) is anywhere but the whole value of a container's `Environment` variable |

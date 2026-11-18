@@ -10,7 +10,7 @@ use std::process::Command;
 use semver::Version;
 
 use crate::integrity::copy_tree;
-use crate::Error;
+use crate::{Error, Kind};
 
 /// The `git` binary to run. `MERIDIAN_GIT` names another one.
 fn git() -> Command {
@@ -25,21 +25,27 @@ fn git() -> Command {
 fn run(mut command: Command, doing: &str) -> Result<String, Error> {
     let output = command.output().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
-            Error::new(format!(
-                "{doing}: the `git` program was not found; a git module needs git installed"
-            ))
+            Error::new(
+                Kind::Git,
+                format!(
+                    "{doing}: the `git` program was not found; a git module needs git installed"
+                ),
+            )
         } else {
-            Error::new(format!("{doing}: could not run git: {e}"))
+            Error::new(Kind::Git, format!("{doing}: could not run git: {e}"))
         }
     })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let said = stderr.trim();
-        return Err(Error::new(if said.is_empty() {
-            format!("{doing}: git failed ({})", output.status)
-        } else {
-            format!("{doing}: git failed:\n{said}")
-        }));
+        return Err(Error::new(
+            Kind::Git,
+            if said.is_empty() {
+                format!("{doing}: git failed ({})", output.status)
+            } else {
+                format!("{doing}: git failed:\n{said}")
+            },
+        ));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
@@ -88,8 +94,12 @@ pub(crate) fn fetch(
 ) -> Result<String, Error> {
     let doing = format!("fetching {reference} of {url}");
     let repo = scratch.join("repo");
-    std::fs::create_dir_all(&repo)
-        .map_err(|e| Error::new(format!("{doing}: creating {}: {e}", repo.display())))?;
+    std::fs::create_dir_all(&repo).map_err(|e| {
+        Error::new(
+            Kind::Git,
+            format!("{doing}: creating {}: {e}", repo.display()),
+        )
+    })?;
     let at = |args: &[&str]| {
         let mut command = git();
         command.arg("-C").arg(&repo).args(args);
@@ -136,9 +146,10 @@ pub(crate) fn fetch(
     };
     let commit = commit.trim().to_owned();
     if !is_commit(&commit) {
-        return Err(Error::new(format!(
-            "{doing}: git did not name a commit ({commit:?})"
-        )));
+        return Err(Error::new(
+            Kind::Git,
+            format!("{doing}: git did not name a commit ({commit:?})"),
+        ));
     }
 
     // Symbolic links are checked out as links, never followed here, and a
@@ -162,12 +173,15 @@ pub(crate) fn fetch(
         None => repo.clone(),
     };
     if !root.is_dir() {
-        return Err(Error::new(format!(
-            "{doing}: the repository has no directory {:?}",
-            subdir.unwrap_or_default()
-        )));
+        return Err(Error::new(
+            Kind::Git,
+            format!(
+                "{doing}: the repository has no directory {:?}",
+                subdir.unwrap_or_default()
+            ),
+        ));
     }
-    copy_tree(&root, dest).map_err(|e| Error::new(format!("{doing}: {e}")))?;
+    copy_tree(&root, dest).map_err(|e| Error::new(Kind::Git, format!("{doing}: {e}")))?;
     Ok(commit)
 }
 

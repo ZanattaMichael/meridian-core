@@ -120,6 +120,127 @@ spec:
     }
 }
 
+/// `kubectl get -o kyaml` prints the same objects as `-o yaml` in a flow
+/// style with every string quoted and a trailing comma after every entry.
+/// The importer reads both the same way; the Service here is the example
+/// from the KYAML enhancement proposal (KEP-5295).
+#[test]
+fn kubectl_kyaml_output_imports_the_same_as_its_yaml_form() {
+    let kyaml = r#"---
+{
+  apiVersion: "v1",
+  kind: "Service",
+  metadata: {
+    creationTimestamp: "2025-05-09T21:14:40Z",
+    labels: {
+      app: "hostnames",
+    },
+    name: "hostnames",
+    namespace: "default",
+    resourceVersion: "37697",
+    uid: "7aad616c-1686-4231-b32e-5ec68a738bba",
+  },
+  spec: {
+    clusterIP: "10.0.162.160",
+    clusterIPs: [
+      "10.0.162.160",
+    ],
+    internalTrafficPolicy: "Cluster",
+    ipFamilies: [
+      "IPv4",
+    ],
+    ipFamilyPolicy: "SingleStack",
+    ports: [{
+      port: 80,
+      protocol: "TCP",
+      targetPort: 9376,
+    }],
+    selector: {
+      app: "hostnames",
+    },
+    sessionAffinity: "None",
+    type: "ClusterIP",
+  },
+  status: {
+    loadBalancer: {},
+  },
+}
+"#;
+    let yaml = r#"
+apiVersion: v1
+kind: Service
+metadata:
+  creationTimestamp: "2025-05-09T21:14:40Z"
+  labels:
+    app: hostnames
+  name: hostnames
+  namespace: default
+  resourceVersion: "37697"
+  uid: 7aad616c-1686-4231-b32e-5ec68a738bba
+spec:
+  clusterIP: 10.0.162.160
+  clusterIPs:
+    - 10.0.162.160
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+    - port: 80
+      protocol: TCP
+      targetPort: 9376
+  selector:
+    app: hostnames
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}
+"#;
+    let from_kyaml = KubernetesImporter
+        .import(&import_text("svc", &[("svc.yaml", kyaml)]))
+        .unwrap();
+    let from_yaml = KubernetesImporter
+        .import(&import_text("svc", &[("svc.yaml", yaml)]))
+        .unwrap();
+    assert_eq!(from_kyaml.documents, from_yaml.documents);
+    assert_eq!(from_kyaml.notes.len(), from_yaml.notes.len());
+    // And what it compiles back to means the same as the flow form.
+    let (_, trips) = round_trip(
+        &KubernetesImporter,
+        &Kubernetes,
+        &import_text("svc", &[("svc.yaml", kyaml)]),
+    );
+    let compiled = objects(&trips[0].emitted.artifact.files[MANIFESTS_PATH]);
+    let expected = objects(
+        r#"
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: hostnames
+  name: hostnames
+  namespace: default
+spec:
+  clusterIP: 10.0.162.160
+  clusterIPs:
+    - 10.0.162.160
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+    - port: 80
+      protocol: TCP
+      targetPort: 9376
+  selector:
+    app: hostnames
+  sessionAffinity: None
+  type: ClusterIP
+"#,
+    );
+    assert_same(&expected, &compiled, Rules::default());
+}
+
 #[test]
 fn what_is_not_an_object_is_reported_and_marked() {
     let source = import_text(

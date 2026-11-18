@@ -1,5 +1,6 @@
 //! Stage two: systemd's ordering semantics.
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, EdgeKind, ResourceGraph};
 
 use crate::{refuse_at, Units};
@@ -23,7 +24,7 @@ pub(crate) fn apply_ordering(graph: &ResourceGraph, units: &mut Units) -> Result
             return Err(refuse_at(
                 &edge.to,
                 &edge.pos,
-                "unknown-dependency",
+                &rules::UNKNOWN_DEPENDENCY,
                 format!("an edge names resource {missing:?}, which this document does not declare"),
             ));
         };
@@ -43,7 +44,7 @@ pub(crate) fn apply_ordering(graph: &ResourceGraph, units: &mut Units) -> Result
                     return Err(refuse_at(
                         &edge.from,
                         &edge.pos,
-                        "unsupported-action",
+                        &rules::UNSUPPORTED_ACTION,
                         format!(
                             "notifies resource {:?} with action {:?}, which this target cannot \
                              express: what systemd can do to a unit when another changes is \

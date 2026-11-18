@@ -11,13 +11,14 @@ of Puppet: `puppet apply` on the machine itself, or OpenBolt for another machine
 | | |
 |---|---|
 | Category | configuration management |
-| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md), and [below](#resource-reference) for what each becomes) |
+| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md), and [below](#resource-reference) for what each becomes), and any Puppet type beside them: `cron`, `mysql::db`, `native/file` ([below](#puppet-types-beside-the-six)) |
 | `dependsOn` | Yes, as `require`. OpenVox orders by declared relationships, so the dependency graph survives into the manifest intact |
-| `notifies` | Native: `notify`. A service can be restarted (`restart` or `refresh`); an exec can be `run` |
+| `notifies` | Native: `notify`. A service can be restarted (`restart` or `refresh`); an exec can be `run`; a Puppet type of its own can be refreshed (`refresh`) |
 | Not supported | `action: reload`, `start` or `stop` on a service, and notifying a `package`, `file`, `user` or `group`. A refresh restarts a service and takes no argument, and the other types do nothing on one. The compile refuses these and says why; it does not turn a reload into a restart |
 | `runtimeWhen` | No. A catalog is compiled before it reaches the node, so there is nothing left to evaluate at apply time. Refused |
 | `state: restarted` | No. It is not a state a node can be left in. Notify the service instead |
 | Secrets | Yes: by Hiera, as a `Sensitive` lookup, exactly as the Puppet target does. See [Secrets](#secrets) |
+| Editor schemas | Yes: `meridian schema sync` asks `puppet describe` what each type takes, as the Puppet target does. See [Editor schemas](#editor-schemas) |
 | References (`${id.param}`) | Yes, settled at compile time to the value the document declares. Anything that cannot be settled is refused. See [References](#references) |
 | Plan | Yes: the tool's own `--noop` run |
 | Apply | Yes |
@@ -319,8 +320,10 @@ operation, so nothing from an OpenVox run can feed a later stage.
 
 ## Resource reference
 
-Anything not listed is refused at compile time, naming the resource and what is
-accepted. A resource with no `state` gets the default.
+The six shared types are listed here; anything else is a Puppet type of its
+own, [below](#puppet-types-beside-the-six). A param a shared type does not
+take is refused at compile time, naming the resource and what is accepted. A
+resource with no `state` gets the default.
 
 ### package
 
@@ -398,6 +401,21 @@ Cannot be notified.
 Takes no `state`. Give the command's full path, or set `shell: true`. Can be notified
 with `run`.
 
+### Puppet types beside the six
+
+Any Puppet type OpenVox can load is a resource type, written as a
+declaration names it: `cron`, `mount`, `mysql::db`. Its `params` are the
+type's attributes, written as given and checked against nothing; `state` is
+its `ensure`; notified with `refresh`, it is refreshed. The six names the
+shared types have taken are reached with a prefix: `native/file` is Puppet's
+own `file`, with `source` and `recurse`. It is exactly what the
+[Puppet target does](puppet.md#puppet-types-beside-the-six), compiled by the
+same code, and [`examples/puppet/native-types.yaml`](../../examples/puppet/native-types.yaml)
+compiles for this target with `spec.target: openvox`. A document that names a
+Puppet type compiles for the two of them only; the
+[`native-type`](../reference/lint.md#native-type) lint rule marks each such
+resource.
+
 ## Refusals
 
 Each refusal is printed with the file, line and column of the resource, the target, the
@@ -409,23 +427,24 @@ site.yaml:37:11: openvox: resource "nginx_conf" [unsupported-action]: notifies r
 
 | Rule | When |
 |---|---|
-| `unsupported-resource-type` | the `type` is not one of the six above |
+| `unsupported-resource-type` | the `type` is not one of the six above and not a Puppet type name either: a wrong case, a dotted name, or `native/` on a name no shared type has taken |
 | `unsupported-state` | a `state` the type does not take, such as `restarted` on a service, or any `state` on an exec |
 | `unsupported-param` | a param the type does not take; the message lists the ones it does |
 | `missing-param` | a required param is absent: `name`, `path` or `command` |
 | `empty-param` | a param is present with no value |
-| `unrepresentable-value` | a `null` somewhere inside a value |
+| `invalid-param` | a `null` somewhere inside a value |
 | `unsupported-runtime-condition` | the resource has `runtimeWhen` |
 | `invalid-reference` | a `${...}` that cannot be settled from the document; see [References](#references) |
-| `unsupported-action` | a notify action the notified type cannot perform, or a notified type that cannot be refreshed at all |
-| `duplicate-namevar` | two resources of one type manage the same `name`, `path` or `command`. OpenVox would only find this on the node |
-| `invalid-class-name` | the document name cannot be a class name |
-| `quoted-title`, `multiline-title`, `empty-title` | a resource id that holds a single quote or a line break, or is blank, and so cannot be a title |
-| `empty-resource` | a resource that would be declared with no attributes at all |
+| `unsupported-action` | a notify action the notified type cannot perform, a notified type that cannot be refreshed at all, or anything but `refresh` on a Puppet type of its own |
+| `duplicate-resource` | two resources of one type manage the same `name`, `path` or `command`. OpenVox would only find this on the node |
+| `invalid-name` | the document name cannot be a class name |
+| `invalid-name` | a resource id that holds a single quote or a line break, or is blank, and so cannot be a title |
+| `missing-param` | a resource of a shared type that would be declared with no attributes at all |
+| `param-conflicts-with-state` | `content` on a `directory`; `state` and `params.ensure` both on a Puppet type of its own |
 
 Five more rules guard the plugin against a malformed tree from Meridian itself and are
 not reachable from a valid document: `unknown-dependency`, `unknown-notify-target`,
-`dangling-reference`, `duplicate-title` and `ordering-violated`. If you see one, it is a
+`invalid-reference`, `duplicate-resource` and `ordering-violated`. If you see one, it is a
 bug in Meridian; please report it.
 
 ## How a run works
@@ -519,6 +538,16 @@ does not tell you which one you have. Before a local run the plugin asks the too
 
 The check covers local runs. Over OpenBolt the catalog is applied by whatever agent is
 installed on the node, and the plugin does not connect to the node just to ask.
+
+## Editor schemas
+
+`meridian schema sync` asks the OpenVox `puppet describe` what the Puppet
+types the documents use take, exactly as the
+[Puppet target does](puppet.md#editor-schemas), with this target's own
+settings (`MERIDIAN_OPENVOX`, `MERIDIAN_OPENVOX_ARGS`) and the tool pinned
+as `openvox` at the installed version. Each used type is described in full
+from `puppet describe <type>`; every other type `puppet describe --list`
+knows is listed by name, the six shared names under `native/`.
 
 ## Credentials
 

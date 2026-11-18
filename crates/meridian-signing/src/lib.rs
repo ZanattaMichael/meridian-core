@@ -38,6 +38,76 @@ const PUBLIC_KEY_HEADER: &str = "meridian-public-key-v1";
 /// The word a secret key file starts with.
 const SECRET_KEY_HEADER: &str = "meridian-secret-key-v1";
 
+/// Why a key or a signature was not accepted. `kind` says which of the few
+/// things that can go wrong did, with a fixed code a caller can act on; the
+/// message is for the terminal and names the file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Error {
+    kind: Kind,
+    msg: String,
+}
+
+/// What kind of thing went wrong, each with a fixed code listed in
+/// `docs/reference/errors.md`. A code is never reused for another meaning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Kind {
+    /// A key file or key text is not a key of the right shape.
+    Key,
+    /// A file could not be read, or the random source is not available.
+    Io,
+    /// A signature does not pass, or the policy refuses what was found.
+    Signature,
+    /// The word is not a signature policy.
+    Policy,
+}
+
+impl Kind {
+    /// Every kind, in the order the reference lists them.
+    pub const ALL: [Kind; 4] = [Kind::Key, Kind::Io, Kind::Signature, Kind::Policy];
+
+    /// The fixed code.
+    pub fn code(self) -> &'static str {
+        match self {
+            Kind::Key => "signing-key",
+            Kind::Io => "signing-io",
+            Kind::Signature => "signing-signature",
+            Kind::Policy => "signing-policy",
+        }
+    }
+}
+
+impl Error {
+    pub(crate) fn new(kind: Kind, msg: impl Into<String>) -> Error {
+        Error {
+            kind,
+            msg: msg.into(),
+        }
+    }
+
+    /// The same error, with `prefix` in front of its message.
+    fn prefixed(self, prefix: &str) -> Error {
+        Error::new(self.kind, format!("{prefix}{}", self.msg))
+    }
+
+    pub fn kind(&self) -> Kind {
+        self.kind
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.msg)
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl From<Error> for String {
+    fn from(error: Error) -> String {
+        error.msg
+    }
+}
+
 /// What the host does about a plugin's signature.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Policy {
@@ -62,15 +132,16 @@ impl Policy {
 }
 
 impl std::str::FromStr for Policy {
-    type Err = String;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim().to_ascii_lowercase().as_str() {
             "off" => Ok(Policy::Off),
             "warn" => Ok(Policy::Warn),
             "require" => Ok(Policy::Require),
-            other => Err(format!(
-                "{other:?} is not a signature policy; use off, warn or require"
+            other => Err(Error::new(
+                Kind::Policy,
+                format!("{other:?} is not a signature policy; use off, warn or require"),
             )),
         }
     }
@@ -119,22 +190,28 @@ impl Verification {
     /// `Ok` carries what was found, for showing; under [`Policy::Warn`] that
     /// may be a signature that did not pass. `Err` is a refusal: the plugin
     /// must not be started, and the text says why.
-    pub fn check(&self, binary: &Path) -> Result<Signature, String> {
+    pub fn check(&self, binary: &Path) -> Result<Signature, Error> {
         if self.policy == Policy::Off {
             return Ok(Signature::NotChecked);
         }
         let found = verify_file(binary, &self.trusted);
         match (&found, self.policy) {
             (Signature::Verified { .. }, _) | (_, Policy::Warn) => Ok(found),
-            (Signature::Unsigned, _) => Err(format!(
-                "it is not signed: there is no {}. Plugin signatures are required; trust the \
-                 plugin's signer with --trusted-key, or relax the check with \
-                 --plugin-signatures warn",
-                signature_path(binary).display()
+            (Signature::Unsigned, _) => Err(Error::new(
+                Kind::Signature,
+                format!(
+                    "it is not signed: there is no {}. Plugin signatures are required; trust the \
+                     plugin's signer with --trusted-key, or relax the check with \
+                     --plugin-signatures warn",
+                    signature_path(binary).display()
+                ),
             )),
-            (Signature::Invalid(why), _) => Err(format!(
-                "its signature does not pass: {why}. Plugin signatures are required, so it \
-                 was not started"
+            (Signature::Invalid(why), _) => Err(Error::new(
+                Kind::Signature,
+                format!(
+                    "its signature does not pass: {why}. Plugin signatures are required, so it \
+                     was not started"
+                ),
             )),
             (Signature::NotChecked, _) => Ok(found),
         }
@@ -156,36 +233,38 @@ impl PublicKey {
     /// Reads a key from its text form: `meridian-public-key-v1 <hex>`, with
     /// anything after the key on the line treated as a comment. The bare hex
     /// is accepted too.
-    pub fn parse(text: &str) -> Result<PublicKey, String> {
+    pub fn parse(text: &str) -> Result<PublicKey, Error> {
+        let key = |msg: &str| Error::new(Kind::Key, msg);
         let line = text
             .lines()
             .map(str::trim)
             .find(|line| !line.is_empty() && !line.starts_with('#'))
-            .ok_or("the key is empty")?;
+            .ok_or_else(|| key("the key is empty"))?;
         let mut words = line.split_whitespace();
         let first = words.next().unwrap_or_default();
         let hex = if first == PUBLIC_KEY_HEADER {
             words
                 .next()
-                .ok_or("the key has no value after its header")?
+                .ok_or_else(|| key("the key has no value after its header"))?
         } else if first == SECRET_KEY_HEADER {
-            return Err("this is a secret key; a public key is needed here".to_owned());
+            return Err(key("this is a secret key; a public key is needed here"));
         } else {
             first
         };
         let bytes: [u8; 32] = from_hex(hex)
             .and_then(|b| b.try_into().ok())
-            .ok_or("a public key is 64 hexadecimal digits")?;
+            .ok_or_else(|| key("a public key is 64 hexadecimal digits"))?;
         VerifyingKey::from_bytes(&bytes)
             .map(PublicKey)
-            .map_err(|_| "the value is not a valid Ed25519 public key".to_owned())
+            .map_err(|_| key("the value is not a valid Ed25519 public key"))
     }
 
     /// Reads a key from a file.
-    pub fn read(path: &Path) -> Result<PublicKey, String> {
-        let text = fs::read_to_string(path)
-            .map_err(|e| format!("reading the key {}: {e}", path.display()))?;
-        PublicKey::parse(&text).map_err(|e| format!("the key {}: {e}", path.display()))
+    pub fn read(path: &Path) -> Result<PublicKey, Error> {
+        let text = fs::read_to_string(path).map_err(|e| {
+            Error::new(Kind::Io, format!("reading the key {}: {e}", path.display()))
+        })?;
+        PublicKey::parse(&text).map_err(|e| e.prefixed(&format!("the key {}: ", path.display())))
     }
 
     /// A short name for the key: the first 16 hexadecimal digits of the
@@ -218,32 +297,40 @@ impl fmt::Debug for SecretKey {
 
 impl SecretKey {
     /// A new key from the operating system's random source.
-    pub fn generate() -> Result<SecretKey, String> {
+    pub fn generate() -> Result<SecretKey, Error> {
         let mut seed = [0u8; 32];
-        getrandom::fill(&mut seed)
-            .map_err(|e| format!("the system's random source is not available: {e}"))?;
+        getrandom::fill(&mut seed).map_err(|e| {
+            Error::new(
+                Kind::Io,
+                format!("the system's random source is not available: {e}"),
+            )
+        })?;
         Ok(SecretKey(SigningKey::from_bytes(&seed)))
     }
 
     /// Reads a key from its text form: `meridian-secret-key-v1 <hex>`.
-    pub fn parse(text: &str) -> Result<SecretKey, String> {
+    pub fn parse(text: &str) -> Result<SecretKey, Error> {
         let mut words = text.split_whitespace();
         if words.next() != Some(SECRET_KEY_HEADER) {
-            return Err(format!("a secret key file starts with {SECRET_KEY_HEADER}"));
+            return Err(Error::new(
+                Kind::Key,
+                format!("a secret key file starts with {SECRET_KEY_HEADER}"),
+            ));
         }
         let bytes: [u8; 32] = words
             .next()
             .and_then(from_hex)
             .and_then(|b| b.try_into().ok())
-            .ok_or("a secret key is 64 hexadecimal digits")?;
+            .ok_or_else(|| Error::new(Kind::Key, "a secret key is 64 hexadecimal digits"))?;
         Ok(SecretKey(SigningKey::from_bytes(&bytes)))
     }
 
     /// Reads a key from a file.
-    pub fn read(path: &Path) -> Result<SecretKey, String> {
-        let text = fs::read_to_string(path)
-            .map_err(|e| format!("reading the key {}: {e}", path.display()))?;
-        SecretKey::parse(&text).map_err(|e| format!("the key {}: {e}", path.display()))
+    pub fn read(path: &Path) -> Result<SecretKey, Error> {
+        let text = fs::read_to_string(path).map_err(|e| {
+            Error::new(Kind::Io, format!("reading the key {}: {e}", path.display()))
+        })?;
+        SecretKey::parse(&text).map_err(|e| e.prefixed(&format!("the key {}: ", path.display())))
     }
 
     pub fn public(&self) -> PublicKey {
@@ -256,7 +343,7 @@ impl SecretKey {
     }
 
     /// Signs a binary and returns the text of its signature file.
-    pub fn sign_file(&self, binary: &Path) -> Result<String, String> {
+    pub fn sign_file(&self, binary: &Path) -> Result<String, Error> {
         let digest = digest_of(binary)?;
         let signature = self.0.sign(message(SIGNATURE_HEADER, &digest).as_bytes());
         Ok(format!(
@@ -300,7 +387,7 @@ pub fn verify_file(binary: &Path, trusted: &[PublicKey]) -> Signature {
     };
     let digest = match digest_of(binary) {
         Ok(digest) => digest,
-        Err(e) => return Signature::Invalid(e),
+        Err(e) => return Signature::Invalid(e.into()),
     };
     match verify_text(
         &text,
@@ -309,7 +396,7 @@ pub fn verify_file(binary: &Path, trusted: &[PublicKey]) -> Signature {
         (SIGNATURE_HEADER, "binary", "file"),
     ) {
         Ok(key_id) => Signature::Verified { key_id },
-        Err(why) => Signature::Invalid(why),
+        Err(why) => Signature::Invalid(why.into()),
     }
 }
 
@@ -322,7 +409,7 @@ pub fn verify_bytes(signature: &str, bytes: &[u8], trusted: &[PublicKey], what: 
     let digest = to_hex(&Sha256::digest(bytes));
     match verify_text(signature, &digest, trusted, (STATEMENT_HEADER, what, what)) {
         Ok(key_id) => Signature::Verified { key_id },
-        Err(why) => Signature::Invalid(why),
+        Err(why) => Signature::Invalid(why.into()),
     }
 }
 
@@ -333,10 +420,13 @@ fn verify_text(
     digest: &str,
     trusted: &[PublicKey],
     (header, what, signed_as): (&str, &str, &str),
-) -> Result<String, String> {
+) -> Result<String, Error> {
+    let invalid = |msg: String| Error::new(Kind::Signature, msg);
     let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
     if lines.next() != Some(header) {
-        return Err(format!("the signature file does not start with {header}"));
+        return Err(invalid(format!(
+            "the signature file does not start with {header}"
+        )));
     }
     let (mut key_id, mut recorded, mut signature) = (None, None, None);
     for line in lines {
@@ -348,34 +438,40 @@ fn verify_text(
             _ => {}
         }
     }
-    let key_id = key_id.ok_or("the signature file names no key")?;
+    let key_id = key_id.ok_or_else(|| invalid("the signature file names no key".to_owned()))?;
     let signature: [u8; 64] = signature
         .and_then(from_hex)
         .and_then(|b| b.try_into().ok())
-        .ok_or("the signature file holds no signature of the right length")?;
+        .ok_or_else(|| {
+            invalid("the signature file holds no signature of the right length".to_owned())
+        })?;
     let Some(key) = trusted.iter().find(|k| k.id() == key_id) else {
-        return Err(format!(
+        return Err(invalid(format!(
             "it was signed by key {key_id}, which is not a trusted key"
-        ));
+        )));
     };
     // Said first because it is the likelier and the more useful thing to
     // know. It decides nothing: the signature is checked against the digest
     // of the file as it is, not against what the signature file claims.
     if recorded.is_some_and(|r| !r.eq_ignore_ascii_case(digest)) {
-        return Err(format!(
+        return Err(invalid(format!(
             "the {what} is not the {signed_as} that was signed: its contents have changed"
-        ));
+        )));
     }
     let signature = ed25519_dalek::Signature::from_bytes(&signature);
     key.0
         .verify_strict(message(header, digest).as_bytes(), &signature)
-        .map_err(|_| format!("the signature is not one key {key_id} made for this {what}"))?;
+        .map_err(|_| {
+            invalid(format!(
+                "the signature is not one key {key_id} made for this {what}"
+            ))
+        })?;
     Ok(key_id.to_owned())
 }
 
 /// The SHA-256 of a file, in hexadecimal.
-fn digest_of(path: &Path) -> Result<String, String> {
-    let fail = |e: std::io::Error| format!("reading {}: {e}", path.display());
+fn digest_of(path: &Path) -> Result<String, Error> {
+    let fail = |e: std::io::Error| Error::new(Kind::Io, format!("reading {}: {e}", path.display()));
     let mut file = fs::File::open(path).map_err(fail)?;
     let mut hasher = Sha256::new();
     let mut chunk = [0u8; 64 * 1024];
@@ -594,7 +690,8 @@ mod tests {
                 (SIGNATURE_HEADER, "binary", "file"),
             )
             .unwrap_err();
-            assert!(err.contains(want), "{text:?}: {err}");
+            assert_eq!(err.kind(), Kind::Signature);
+            assert!(err.to_string().contains(want), "{text:?}: {err}");
         }
     }
 
@@ -628,9 +725,17 @@ mod tests {
         let err = with(Policy::Require, vec![key.public()])
             .check(&unsigned)
             .unwrap_err();
-        assert!(err.starts_with("it is not signed: there is no "), "{err}");
+        assert_eq!(err.kind(), Kind::Signature);
+        assert!(
+            err.to_string()
+                .starts_with("it is not signed: there is no "),
+            "{err}"
+        );
         let err = with(Policy::Require, vec![]).check(&binary).unwrap_err();
-        assert!(err.contains("which is not a trusted key"), "{err}");
+        assert!(
+            err.to_string().contains("which is not a trusted key"),
+            "{err}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -651,7 +756,10 @@ mod tests {
 
         assert_eq!(
             PublicKey::parse(&key.to_text()).unwrap_err(),
-            "this is a secret key; a public key is needed here"
+            Error::new(
+                Kind::Key,
+                "this is a secret key; a public key is needed here"
+            )
         );
         assert!(SecretKey::parse(&public.to_text()).is_err());
         assert!(PublicKey::parse("").is_err());

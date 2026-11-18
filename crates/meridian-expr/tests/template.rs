@@ -37,11 +37,11 @@ fn scope() -> Scope {
 }
 
 fn eval(source: &str) -> Result<Value, String> {
-    Template::parse(source)?.eval(&scope())
+    Ok(Template::parse(source)?.eval(&scope())?)
 }
 
 fn literal(source: &str) -> Result<Value, String> {
-    Template::parse(source)?.eval_literal(&scope())
+    Ok(Template::parse(source)?.eval_literal(&scope())?)
 }
 
 #[test]
@@ -135,15 +135,15 @@ fn an_interpolation_inside_text_is_placed_as_text() {
 
 #[test]
 fn what_cannot_be_text_is_refused_inside_text() {
-    let err = eval("ports: ${{ data.ports }}").unwrap_err();
+    let err = eval("ports: ${{ data.ports }}").unwrap_err().to_string();
     assert!(
         err.contains("cannot be placed inside text") && err.contains("join(...)"),
         "{err}"
     );
     assert!(err.contains("${{ data.ports }}"), "{err}");
-    let err = eval("site: ${{ data.site }}").unwrap_err();
+    let err = eval("site: ${{ data.site }}").unwrap_err().to_string();
     assert!(err.contains("cannot be placed inside text"), "{err}");
-    let err = eval("x${{ data.nothing }}").unwrap_err();
+    let err = eval("x${{ data.nothing }}").unwrap_err().to_string();
     assert!(err.contains("null") && err.contains("??"), "{err}");
     assert_eq!(eval("x${{ data.nothing ?? 'd' }}").unwrap(), text("xd"));
 }
@@ -172,17 +172,21 @@ fn the_end_of_an_expression_is_found_past_quotes_and_brackets() {
 
 #[test]
 fn an_interpolation_that_cannot_be_read_says_why() {
-    let err = Template::parse("a ${{ data.env").unwrap_err();
+    let err = Template::parse("a ${{ data.env").unwrap_err().to_string();
     assert!(err.contains("never closed"), "{err}");
-    let err = Template::parse("a ${{ data.env } b").unwrap_err();
+    let err = Template::parse("a ${{ data.env } b")
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("never closed"), "{err}");
-    let err = Template::parse("${{ }}").unwrap_err();
+    let err = Template::parse("${{ }}").unwrap_err().to_string();
     assert!(err.contains("empty interpolation"), "{err}");
-    let err = Template::parse("${{}}").unwrap_err();
+    let err = Template::parse("${{}}").unwrap_err().to_string();
     assert!(err.contains("empty interpolation"), "{err}");
-    let err = Template::parse("x ${{ data.env == }} y").unwrap_err();
+    let err = Template::parse("x ${{ data.env == }} y")
+        .unwrap_err()
+        .to_string();
     assert!(err.starts_with("in ${{ data.env == }}: "), "{err}");
-    let err = Template::parse("${{ nope( }}").unwrap_err();
+    let err = Template::parse("${{ nope( }}").unwrap_err().to_string();
     assert!(err.starts_with("in ${{ nope( }}: "), "{err}");
 }
 
@@ -194,7 +198,8 @@ fn names_and_functions_are_checked_without_data() {
     let err = Template::parse("a-${{ param.x }}")
         .unwrap()
         .check(&names)
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
     assert!(
         err.contains("in ${{ param.x }}") && err.contains("unknown name \"param\""),
         "{err}"
@@ -202,7 +207,8 @@ fn names_and_functions_are_checked_without_data() {
     let err = Template::parse("${{ uper(data.a) }}")
         .unwrap()
         .check(&names)
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("unknown function \"uper\""), "{err}");
     // Literal text is never checked as anything.
     assert!(Template::parse("{{ nope }} ${nope.x}")
@@ -213,10 +219,12 @@ fn names_and_functions_are_checked_without_data() {
 
 #[test]
 fn a_failure_names_the_interpolation_it_came_from() {
-    let err = eval("a ${{ data.env }} b ${{ data.missing }}").unwrap_err();
+    let err = eval("a ${{ data.env }} b ${{ data.missing }}")
+        .unwrap_err()
+        .to_string();
     assert!(err.starts_with("in ${{ data.missing }}: "), "{err}");
     assert!(err.contains("data.missing is not set"), "{err}");
-    let err = eval("${{ data.env + 1 }}").unwrap_err();
+    let err = eval("${{ data.env + 1 }}").unwrap_err().to_string();
     assert!(err.starts_with("in ${{ data.env + 1 }}: "), "{err}");
 }
 
@@ -325,7 +333,8 @@ fn a_placed_value_cannot_join_with_its_neighbour_into_a_reference() {
         let refused = Template::parse(source)
             .unwrap()
             .eval_literal(&scope)
-            .expect_err(source);
+            .expect_err(source)
+            .to_string();
         assert!(
             refused.contains("${web.id}") && refused.contains("the reference would be lost"),
             "{source}: {refused}"

@@ -29,6 +29,8 @@ page it affects. The pull request template asks for it.
 | [`metadata.labels` select documents and are not passed to plugins](0002-labels-select-documents-only.md) | Language | proposed |
 | [With no data given, editors treat every `when` as true](0003-editors-treat-every-when-as-true.md) | Language | proposed |
 | [A value placed by interpolation is always literal text](0004-placed-values-are-literal.md) | Language | proposed |
+| [YAML tags other than `!!str` are refused, and `08` is text](0027-yaml-tags-are-refused-and-08-is-text.md) | Language | proposed |
+| [Tool-wide settings live under `spec.settings`, not in a resource](0031-tool-wide-settings-live-under-spec-settings.md) | Language | proposed |
 | [Packer sits under infrastructure as code](0005-packer-is-infrastructure-as-code.md) | Categories | proposed |
 | [cloud-init sits under configuration management](0006-cloud-init-is-configuration-management.md) | Categories | proposed |
 | [Containerization accepts both document kinds](0007-containerization-accepts-both-kinds.md) | Categories | proposed |
@@ -50,5 +52,14 @@ page it affects. The pull request template asks for it.
 | [Podman output is Quadlet units only](0019-podman-output-is-quadlet-units-only.md) | Targets | proposed |
 | [Terraform import renames colliding names](0020-terraform-import-renames-colliding-names.md) | Targets | proposed |
 | [A secret has one place on each containers target](0022-a-secret-has-one-place-on-each-containers-target.md) | Targets | proposed |
+| [An error's kind is a fixed code that is never reused](0026-error-codes-are-fixed-words-and-never-reused.md) | Core | proposed |
+| [A pipeline engine is shown the events and the report, and nothing formatted a second time](0033-annotations-come-from-events-and-the-report-only.md) | Reporting | proposed |
+| [The MCP server is a subcommand of `meridian`, read-only, speaking the protocol itself](0035-the-mcp-server-is-a-read-only-subcommand.md) | Tooling | proposed |
+| [A command's JSON result is one object, and a plan with changes exits 2 only when asked](0030-json-output-is-one-object-and-plan-exits-2-only-when-asked.md) | Core | proposed |
+| [A refusal's rule is one of a registry, and the same mistake has the same name on every target](0034-a-refusal-rule-is-one-of-a-registry.md) | Core | proposed |
+| [An apply from a saved plan applies that plan or nothing, and the file never holds a value](0038-an-apply-from-a-saved-plan-applies-that-or-nothing.md) | Orchestrator | proposed |
+| [A test is a document of cases over compile and plan, and never a script](0037-a-test-is-a-document-of-cases-over-compile-and-plan.md) | Testing | proposed |
 | [A key reaches a host through an agent Meridian starts](0028-a-key-reaches-a-host-through-an-agent-meridian-starts.md) | Targets | proposed |
 | [A cloud credential reaches a tool in its environment](0029-a-cloud-credential-reaches-a-tool-in-its-environment.md) | Targets | proposed |
+| [A configuration management target takes its tool's own types beside the six, and a colliding name is written `native/<name>`](0032-native-types-beside-the-six-and-a-prefix-for-colliding-names.md) | Targets | proposed |
+| [A tool's published schema file is fetched over HTTPS, pinned by its hash, and the last copy stands in offline](0036-a-published-schema-file-is-fetched-over-https-pinned-by-hash-and-reused-offline.md) | Tooling | proposed |

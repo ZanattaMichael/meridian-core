@@ -51,20 +51,98 @@ pub use signature::{sign, Signed, NO_SIGNATURES, SIGNATURE_FILE};
 pub use meridian_signing::{Policy, PublicKey, SecretKey, Signature, Verification};
 
 /// Why something to do with modules failed. The text is the whole message:
-/// it names the file, the module and what to do about it.
+/// it names the file, the module and what to do about it. `kind` says which
+/// step of handling modules it came from.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Error(String);
+pub struct Error {
+    kind: Kind,
+    msg: String,
+}
+
+/// Which step failed, each with a fixed code listed in
+/// `docs/reference/errors.md`. A code is never reused for another meaning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Kind {
+    /// `meridian.yaml` cannot be read or says something it cannot.
+    Manifest,
+    /// `meridian.lock` cannot be read, or does not match the manifest.
+    Lock,
+    /// A module's files are not the files its hash or its lock entry names.
+    Integrity,
+    /// A registry could not be reached, refused the request, or answered
+    /// with something that is not a module.
+    Registry,
+    /// A git source could not be fetched or checked out.
+    Git,
+    /// A module archive could not be packed or unpacked.
+    Pack,
+    /// A module's signature is missing, or does not pass.
+    Signature,
+    /// The modules' versions cannot be agreed on: a constraint has no
+    /// version, two demands conflict, or a module needs another core.
+    Resolution,
+    /// A resolved module could not be fetched and written into place, or an
+    /// installed module is not the one the lock pins.
+    Install,
+    /// The credential a registry needs is not declared, or cannot be read.
+    Credential,
+}
+
+impl Kind {
+    /// Every kind, in the order the reference lists them.
+    pub const ALL: [Kind; 10] = [
+        Kind::Manifest,
+        Kind::Lock,
+        Kind::Integrity,
+        Kind::Registry,
+        Kind::Git,
+        Kind::Pack,
+        Kind::Signature,
+        Kind::Resolution,
+        Kind::Install,
+        Kind::Credential,
+    ];
+
+    /// The fixed code.
+    pub fn code(self) -> &'static str {
+        match self {
+            Kind::Manifest => "module-manifest",
+            Kind::Lock => "module-lock",
+            Kind::Integrity => "module-integrity",
+            Kind::Registry => "module-registry",
+            Kind::Git => "module-git",
+            Kind::Pack => "module-pack",
+            Kind::Signature => "module-signature",
+            Kind::Resolution => "module-resolution",
+            Kind::Install => "module-install",
+            Kind::Credential => "module-credential",
+        }
+    }
+}
 
 impl Error {
-    pub(crate) fn new(msg: impl Into<String>) -> Error {
-        Error(msg.into())
+    pub(crate) fn new(kind: Kind, msg: impl Into<String>) -> Error {
+        Error {
+            kind,
+            msg: msg.into(),
+        }
+    }
+
+    pub fn kind(&self) -> Kind {
+        self.kind
     }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.msg)
     }
 }
 
 impl std::error::Error for Error {}
+
+impl From<Error> for String {
+    fn from(error: Error) -> String {
+        error.msg
+    }
+}

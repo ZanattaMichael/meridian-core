@@ -192,6 +192,7 @@ impl Runner for PackerRunner {
                 .map(|(id, builder)| created(id, builder))
                 .collect(),
             unknown: false,
+            saved: None,
         })
     }
 

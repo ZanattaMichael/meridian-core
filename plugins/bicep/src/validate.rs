@@ -2,21 +2,23 @@
 
 use std::collections::BTreeSet;
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::CompileError;
 
 use crate::{is_identifier, refuse_at, Template, NAME};
 
 pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
-    let document = |rule: &str, msg: String| CompileError {
+    let document = |rule: &Rule, msg: String| CompileError {
         target: NAME.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         ..CompileError::default()
     };
 
     if template.deployment.resource_group.is_empty() {
         return Err(document(
-            "missing-deployment",
+            &rules::MISSING_RESOURCE,
             "the document does not say which resource group to deploy to. Add a resource of \
              type \"deployment\" with a resourceGroup param"
                 .to_owned(),
@@ -30,7 +32,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
             .all(|c| c.is_ascii_alphanumeric() || "-_.()".contains(c));
     if !valid {
         return Err(document(
-            "invalid-deployment-name",
+            &rules::INVALID_NAME,
             format!(
                 "{name:?} cannot be a deployment name: one holds only letters, digits, hyphens, \
                  underscores, periods and parentheses"
@@ -39,7 +41,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
     }
     if template.statements.is_empty() {
         return Err(document(
-            "empty-template",
+            &rules::EMPTY_DOCUMENT,
             "a Bicep file needs at least one resource".to_owned(),
         ));
     }
@@ -49,7 +51,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &statement.symbol,
                 &statement.pos,
-                "invalid-name",
+                &rules::INVALID_NAME,
                 format!(
                     "resource id {:?} cannot be a Bicep symbolic name: one starts with a letter \
                      or underscore and holds only letters, digits and underscores",
@@ -61,7 +63,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &statement.symbol,
                 &statement.pos,
-                "missing-param",
+                &rules::MISSING_PARAM,
                 format!(
                     "resource type {:?} requires param \"name\" on this target: the resource's \
                      name in Azure",
@@ -77,7 +79,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
             return Err(refuse_at(
                 "",
                 pos,
-                "invalid-name",
+                &rules::INVALID_NAME,
                 format!("output name {name:?} cannot be a Bicep name"),
             ));
         }
@@ -85,7 +87,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
             return Err(refuse_at(
                 "",
                 pos,
-                "duplicate-output",
+                &rules::DUPLICATE_OUTPUT,
                 format!("output {name:?} is declared twice"),
             ));
         }
@@ -93,7 +95,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
             return Err(refuse_at(
                 "",
                 pos,
-                "duplicate-name",
+                &rules::DUPLICATE_RESOURCE,
                 format!(
                     "output {name:?} has the same name as a resource; Bicep keeps both in one namespace"
                 ),
@@ -146,10 +148,10 @@ mod tests {
     fn each_rule_refuses_the_one_mistake_it_is_for() {
         type Break = fn(&mut Template);
         let table: &[(&str, &str, Break)] = &[
-            ("missing-deployment", "", |t| {
+            ("missing-resource", "", |t| {
                 t.deployment.resource_group.clear();
             }),
-            ("empty-template", "", |t| t.statements.clear()),
+            ("empty-document", "", |t| t.statements.clear()),
             ("invalid-name", "web-vm", |t| {
                 t.statements[0].symbol = "web-vm".to_owned();
             }),
@@ -167,7 +169,7 @@ mod tests {
                 let again = t.outputs[0].clone();
                 t.outputs.push(again);
             }),
-            ("duplicate-name", "", |t| {
+            ("duplicate-resource", "", |t| {
                 t.outputs[0].0 = "store".to_owned()
             }),
         ];
@@ -205,7 +207,7 @@ mod tests {
             "", "site 1", "site/1", "site:1", "sité", "site\n", "site'", &too_long,
         ] {
             let err = named(bad).expect_err(bad);
-            assert_eq!(err.rule, "invalid-deployment-name", "{bad:?}");
+            assert_eq!(err.rule, "invalid-name", "{bad:?}");
         }
     }
 
@@ -225,7 +227,7 @@ mod tests {
         let mut t = template();
         t.deployment.resource_group.clear();
         t.deployment.name = "not valid".to_owned();
-        assert_eq!(validate(&t).unwrap_err().rule, "missing-deployment");
+        assert_eq!(validate(&t).unwrap_err().rule, "missing-resource");
 
         let mut t = template();
         t.outputs.clear();

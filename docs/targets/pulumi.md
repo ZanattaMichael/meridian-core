@@ -360,8 +360,14 @@ beside it (`create web_vm: aws:ec2/instance:Instance`). A replacement is reporte
 stack resource and the providers it loads by itself are not reported: neither is
 something the document declares.
 
-Pulumi has no saved plan to apply, so `apply` previews and then updates. If something
-changes between the two, the update follows the infrastructure, not the preview.
+A plain `apply` previews and then updates, and if something changes between the two,
+the update follows the infrastructure, not the preview. With a
+[saved plan](../operations/pull-requests.md), the plan is taken with
+`preview --save-plan` and the apply runs `up --plan` on it, so the update is constrained
+to what was reviewed (Pulumi's update plans are experimental, and the plugin sets
+`PULUMI_EXPERIMENTAL` for those two calls). The plan is not saved when the run handed
+Pulumi a secret, because an update plan holds every input; the apply then previews
+again for that stage, with the artifact hash as the check.
 
 When a preview fails, what Pulumi said is returned with the failure, together with the
 command that was run.
@@ -540,8 +546,8 @@ Every refusal carries a rule and, where it is about one resource, that resource 
 | `invalid-param` | `resourceOptions` or `invokeOptions` is not a map, an unknown setting on a `stack` or `config`, or a `stack` setting that is not plain text. | |
 | `missing-param` | A `config` with neither `type` nor `default`. | |
 | `invalid-name` | An id, a `config` name, the stack's name or the document's name that Pulumi would not accept, or an id of `pulumi`. | Ids start with a letter or underscore and hold letters, digits, underscores and hyphens. |
-| `duplicate-name` | A `config` renamed to a name another resource already has. | |
-| `duplicate-stack`, `duplicate-output` | Two `stack` resources, or two outputs with one name. | |
+| `duplicate-resource` | A `config` renamed to a name another resource already has. | |
+| `duplicate-resource`, `duplicate-output` | Two `stack` resources, or two outputs with one name. | |
 
 ## Environment
 

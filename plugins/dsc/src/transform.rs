@@ -1,15 +1,25 @@
-//! Stage one: each resource becomes a DSC resource instance, and every
-//! reference becomes the runner's own accessor.
+//! Stage one: the document's settings become the runner's, each resource
+//! becomes a DSC resource instance, and every reference becomes the runner's
+//! own accessor.
 
 use std::collections::BTreeMap;
 
 use meridian_sdk::expr::{self, Part};
-use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
+use meridian_sdk::rules::{self, Rule};
+use meridian_sdk::{CompileError, Position, ResourceGraph, Value, Warning};
 
 use crate::{refuse, refuse_at, Configuration, Instance, Settings, NAME};
 
 const ENGINES: [&str; 3] = ["Auto", "DscV2", "DscV3"];
 const TARGETS: [&str; 3] = ["Local", "SSH", "WinRM"];
+
+/// The keys of `spec.settings` this target reads, in the order they are
+/// listed to a reader.
+pub(crate) const SETTINGS_KEYS: [&str; 3] = ["credential", "engine", "target"];
+
+/// The resource type that carried the settings before `spec.settings`
+/// existed. Still read, with a warning that says where to move it.
+pub(crate) const RUNNER_TYPE: &str = "runner";
 
 /// Whether a type is shaped like a DSC resource: `Module/Resource`.
 fn is_dsc_type(t: &str) -> bool {
@@ -22,7 +32,10 @@ fn is_dsc_type(t: &str) -> bool {
         .is_some_and(|(module, resource)| part(module) && part(resource))
 }
 
-pub(crate) fn transform(graph: &ResourceGraph) -> Result<Configuration, CompileError> {
+pub(crate) fn transform(
+    graph: &ResourceGraph,
+    warnings: &mut Vec<Warning>,
+) -> Result<Configuration, CompileError> {
     let mut configuration = Configuration {
         node: graph.name.clone(),
         host: graph.host.clone(),
@@ -44,20 +57,45 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Configuration, CompileE
         configuration.settings.engine = engine.to_owned();
     }
 
+    // The settings proper: spec.settings, which the host has already checked
+    // against the keys this target lists.
+    let mut given: BTreeMap<&str, &str> = BTreeMap::new();
+    for (name, value) in &graph.settings {
+        let text = read_setting(name, value, &mut configuration.settings, |rule, msg| {
+            refuse_at("", &Position::default(), rule, msg)
+        })?;
+        given.insert(name.as_str(), text);
+    }
+    if let (Some(engine), true) = (asked, graph.settings.contains_key("engine")) {
+        if configuration.settings.engine != engine {
+            return Err(refuse_at(
+                "",
+                &Position::default(),
+                &rules::CONFLICTING_SETTINGS,
+                format!(
+                    "the document's targetVersion {:?} means the engine {engine}, and \
+                     spec.settings.engine asks for {}. Say it once: drop one of the two",
+                    graph.target_version, configuration.settings.engine
+                ),
+            ));
+        }
+    }
+
     let ids: Vec<&str> = graph
         .resources
         .iter()
-        .filter(|r| r.r#type != "runner")
+        .filter(|r| r.r#type != RUNNER_TYPE)
         .map(|r| r.id.as_str())
         .collect();
 
     for r in &graph.resources {
-        if r.r#type == "runner" {
+        if r.r#type == RUNNER_TYPE {
             if runner_seen {
                 return Err(refuse(
                     r,
-                    "duplicate-runner",
-                    "a document is run one way; this one has two resources of type \"runner\""
+                    &rules::DUPLICATE_RESOURCE,
+                    "a document is run one way; this one has two resources of type \"runner\". \
+                     Write the settings once, under spec.settings"
                         .to_owned(),
                 ));
             }
@@ -67,7 +105,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Configuration, CompileE
             if !r.runtime_when.is_empty() {
                 return Err(refuse(
                     r,
-                    "unsupported-runtime-condition",
+                    &rules::UNSUPPORTED_RUNTIME_CONDITION,
                     format!(
                         "resource carries runtimeWhen {:?}, which a \"runner\" cannot express: \
                          it says how the configuration is run and is not applied to the node. \
@@ -76,12 +114,44 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Configuration, CompileE
                     ),
                 ));
             }
-            read_settings(r, &mut configuration.settings)?;
+            warnings.push(Warning {
+                target: NAME.to_owned(),
+                resource: r.id.clone(),
+                msg: format!(
+                    "a resource of type \"runner\" is the old way to say how the configuration \
+                     is run. Move its params ({}) to spec.settings; the resource type will be \
+                     removed in the next apiVersion",
+                    r.params
+                        .keys()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            });
+            for (name, value) in &r.params {
+                let before = configuration.settings.clone();
+                let text = read_setting(name, value, &mut configuration.settings, |rule, msg| {
+                    refuse(r, rule, msg)
+                })?;
+                if let Some(earlier) = given.get(name.as_str()) {
+                    if !earlier.eq_ignore_ascii_case(text) {
+                        return Err(refuse(
+                            r,
+                            &rules::CONFLICTING_SETTINGS,
+                            format!(
+                                "spec.settings.{name} is {earlier:?} and the \"runner\" \
+                                 resource says {text:?}. Say it once, under spec.settings"
+                            ),
+                        ));
+                    }
+                    configuration.settings = before;
+                }
+            }
             if let Some(engine) = asked {
                 if configuration.settings.engine != engine {
                     return Err(refuse(
                         r,
-                        "conflicting-engine",
+                        &rules::CONFLICTING_SETTINGS,
                         format!(
                             "the document's targetVersion {:?} means the engine {engine}, and \
                              the runner asks for {}. Say it once: drop one of the two",
@@ -95,11 +165,11 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Configuration, CompileE
         if !is_dsc_type(&r.r#type) {
             return Err(refuse(
                 r,
-                "unsupported-resource-type",
+                &rules::UNSUPPORTED_RESOURCE_TYPE,
                 format!(
                     "{:?} is not a DSC resource. Write the module and the resource, such as \
-                     PSDscResources/Service or Microsoft.Windows/Registry, or \"runner\" for how \
-                     the configuration is run",
+                     PSDscResources/Service or Microsoft.Windows/Registry. How the \
+                     configuration is run goes under spec.settings, not in a resource",
                     r.r#type
                 ),
             ));
@@ -107,7 +177,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Configuration, CompileE
         if !r.state.is_empty() {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!(
                     "state {:?} is not written on this target: a DSC resource carries its \
                      desired state in its own properties, such as Ensure or _exist, so set it \
@@ -120,8 +190,13 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Configuration, CompileE
         let mut reads = Vec::new();
         let mut properties = BTreeMap::new();
         for (key, value) in &r.params {
-            let rewritten = rewrite(value, &ids, &r.id, &mut reads)
-                .map_err(|msg| refuse(r, "invalid-reference", format!("param {key:?}: {msg}")))?;
+            let rewritten = rewrite(value, &ids, &r.id, &mut reads).map_err(|msg| {
+                refuse(
+                    r,
+                    &rules::INVALID_REFERENCE,
+                    format!("param {key:?}: {msg}"),
+                )
+            })?;
             properties.insert(key.clone(), rewritten);
         }
         reads.sort();
@@ -142,7 +217,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Configuration, CompileE
         return Err(refuse_at(
             "",
             &output.pos,
-            "unsupported-output",
+            &rules::UNSUPPORTED_OUTPUT,
             format!(
                 "output {:?}: this target reports no outputs. DscPipelineRunner keeps what a \
                  resource returns inside its own run",
@@ -158,11 +233,12 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Configuration, CompileE
         if !local {
             return Err(CompileError {
                 target: NAME.to_owned(),
-                rule: "missing-param".to_owned(),
+                rule: rules::MISSING_PARAM.name.to_owned(),
+                hint: rules::MISSING_PARAM.hint.to_owned(),
                 msg: format!(
                     "the document's host is {:?}, and nothing says how the runner reaches it. \
-                     Add a resource of type \"runner\" with target: WinRM or target: SSH, or \
-                     target: Local when Meridian runs on the host itself",
+                     Set spec.settings.target to WinRM or SSH, or to Local when Meridian runs \
+                     on the host itself",
                     graph.host
                 ),
                 ..CompileError::default()
@@ -173,49 +249,51 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Configuration, CompileE
     Ok(configuration)
 }
 
-fn read_settings(r: &Resource, settings: &mut Settings) -> Result<(), CompileError> {
-    // A runner that does not name an engine leaves the one already chosen.
-    for (name, value) in &r.params {
-        let Value::String(text) = value else {
-            return Err(refuse(
-                r,
-                "invalid-param",
-                format!("param {name:?} of the runner must be a string"),
-            ));
-        };
-        let one_of = |choices: &[&str]| -> Result<String, CompileError> {
-            choices
-                .iter()
-                .find(|c| c.eq_ignore_ascii_case(text))
-                .map(|c| (*c).to_owned())
-                .ok_or_else(|| {
-                    refuse(
-                        r,
-                        "invalid-param",
-                        format!(
-                            "param {name:?} of the runner cannot be {text:?} (accepted: {})",
-                            choices.join(", ")
-                        ),
-                    )
-                })
-        };
-        match name.as_str() {
-            "engine" => settings.engine = one_of(&ENGINES)?,
-            "target" => settings.target = one_of(&TARGETS)?,
-            "credential" => settings.credential = text.clone(),
-            _ => {
-                return Err(refuse(
-                    r,
-                    "unsupported-param",
+/// Reads one setting into the runner's, whether it was written under
+/// `spec.settings` or on the old `runner` resource, and gives back its text.
+/// A setting that does not name an engine leaves the one already chosen.
+fn read_setting<'v>(
+    name: &str,
+    value: &'v Value,
+    settings: &mut Settings,
+    refuse: impl Fn(&Rule, String) -> CompileError,
+) -> Result<&'v str, CompileError> {
+    let Value::String(text) = value else {
+        return Err(refuse(
+            &rules::INVALID_SETTING,
+            format!("setting {name:?} must be a string"),
+        ));
+    };
+    let one_of = |choices: &[&str]| -> Result<String, CompileError> {
+        choices
+            .iter()
+            .find(|c| c.eq_ignore_ascii_case(text))
+            .map(|c| (*c).to_owned())
+            .ok_or_else(|| {
+                refuse(
+                    &rules::INVALID_SETTING,
                     format!(
-                        "resource type \"runner\" does not accept param {name:?} on this target \
-                         (accepted: credential, engine, target)"
+                        "setting {name:?} cannot be {text:?} (accepted: {})",
+                        choices.join(", ")
                     ),
-                ))
-            }
+                )
+            })
+    };
+    match name {
+        "engine" => settings.engine = one_of(&ENGINES)?,
+        "target" => settings.target = one_of(&TARGETS)?,
+        "credential" => settings.credential = text.clone(),
+        _ => {
+            return Err(refuse(
+                &rules::UNSUPPORTED_SETTING,
+                format!(
+                    "this target does not take a setting named {name:?} (accepted: {})",
+                    SETTINGS_KEYS.join(", ")
+                ),
+            ))
         }
     }
-    Ok(())
+    Ok(text)
 }
 
 /// Replaces every reference in a value with the runner's accessor for it,

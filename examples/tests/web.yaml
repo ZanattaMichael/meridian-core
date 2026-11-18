@@ -1,0 +1,35 @@
+# A web server whose message of the day and whose presence come from data,
+# with the tests that pin both down under tests/.
+#
+# `meridian test` in this directory runs tests/web.test.yaml: it compiles
+# this document with each case's data and checks what came out. Nothing is
+# applied and no tool runs.
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: web
+spec:
+  target: ansible
+  when: data.web
+  targetHost:
+    from: inline
+    host: web01.example.com
+  resources:
+    - id: nginx_pkg
+      type: package
+      params:
+        name: nginx
+    - id: motd
+      type: file
+      params:
+        path: /etc/motd
+        content: "welcome to ${{ data.env }}\n"
+        mode: "${{ data.mode }}"
+    - id: nginx_svc
+      type: service
+      state: running
+      params:
+        name: nginx
+        enabled: true
+      dependsOn:
+        - resource: nginx_pkg

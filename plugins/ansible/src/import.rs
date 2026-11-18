@@ -659,20 +659,58 @@ impl Importing<'_, '_> {
         };
         call.substitute(item);
         call.substitute(&self.vars);
-        let mapped = match map_module(short(module), &mut call) {
-            Ok(mapped) => mapped,
-            Err(why) => {
-                self.notes.untranslated(&origin, &subject, "", why);
-                return;
-            }
+        // A task becomes a shared resource type where one carries all of
+        // it, and the module itself otherwise: the shared type travels to
+        // other tools, the module keeps every argument.
+        let as_written = call.clone();
+        let shared = match map_module(short(module), &mut call) {
+            Ok(mapped) if call.rest.is_empty() => Ok(mapped),
+            Ok(mapped) => Err(format!(
+                "the {} resource type has no param for these arguments of {module}: {}",
+                mapped.r#type,
+                call.rest.keys().cloned().collect::<Vec<_>>().join(", ")
+            )),
+            Err(why) => Err(why),
         };
+        let (mapped, as_module) = match shared {
+            Ok(mapped) => (mapped, None),
+            Err(why) => match map_native(module, as_written) {
+                Ok(mapped) => (mapped, Some(why)),
+                Err(cannot) => {
+                    self.notes.untranslated(
+                        &origin,
+                        &subject,
+                        "",
+                        format!("{why}, and {cannot}; the task was left out"),
+                    );
+                    return;
+                }
+            },
+        };
+        call.rest.clear();
 
         let base = match (&task_name, item.get("item")) {
             (Some(name), None) => slug(name, '_'),
             (Some(name), Some(value)) => slug(&format!("{name} {}", text_of(value)), '_'),
-            (None, _) => slug(&format!("{} {}", mapped.r#type, mapped.label), '_'),
+            (None, _) => slug(
+                &format!("{} {}", last_part(&mapped.r#type), mapped.label),
+                '_',
+            ),
         };
         let id = unique_id(&base, &mut self.taken);
+        if let Some(why) = as_module {
+            self.notes.changed(
+                &origin,
+                &subject,
+                &id,
+                format!(
+                    "the task is the module {} itself, with its arguments as written, and \
+                     not a shared resource type: {why}. The document compiles for Ansible \
+                     only",
+                    mapped.r#type
+                ),
+            );
+        }
 
         // Play variables: written in where the value is plain, and reported
         // where it is not or where an expression computes with one.
@@ -710,19 +748,6 @@ impl Importing<'_, '_> {
             );
         }
 
-        if !call.rest.is_empty() {
-            self.notes.untranslated(
-                &origin,
-                &subject,
-                &id,
-                format!(
-                    "the {} resource type has no param for these arguments of {module}, so \
-                     they were left out: {}",
-                    mapped.r#type,
-                    call.rest.keys().cloned().collect::<Vec<_>>().join(", ")
-                ),
-            );
-        }
         if !lost.is_empty() {
             self.notes.untranslated(
                 &origin,
@@ -750,7 +775,7 @@ impl Importing<'_, '_> {
         }
         self.resources.push(ImportedResource {
             id,
-            r#type: mapped.r#type.to_owned(),
+            r#type: mapped.r#type,
             state: mapped.state,
             params,
             runtime_when: runtime_when.replace("${", "$${"),
@@ -961,7 +986,7 @@ fn text_of(value: &Value) -> String {
 }
 
 /// A module call being mapped: the arguments not yet claimed by a param.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Call {
     rest: BTreeMap<String, Value>,
     /// The command of a `command` or `shell` task written as a plain string.
@@ -988,7 +1013,7 @@ impl Call {
 
 /// One task as the resource it becomes.
 struct Mapped {
-    r#type: &'static str,
+    r#type: String,
     state: String,
     params: BTreeMap<String, Value>,
     /// What an id is made from when the task has no name.
@@ -1001,7 +1026,7 @@ fn state_of(call: &mut Call) -> Result<Option<String>, String> {
         None => Ok(None),
         Some(Value::String(s)) if !s.contains("{{") => Ok(Some(s)),
         Some(other) => Err(format!(
-            "its state is {}, which is not one fixed word; the task was left out",
+            "its state is {}, which is not one fixed word",
             other.canonical()
         )),
     }
@@ -1028,8 +1053,7 @@ fn map_module(module: &str, call: &mut Call) -> Result<Mapped, String> {
             Some("latest") => "latest",
             Some(other) => {
                 return Err(format!(
-                    "the package resource type has no state for {module}'s {other:?}; the \
-                     task was left out"
+                    "the package resource type has no state for {module}'s {other:?}"
                 ))
             }
         };
@@ -1052,8 +1076,7 @@ fn map_module(module: &str, call: &mut Call) -> Result<Mapped, String> {
             }
             Some(other) => {
                 return Err(format!(
-                    "the service resource type has no state for {module}'s {other:?}; the \
-                     task was left out"
+                    "the service resource type has no state for {module}'s {other:?}"
                 ))
             }
         };
@@ -1067,7 +1090,7 @@ fn map_module(module: &str, call: &mut Call) -> Result<Mapped, String> {
             Some(other) => {
                 return Err(format!(
                     "the file resource type has no state for the file module's {other:?} \
-                     (links and `touch` are not carried); the task was left out"
+                     (links and `touch` are not carried)"
                 ))
             }
         };
@@ -1078,9 +1101,8 @@ fn map_module(module: &str, call: &mut Call) -> Result<Mapped, String> {
     } else if module == "copy" {
         if !call.rest.contains_key("content") {
             return Err(
-                "the task copies a file from the machine Ansible runs on, and a document \
-                 carries a file's content, not a path to it. Write the content into a file \
-                 resource"
+                "the task copies a file from the machine Ansible runs on, and a file resource \
+                 carries a file's content, not a path to it"
                     .to_owned(),
             );
         }
@@ -1119,15 +1141,11 @@ fn map_module(module: &str, call: &mut Call) -> Result<Mapped, String> {
         ("exec", String::new())
     } else {
         return Err(format!(
-            "no resource type of this target compiles to the module {module}, so the task \
-             was left out (the types are {})",
-            crate::supported_resource_types().join(", ")
+            "no shared resource type compiles to the module {module}"
         ));
     };
     if matches!(r#type, "user" | "group") && !matches!(state.as_str(), "present" | "absent") {
-        return Err(format!(
-            "the {type} resource type has no state {state:?}; the task was left out"
-        ));
+        return Err(format!("the {type} resource type has no state {state:?}"));
     }
 
     // The one param each type cannot do without.
@@ -1138,8 +1156,7 @@ fn map_module(module: &str, call: &mut Call) -> Result<Mapped, String> {
     };
     let Some(main) = params.get(key) else {
         return Err(format!(
-            "the task gives {module} no {key}, which the {type} resource type needs; it was \
-             left out"
+            "the task gives {module} no {key}, which the {type} resource type needs"
         ));
     };
     let label = match main {
@@ -1170,12 +1187,149 @@ fn map_module(module: &str, call: &mut Call) -> Result<Mapped, String> {
     }
 
     Ok(Mapped {
-        r#type,
+        r#type: r#type.to_owned(),
         state,
         params,
         label,
         changed,
     })
+}
+
+/// The modules of ansible-core itself, which a playbook may name without
+/// their collection. Any other bare name belongs to a collection the
+/// playbook reaches through a `collections` keyword or a role, which is
+/// not read, so it cannot be written in full.
+const BUILTIN_MODULES: &[&str] = &[
+    "add_host",
+    "apt",
+    "apt_key",
+    "apt_repository",
+    "assemble",
+    "assert",
+    "async_status",
+    "blockinfile",
+    "command",
+    "copy",
+    "cron",
+    "deb822_repository",
+    "debconf",
+    "debug",
+    "dnf",
+    "dnf5",
+    "dpkg_selections",
+    "expect",
+    "fail",
+    "fetch",
+    "file",
+    "find",
+    "gather_facts",
+    "get_url",
+    "getent",
+    "git",
+    "group",
+    "group_by",
+    "hostname",
+    "include_vars",
+    "iptables",
+    "known_hosts",
+    "lineinfile",
+    "meta",
+    "mount_facts",
+    "package",
+    "package_facts",
+    "pause",
+    "ping",
+    "pip",
+    "raw",
+    "reboot",
+    "replace",
+    "rpm_key",
+    "script",
+    "service",
+    "service_facts",
+    "set_fact",
+    "set_stats",
+    "setup",
+    "shell",
+    "slurp",
+    "stat",
+    "subversion",
+    "systemd",
+    "systemd_service",
+    "sysvinit",
+    "tempfile",
+    "template",
+    "unarchive",
+    "uri",
+    "user",
+    "validate_argument_spec",
+    "wait_for",
+    "wait_for_connection",
+    "yum",
+    "yum_repository",
+];
+
+/// The full name of a module as a document writes it: as the playbook
+/// wrote it when that is already `namespace.collection.module`
+/// (`ansible.legacy` is the same as `ansible.builtin`), and
+/// `ansible.builtin.<name>` for a bare name of ansible-core's own.
+fn full_module_name(module: &str) -> Result<String, String> {
+    let is_word = |w: &str| {
+        !w.is_empty()
+            && !w.starts_with(|c: char| c.is_ascii_digit())
+            && w.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    };
+    let parts: Vec<&str> = module.split('.').collect();
+    match parts.as_slice() {
+        [namespace, collection, name] if parts.iter().all(|p| is_word(p)) => {
+            if *namespace == "ansible" && *collection == "legacy" {
+                Ok(format!("ansible.builtin.{name}"))
+            } else {
+                Ok(module.to_owned())
+            }
+        }
+        [name] if BUILTIN_MODULES.contains(name) => Ok(format!("ansible.builtin.{name}")),
+        [name] if is_word(name) => Err(format!(
+            "the module {name} is named without its collection and is not one of \
+             ansible-core's own, so its full name is not known; write it as \
+             namespace.collection.{name} and import again"
+        )),
+        _ => Err(format!("{module:?} is not a module name")),
+    }
+}
+
+/// Maps one module call onto the module itself: the resource's type is the
+/// module's full name and its params are the arguments as written, state
+/// included. Nothing is lost, and the document compiles for Ansible only.
+fn map_native(module: &str, call: Call) -> Result<Mapped, String> {
+    let full = full_module_name(module)?;
+    if call.free_form.is_some() {
+        return Err(format!(
+            "the arguments of {module} are free-form text, which only the shared exec type \
+             carries; write them as a mapping"
+        ));
+    }
+    let label = ["name", "path", "dest", "src", "msg"]
+        .iter()
+        .find_map(|key| call.rest.get(*key))
+        .map(|v| match v {
+            Value::List(items) => items.iter().map(text_of).collect::<Vec<_>>().join(" "),
+            other => text_of(other),
+        })
+        .unwrap_or_default();
+    Ok(Mapped {
+        r#type: full,
+        state: String::new(),
+        params: call.rest,
+        label,
+        changed: Vec::new(),
+    })
+}
+
+/// The last part of a module's full name, for an id.
+fn last_part(module: &str) -> &str {
+    module.rsplit('.').next().unwrap_or(module)
 }
 
 /// Writes the value of each variable in `vars` in place of its `{{ name }}`,

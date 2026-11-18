@@ -49,6 +49,7 @@ mod validate;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
     holds_secret, Artifact, Capabilities, Category, CloudTakes, CompileError, Data, Emitted,
     Emitter, Position, Resource, ResourceGraph, Value,
@@ -186,13 +187,14 @@ fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
     meridian_sdk::check_cloud_credential(credential, &CLOUD_TAKES).map_err(|msg| CompileError {
         target: NAME.to_owned(),
         resource: String::new(),
-        rule: "unsupported-credential".to_owned(),
+        rule: meridian_sdk::rules::UNSUPPORTED_CREDENTIAL.name.to_owned(),
+        hint: meridian_sdk::rules::UNSUPPORTED_CREDENTIAL.hint.to_owned(),
         msg: format!("the credential {:?}: {msg}", credential.name),
         pos: Position::default(),
     })
 }
 
-pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         ..CompileError::for_resource(r, rule, msg)
@@ -200,11 +202,12 @@ pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
 }
 
 /// A refusal that is about the document and not one resource.
-pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         resource: resource.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         pos: pos.clone(),
     }
@@ -237,7 +240,7 @@ fn refuse_secret_in(graph: &ResourceGraph, types: &[&str], what: &str) -> Result
         if let Some((name, _)) = r.params.iter().find(|(_, value)| holds_secret(value)) {
             return Err(refuse(
                 r,
-                "unsupported-secret-place",
+                &rules::UNSUPPORTED_SECRET_PLACE,
                 format!(
                     "param {name:?} of the {} holds a secret, and {what}, where a secret cannot \
                      go. A secret goes in a resource's params, which the tool is handed by a \

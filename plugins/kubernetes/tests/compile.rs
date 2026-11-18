@@ -183,10 +183,10 @@ fn names_types_and_duplicates_are_checked() {
     let err = refusal(&format!(
         "{CONFIG}    - id: other\n      type: v1/ConfigMap\n      params:\n        metadata: {{name: app-config}}\n"
     ));
-    assert_eq!(err.rule, "duplicate-object");
+    assert_eq!(err.rule, "duplicate-resource");
 
     let err = refusal("    - id: target\n      type: cluster\n      params: {context: prod}\n");
-    assert_eq!(err.rule, "empty-manifests");
+    assert_eq!(err.rule, "empty-document");
 }
 
 #[test]
@@ -273,6 +273,6 @@ fn text_that_reads_as_a_secrets_token_is_refused() {
     let err = refusal(
         "    - id: c\n      type: v1/ConfigMap\n      params:\n        data:\n          x: \"${meridian_secret_db_password}\"\n",
     );
-    assert_eq!(err.rule, "reserved-text");
+    assert_eq!(err.rule, "reserved-name");
     assert!(err.msg.contains("choose other text"), "{err}");
 }

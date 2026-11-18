@@ -11,7 +11,7 @@ use meridian_ir::Value;
 
 use crate::manifest::valid_name;
 use crate::project::normalize;
-use crate::Error;
+use crate::{Error, Kind};
 
 /// The lockfile's name, beside the manifest.
 pub const LOCK_FILE: &str = "meridian.lock";
@@ -182,14 +182,18 @@ impl Lock {
         match std::fs::read(&path) {
             Ok(data) => Lock::parse(&name, &data).map(Some),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(Error::new(format!("{name}: cannot read file: {e}"))),
+            Err(e) => Err(Error::new(
+                Kind::Lock,
+                format!("{name}: cannot read file: {e}"),
+            )),
         }
     }
 
     /// Parses a lockfile. `file` is used only in messages.
     pub fn parse(file: &str, data: &[u8]) -> Result<Lock, Error> {
-        let bad = |msg: String| Error::new(format!("{file}: {msg}"));
-        let value = meridian_ir::parse_value(file, data).map_err(|e| Error::new(e.to_string()))?;
+        let bad = |msg: String| Error::new(Kind::Lock, format!("{file}: {msg}"));
+        let value = meridian_ir::parse_value(file, data)
+            .map_err(|e| Error::new(Kind::Lock, e.to_string()))?;
         let Some(top) = value.as_map() else {
             return Err(bad(
                 "the lockfile is not a mapping; run `meridian module install` to write it again"

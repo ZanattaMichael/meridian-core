@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::expr::{self, Part};
+use meridian_sdk::rules;
 use meridian_sdk::{holds_secret, CompileError, Resource, ResourceGraph, SecretName, Value};
 
 use crate::keys::{self, Lookup};
@@ -37,7 +38,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Units, CompileError> {
         let Some(kind) = Kind::from_type(&r.r#type) else {
             return Err(refuse(
                 r,
-                "unsupported-resource-type",
+                &rules::UNSUPPORTED_RESOURCE_TYPE,
                 format!(
                     "{:?} is not something Podman runs. This target accepts: {}",
                     r.r#type,
@@ -62,7 +63,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Units, CompileError> {
             refuse_at(
                 "",
                 &output.pos,
-                "invalid-reference",
+                &rules::INVALID_REFERENCE,
                 format!("output {:?}: {msg}", output.name),
             )
         })?;
@@ -82,7 +83,7 @@ fn text_param<'a>(r: &'a Resource, key: &str) -> Result<Option<&'a str>, Compile
         Some(Value::String(s)) if !s.trim().is_empty() => Ok(Some(s)),
         Some(_) => Err(refuse(
             r,
-            "invalid-param",
+            &rules::INVALID_PARAM,
             format!("param {key:?} must be a string that is not empty"),
         )),
     }
@@ -123,7 +124,7 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
     if !r.runtime_when.is_empty() {
         return Err(refuse(
             r,
-            "unsupported-runtime-condition",
+            &rules::UNSUPPORTED_RUNTIME_CONDITION,
             format!(
                 "resource carries runtimeWhen {:?}, which this target cannot express: a unit's \
                  start conditions are systemd's fixed Condition*= tests, not an expression. \
@@ -137,7 +138,7 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
         "" | "present" | "running" => Ok(()),
         "absent" => Err(refuse(
             r,
-            "unsupported-state",
+            &rules::UNSUPPORTED_STATE,
             "state \"absent\" has no meaning on this target: a unit that is no longer in the \
              document is stopped and removed by the next apply, so remove the resource from \
              the document"
@@ -145,7 +146,7 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
         )),
         other => Err(refuse(
             r,
-            "unsupported-state",
+            &rules::UNSUPPORTED_STATE,
             format!(
                 "resource type {:?} does not accept state {other:?} on this target \
                  (accepted: present, running)",
@@ -180,9 +181,15 @@ fn unit(r: &Resource, names: &NameTable, secrets: &[SecretName]) -> Result<Unit,
         if matches!(value, Value::Map(m) if m.is_empty()) && key == "Environment" {
             continue;
         }
-        let invalid = |msg: String| refuse(r, "invalid-param", format!("param {key:?}: {msg}"));
-        let bad_reference =
-            |msg: String| refuse(r, "invalid-reference", format!("param {key:?}: {msg}"));
+        let invalid =
+            |msg: String| refuse(r, &rules::INVALID_PARAM, format!("param {key:?}: {msg}"));
+        let bad_reference = |msg: String| {
+            refuse(
+                r,
+                &rules::INVALID_REFERENCE,
+                format!("param {key:?}: {msg}"),
+            )
+        };
 
         if let Some((_, section)) = SECTIONS.iter().find(|(param, _)| param == key) {
             let Value::Map(entries) = value else {
@@ -211,7 +218,7 @@ fn unit(r: &Resource, names: &NameTable, secrets: &[SecretName]) -> Result<Unit,
             Lookup::Miscapitalised(right) => {
                 return Err(refuse(
                     r,
-                    "unknown-param",
+                    &rules::UNSUPPORTED_PARAM,
                     format!(
                         "param {key:?} is Quadlet's {right:?} in another capitalisation; \
                          Quadlet reads keys exactly, so write {right:?}"
@@ -221,7 +228,7 @@ fn unit(r: &Resource, names: &NameTable, secrets: &[SecretName]) -> Result<Unit,
             Lookup::Unknown if !key.starts_with(|c: char| c.is_ascii_uppercase()) => {
                 return Err(refuse(
                     r,
-                    "unknown-param",
+                    &rules::UNSUPPORTED_PARAM,
                     format!(
                         "param {key:?} is not a Quadlet key of a {} unit, which all start with \
                          a capital letter (Image, Volume), nor one of the other sections of \
@@ -293,7 +300,7 @@ fn split_secrets(
                         other if holds_secret(other) => {
                             return Err(refuse(
                                 r,
-                                "unsupported-secret-place",
+                                &rules::UNSUPPORTED_SECRET_PLACE,
                                 format!(
                                     "param \"Environment\": {variable} holds a secret inside a \
                                      value; a variable's value is one string, so write the secret \
@@ -319,7 +326,7 @@ fn split_secrets(
         };
         return Err(refuse(
             r,
-            "unsupported-secret-place",
+            &rules::UNSUPPORTED_SECRET_PLACE,
             format!(
                 "param {key:?} of the {} holds a secret, and a unit file is written onto the \
                  host as it stands, where a secret cannot go; {where_else}",

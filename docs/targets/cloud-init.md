@@ -11,8 +11,8 @@ its SSH key, and the packages a configuration tool needs to find there.
 
 | | |
 |---|---|
-| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([what each takes here](#resource-reference)) |
-| `dependsOn` | Yes, within [the order of a first boot](#the-order-of-a-first-boot). cloud-init handles files, accounts, packages and commands at fixed steps, so a dependency that points backwards through those steps is refused |
+| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([what each takes here](#resource-reference)), and any cloud-config module beside them: `ntp`, `apt`, `timezone`, `bootcmd` ([modules beside the six](#cloud-config-modules-beside-the-six)) |
+| `dependsOn` | Yes, within [the order of a first boot](#the-order-of-a-first-boot). cloud-init handles files, accounts, packages and commands at fixed steps, so a dependency that points backwards through those steps is refused. Nothing can depend on a module of cloud-init's own, or be depended on by one |
 | `notifies` | Emulated: each notified action is a command that runs once, after every other command, with a warning. Actions `start`, `stop`, `restart`, `reload` on a service, `run` on an exec ([how](#notifications)) |
 | `runtimeWhen` | No. It is refused: cloud-init evaluates nothing per resource |
 | States | Only what a first boot can do. `absent` on a user, group or package and `latest` on a package are refused ([everything refused](#what-is-refused)) |
@@ -21,6 +21,7 @@ its SSH key, and the packages a configuration tool needs to find there.
 | Apply | Writes the user-data and a NoCloud seed on the machine running Meridian. The new machine applies it by itself on its first boot. `apply` can wait for that boot over SSH ([plan and apply](#plan-and-apply)) |
 | Outputs | Yes: `seed_dir` and `user_data_file` ([outputs](#outputs)) |
 | Host | Required. It names the machine in `meta-data` and is where `apply` waits |
+| Editor schemas | Yes: `meridian schema sync` reads the cloud-config schema cloud-init publishes, at the installed version's tag ([editor schemas](#editor-schemas)) |
 | Plugin binary | `meridian-target-cloud-init` |
 | Needs | `cloud-init` for the check (Linux only; the check can be turned off), and `ssh` only to wait ([settings](#settings)) |
 
@@ -30,7 +31,8 @@ On this page:
 - [A first example](#a-first-example) and [a second: a web server](#a-second-example-a-web-server)
 - [What a document compiles to](#what-a-document-compiles-to)
 - [The order of a first boot](#the-order-of-a-first-boot)
-- [Resource reference](#resource-reference): every type, param and state
+- [Resource reference](#resource-reference): every shared type, param and state
+- [cloud-config modules beside the six](#cloud-config-modules-beside-the-six)
 - [References](#references)
 - [Notifications](#notifications)
 - [What is refused](#what-is-refused) and [warnings](#warnings)
@@ -487,6 +489,94 @@ runcmd:
   - if [ ! -e /srv/app/venv ]; then ( cd /srv/app && python3 -m venv venv ); fi
 ```
 
+## cloud-config modules beside the six
+
+Any cloud-config module is a resource type, written by the key cloud-init reads it
+under: `ntp`, `apt`, `timezone`, `bootcmd`, `ssh_import_id`, `ca_certs`. The resource's
+`params` are the module's own keys, written under it exactly as given; Meridian checks
+nothing against what the module takes. A key the module does not have is cloud-init's
+to refuse when it validates the user-data (`meridian plan` runs that check), as a
+provider's type is Terraform's, until the module's schema is synced and the editor
+reports it in place. A module whose value is not a mapping, such as `timezone` (a
+string) or `bootcmd` (a list), takes the one param `value`.
+
+None of the six shared types is a cloud-config module of its own name, so `native/<name>`
+reaches nothing here and is refused. The keys the six write, `write_files`, `packages`,
+`users`, `groups` and `runcmd`, are theirs alone: writing `type: packages` is refused,
+with the shared type to use, so that two resources never write one key.
+
+```yaml
+resources:
+  - id: clock
+    type: ntp
+    params:
+      enabled: true
+      servers: [0.pool.ntp.org, 1.pool.ntp.org]
+  - id: zone
+    type: timezone
+    params:
+      value: Europe/Amsterdam
+  - id: early
+    type: bootcmd
+    params:
+      value: ["echo booting > /dev/kmsg"]
+```
+
+compiles to
+
+```yaml
+ntp:
+  enabled: true
+  servers:
+    - 0.pool.ntp.org
+    - 1.pool.ntp.org
+timezone: Europe/Amsterdam
+bootcmd:
+  - echo booting > /dev/kmsg
+```
+
+| | |
+|---|---|
+| `type` | a cloud-config key: a lower-case word of letters, digits, underscores and hyphens. A wrong case, a dotted name, `native/<name>`, or one of the five keys the shared types write is refused |
+| `params` | the module's keys, as written; or the one param `value` for a module whose value is a string or a list. `value` stands alone (`invalid-param` beside other params); a module given no params at all is refused (`missing-param`) |
+| `state` | none: a module's own keys say what it does. Any `state` is refused (`unsupported-state`) |
+| `dependsOn` | refused at either end (`unsatisfiable-order`). cloud-init applies each module at a point of the first boot that is the module's own, which this target does not know, so a document cannot order anything before or after it |
+| `notifies` to a module | refused (`unsupported-action`): a module is applied once and there is no command that runs it again |
+| `notifies` from a module | as from any resource: the action runs once, last |
+| `runtimeWhen` | refused, as for the six |
+| Secrets | not on this target |
+| References | `${id.param}` is settled from the document, as for the six |
+| two resources of one module | refused (`duplicate-resource`): cloud-init reads one mapping, and one resource writes a module's whole value |
+
+[`examples/cloud-init/native-modules.yaml`](../../examples/cloud-init/native-modules.yaml)
+is a whole document of both kinds. A document that names a module compiles for
+cloud-init only. The [`native-type`](../reference/lint.md#native-type) lint rule marks
+each such resource. The six shared types stay the portable way to say what they can
+say; a module is for everything else. The split is
+[decision 0032](../decisions/0032-native-types-beside-the-six-and-a-prefix-for-colliding-names.md).
+
+## Editor schemas
+
+`meridian schema sync` reads the cloud-config schema cloud-init validates
+user-data against (`cloudinit/config/schemas/schema-cloud-config-v1.json` in
+the [cloud-init repository](https://github.com/canonical/cloud-init)), so an
+editor completes and checks the keys of every module beside the six
+([Tool schemas](../tooling/schema-sync.md)). The schema is fetched at the tag
+of the installed `cloud-init`'s version, so the editor knows the modules of
+the cloud-init the machine will run, and from the `main` branch when
+cloud-init is not installed, with a note.
+
+| | |
+|---|---|
+| Described in full | every module: a module whose value is a mapping takes its keys as params, with their kinds and values; a module whose value is a string or a list takes the one param `value`, as the compiler reads it |
+| Listed by name | nothing: the schema is small and every module is described |
+| Pinned | the cloud-init version or branch, and the schema's SHA-256 |
+
+The keys the six shared types write (`write_files`, `packages`, `users`,
+`groups`, `runcmd`) are not modules in the cache, because a document cannot
+write them as types. The source is tested against the real schema in the
+`cloud-init` workflow.
+
 ## References
 
 `${id.param}` in a param becomes the value the document gives that param on the
@@ -542,8 +632,8 @@ and then by resource id, so `reload web` runs before `restart db`. A notified se
 still gets the commands of its own state: a service in state `running` that is
 notified `reload` is started in its place and reloaded at the end.
 
-Notifying any other type, or an action the type does not have, is refused with
-`unsupported-action`.
+Notifying any other type, a module of cloud-init's own, or an action the type does not
+have, is refused with `unsupported-action`.
 
 ## What is refused
 
@@ -553,23 +643,25 @@ Each of these stops the compile with the resource, the rule and the line.
 |---|---|---|
 | `state: absent` on a `user`, `group` or `package`; `state: latest` on a `package` | `unsupported-state` | A first boot adds things. Use an `exec` to remove what an image ships with. |
 | `runtimeWhen` on any resource | `unsupported-runtime-condition` | cloud-init evaluates nothing per resource. Put the test inside an `exec` command. |
-| a `dependsOn` that points backwards through the five steps | `unsatisfiable-order` | The order of a first boot cannot be changed. |
+| a `dependsOn` that points backwards through the five steps, or at either end of a module of cloud-init's own | `unsatisfiable-order` | The order of a first boot cannot be changed, and where a module falls in it is cloud-init's to know. |
 | a `file` with no `content` | `missing-param` | It would empty the file. |
-| a relative `path` | `relative-path` | A first boot has no working directory. |
-| removing `/` | `unsafe-path` | |
-| `mode: 644` without quotes, or a mode that is not octal | `invalid-param`, `invalid-mode` | cloud-init takes the mode as a string of octal digits. |
-| two files with one `path`, the second without `append: true` | `duplicate-file-path` | The second would silently replace the first. |
-| two users, groups or packages with one name | `duplicate-user`, `duplicate-group`, `duplicate-package` | |
-| a command with an unclosed quote and no `shell: true` | `invalid-command` | It cannot be split into words. |
+| a relative `path` | `invalid-path` | A first boot has no working directory. |
+| removing `/` | `invalid-path` | |
+| `mode: 644` without quotes, or a mode that is not octal | `invalid-param` | cloud-init takes the mode as a string of octal digits. |
+| two files with one `path`, the second without `append: true` | `duplicate-resource` | The second would silently replace the first. |
+| two users, groups or packages with one name | `duplicate-resource` | |
+| two resources of one cloud-config module | `duplicate-resource` | cloud-init reads one mapping; the second would replace the first. |
+| a command with an unclosed quote and no `shell: true` | `invalid-param` | It cannot be split into words. |
 | a param the type does not take here, such as `gid` on a `group`; `mode`, `owner` or `group` on a file in state `absent` | `unsupported-param` | The message lists the ones accepted. |
-| a resource type other than the six | `unsupported-resource-type` | The message lists the six. |
+| a resource type that is neither one of the six nor a cloud-config key: a wrong case, a dotted name, `native/<name>`, or a key a shared type writes (`packages`) | `unsupported-resource-type` | The message lists the six and says how a module is written. |
 | a required param left out, such as `name` or `path` | `missing-param` | |
 | a param that is there and empty, such as `command: ""` | `empty-param` | An empty name or command is a mistake, not a request for nothing. |
+| `value` beside other params on a module; a module with no params; a `state` on a module | `invalid-param`, `missing-param`, `unsupported-state` | A module's value is the one param `value`, or its keys as params. |
 | a param of the wrong kind, such as a list where one string is expected | `invalid-param` | The message says what was expected and what was found. |
-| an `encoding` cloud-init does not read | `invalid-encoding` | The message lists the ones accepted. |
-| an `owner` or `group` on a file that holds a colon | `invalid-owner` | cloud-init joins the two with a colon. Give them as separate params. |
+| an `encoding` cloud-init does not read | `invalid-param` | The message lists the ones accepted. |
+| an `owner` or `group` on a file that holds a colon | `invalid-param` | cloud-init joins the two with a colon. Give them as separate params. |
 | a user or group name with a space or a colon; a package name with a space | `invalid-name` | It would be read as two values. |
-| notifying a `file`, `package`, `user` or `group`, or an action the type does not have | `unsupported-action` | Only a service or an exec can react. |
+| notifying a `file`, `package`, `user` or `group`, a module of cloud-init's own, or an action the type does not have | `unsupported-action` | Only a service or an exec can react. |
 | notifying an id that is not in the document | `unknown-notify-target` | |
 | a document with no host | `missing-host` | The host names the machine in `meta-data`. |
 

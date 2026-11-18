@@ -56,6 +56,12 @@ byte. The reasons, the layout and the order of work are in
 |---|---|
 | [Importing existing configuration](operations/importing.md) | `meridian import`: Terraform, OpenTofu, Ansible, Compose, Kubernetes and DSC configuration into documents, with everything that could not be carried over marked |
 
+| Operating | |
+|---|---|
+| [Testing documents and modules](reference/testing.md) | `meridian test`: a `Test` document of cases that compile or plan your documents with given data and check the outcome, the files, the rule of a refusal and the changes; JUnit for the pipeline |
+| [Running Meridian in a pipeline](operations/running-in-a-pipeline.md) | one job per engine: a tested GitHub Actions workflow and reviewed snippets for Azure Pipelines, GitLab CI, Buildkite, Jenkins, Argo Workflows, Tekton and Octopus; what the engine owns and what Meridian owns; annotations and job summaries; checking the job's identity first; sharing the record between jobs |
+| [A saved plan, and applying it from a pull request](operations/pull-requests.md) | `plan --out` writes one plan file, `apply --plan` applies exactly that or refuses; what the file holds and never holds; two GitHub Actions that plan on every push, comment on the pull request and apply after the approval; a GitLab recipe |
+
 | Concepts | |
 |---|---|
 | [Documents, resources and targets](concepts/ir-overview.md) | the two kinds of document, and the two families of resource types |
@@ -75,6 +81,9 @@ byte. The reasons, the layout and the order of work are in
 | [A secret's path](concepts/secrets-in-memory.md) | from a provider into locked memory, as a reference everywhere else, to the tool by a private file |
 | [A run](concepts/run-safety.md) | the lock, the policy check, the record, the run-state, and what happens when a stage fails |
 | [Modules](reference/modules.md) | the manifest, the sources, the lockfile, and what every run verifies |
+| [Inside a pipeline engine](operations/running-in-a-pipeline.md) | the engine's band above Meridian's: the job runs `meridian apply`, and the events come back as annotations and a summary |
+| [A saved plan](operations/pull-requests.md) | `plan --out` writes the file, the reviewer reads it on the pull request, and `apply --plan` compiles again, refuses what has moved, and hands each tool the plan it saved |
+| [A test](reference/testing.md) | a Test document's cases, each compiled or planned in a scratch directory, and the checks over what came out |
 
 Each picture is drawn by [`tools/wiki/graphics.py`](https://github.com/ZanattaMichael/meridian-core/blob/main/tools/wiki/graphics.py)
 and checked against the file in every build, so none can fall behind the script that describes it.
@@ -89,10 +98,12 @@ and checked against the file in every build, so none can fall behind the script 
 | [The linter](tooling/linter.md) | `meridian lint`: every error in a project, plus probable mistakes |
 | [The JSON Schema](tooling/json-schema.md) | `meridian schema`: validation for editors that only know YAML |
 | [Tool schemas](tooling/schema-sync.md) | `meridian schema sync`: a tool's own types, read once from the tool and cached, so the editor completes and checks them |
+| [The MCP server](tooling/mcp-server.md) | `meridian mcp`: the compiler and the catalogue as tools for an AI model, read-only, with the one diagnostic shape a small model can act on |
 
 | Reference | |
 |---|---|
 | [The `meridian` command](reference/cli.md) | commands, options, exit status |
+| [Machine-readable output](reference/cli-json.md) | `--output json`: the one object every command prints for a pipeline, its schema, and `plan --detailed-exitcode` |
 | [Lint rules](reference/lint.md) | every rule of `meridian lint`, with an example and what to do |
 | [Plugin signatures](reference/plugin-signatures.md) | how `meridian` decides a plugin may be started, trusting a plugin from elsewhere, and signing your own |
 | [Policy checks](reference/policy.md) | asking a policy before a change is made: the options, the input a policy sees, Rego with Open Policy Agent, and how to write an engine |
@@ -104,12 +115,15 @@ and checked against the file in every build, so none can fall behind the script 
 | The language item by item | [resources](reference/dsl/resources.md), [`dependsOn`](reference/dsl/dependson.md), [`notifies`](reference/dsl/notifies.md), [conditions](reference/dsl/conditions.md), [references](reference/dsl/references.md), [outputs and hand-offs](reference/dsl/outputs-and-hand-offs.md) |
 | The language by segment | how `type`, `state`, `params`, references and notifies are written for [configuration management](reference/dsl/configuration-management.md), [infrastructure as code](reference/dsl/infrastructure-as-code.md), [containerization](reference/dsl/containerization.md) and [container orchestration](reference/dsl/container-orchestration.md) |
 | [Configuration management resource types](reference/resource-types.md) | `package`, `file`, `service`, `user`, `group`, `exec`, and how each target differs |
+| [Testing documents and modules](reference/testing.md) | `meridian test`: the `Test` document, its cases, expectations and assertions, what `stages` holds, tests in a module, JUnit output |
 | [Modules](reference/modules.md) | packaging configuration to share it: the manifest, sources (path, git, registry), versions, the lockfile, integrity, the `meridian module` commands |
 | [Capability matrix](reference/capability-matrix.md) | generated from the plugins |
 | [Plugin settings](reference/plugin-settings.md) | every setting of every target's runner, how a value is found, how argument lists are split; generated from the plugins |
 | [Conformance matrix](reference/conformance-matrix.md) | the same document on every configuration management target, cell by cell; generated from the plugins |
+| [Refusal rules](reference/refusal-rules.md) | every rule a compile-time refusal can carry, what it refuses and what to write instead; generated from the registry and the plugins |
 | [Compatibility](reference/compatibility.md) | which language versions a build reads, and which plugins it loads; generated from the code |
 | [Compile rules](reference/compile-rules.md) | the rules file, every rule and every refusal, and `meridian rules check` |
+| [Error kinds and codes](reference/errors.md) | every kind of error the crates produce, with its fixed code: expressions, stages of a run, modules, compile rules, layered data, keys and signatures |
 
 | Targets | |
 |---|---|

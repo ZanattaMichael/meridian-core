@@ -59,7 +59,11 @@ same resource compiles for any of them, and each target's page has the table of
 what a type and its params become. This is where "write once" is real, because
 these tools manage the same small set of things. `cloud-init` takes the same six
 and applies them once, on a machine's first boot, which narrows what some of
-them can mean; [its page](../targets/cloud-init.md) says how.
+them can mean; [its page](../targets/cloud-init.md) says how. Where the six
+fall short, these targets take the tool's own types beside them, written as
+the tool writes them (`ansible.builtin.lineinfile`), with the tool's own
+params; such a resource compiles for that one target
+([native types beside the six](../reference/dsl/configuration-management.md#native-types-beside-the-six)).
 
 **Everything else is native passthrough.** A Terraform provider has thousands of
 resource types, Kubernetes has its whole API, Azure has every service. Meridian
@@ -89,8 +93,10 @@ to the next stage, and one way to plan and apply.
 
 Most passthrough targets also take one **settings resource** that is not part of
 the tool's file: where to deploy, which cluster, which daemon. It has a fixed
-type name (`stack`, `deployment`, `cluster`, `project`, `runner`) and is
-described on the target's page. The `helm` target has four: `values`, `chart`,
+type name (`stack`, `deployment`, `cluster`, `project`) and is
+described on the target's page. The `dsc` target takes its settings under
+`spec.settings` instead, one mapping for the whole document, which is where the
+others will move. The `helm` target has four: `values`, `chart`,
 `release` and `kustomization`. The `arm` target has one more type of its own,
 `parameter`, which declares a parameter of the template. `packer` has none: one document is one build,
 and everything a build needs is a resource of it. The `terraform` and `opentofu`

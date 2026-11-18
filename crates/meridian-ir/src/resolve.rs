@@ -196,7 +196,7 @@ fn scope_with(data: &Data, secrets: &Secrets) -> Scope {
 /// `data.motd == '${{'`, where it is three characters like any others.
 pub(crate) fn condition(text: &str) -> Result<Expr, String> {
     let wrapped = |text: &str| match Template::parse(text.trim())?.sole_source() {
-        Some(source) => Expr::parse_condition(source),
+        Some(source) => Ok(Expr::parse_condition(source)?),
         None => Err(
             "a condition is one expression, written bare; an interpolation cannot be mixed \
              with other text here"
@@ -209,6 +209,7 @@ pub(crate) fn condition(text: &str) -> Result<Expr, String> {
     // One that does not read as an expression and holds an interpolation
     // was most likely meant as one: say that, not what the parser tripped on.
     Expr::parse_condition(text).or_else(|bare| {
+        let bare = String::from(bare);
         if has_interpolation(text) {
             wrapped(text).and(Err(bare))
         } else {
@@ -709,6 +710,28 @@ pub(crate) fn check(doc: &Document, errs: &mut ErrorList) {
         }
     }
 
+    // Settings reach the tool as a param does, so they are checked the same
+    // way; a mapping key in them is a name the target reads, not a value.
+    let mut problems = Vec::new();
+    for (name, value) in doc.settings() {
+        let at = format!("spec.settings.{name}");
+        if has_interpolation(name) {
+            problems.push((at.clone(), format!("a setting's name {SKELETON}")));
+        }
+        each_text(value, &at, &mut |text, at, is_key| {
+            if is_key {
+                if has_interpolation(text) {
+                    problems.push((at.to_owned(), format!("a mapping key {SKELETON}")));
+                }
+            } else if let Err(why) = check_text(text) {
+                problems.push((at.to_owned(), why));
+            }
+        });
+    }
+    for (at, why) in problems {
+        fail(pos, at, why);
+    }
+
     for (i, r) in doc.resources().iter().enumerate() {
         let path = format!("spec.resources[{i}]");
         for (field, text) in [("id", &r.id), ("type", &r.r#type)] {
@@ -795,12 +818,13 @@ fn place(
 ) -> Result<Value, (String, String)> {
     Ok(match value {
         Value::String(text) if has_interpolation(text) => {
-            let template = Template::parse(text).map_err(|why| (path.to_owned(), why))?;
+            let template =
+                Template::parse(text).map_err(|why| (path.to_owned(), why.to_string()))?;
             let decided = match literal {
                 Some(escapes) => template.eval_literal_with(scope, escapes),
                 None => template.eval(scope),
             };
-            decided.map_err(|why| (path.to_owned(), why))?
+            decided.map_err(|why| (path.to_owned(), why.to_string()))?
         }
         Value::List(items) => Value::List(
             items
@@ -914,7 +938,7 @@ fn declarations(
             let path = format!("spec.conditions.{}", decl.name);
             let text = &doc.conditions()[&decl.name];
             let decided = condition(text)
-                .and_then(|expr| expr.truth(&scope))
+                .and_then(|expr| Ok(expr.truth(&scope)?))
                 .map_err(|why| Error::new(pos.clone(), path, why))?;
             conds.insert(decl.name, Value::Bool(decided));
         }
@@ -924,7 +948,7 @@ fn declarations(
 
 /// Decides a condition in `scope`.
 fn decide(text: &str, scope: &Scope) -> Result<bool, String> {
-    condition(text)?.truth(scope)
+    Ok(condition(text)?.truth(scope)?)
 }
 
 /// Resolves a document against `data`: decides every condition and places
@@ -1010,6 +1034,14 @@ pub fn resolve_for(
         r.params = params;
     }
 
+    let mut settings = BTreeMap::new();
+    for (name, value) in doc.settings() {
+        let at = format!("spec.settings.{name}");
+        let value = place(value, &scope, Some(&escapes), &at)
+            .map_err(|(at, why)| Error::new(pos.clone(), at, why))?;
+        settings.insert(name.clone(), value);
+    }
+
     // A credential's secret fields become the secrets they read, which the
     // resolved document holds as slots and never as values; its plain
     // fields are placed as text.
@@ -1064,6 +1096,7 @@ pub fn resolve_for(
             placed(&mut d.spec.target_version, "spec.targetVersion")?;
             d.spec.resources = resources;
             d.spec.credentials = resolved_credentials;
+            d.spec.settings = settings;
             d.spec.outputs = outputs(&d.spec.outputs, &scope, &escapes, &mut removed)?;
             clear(
                 &mut d.spec.when,
@@ -1077,6 +1110,7 @@ pub fn resolve_for(
             placed(&mut d.spec.target_version, "spec.targetVersion")?;
             d.spec.resources = resources;
             d.spec.credentials = resolved_credentials;
+            d.spec.settings = settings;
             if let Some(th) = &mut d.spec.target_host {
                 place_text(&mut th.host, &scope, None)
                     .map_err(|why| Error::new(th.pos.clone(), "spec.targetHost.host", why))?;

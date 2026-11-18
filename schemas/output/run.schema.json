@@ -1,0 +1,580 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ZanattaMichael/meridian-core/schemas/output/run.schema.json",
+  "title": "A run: compile, plan, apply, drift or rollback",
+  "description": "What one of the commands that run a workflow prints with --output json.",
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "description": "The subcommand as it is typed"
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "Whether the command did what was asked: false means it exited 1, or 130 when interrupted"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "compile",
+        "plan",
+        "apply",
+        "drift",
+        "rollback"
+      ]
+    },
+    "run": {
+      "type": "string",
+      "description": "The run's id, under which plan, apply, drift and rollback keep their record; compile has one too but records nothing"
+    },
+    "refused": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "locked",
+                "state",
+                "resume",
+                "rollback",
+                "plan"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "lock": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/lock"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "message",
+            "lock"
+          ]
+        }
+      ]
+    },
+    "stages": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/stage"
+      }
+    },
+    "rollbacks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/rollback"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "plan": {
+      "description": "plan --out: the plan that was saved; apply --plan: the plan that was carried out. Null when neither was asked",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "The plan file, as it was named on the command line"
+            },
+            "run": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "apply --plan: the id of the run that took the plan; null for the plan that is being saved"
+            },
+            "hasChanges": {
+              "type": "boolean",
+              "description": "Whether the plan leaves an apply something to do"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "file",
+            "run",
+            "hasChanges"
+          ]
+        }
+      ]
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "stages": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "changes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hasChanges": {
+          "type": "boolean",
+          "description": "plan: whether an apply would do something, which is what --detailed-exitcode exits 2 on"
+        },
+        "drifted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "succeeded": {
+          "type": "boolean"
+        },
+        "interrupted": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "stages",
+        "failed",
+        "changes",
+        "hasChanges",
+        "drifted",
+        "succeeded",
+        "interrupted"
+      ]
+    }
+  },
+  "required": [
+    "command",
+    "ok",
+    "mode",
+    "run",
+    "refused",
+    "stages",
+    "rollbacks",
+    "warnings",
+    "plan",
+    "summary"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "stageId": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "Infrastructure",
+            "ResourceSet"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "kind"
+      ]
+    },
+    "change": {
+      "type": "object",
+      "properties": {
+        "resource": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "create",
+            "update",
+            "delete",
+            "replace"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "resource",
+        "action",
+        "summary"
+      ]
+    },
+    "output": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "description": "The output's value, or the mask (sensitive) when it is sensitive"
+        },
+        "sensitive": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "value",
+        "sensitive"
+      ]
+    },
+    "lock": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "user": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "host": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "since": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "user",
+        "host",
+        "pid",
+        "command",
+        "since"
+      ]
+    },
+    "stage": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "Infrastructure",
+            "ResourceSet"
+          ]
+        },
+        "target": {
+          "type": "string"
+        },
+        "host": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "credential": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "compiled",
+            "planned",
+            "applied",
+            "deferred",
+            "skipped",
+            "drift",
+            "left-out",
+            "failed",
+            "not-run"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For a failed stage, its error code from docs/reference/errors.md"
+        },
+        "artifact": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "hash": {
+                  "type": "string"
+                },
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "hash",
+                "files"
+              ]
+            }
+          ]
+        },
+        "writtenTo": {
+          "type": "string",
+          "description": "compile --out: the directory the files were written to"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "target": {
+                "type": "string"
+              },
+              "resource": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "target",
+              "resource",
+              "message"
+            ]
+          }
+        },
+        "removed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "subject": {
+                "type": "string"
+              },
+              "condition": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "subject",
+              "condition"
+            ]
+          }
+        },
+        "policy": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "allowed": {
+                  "type": "boolean"
+                },
+                "asked": {
+                  "type": "boolean"
+                },
+                "deny": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "warn": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "allowed",
+                "asked",
+                "deny",
+                "warn"
+              ]
+            }
+          ]
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/change"
+          }
+        },
+        "unknown": {
+          "type": "boolean",
+          "description": "planned: the tool cannot preview"
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/output"
+          }
+        },
+        "waitingOn": {
+          "$ref": "#/$defs/stageId"
+        },
+        "waitingFor": {
+          "type": "string"
+        },
+        "appliedIn": {
+          "type": "string"
+        },
+        "drift": {
+          "type": "string",
+          "enum": [
+            "never-applied",
+            "in-sync",
+            "drifted",
+            "pending",
+            "unknown"
+          ]
+        },
+        "lastApplyFailed": {
+          "type": "boolean"
+        },
+        "condition": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "becauseOf": {
+          "$ref": "#/$defs/stageId"
+        },
+        "previousGood": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "kind",
+        "target",
+        "host",
+        "credential",
+        "status",
+        "reason",
+        "artifact",
+        "warnings",
+        "removed",
+        "policy",
+        "previousGood"
+      ]
+    },
+    "rollback": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "Infrastructure",
+            "ResourceSet"
+          ]
+        },
+        "target": {
+          "type": "string"
+        },
+        "host": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "rolled-back",
+            "unchanged",
+            "unavailable",
+            "failed",
+            "not-attempted"
+          ]
+        },
+        "to": {
+          "type": "string"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/change"
+          }
+        },
+        "error": {
+          "type": "string"
+        },
+        "becauseOf": {
+          "$ref": "#/$defs/stageId"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "kind",
+        "target",
+        "host",
+        "status"
+      ]
+    }
+  }
+}
