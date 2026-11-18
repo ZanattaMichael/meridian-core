@@ -1807,7 +1807,7 @@ named endpoints can stand beside. Validation checks the credential's type
 against the endpoint's kind (`aws`, `azure` or `gcp` for a cloud,
 `kubeconfig` for a cluster) and that a ResourceSet names one identity, host
 or endpoint. A target declares `Capabilities::cloud_credentials` (protocol
-field 6) and the core refuses a cloud credential for one that does not,
+field 7) and the core refuses a cloud credential for one that does not,
 naming the ones that do. Built for `terraform`, `opentofu`, `pulumi`,
 `cloudformation` and `packer` with one SDK module (`meridian_sdk::cloud`):
 `check_cloud_credential` refuses at compile what the tool cannot take (an

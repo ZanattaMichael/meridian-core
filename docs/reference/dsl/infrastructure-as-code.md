@@ -143,6 +143,19 @@ These tools have no handlers. What each can be made to do instead:
 Refused on every target in the segment. There is no node, and no moment on it,
 to check a condition.
 
+## `adopt`
+
+The tool's own identifier of a thing that already exists, so the tool takes it
+into its state instead of creating it. See
+[adopting what exists](resources.md#adopting-what-exists).
+
+| Target | `adopt` is |
+|---|---|
+| `terraform`, `opentofu` | an `import` block. Only on a managed resource |
+| `pulumi` | the resource's `import` option |
+| `bicep`, `arm` | accepted with a warning, and changes nothing: Resource Manager updates a resource of the same name in place |
+| `cloudformation`, `packer` | refused |
+
 ## Outputs
 
 An output names a value the tool reports once the document is applied:

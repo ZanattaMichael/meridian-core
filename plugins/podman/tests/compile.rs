@@ -55,6 +55,7 @@ fn the_plugin_says_what_it_is() {
             secrets: true,
             credentials: true,
             cloud_credentials: false,
+            adopt: meridian_sdk::Adoption::None,
         }
     );
     assert_eq!(

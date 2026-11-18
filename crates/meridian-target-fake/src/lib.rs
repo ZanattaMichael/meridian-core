@@ -40,7 +40,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 use meridian_sdk::{
-    canonical_map, decode_map, serve, Applied, Artifact, Capabilities, Category, Change,
+    canonical_map, decode_map, serve, Adoption, Applied, Artifact, Capabilities, Category, Change,
     ChangeAction, CompileError, Data, DocumentKind, Emitted, Emitter, ImportError, ImportFormat,
     ImportNote, ImportSource, Imported, ImportedDocument, ImportedResource, Importer, Log,
     NoteLevel, Operations, Output, ParamKind, ParamSchema, Plan, Plugin, ResourceGraph,
@@ -70,6 +70,15 @@ impl Emitter for Fake {
             // A cloud credential is handed over the same way as a host's:
             // the fake has no provider to tell, so it records the handover.
             cloud_credentials: std::env::var("FAKE_SECRETS").as_deref() != Ok("none"),
+            // Adopts as a stateful tool does: the identifier is written
+            // beside the file, and the first plan reports an adoption.
+            // FAKE_ADOPT stands it in for a target that adopts by
+            // converging, or for one that cannot adopt.
+            adopt: match std::env::var("FAKE_ADOPT").as_deref() {
+                Ok("none") => Adoption::None,
+                Ok("converge") => Adoption::Converge,
+                _ => Adoption::Import,
+            },
         }
     }
 
@@ -123,6 +132,12 @@ impl Emitter for Fake {
                 .artifact
                 .files
                 .insert(format!("files/{}", resource.id), content);
+            if !resource.adopt.is_empty() && self.capabilities().adopt == Adoption::Import {
+                emitted.artifact.files.insert(
+                    format!("{ADOPT_DIR}{}", resource.id),
+                    resource.adopt.clone(),
+                );
+            }
         }
         // The credential the host, or the cloud, is reached with: what a
         // compile knows of it, which is never a value.
@@ -337,10 +352,21 @@ fn read_state(work_dir: &Path) -> Result<BTreeMap<String, Value>, RunError> {
     }
 }
 
+/// Where a compile writes the identifier a resource adopts. It is the
+/// tool's import, not a file it manages, so a plan never reports it.
+const ADOPT_DIR: &str = "adopt/";
+
 fn diff(state: &BTreeMap<String, Value>, artifact: &Artifact) -> Vec<Change> {
     let mut changes = Vec::new();
     for (path, content) in &artifact.files {
+        if path.starts_with(ADOPT_DIR) {
+            continue;
+        }
+        let adopted = path
+            .strip_prefix("files/")
+            .is_some_and(|id| artifact.files.contains_key(&format!("{ADOPT_DIR}{id}")));
         let action = match state.get(path) {
+            None if adopted => ChangeAction::Adopt,
             None => ChangeAction::Create,
             Some(Value::String(old)) if old == content => continue,
             Some(_) => ChangeAction::Update,
@@ -352,7 +378,7 @@ fn diff(state: &BTreeMap<String, Value>, artifact: &Artifact) -> Vec<Change> {
         });
     }
     for path in state.keys() {
-        if !artifact.files.contains_key(path) {
+        if !path.starts_with(ADOPT_DIR) && !artifact.files.contains_key(path) {
             changes.push(Change {
                 resource: path.clone(),
                 action: ChangeAction::Delete,

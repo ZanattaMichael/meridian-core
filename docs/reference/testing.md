@@ -206,7 +206,7 @@ expectation that does not hold; all of them are reported.
 | `message` | The refusal's message holds this text |
 | `files` | What the files the document compiled to hold, by the path the plugin gives each. Each file takes `contains` (text, or a list of texts, each of which must appear), `notContains`, `equals` (the whole file, exactly) and `matches` (a [pattern](dsl/expressions.md#patterns), or a list; the same patterns as `regexMatch`) |
 | `warnings` | Text, or a list of texts, each of which some warning of the compile holds |
-| `changes` | In a plan case, changes that must be among the tool's: each names an `action` (`create`, `update`, `delete`, `replace`), a `resource` (the id, or the tool's own name for what changes, as `meridian plan` prints it), or both |
+| `changes` | In a plan case, changes that must be among the tool's: each names an `action` (`create`, `update`, `delete`, `replace`, `adopt`), a `resource` (the id, or the tool's own name for what changes, as `meridian plan` prints it), or both |
 | `changeCount` | In a plan case, exactly how many changes the tool reports. A tool that cannot preview fails this |
 
 A document that exists only to be refused is still an error to

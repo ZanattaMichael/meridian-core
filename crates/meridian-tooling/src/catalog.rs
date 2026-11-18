@@ -72,6 +72,13 @@ impl Target {
         }
     }
 
+    /// Whether the plugin itself describes the type `name` param by param,
+    /// so that no tool schema is needed for it: Meridian's own types, such
+    /// as `provider` on Terraform or `package` on Ansible.
+    pub fn plugin_describes(&self, name: &str) -> bool {
+        self.declared.iter().any(|t| t.r#type == name && !t.open)
+    }
+
     /// Adds the types a tool described. A type the plugin described param
     /// by param under the same exact name is kept, since the plugin is the
     /// one that compiles it. A type the plugin only named, leaving its

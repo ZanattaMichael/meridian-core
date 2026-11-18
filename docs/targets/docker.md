@@ -40,6 +40,7 @@ On this page:
 | `dependsOn` | Between two services, Compose's own `depends_on`, waiting for the other service to be healthy when it declares a healthcheck. Anything else Compose already creates before it starts a service |
 | `notifies` | The action `restart`, aimed at a service. Native from a service, synthetic from anything else. See [Notifications](#notifications) |
 | `runtimeWhen` | No. Refused |
+| `adopt` | No. Refused: Compose refuses a container it did not create |
 | `state: absent` | No. Remove the resource from the document; bringing the project up removes services the document no longer declares |
 | Plan | Yes: the file is compared with what Docker is running. See [Running](#running) |
 | Outputs | Yes: a published port, or a path into `docker inspect` |

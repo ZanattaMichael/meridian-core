@@ -35,8 +35,8 @@ use std::collections::BTreeSet;
 
 use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
-    holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
-    Resource, ResourceGraph,
+    holds_secret, Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter,
+    Position, Resource, ResourceGraph,
 };
 
 /// The parameter the secret `name` is handed over as: `meridian_secret_<name>`.
@@ -185,6 +185,7 @@ impl Emitter for Bicep {
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             secrets: true,
+            adopt: Adoption::Converge,
             ..Capabilities::default()
         }
     }

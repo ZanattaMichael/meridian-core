@@ -126,6 +126,7 @@ fn the_host_learns_what_the_plugin_is_from_the_plugin() {
             secrets: false,
             credentials: false,
             cloud_credentials: false,
+            adopt: meridian_sdk::Adoption::None,
         }
     );
     assert!(

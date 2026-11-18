@@ -512,6 +512,7 @@ fn no_target_panics_on_a_malformed_tree() {
                 Value::String("${probe.x}".to_owned()),
             )]),
             runtime_when: "x".to_owned(),
+            adopt: String::new(),
             index: 0,
             pos: Position::default(),
         });

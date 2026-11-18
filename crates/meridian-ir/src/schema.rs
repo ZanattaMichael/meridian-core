@@ -335,6 +335,14 @@ pub const RESOURCE: Shape = Shape {
             "A condition written in the tool's own language and checked on the node at \
              the moment of apply. Only a target that can express it accepts it.",
         ),
+        text(
+            "adopt",
+            false,
+            Role::None,
+            "The tool's own identifier of a thing that already exists, such as \
+             `i-0abc123` for an `aws_instance`. The tool takes it under management \
+             instead of creating it. Only a target that can adopt accepts it.",
+        ),
         Field {
             name: "params",
             doc: "The resource's settings. The target and the resource type decide which \

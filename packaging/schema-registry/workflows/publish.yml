@@ -1,0 +1,261 @@
+# The weekly schema bundles, for the meridian-schemas repository. Copy this
+# file to .github/workflows/publish.yml there; see README.md in this folder.
+#
+# Three jobs, each with the least it needs:
+#   bump    (weekly) looks up each upstream's newest version and opens one
+#           pull request that moves catalogue.yaml. Nothing else runs on what
+#           it found.
+#   build   (on that pull request, on a merge, or by hand) syncs and packs
+#           every bundle from the catalogue as merged, with no secrets, and
+#           writes what changed into the run's summary.
+#   publish (on a merge or by hand, never on a pull request) runs in the
+#           `schemas` environment, whose required reviewer approves it. It
+#           alone holds the signing key and the registry token: it signs each
+#           bundle, pushes it with the index, and attests where it came from.
+name: publish schemas
+
+on:
+  schedule:
+    - cron: '17 4 * * 1'
+  pull_request:
+    paths: ['catalogue.yaml', 'seeds/**', 'tools/**', '.github/workflows/publish.yml']
+  push:
+    branches: [main]
+    paths: ['catalogue.yaml', 'seeds/**']
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'Build only these bundles, as target/name separated by commas (empty: all)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  bump:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install pyyaml
+      - name: Look up newer versions
+        id: bump
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo 'summary<<EOF'
+            python3 tools/catalogue.py bump --write
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          branch: bump/weekly
+          title: Move the schema catalogue to the newest upstream versions
+          commit-message: Move the schema catalogue to the newest upstream versions
+          body: |
+            The weekly look at each upstream found:
+
+            ${{ steps.bump.outputs.summary }}
+
+            The `build` check on this pull request packs every bundle at the new
+            versions and lists, in its run summary, the types and params that each
+            one adds or removes against what is published now. Nothing is
+            published until this is merged and the `publish` job is approved.
+
+  plan:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      core: ${{ steps.matrix.outputs.core }}
+      ref: ${{ steps.matrix.outputs.ref }}
+      registry: ${{ steps.matrix.outputs.registry }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install pyyaml
+      - id: matrix
+        env:
+          ONLY: ${{ inputs.only }}
+        run: |
+          echo "matrix=$(python3 tools/catalogue.py matrix)" >> "$GITHUB_OUTPUT"
+          python3 - >> "$GITHUB_OUTPUT" <<'PY'
+          import yaml
+          c = yaml.safe_load(open("catalogue.yaml"))
+          print(f"core={c['meridian']['repository']}")
+          print(f"ref={c['meridian']['ref']}")
+          print(f"registry={c['registry']}")
+          PY
+
+  build:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    name: build ${{ matrix.target }}/${{ matrix.name }}:${{ matrix.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.plan.outputs.core }}
+          ref: ${{ needs.plan.outputs.ref }}
+          path: core
+      - run: pip install pyyaml
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+      - name: Build meridian and the target's plugin
+        working-directory: core
+        run: cargo build --locked --release -p meridian-cli -p "meridian-target-${{ matrix.target }}"
+
+      # Each target's tool, at the version being built.
+      - if: matrix.target == 'terraform'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - if: matrix.target == 'pulumi'
+        uses: pulumi/actions@v6
+      - if: matrix.target == 'kubernetes'
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: schemas
+          node_image: kindest/node:v${{ matrix.version }}
+      - if: matrix.target == 'ansible'
+        run: |
+          pip install "ansible-core==$(python3 tools/catalogue.py show ansible ansible.builtin version)"
+          if [ "${{ matrix.name }}" != ansible.builtin ]; then
+            ansible-galaxy collection install "${{ matrix.name }}==${{ matrix.version }}"
+          fi
+
+      - name: Sync and pack
+        env:
+          MERIDIAN_PLUGIN_DIR: ${{ github.workspace }}/core/target/release
+          MERIDIAN_ANNOTATIONS: 'off'
+        run: |
+          work="$RUNNER_TEMP/bundle"
+          python3 tools/catalogue.py seed "${{ matrix.target }}" "${{ matrix.name }}" "$work"
+          cd "$work"
+          meridian="$GITHUB_WORKSPACE/core/target/release/meridian"
+          "$meridian" schema sync --all-types --prefer tool --no-lock seed.yaml
+          prefixes=()
+          for p in $(python3 "$GITHUB_WORKSPACE/tools/catalogue.py" show "${{ matrix.target }}" "${{ matrix.name }}" prefix); do
+            prefixes+=(--prefix "$p")
+          done
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          "$meridian" schema pack "${{ matrix.target }}" --name "${{ matrix.name }}" \
+            --version "${{ matrix.version }}" "${prefixes[@]}" \
+            --out "$GITHUB_WORKSPACE/out/${{ matrix.target }}-${{ matrix.name }}-${{ matrix.version }}.tar.gz"
+
+      - name: What changed against what is published
+        env:
+          MERIDIAN_ANNOTATIONS: 'off'
+        run: |
+          meridian="$GITHUB_WORKSPACE/core/target/release/meridian"
+          new="out/${{ matrix.target }}-${{ matrix.name }}-${{ matrix.version }}.tar.gz"
+          old="$RUNNER_TEMP/published.tar.gz"
+          # The newest published bundle of this name, if any: read from the
+          # registry's index, which anyone can read.
+          oras_version=1.2.0
+          curl -sSL "https://github.com/oras-project/oras/releases/download/v${oras_version}/oras_${oras_version}_linux_amd64.tar.gz" | tar -xz -C "$RUNNER_TEMP" oras
+          registry="${{ needs.plan.outputs.registry }}"
+          if "$RUNNER_TEMP/oras" pull "$registry/index:latest" -o "$RUNNER_TEMP/index" 2>/dev/null; then
+            previous=$(python3 - "$RUNNER_TEMP/index/index.json" <<'PY'
+          import json, sys
+          index = json.load(open(sys.argv[1]))
+          mine = [b for b in index["bundles"] if b["target"] == "${{ matrix.target }}" and b["name"] == "${{ matrix.name }}"]
+          mine.sort(key=lambda b: b["version"])
+          print(mine[-1]["version"] if mine else "")
+          PY
+            )
+            if [ -n "$previous" ]; then
+              "$RUNNER_TEMP/oras" pull "$registry/${{ matrix.target }}/${{ matrix.name }}:$previous" -o "$RUNNER_TEMP/previous" || true
+              cp "$RUNNER_TEMP/previous/"*.tar.gz "$old" 2>/dev/null || true
+            fi
+          fi
+          python3 tools/catalogue.py diff "$old" "$new" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.target }}-${{ matrix.name }}
+          path: out/*.tar.gz
+          retention-days: 7
+
+  publish:
+    # A pull request builds and shows; only what is merged is published.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    # The reviewer of this environment approves every publish. It holds
+    # MERIDIAN_SCHEMAS_KEY (the secret key from `meridian signing keygen`).
+    environment: schemas
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.plan.outputs.core }}
+          ref: ${{ needs.plan.outputs.ref }}
+          path: core
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+      - run: cargo build --locked --release -p meridian-cli
+        working-directory: core
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bundle-*
+          path: built
+          merge-multiple: true
+      - name: Sign, push and list each bundle
+        env:
+          MERIDIAN_SCHEMAS_KEY: ${{ secrets.MERIDIAN_SCHEMAS_KEY }}
+          GHCR_TOKEN: ${{ github.token }}
+          MERIDIAN_ANNOTATIONS: 'off'
+        run: |
+          meridian="$GITHUB_WORKSPACE/core/target/release/meridian"
+          key="$RUNNER_TEMP/schemas.key"
+          umask 077
+          printf '%s\n' "$MERIDIAN_SCHEMAS_KEY" > "$key"
+          # The login meridian sends, declared the way any project declares
+          # one; the token stays in the environment.
+          cat > meridian.yaml <<YAML
+          apiVersion: meridian/v1
+          kind: Module
+          metadata:
+            name: meridian-schemas
+          spec:
+            credentials:
+              - name: ghcr
+                type: registry
+                server: ghcr.io
+                user: ${{ github.actor }}
+                password:
+                  from: env
+                  key: GHCR_TOKEN
+          YAML
+          mkdir -p signed
+          for built in built/*.tar.gz; do
+            # The bundle the build made, signed here and nowhere else.
+            "$meridian" schema sign "$built" --key "$key" --out "signed/$(basename "$built")"
+            "$meridian" schema push "signed/$(basename "$built")" "${{ needs.plan.outputs.registry }}" --credential ghcr
+          done
+          rm -f "$key"
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: signed/*.tar.gz

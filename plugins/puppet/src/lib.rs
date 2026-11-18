@@ -41,8 +41,8 @@ use std::collections::BTreeMap;
 
 use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, SshTakes, Value,
+    Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph, SshTakes, Value,
 };
 
 /// What `bolt` can take of the credential a document reaches its host as:
@@ -222,6 +222,7 @@ impl Emitter for Puppet {
             secrets: true,
             credentials: true,
             cloud_credentials: false,
+            adopt: Adoption::Converge,
         }
     }
     fn rules(&self) -> Vec<Rule> {

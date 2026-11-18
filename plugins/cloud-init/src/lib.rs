@@ -37,8 +37,8 @@ use std::collections::BTreeMap;
 
 use meridian_sdk::rules::Rule;
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, Value, Warning,
+    Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph, Value, Warning,
 };
 
 pub use emit::{META_DATA_PATH, USER_DATA_PATH};
@@ -225,6 +225,7 @@ impl Emitter for CloudInit {
             secrets: false,
             credentials: false,
             cloud_credentials: false,
+            adopt: Adoption::None,
         }
     }
     fn rules(&self) -> Vec<Rule> {

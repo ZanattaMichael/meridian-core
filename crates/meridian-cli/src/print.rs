@@ -416,6 +416,7 @@ pub(crate) fn change_line(change: &meridian_sdk::Change) -> String {
         ChangeAction::Update => '~',
         ChangeAction::Delete => '-',
         ChangeAction::Replace => '!',
+        ChangeAction::Adopt => '=',
     };
     format!("{sign} {change}")
 }

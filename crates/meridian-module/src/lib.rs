@@ -32,9 +32,15 @@ mod project;
 mod signature;
 
 pub use integrity::hash_dir;
-pub use lock::{Lock, Locked, LockedSchemas, LOCK_FILE, LOCK_VERSION};
-pub use manifest::{valid_name, Manifest, Requirement, Source, MANIFEST_FILE};
-pub use oci::{push, Pushed, ARTIFACT_TYPE, LAYER_MEDIA_TYPE};
+pub use lock::{valid_digest, Lock, Locked, LockedBundle, LockedSchemas, LOCK_FILE, LOCK_VERSION};
+pub use manifest::{
+    valid_name, Manifest, Requirement, SchemaRegistry, SchemaSettings, Source, MANIFEST_FILE,
+};
+pub use oci::{
+    list_tags, pull_artifact, push, push_artifact, valid_tag, Artifact, ArtifactKind, Pushed,
+    ARTIFACT_TYPE, LAYER_MEDIA_TYPE, MODULE_ARTIFACT, SCHEMA_BUNDLE_ARTIFACT,
+    SCHEMA_INDEX_ARTIFACT,
+};
 pub use pack::{pack, unpack, MAX_UNPACKED_BYTES};
 pub use project::{
     install, resolve_login, verify, Change, Check, Mode, Modules, Project, Report,

@@ -229,7 +229,7 @@ def architecture() -> str:
     ]))
     p.append(chip_row(L + 28, core_y + 96, [
         "secrets in locked memory", "policy checks", "reports and sinks", "plugin signatures",
-        "rollback and drift", "import", "schema sync",
+        "rollback and drift", "import", "adopt", "schema sync",
     ], TEXT_SOFT))
     for i, cx in enumerate(centres):
         p.append(flow(f"M{cx:g} {top + card_h}L{cx:g} {core_y}", WHITE if i < 3 else TEXT_SOFT, delay=i * 0.9, seconds=3 if i < 3 else 4))
@@ -689,6 +689,82 @@ def test_flow() -> str:
     return doc(W, H, "meridian test: a Test document names documents and cases; each case compiles or plans them with its data in a scratch directory and checks the outcome, the files, the refusal and the changes", "".join(p))
 
 
+def schema_bundles() -> str:
+    """Schema bundles: published once from the tools, then synced by every project without them."""
+    W, H = 1200, 560
+    p: list[str] = []
+    # Publishing, along the top.
+    p.append(heading(40, 40, "Published once, where the tools are"))
+    top = [
+        ("catalogue.yaml", ["each upstream at one", "exact version, moved", "by a reviewed PR"], WHITE, False),
+        ("build", ["no secrets:", "sync --all-types", "and pack each bundle"], IAC, False),
+        ("publish", ["a reviewer approves;", "sign, push, update", "the index, attest"], PIPE, False),
+    ]
+    for i, (title, body, colour, mono) in enumerate(top):
+        x = 40 + i * 250
+        p.append(card(x, 56, 220, 118, title, body, colour, 16, 12.5, mono))
+        if i > 0:
+            p.append(flow(f"M{x - 30} 115L{x} 115", colour, delay=i * 0.5, seconds=1.6))
+    # The registry, top right.
+    p.append(rect(800, 56, 360, 118, WELL, CON, 18, 1.4))
+    p.append(f'<rect x="800" y="56" width="360" height="5" rx="2.5" fill="{CON}"/>')
+    p.append(text(980, 86, "an OCI registry, or a directory", 16, 700, WHITE))
+    p.append(lines(822, 112, [
+        "terraform/hashicorp-aws:5.60.0",
+        "kubernetes/core:1.31.0",
+        "index:latest   every bundle, its types",
+    ], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(flow("M770 115L800 115", CON, delay=1.5, seconds=1.6))
+    # Using, along the bottom.
+    by = 280
+    p.append(heading(40, by - 16, "Used everywhere else, with no tool"))
+    p.append(card(40, by, 250, 130, "meridian.yaml", ["spec:", "  schemas:", "    registry: ghcr.io/…", "    signatures: require"], WHITE, 16, 12.5, True))
+    p.append(card(330, by, 300, 130, "meridian schema sync", ["the types the documents use", "→ the newest bundle that", "describes each, from the index", "→ its signature checked"], LINE, 16, 12.5))
+    p.append(flow(f"M290 {by + 65}L330 {by + 65}", WHITE, delay=0.2, seconds=1.6))
+    p.append(flow(f"M980 174L980 222L480 222L480 {by}", CON, delay=0.6, seconds=3.0))
+    p.append(card(670, by, 230, 130, "the cache", ["types used: in full", "the rest: by name", "the same bytes on", "every machine"], ORC, 16, 12.5))
+    p.append(flow(f"M630 {by + 65}L670 {by + 65}", ORC, delay=1.0, seconds=1.6))
+    p.append(card(940, by, 220, 130, "meridian.lock", ["each bundle by", "reference and digest;", "sync --locked takes", "exactly those"], GREEN, 16, 12.5))
+    p.append(flow(f"M900 {by + 65}L940 {by + 65}", GREEN, delay=1.4, seconds=1.6))
+    # The fallback, and the editor.
+    fy = 448
+    p.append(chip(330, fy, 300, "no bundle describes a type: ask the tool", CM, 30, 12.5))
+    p.append(flow(f"M480 {by + 130}L480 {fy}", CM, delay=1.8, seconds=1.6))
+    p.append(chip(670, fy, 490, "the editor, lint and the JSON Schema read the cache as before", LINE, 30, 12.5))
+    p.append(flow(f"M785 {by + 130}L785 {fy}", ORC, delay=2.2, seconds=1.6))
+    p.append(caption(W, H, "A bundle is data, signed and pinned by digest: it can make completion wrong, never a deployment."))
+    return doc(W, H, "Schema bundles: a catalogue is built into signed bundles and pushed with an index to an OCI registry; a project's schema sync picks the newest bundle for each type its documents use, checks the signature, writes the cache and pins each bundle in meridian.lock, and asks the tool only for what no bundle describes", "".join(p))
+
+
+def adopt_flow() -> str:
+    """adopt: one field on a resource, and what each kind of target makes of it."""
+    W, H = 1200, 470
+    p: list[str] = []
+    p.append(card(40, 60, 300, 150, "a resource", None, WHITE, 17))
+    p.append(lines(80, 112, ["- id: logs", "  type: aws_s3_bucket", "  adopt: example-logs", "  params:", "    bucket: example-logs"], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(heading(400, 48, "What the target says it does with adopt"))
+    kinds = [
+        ("import", ["compiled into the tool's own import:", "an import block, Pulumi's import", "option. The first plan says adopt,", "the apply puts it in the state"], IAC, "Terraform · OpenTofu · Pulumi"),
+        ("converge", ["accepted with a warning, and", "changes nothing: the tool keeps", "no state and makes the thing what", "the document says either way"], CM, "Ansible · Puppet · Chef · Salt · DSC · Kubernetes · Bicep · ARM"),
+        ("none", ["refused by the core before the", "plugin is asked, so no tool", "creates a second thing beside", "the one that exists"], RED, "every other target, and any plugin built before adopt"),
+    ]
+    for i, (name, body, colour, who) in enumerate(kinds):
+        x = 400 + i * 265
+        p.append(card(x, 60, 245, 150, name, body, colour, 16, 12.5))
+    p.append(flow("M340 135L400 135", WHITE, delay=0.2, seconds=1.6))
+    # Who is which, below.
+    y = 250
+    p.append(heading(40, y - 12, "Which targets"))
+    for i, (name, _, colour, who) in enumerate(kinds):
+        p.append(chip(40, y + i * 40, 110, name, colour, 28, 13, True))
+        p.append(text(165, y + i * 40 + 19, who, 13, 400, TEXT_SOFT, "start"))
+    p.append(card(760, 250, 400, 108, "meridian plan", None, GREEN, 16))
+    p.append(lines(790, 302, ["= adopt logs: aws_s3_bucket", "~ update app: aws_subnet, adopted"], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(text(960, 346, "an import that also changes the thing is reported as the change", 11.5, 400, TEXT_SOFT))
+    p.append(caption(W, H, "One field moves between tools: a stateful tool imports the thing, a converging tool already takes it as it finds it."))
+    return doc(W, H, "adopt: a resource names the tool's identifier of a thing that exists; a stateful target compiles it into the tool's import and the plan reports adopt, a converging target accepts it and changes nothing, and any other target is refused before its plugin is asked", "".join(p))
+
+
 GRAPHIC_FILES = {
     "meridian-architecture.svg": architecture,
     "meridian-compile-pipeline.svg": compile_pipeline,
@@ -700,6 +776,8 @@ GRAPHIC_FILES = {
     "meridian-modules-flow.svg": modules_flow,
     "meridian-saved-plan.svg": saved_plan,
     "meridian-test-flow.svg": test_flow,
+    "meridian-schema-bundles.svg": schema_bundles,
+    "meridian-adopt.svg": adopt_flow,
 }
 
 # ---------------------------------------------------------------------------

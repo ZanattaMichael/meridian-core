@@ -51,6 +51,7 @@ fn the_plugin_says_what_it_is() {
         Capabilities {
             secrets: true,
             cloud_credentials: true,
+            adopt: meridian_sdk::Adoption::Import,
             ..Capabilities::default()
         }
     );
@@ -568,4 +569,38 @@ fn a_cloud_credential_leaves_nothing_in_the_program_and_a_role_is_refused() {
         "{}",
         err.msg
     );
+}
+fn adopt_becomes_the_import_option() {
+    let text = program(
+        "  resources:\n    - id: logs\n      type: aws:s3/bucket:Bucket\n      adopt: example-logs\n      params:\n        bucket: example-logs\n        resourceOptions: {protect: true}\n",
+    );
+    assert!(
+        text.contains("    options:\n      import: example-logs\n      protect: true\n"),
+        "{text}"
+    );
+}
+
+#[test]
+fn adopt_that_contradicts_the_import_option_is_refused() {
+    let e = refusal(
+        "  resources:\n    - id: logs\n      type: aws:s3/bucket:Bucket\n      adopt: example-logs\n      params:\n        resourceOptions: {import: other-logs}\n",
+    );
+    assert_eq!(e.rule, "invalid-adopt", "{e}");
+    // Saying the same thing twice is not a contradiction.
+    program(
+        "  resources:\n    - id: logs\n      type: aws:s3/bucket:Bucket\n      adopt: example-logs\n      params:\n        resourceOptions: {import: example-logs}\n",
+    );
+}
+
+#[test]
+fn adopt_on_a_configuration_value_or_a_provider_is_refused() {
+    for (r#type, params) in [
+        ("config", "{type: string}"),
+        ("pulumi:providers:aws", "{region: us-east-1}"),
+    ] {
+        let e = refusal(&format!(
+            "  resources:\n    - id: x\n      type: {type}\n      adopt: whatever\n      params: {params}\n"
+        ));
+        assert_eq!(e.rule, "invalid-adopt", "{e}");
+    }
 }

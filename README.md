@@ -81,7 +81,9 @@ A `plan` or `apply` holds a lock on that state, so two runs cannot collide, and 
 recorded: `meridian status` shows the last one step by step, and `meridian apply --resume`
 continues an apply that failed from the stage that failed. `--on-failure rollback` and
 `meridian rollback` put back what an apply changed, and `meridian drift` says whether what was
-applied is still what is there. With `--policy`, a `plan` or `apply` first asks a policy, written
+applied is still what is there. A resource's `adopt` takes a thing that already exists under
+management instead of creating another ([adopting what exists](docs/reference/dsl/resources.md#adopting-what-exists)).
+With `--policy`, a `plan` or `apply` first asks a policy, written
 in Rego for Open Policy Agent, whether each change may be made, and an apply that is denied
 applies nothing ([policy checks](docs/reference/policy.md)). The record can be kept in a shared place with `--backend`. See
 [running safely](docs/concepts/run-safety.md).
@@ -124,6 +126,7 @@ meridian fmt .                              # one standard layout; never changes
 meridian lint --strict .                    # every error in a project, plus probable mistakes
 meridian schema -o meridian.schema.json     # a JSON Schema, for editors that only know YAML
 meridian schema sync .                      # cache each tool's own types, for completion and checking
+meridian schema sync --locked .             # the same, from signed schema bundles the lock pins: no tool needed
 meridian lsp                                # the language server, started by your editor
 meridian mcp                                # the MCP server, started by an AI client
 ```
@@ -133,7 +136,8 @@ meridian mcp                                # the MCP server, started by an AI c
 The language server gives completion, hover documentation, errors as you type, go to
 definition, rename, formatting and quick fixes, with resource types and params read from
 the plugins you have installed, and a tool's own types (`aws_instance`, `apps/v1/Deployment`)
-read once from the tool by `meridian schema sync` and cached in the project. There is a [Visual Studio Code extension](docs/tooling/vscode.md)
+read once from the tool by `meridian schema sync` and cached in the project, or taken ready-made from
+signed [schema bundles](docs/tooling/schema-bundles.md) in an OCI registry. There is a [Visual Studio Code extension](docs/tooling/vscode.md)
 in [`editors/vscode`](editors/vscode), and recipes for [other editors](docs/tooling/other-editors.md).
 Start at [Tools for writing Meridian documents](docs/tooling/index.md).
 

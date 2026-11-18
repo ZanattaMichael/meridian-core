@@ -56,8 +56,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
-    holds_secret, Artifact, Capabilities, Category, CloudTakes, CompileError, Data, Emitted,
-    Emitter, Position, Resource, ResourceGraph, Value,
+    holds_secret, Adoption, Artifact, Capabilities, Category, CloudTakes, CompileError, Data,
+    Emitted, Emitter, Position, Resource, ResourceGraph, Value,
 };
 
 pub use emit::{BUILD_PATH, CONFIG_PATH, MANIFEST_PATH};
@@ -305,6 +305,7 @@ impl Emitter for Packer {
             secrets: true,
             credentials: false,
             cloud_credentials: true,
+            adopt: Adoption::None,
         }
     }
 

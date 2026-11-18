@@ -85,7 +85,14 @@ fn an_empty_file_offers_whole_documents_and_the_top_level_fields() {
 fn fields_come_from_the_language_and_leave_out_what_is_already_there() {
     assert_eq!(
         labels(&format!("{HEAD}      |")),
-        ["state", "when", "runtimeWhen", "dependsOn", "notifies"]
+        [
+            "state",
+            "when",
+            "runtimeWhen",
+            "adopt",
+            "dependsOn",
+            "notifies"
+        ]
     );
     assert_eq!(
         labels("kind: ResourceSet\nspec:\n  |"),

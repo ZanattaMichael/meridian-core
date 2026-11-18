@@ -49,6 +49,7 @@ fn the_plugin_describes_itself() {
             secrets: true,
             credentials: true,
             cloud_credentials: false,
+            adopt: meridian_sdk::Adoption::Converge,
         }
     );
     assert_eq!(

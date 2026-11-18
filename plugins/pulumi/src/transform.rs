@@ -280,6 +280,9 @@ fn entry(
         }
         refs.remove(&r.id);
     }
+    if !r.adopt.is_empty() {
+        adopt(r, kind, &token, &mut options)?;
+    }
 
     Ok(Entry {
         kind,
@@ -291,6 +294,49 @@ fn entry(
         refs,
         pos: r.pos.clone(),
     })
+}
+
+/// A resource's `adopt` becomes Pulumi's own `import` resource option, which
+/// takes the thing into the stack on the next `pulumi up`.
+fn adopt(
+    r: &Resource,
+    kind: Kind,
+    token: &str,
+    options: &mut BTreeMap<String, Value>,
+) -> Result<(), CompileError> {
+    if kind != Kind::Managed || token.starts_with("pulumi:providers:") {
+        return Err(refuse(
+            r,
+            &rules::INVALID_ADOPT,
+            format!(
+                "adopt {:?}: only a resource can be adopted, and this is a {}: Pulumi \
+                 imports resources, not providers, function calls or configuration values",
+                r.adopt,
+                if kind == Kind::Managed {
+                    "provider"
+                } else {
+                    kind.noun()
+                }
+            ),
+        ));
+    }
+    let id = Value::String(r.adopt.clone());
+    match options.get("import") {
+        Some(written) if *written != id => Err(refuse(
+            r,
+            &rules::INVALID_ADOPT,
+            format!(
+                "adopt {:?} and {RESOURCE_OPTIONS}.import {} name two things; keep adopt \
+                 and remove the option",
+                r.adopt,
+                written.canonical()
+            ),
+        )),
+        _ => {
+            options.insert("import".to_owned(), id);
+            Ok(())
+        }
+    }
 }
 
 /// The rules of a configuration value's declaration.

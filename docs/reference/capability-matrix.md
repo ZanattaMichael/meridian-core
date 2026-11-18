@@ -37,6 +37,12 @@ compiled, with the reason. Each target's own page says how it does what it can.
   it hands the credential to its tool in the tool's own environment, the
   one way the providers take a login, and the plan line says so. See
   [Reaching a cloud as a credential](dsl/credentials.md#reaching-a-cloud-as-a-credential).
+- **adopt** is what the target does with a resource's `adopt`: *import*
+  compiles it into the tool's own import, so the tool takes the existing
+  thing into its state; *converge* means the tool keeps no state and makes
+  the thing what the document says whether it existed or not, so `adopt`
+  changes nothing; *no* refuses it. See
+  [Adopting what exists](dsl/resources.md#adopting-what-exists).
 - **import** is what `meridian import` can read of the tool's existing
   configuration and turn into a document for the target. See
   [Importing existing configuration](../operations/importing.md).
@@ -44,23 +50,23 @@ compiled, with the reason. Each target's own page says how it does what it can.
   `meridian schema sync` can cache them for the editor tools. See
   [Tool schemas](../tooling/schema-sync.md).
 
-| Target | Category | Resource types | notifies | runtimeWhen | plan | saved plan | apply | outputs | inputs | secrets | credentials | cloud | import | schemas |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| [ansible](../targets/ansible.md) | configuration-management | `‹namespace›.‹collection›.‹module›`, `exec`, `file`, `group`, `package`, `service`, `user` | native | yes | yes | no | yes | no | no | yes | yes | no | Ansible playbooks and task files | yes |
-| [arm](../targets/arm.md) | infrastructure-as-code | `‹Namespace›/‹type›`, `deployment`, `parameter` | no | no | yes | no | yes | yes | yes | yes | no | no | no | yes |
-| [bicep](../targets/bicep.md) | infrastructure-as-code | `‹Namespace›/‹type›@‹api-version›`, `deployment` | no | no | yes | no | yes | yes | no | yes | no | no | no | yes |
-| [chef](../targets/chef.md) | configuration-management | `‹resource›`, `exec`, `file`, `group`, `package`, `service`, `user` | native | yes | yes | no | yes | no | no | yes | yes | no | no | yes |
-| [cloud-init](../targets/cloud-init.md) | configuration-management | `‹module›`, `exec`, `file`, `group`, `package`, `service`, `user` | synthetic | no | yes | no | yes | yes | no | no | no | no | no | yes |
-| [cloudformation](../targets/cloudformation.md) | infrastructure-as-code | `‹Vendor›::‹Service›::‹Type›`, `stack` | no | no | yes | yes | yes | yes | no | yes | no | yes | no | yes |
-| [docker](../targets/docker.md) | containerization | `config`, `network`, `project`, `secret`, `service`, `volume` | native and synthetic | no | yes | no | yes | yes | no | yes | no | no | Compose files | yes |
-| [dsc](../targets/dsc.md) | configuration-management | `‹Module›/‹Resource›`, `runner` | native | yes | yes | no | yes | no | no | no | no | no | PowerShell DSC configurations; DSC v3 configuration documents and DscPipelineRunner projects | yes |
-| [helm](../targets/helm.md) | container-orchestration | `‹apiVersion›/‹Kind›`, `chart`, `kustomization`, `release`, `values` | synthetic | no | yes | no | yes | yes | no | yes | no | no | no | yes |
-| [kubernetes](../targets/kubernetes.md) | container-orchestration | `‹apiVersion›/‹Kind›`, `cluster` | synthetic | no | yes | no | yes | yes | no | yes | no | no | Kubernetes manifests | yes |
-| [opentofu](../targets/opentofu.md) | infrastructure-as-code | `‹provider›_‹type›`, `backend`, `data.‹type›`, `encryption`, `ephemeral.‹type›`, `local`, `module`, `provider`, `variable` | synthetic | no | yes | yes | yes | yes | yes | yes | no | yes | OpenTofu configuration files; OpenTofu configuration files in the JSON syntax | yes |
-| [openvox](../targets/openvox.md) | configuration-management | `‹module›::‹type›`, `‹type›`, `exec`, `file`, `group`, `package`, `service`, `user` | native | no | yes | no | yes | no | no | yes | yes | no | no | yes |
-| [packer](../targets/packer.md) | infrastructure-as-code | `data.‹type›`, `error-cleanup-provisioner.‹type›`, `local`, `plugin`, `post-processor.‹type›`, `provisioner.‹type›`, `source.‹builder›`, `variable` | no | no | yes | no | yes | yes | yes | yes | no | yes | no | no |
-| [podman](../targets/podman.md) | containerization | `build`, `container`, `image`, `kube`, `network`, `pod`, `volume` | native | no | yes | no | yes | yes | no | yes | yes | no | no | no |
-| [pulumi](../targets/pulumi.md) | infrastructure-as-code | `‹package›:‹module›:‹Type›`, `config`, `invoke.‹function›`, `stack` | no | no | yes | yes | yes | yes | yes | yes | no | yes | no | yes |
-| [puppet](../targets/puppet.md) | configuration-management | `‹module›::‹type›`, `‹type›`, `exec`, `file`, `group`, `package`, `service`, `user` | native | no | yes | no | yes | no | no | yes | yes | no | no | yes |
-| [salt](../targets/salt.md) | configuration-management | `‹module›.‹function›`, `exec`, `file`, `group`, `package`, `service`, `user` | native | yes | yes | no | yes | no | no | yes | yes | no | no | yes |
-| [terraform](../targets/terraform.md) | infrastructure-as-code | `‹provider›_‹type›`, `backend`, `data.‹type›`, `local`, `module`, `provider`, `variable` | synthetic | no | yes | yes | yes | yes | yes | yes | no | yes | Terraform configuration files; Terraform configuration files in the JSON syntax | yes |
+| Target | Category | Resource types | notifies | runtimeWhen | plan | saved plan | apply | outputs | inputs | secrets | credentials | cloud | adopt | import | schemas |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| [ansible](../targets/ansible.md) | configuration-management | `‹namespace›.‹collection›.‹module›`, `exec`, `file`, `group`, `package`, `service`, `user` | native | yes | yes | no | yes | no | no | yes | yes | no | converge | Ansible playbooks and task files | yes |
+| [arm](../targets/arm.md) | infrastructure-as-code | `‹Namespace›/‹type›`, `deployment`, `parameter` | no | no | yes | no | yes | yes | yes | yes | no | no | converge | no | yes |
+| [bicep](../targets/bicep.md) | infrastructure-as-code | `‹Namespace›/‹type›@‹api-version›`, `deployment` | no | no | yes | no | yes | yes | no | yes | no | no | converge | no | yes |
+| [chef](../targets/chef.md) | configuration-management | `‹resource›`, `exec`, `file`, `group`, `package`, `service`, `user` | native | yes | yes | no | yes | no | no | yes | yes | no | converge | no | yes |
+| [cloud-init](../targets/cloud-init.md) | configuration-management | `‹module›`, `exec`, `file`, `group`, `package`, `service`, `user` | synthetic | no | yes | no | yes | yes | no | no | no | no | no | no | yes |
+| [cloudformation](../targets/cloudformation.md) | infrastructure-as-code | `‹Vendor›::‹Service›::‹Type›`, `stack` | no | no | yes | yes | yes | yes | no | yes | no | yes | no | no | yes |
+| [docker](../targets/docker.md) | containerization | `config`, `network`, `project`, `secret`, `service`, `volume` | native and synthetic | no | yes | no | yes | yes | no | yes | no | no | no | Compose files | yes |
+| [dsc](../targets/dsc.md) | configuration-management | `‹Module›/‹Resource›`, `runner` | native | yes | yes | no | yes | no | no | no | no | no | converge | PowerShell DSC configurations; DSC v3 configuration documents and DscPipelineRunner projects | yes |
+| [helm](../targets/helm.md) | container-orchestration | `‹apiVersion›/‹Kind›`, `chart`, `kustomization`, `release`, `values` | synthetic | no | yes | no | yes | yes | no | yes | no | no | no | no | yes |
+| [kubernetes](../targets/kubernetes.md) | container-orchestration | `‹apiVersion›/‹Kind›`, `cluster` | synthetic | no | yes | no | yes | yes | no | yes | no | no | converge | Kubernetes manifests | yes |
+| [opentofu](../targets/opentofu.md) | infrastructure-as-code | `‹provider›_‹type›`, `backend`, `data.‹type›`, `encryption`, `ephemeral.‹type›`, `local`, `module`, `provider`, `variable` | synthetic | no | yes | yes | yes | yes | yes | yes | no | yes | import | OpenTofu configuration files; OpenTofu configuration files in the JSON syntax | yes |
+| [openvox](../targets/openvox.md) | configuration-management | `‹module›::‹type›`, `‹type›`, `exec`, `file`, `group`, `package`, `service`, `user` | native | no | yes | no | yes | no | no | yes | yes | no | converge | no | yes |
+| [packer](../targets/packer.md) | infrastructure-as-code | `data.‹type›`, `error-cleanup-provisioner.‹type›`, `local`, `plugin`, `post-processor.‹type›`, `provisioner.‹type›`, `source.‹builder›`, `variable` | no | no | yes | no | yes | yes | yes | yes | no | yes | no | no | no |
+| [podman](../targets/podman.md) | containerization | `build`, `container`, `image`, `kube`, `network`, `pod`, `volume` | native | no | yes | no | yes | yes | no | yes | yes | no | no | no | no |
+| [pulumi](../targets/pulumi.md) | infrastructure-as-code | `‹package›:‹module›:‹Type›`, `config`, `invoke.‹function›`, `stack` | no | no | yes | yes | yes | yes | yes | yes | no | yes | import | no | yes |
+| [puppet](../targets/puppet.md) | configuration-management | `‹module›::‹type›`, `‹type›`, `exec`, `file`, `group`, `package`, `service`, `user` | native | no | yes | no | yes | no | no | yes | yes | no | converge | no | yes |
+| [salt](../targets/salt.md) | configuration-management | `‹module›.‹function›`, `exec`, `file`, `group`, `package`, `service`, `user` | native | yes | yes | no | yes | no | no | yes | yes | no | converge | no | yes |
+| [terraform](../targets/terraform.md) | infrastructure-as-code | `‹provider›_‹type›`, `backend`, `data.‹type›`, `local`, `module`, `provider`, `variable` | synthetic | no | yes | yes | yes | yes | yes | yes | no | yes | import | Terraform configuration files; Terraform configuration files in the JSON syntax | yes |

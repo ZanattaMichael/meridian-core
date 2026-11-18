@@ -321,6 +321,12 @@ them, so each one is a promise:
   [handing it over](#secrets) by a private channel. `credentials` says your
   target reaches its host as the credential `targetHost.credential` names,
   and commits your emitter and runner to [the same](#credentials).
+  `adopt` says what you do with a resource's `adopt`: `Adoption::Import`
+  when your tool keeps a state and your emitter compiles `Resource::adopt`
+  into the tool's own import (and your runner reports it as
+  `ChangeAction::Adopt`), `Adoption::Converge` when your tool keeps no state,
+  and `Adoption::None` otherwise. With `None` the host refuses `adopt` before
+  your plugin is asked; with `Converge` the SDK adds the warning for you.
 - `category()`: the one you chose before you started. It also decides which
   kind of document your target accepts, as the table near the top says.
 - `target_versions()`: only if the tool comes in versions that need different
@@ -825,6 +831,13 @@ project's state directory and records the versions in `meridian.lock`; the
 language server, `meridian lint` and `meridian schema` read the cache and
 never call you. What the operator sees is in
 [Tool schemas](../tooling/schema-sync.md).
+
+Your schema source is also what feeds [schema bundles](../tooling/schema-bundles.md):
+`meridian schema sync --all-types` asks you twice, first for the documents'
+types and then for every type your first answer listed by name, so a
+source that lists the rest of the catalogue by name (as the first-party
+ones do) can be packed into a bundle with no change. Nothing in a bundle
+reaches your plugin; the host reads it.
 
 ```rust
 use meridian_sdk::{Log, RunError, SchemaExport, SchemaRequest, SchemaSource};

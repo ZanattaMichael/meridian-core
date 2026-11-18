@@ -48,8 +48,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::rules::Rule;
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CloudTakes, CompileError, Data, Emitted, Emitter, Position,
-    Resource, ResourceGraph, Value,
+    Adoption, Artifact, Capabilities, Category, CloudTakes, CompileError, Data, Emitted, Emitter,
+    Position, Resource, ResourceGraph, Value,
 };
 
 pub use emit::CONFIG_PATH;
@@ -161,6 +161,9 @@ pub(crate) struct Config {
     pub blocks: Vec<Block>,
     /// `required_providers`, by local name.
     pub required_providers: BTreeMap<String, Value>,
+    /// The `import` blocks a resource's `adopt` compiles to: the address it
+    /// is taken under and the tool's own identifier, in declaration order.
+    pub imports: Vec<(String, String)>,
     /// Output name to its value expression.
     pub outputs: Vec<(String, Value, Position)>,
 }
@@ -255,6 +258,7 @@ impl Emitter for Terraform {
             secrets: true,
             credentials: false,
             cloud_credentials: true,
+            adopt: Adoption::Import,
         }
     }
 

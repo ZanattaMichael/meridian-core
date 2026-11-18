@@ -291,6 +291,7 @@ fn the_target_declares_what_it_is_and_can_express() {
             secrets: false,
             credentials: false,
             cloud_credentials: false,
+            adopt: meridian_sdk::Adoption::None,
         }
     );
 }

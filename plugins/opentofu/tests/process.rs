@@ -44,6 +44,7 @@ fn the_binary_declares_its_category_and_everything_it_can_do() {
             secrets: true,
             credentials: false,
             cloud_credentials: true,
+            adopt: meridian_sdk::Adoption::Import,
         }
     );
     assert_eq!(

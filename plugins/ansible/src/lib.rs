@@ -27,8 +27,8 @@ use std::collections::BTreeMap;
 
 use meridian_sdk::rules::Rule;
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, PlacedEscape, Position,
-    Resource, ResourceGraph, Value,
+    Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, PlacedEscape,
+    Position, Resource, ResourceGraph, Value,
 };
 
 pub use emit::{INVENTORY_PATH, PLAYBOOK_PATH};
@@ -140,6 +140,7 @@ impl Emitter for Ansible {
             secrets: true,
             credentials: true,
             cloud_credentials: false,
+            adopt: Adoption::Converge,
         }
     }
 

@@ -53,8 +53,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, SshTakes,
+    Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph, SshTakes,
 };
 
 /// What `ssh` can take of the credential a document reaches its host as:
@@ -289,6 +289,7 @@ impl Emitter for Podman {
             secrets: true,
             credentials: true,
             cloud_credentials: false,
+            adopt: Adoption::None,
         }
     }
 

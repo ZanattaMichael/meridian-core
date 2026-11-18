@@ -79,6 +79,11 @@ pub struct Resource {
     /// whose [`Capabilities::runtime_condition`] is true may accept one; plain
     /// `when` is evaluated and pruned long before a plugin sees the tree.
     pub runtime_when: String,
+    /// The tool's own identifier of a thing that already exists, for the
+    /// tool to take under management instead of creating. Empty for a
+    /// resource created as usual. Only a target whose
+    /// [`Capabilities::adopt`] is not [`Adoption::None`] is sent one.
+    pub adopt: String,
     /// The resource's declaration order in the source document, kept so a
     /// target that reorders resources still has the original tiebreak.
     pub index: usize,
@@ -235,13 +240,14 @@ impl ResourceGraph {
         for r in &self.resources {
             let _ = writeln!(
                 out,
-                "resource {} type={} state={} runtimeWhen={} index={} params={}",
+                "resource {} type={} state={} runtimeWhen={} index={} params={}{}",
                 r.id,
                 r.r#type,
                 r.state,
                 r.runtime_when,
                 r.index,
-                canonical_map(&r.params)
+                canonical_map(&r.params),
+                adopt_suffix(&r.adopt)
             );
         }
         for e in &self.edges {
@@ -293,6 +299,39 @@ pub struct Capabilities {
     /// file only the user can read where a provider reads one. A document
     /// that names a cloud credential for a target without this is refused.
     pub cloud_credentials: bool,
+    /// What the target does with a resource's `adopt`. A target that says
+    /// [`Adoption::None`], which is every plugin built before the field
+    /// existed, is never sent one: the host refuses the document first.
+    pub adopt: Adoption,
+}
+
+/// How a target takes a thing that already exists under management, which
+/// is what a resource's `adopt` asks for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Adoption {
+    /// It cannot: a document that adopts anything is refused.
+    #[default]
+    None,
+    /// The tool keeps its own record of what it manages, and the emitter
+    /// compiles the identifier into the tool's own import, such as a
+    /// Terraform `import` block. The first plan reports the resource as
+    /// [`ChangeAction::Adopt`](crate::ChangeAction::Adopt).
+    Import,
+    /// The tool keeps no record of what it manages and makes each thing
+    /// what the document says whether it existed or not, so there is
+    /// nothing to import. The identifier is accepted and not used, and the
+    /// compile warns that it changes nothing.
+    Converge,
+}
+
+impl Adoption {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Adoption::None => "none",
+            Adoption::Import => "import",
+            Adoption::Converge => "converge",
+        }
+    }
 }
 
 /// The complete output of a compile: relative path to file content. It is
@@ -418,6 +457,62 @@ pub struct Emitted {
     pub warnings: Vec<Warning>,
 }
 
+/// Refuses a document that adopts anything for an emitter whose
+/// [`Capabilities::adopt`] is [`Adoption::None`], and, for one whose tool
+/// keeps no record of what it manages, returns the warnings that say an
+/// `adopt` changes nothing there. The SDK calls it before every `emit`, in
+/// process or over the wire; the host makes the same refusal before it asks
+/// the plugin, so a plugin built before `adopt` existed is never sent one.
+pub fn check_adopt(
+    emitter: &(impl Emitter + ?Sized),
+    graph: &ResourceGraph,
+) -> Result<Vec<Warning>, CompileError> {
+    let mut warnings = Vec::new();
+    for r in graph.resources.iter().filter(|r| !r.adopt.is_empty()) {
+        match emitter.capabilities().adopt {
+            Adoption::None => {
+                return Err(CompileError::for_resource(
+                    r,
+                    &crate::rules::UNSUPPORTED_ADOPT,
+                    format!(
+                        "adopt {:?}: target {:?} cannot take a thing that already exists \
+                         under management. Remove adopt; the capability matrix lists the \
+                         targets that adopt",
+                        r.adopt, graph.target
+                    ),
+                ));
+            }
+            Adoption::Converge => warnings.push(Warning {
+                target: emitter.name().to_owned(),
+                resource: r.id.clone(),
+                msg: format!(
+                    "adopt {:?} changes nothing: {} keeps no record of what it manages and \
+                     makes the resource what the document says whether it exists or not",
+                    r.adopt,
+                    emitter.name()
+                ),
+            }),
+            Adoption::Import => {}
+        }
+    }
+    Ok(warnings)
+}
+
+/// Every check the SDK makes before an emitter is called, then the emit,
+/// with the checks' warnings ahead of the emitter's own.
+pub fn emit_checked(
+    emitter: &(impl Emitter + ?Sized),
+    graph: &ResourceGraph,
+    data: &Data,
+) -> Result<Emitted, CompileError> {
+    check_settings(emitter, graph)?;
+    let mut warnings = check_adopt(emitter, graph)?;
+    let mut emitted = emitter.emit(graph, data)?;
+    warnings.append(&mut emitted.warnings);
+    emitted.warnings = warnings;
+    Ok(emitted)
+}
+
 /// Refuses a document whose `spec.settings` names a key the emitter does not
 /// take. The SDK calls it before every `emit`, in process or over the wire,
 /// so an emitter sees only the keys it listed in [`Emitter::settings_keys`].
@@ -525,4 +620,14 @@ pub trait Emitter {
     }
     /// Compiles the tree, or refuses it.
     fn emit(&self, graph: &ResourceGraph, data: &Data) -> Result<Emitted, CompileError>;
+}
+
+/// How [`ResourceGraph::canonical`] shows an `adopt`: nothing when there is
+/// none, so the canonical form of every tree without one is unchanged.
+fn adopt_suffix(adopt: &str) -> String {
+    if adopt.is_empty() {
+        String::new()
+    } else {
+        format!(" adopt={adopt}")
+    }
 }
