@@ -1,9 +1,12 @@
 # meridian-core
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/branding/banner/meridian-banner-dark.svg">
-  <img src="docs/branding/banner/meridian-banner-light.svg" alt="Meridian: one DSL for everything" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/branding/banner/meridian-banner-dark-animated.svg">
+  <img src="docs/branding/banner/meridian-banner-light-animated.svg" alt="Meridian: one DSL for everything" width="100%">
 </picture>
+
+**Documentation:** <https://zanattamichael.github.io/meridian-core/> · the same pages as the
+[wiki](https://github.com/ZanattaMichael/meridian-core/wiki) · the source under [`docs/`](docs/index.md)
 
 Meridian is one declarative language for infrastructure and configuration. You describe
 what you want once; Meridian compiles it into the native files of the tool you choose and
@@ -19,10 +22,12 @@ quietly does less.
 Early, and moving quickly. The accepted specifications are in [`docs/`](docs/index.md);
 start with the [design plan](docs/plans/design-plan.md).
 
-The documentation is published from `docs/` on every merge, as a
-[site](https://zanattamichael.github.io/meridian-core/) and as this repository's
-[wiki](https://github.com/ZanattaMichael/meridian-core/wiki);
-[how the wiki is published](docs/contributing/documentation-site.md) says how.
+The documentation is published from `docs/` on every merge, as
+[the documentation site](https://zanattamichael.github.io/meridian-core/) and as this
+repository's [wiki](https://github.com/ZanattaMichael/meridian-core/wiki);
+[how the documentation is published](docs/contributing/documentation-site.md) says how.
+[How it fits together](https://zanattamichael.github.io/meridian-core/reference/dsl/how-it-fits-together.html)
+is the page to start with: it follows one document from a file to a tool that has run.
 
 | Plugin | Category | Compiles to | Runs with |
 |---|---|---|---|

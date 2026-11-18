@@ -21,6 +21,9 @@ spec:
 | `ResourceSet` | how a machine that already exists is configured | `targetHost`: the machine |
 
 They are separate on purpose. See [the two-stage architecture](two-stage-architecture.md).
+Each plugin declares a category, and the category decides which kind it takes:
+
+<p align="center"><img src="../graphics/meridian-plugin-categories.svg" alt="Infrastructure documents go to infrastructure as code, containers and orchestration; ResourceSets go to configuration management; docker takes both" width="100%"></p>
 
 This page is the overview. Every field, with its rules, is in
 [the language reference](../reference/dsl/index.md), and each segment's way of

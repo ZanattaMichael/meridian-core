@@ -39,6 +39,10 @@ BRANCH = os.environ.get("WIKI_SOURCE_BRANCH", "main")
 BLOB = f"https://github.com/{REPO}/blob/{BRANCH}/"
 TREE = f"https://github.com/{REPO}/tree/{BRANCH}/"
 WIKI_RAW = f"https://raw.githubusercontent.com/wiki/{REPO}/"
+WIKI_URL = f"https://github.com/{REPO}/wiki"
+# Where the site is served. The owner's name is lower-cased in a github.io address.
+SITE_URL = os.environ.get("WIKI_SITE_URL") or (
+    f"https://{REPO.split('/')[0].lower()}.github.io/{REPO.split('/')[1]}/")
 
 # Where generated graphics are written, relative to the published docs root.
 GENERATED = "generated"
@@ -406,6 +410,11 @@ def site_link(rel: Path) -> Path:
     return rel.with_name("index.md") if rel.name == "README.md" else rel
 
 
+def site_url(rel: Path) -> str:
+    """The published address of a page on the site."""
+    return SITE_URL + site_link(rel).with_suffix(".html").as_posix()
+
+
 def summary_lines(entries: list[Entry], depth: int = 0) -> list[str]:
     lines = []
     for entry in entries:
@@ -524,13 +533,17 @@ def build_wiki() -> Path:
         text = rewrite_links((DOCS / rel).read_text(encoding="utf-8"), rewrite)
         text = decorate(rel, text, asset)
         note = f"<!-- Generated from docs/{rel.as_posix()}. Edit that file, not this page. -->\n"
-        (wiki / f"{names[rel]}.md").write_text(note + text, encoding="utf-8")
+        # The same page on the site, which has search, themes and the animated graphics.
+        site = (f'<p align="right"><a href="{site_url(rel)}">Read this page on the documentation site</a></p>\n\n')
+        (wiki / f"{names[rel]}.md").write_text(note + site + text, encoding="utf-8")
 
     sidebar = [
-        f'<p align="center"><a href="Home"><img src="{asset(Path("branding/logos/meridian-core.svg"))}" '
+        f'<p align="center"><a href="Home"><img src="{asset(Path("branding/logos/meridian-core-animated.svg"))}" '
         'alt="Meridian" width="72"></a></p>',
         "",
         "**[Meridian](Home)**",
+        "",
+        f"[Documentation site]({SITE_URL}) · [Repository](https://github.com/{REPO})",
         "",
     ]
     for title, entries in navigation():
@@ -541,7 +554,8 @@ def build_wiki() -> Path:
     at = f" at [`{sha[:7]}`](https://github.com/{REPO}/commit/{sha})" if sha else ""
     (wiki / "_Footer.md").write_text(
         f"This wiki is generated from [`docs/`]({TREE}docs){at} by the "
-        f"[wiki pipeline]({BLOB}.github/workflows/wiki.yml). "
+        f"[wiki pipeline]({BLOB}.github/workflows/wiki.yml), which also publishes the same pages as "
+        f"[the documentation site]({SITE_URL}). "
         "Changes made here are overwritten; open a pull request against `docs/` instead.\n",
         encoding="utf-8",
     )

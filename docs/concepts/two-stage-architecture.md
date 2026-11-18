@@ -3,6 +3,8 @@
 Meridian has two kinds of document, `Infrastructure` and `ResourceSet`, and runs
 them as two stages. This page says why they are not one.
 
+<p align="center"><img src="../graphics/meridian-two-stage-workflow.svg" alt="An Infrastructure stage creates the machine and promises an output; a ResourceSet stage names that output as its host" width="100%"></p>
+
 ## They answer different questions
 
 An Infrastructure document answers "what should exist?" Its tools (Terraform,

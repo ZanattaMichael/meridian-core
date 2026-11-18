@@ -1,13 +1,24 @@
 # Meridian
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="branding/banner/meridian-banner-dark.svg">
-  <img src="branding/banner/meridian-banner-light.svg" alt="Meridian: one DSL for everything" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="branding/banner/meridian-banner-dark-animated.svg">
+  <img src="branding/banner/meridian-banner-light-animated.svg" alt="Meridian: one DSL for everything" width="100%">
 </picture>
 
 Meridian is one declarative language that compiles to Ansible, Puppet, Chef, DSC,
 cloud-init, Terraform, CloudFormation, Bicep, ARM templates, Pulumi, Docker Compose, Kubernetes and Helm, and then drives
 the tool you chose to plan and apply it.
+
+These pages are published at <https://zanattamichael.github.io/meridian-core/>, with
+search and a sidebar, and as the repository's
+[wiki](https://github.com/ZanattaMichael/meridian-core/wiki). Both are built from
+[`docs/`](https://github.com/ZanattaMichael/meridian-core/tree/main/docs) on every merge.
+
+<p align="center"><img src="graphics/meridian-architecture.svg" alt="Meridian architecture: documents go into the core, the core speaks to one plugin per target over the plugin protocol, and each plugin drives its own tool" width="100%"></p>
+
+The core knows the language and nothing about any tool. Each plugin knows one tool and
+nothing about the others. [How it fits together](reference/dsl/how-it-fits-together.md)
+follows one document through both.
 
 ## Honest scope statement
 
@@ -54,6 +65,19 @@ byte. The reasons, the layout and the order of work are in
 | [Running safely](concepts/run-safety.md) | one run at a time, the record of every run, resuming a failed run, putting one back, finding drift, asking a policy first, sharing state |
 | [Compile rules](concepts/compile-rules.md) | policies over layered configuration: what a layer may and may not override, checked before anything is compiled |
 | [How a secret is held in memory](concepts/secrets-in-memory.md) | locked, wiped memory, the hardened process, how a secret reaches a tool, and what is not promised |
+
+| In pictures | |
+|---|---|
+| [The architecture](reference/dsl/how-it-fits-together.md#the-same-thing-as-an-architecture) | documents, the core, the plugin protocol, the plugins by category, and the tools |
+| [The path of a document](reference/dsl/how-it-fits-together.md) | nine steps from a file to a tool that has run, and how far each command goes |
+| [Kinds and categories](concepts/ir-overview.md#two-kinds) | which kind of document each plugin category takes |
+| [The two stages](concepts/two-stage-architecture.md) | an Infrastructure stage hands one declared value to a ResourceSet stage |
+| [A secret's path](concepts/secrets-in-memory.md) | from a provider into locked memory, as a reference everywhere else, to the tool by a private file |
+| [A run](concepts/run-safety.md) | the lock, the policy check, the record, the run-state, and what happens when a stage fails |
+| [Modules](reference/modules.md) | the manifest, the sources, the lockfile, and what every run verifies |
+
+Each picture is drawn by [`tools/wiki/graphics.py`](https://github.com/ZanattaMichael/meridian-core/blob/main/tools/wiki/graphics.py)
+and checked against the file in every build, so none can fall behind the script that describes it.
 
 | Editor and authoring tools | |
 |---|---|
@@ -127,9 +151,10 @@ plugins.
 
 Security reports go through [`SECURITY.md`](../SECURITY.md), not the issue tracker.
 
-These pages are published as a site and as the repository's wiki by a pipeline;
-[how the wiki is published](contributing/documentation-site.md) describes it and what a
-new page needs.
+These pages are published as [the documentation site](https://zanattamichael.github.io/meridian-core/)
+and as the repository's [wiki](https://github.com/ZanattaMichael/meridian-core/wiki) by a
+pipeline; [how the documentation is published](contributing/documentation-site.md)
+describes it, what a new page needs, and how the graphics and the animated theme are made.
 
 ## Reading order
 
