@@ -192,6 +192,7 @@ impl Registry {
             resource_schemas: emitter.resource_schemas(),
             import_formats: importer.as_ref().map(|i| i.formats()).unwrap_or_default(),
             exports_schemas: schemas.is_some(),
+            settings: Vec::new(),
             operations: Operations::COMPILE_ONLY,
             accepts_inputs: false,
             path: String::new(),
@@ -326,9 +327,18 @@ impl Registry {
 /// A target name holds no dot, so the files a build leaves beside a binary
 /// (`meridian-target-ansible.d`, `.pdb`) are not taken for plugins.
 fn is_plugin_name(name: &str) -> bool {
+    target_of(name).is_some()
+}
+
+/// The target a plugin binary is for, read from its file name:
+/// `meridian-target-ansible` and `meridian-target-ansible.exe` are both for
+/// `ansible`. `None` for a file that is not named like a plugin. The path
+/// may have directories in front of the name.
+pub fn target_of(path: &str) -> Option<&str> {
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
     let name = name.strip_suffix(".exe").unwrap_or(name);
     name.strip_prefix(BINARY_PREFIX)
-        .is_some_and(|target| !target.is_empty() && !target.contains('.'))
+        .filter(|target| !target.is_empty() && !target.contains('.'))
 }
 
 /// The file name a plugin for the given target must have.

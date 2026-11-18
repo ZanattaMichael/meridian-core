@@ -252,7 +252,7 @@ same three promises:
   not even in a file: it goes into an SSH agent Meridian starts for the
   stage, through `ssh-add`'s standard input, and the tool is told only the
   agent's socket in `SSH_AUTH_SOCK`. See
-  [0023](../../decisions/0023-a-key-reaches-a-host-through-an-agent-meridian-starts.md).
+  [0028](../../decisions/0028-a-key-reaches-a-host-through-an-agent-meridian-starts.md).
 - **For the length of the stage.** The values are fetched at the stage's turn
   and wiped when it ends. A rollback fetches them again at its own turn.
 

@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use meridian_secret::{Part, SecretFile, SecretValue};
 
 use crate::tool::Tool;
-use crate::{Log, RunError};
+use crate::{settings, Log, RunError, Setting};
 
 /// Names the `ssh-agent` program, when it is not on `PATH`.
 pub const SSH_AGENT_VARIABLE: &str = "MERIDIAN_SSH_AGENT";
@@ -48,7 +48,37 @@ impl Default for AgentPrograms {
     }
 }
 
+/// The two settings a runner that starts an agent declares, for its
+/// `settings()` list: `ssh-agent` and `ssh-add`. They are the same variables
+/// on every target, so one project setting serves them all by name.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "ssh-agent",
+            SSH_AGENT_VARIABLE,
+            "ssh-agent",
+            "The `ssh-agent` program, when it is not on `PATH`. It is started for the length of a stage when the document reaches its host as a credential with a private key, which the tool is then given through the agent and nothing else.",
+        ),
+        Setting::new(
+            "ssh-add",
+            SSH_ADD_VARIABLE,
+            "ssh-add",
+            "The `ssh-add` program, when it is not on `PATH`. It loads the credential's key into the agent from its standard input.",
+        ),
+    ]
+}
+
 impl AgentPrograms {
+    /// The programs as a runner's declared settings resolve them: the
+    /// environment, then the project, then the defaults. `declared` holds
+    /// what [`settings`] returns, among the runner's own.
+    pub fn from_settings(declared: &[Setting]) -> Self {
+        AgentPrograms {
+            ssh_agent: settings::text(settings::find(declared, "ssh-agent")),
+            ssh_add: settings::text(settings::find(declared, "ssh-add")),
+        }
+    }
+
     /// The programs as the environment names them, or the defaults.
     pub fn from_env() -> Self {
         let named = |variable: &str, default: &str| {

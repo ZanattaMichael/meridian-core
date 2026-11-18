@@ -65,6 +65,7 @@ fn runner(dir: &Path, cases: &str) -> OpenTofuRunner {
     );
     OpenTofuRunner {
         program: program.to_str().unwrap().to_owned(),
+        extra_args: Vec::new(),
     }
 }
 
@@ -312,6 +313,7 @@ fn a_missing_program_says_what_was_looked_for() {
     let (dir, _serial) = scratch_alone("missing");
     let runner = OpenTofuRunner {
         program: dir.join("no-such-tofu").to_str().unwrap().to_owned(),
+        extra_args: Vec::new(),
     };
     let err = runner
         .plan(&context(&dir), &compiled(), &KeptLog::default())

@@ -541,9 +541,14 @@ The plugin reads four environment variables:
 | `MERIDIAN_SALT_CALL` | The `salt-call` program | `salt-call` on `PATH` |
 | `MERIDIAN_SALT_SSH` | The `salt-ssh` program | `salt-ssh` on `PATH` |
 | `MERIDIAN_SALT_TRANSPORT` | `local` or `ssh`, to override the choice made from the host | chosen from the host |
-| `MERIDIAN_SALT_ARGS` | Extra arguments for every run, split on spaces | none |
+| `MERIDIAN_SALT_ARGS` | Extra arguments for every run, split like a shell command line (quotes hold a word together) | none |
 | `MERIDIAN_SSH_AGENT` | The `ssh-agent` program, started for a credential's key; see [Credentials](#credentials) | `ssh-agent` on `PATH` |
 | `MERIDIAN_SSH_ADD` | The `ssh-add` program | `ssh-add` on `PATH` |
+
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.salt`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#salt).
 
 Common uses:
 

@@ -14,6 +14,7 @@ use meridian_sdk::{
     ChangeAction, HeldCredential, Log, LogLine, LogStream, Operations, Part, Plan, RunContext,
     RunError, Runner, SecretFile, Value,
 };
+use meridian_sdk::{settings, Setting};
 
 use crate::{MANIFEST_PATH, SITE_PATH};
 
@@ -23,8 +24,41 @@ pub const PUPPET_VARIABLE: &str = "MERIDIAN_PUPPET";
 pub const BOLT_VARIABLE: &str = "MERIDIAN_BOLT";
 /// `local` or `bolt`, to override the choice made from the host.
 pub const TRANSPORT_VARIABLE: &str = "MERIDIAN_PUPPET_TRANSPORT";
-/// Extra arguments for every run, split on whitespace.
+/// Extra arguments for every run, split like a shell command line.
 pub const ARGS_VARIABLE: &str = "MERIDIAN_PUPPET_ARGS";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    let mut declared = vec![
+        Setting::new(
+            "puppet",
+            PUPPET_VARIABLE,
+            "puppet",
+            "The `puppet` program, when it is not on `PATH`.",
+        ),
+        Setting::new(
+            "bolt",
+            BOLT_VARIABLE,
+            "bolt",
+            "The `bolt` program, when it is not on `PATH`.",
+        ),
+        Setting::new(
+            "transport",
+            TRANSPORT_VARIABLE,
+            "",
+            "`local` or `bolt`, to override the choice made from the host: `local` applies on this machine with `puppet apply`, `bolt` reaches the host with `bolt apply`.",
+        ),
+        Setting::new(
+            "args",
+            ARGS_VARIABLE,
+            "",
+            "Extra arguments for every run, split like a shell command line.",
+        ),
+    ];
+    declared.extend(meridian_sdk::agent::settings());
+    declared
+}
 
 /// The manifest the runner hands to the tool: the compiled class followed by
 /// the line that includes it. The compiled `site.pp` does the same through a
@@ -57,20 +91,15 @@ pub struct PuppetRunner {
     pub agent: AgentPrograms,
 }
 
-fn variable(name: &str, default: &str) -> String {
-    std::env::var(name)
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| default.to_owned())
-}
-
 impl PuppetRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         PuppetRunner {
-            puppet: variable(PUPPET_VARIABLE, "puppet"),
-            bolt: variable(BOLT_VARIABLE, "bolt"),
-            transport: match variable(TRANSPORT_VARIABLE, "")
+            puppet: settings::text(setting("puppet")),
+            bolt: settings::text(setting("bolt")),
+            transport: match settings::text(setting("transport"))
                 .to_ascii_lowercase()
                 .as_str()
             {
@@ -78,10 +107,8 @@ impl PuppetRunner {
                 "bolt" => Some(Transport::Bolt),
                 _ => None,
             },
-            extra_args: std::env::var(ARGS_VARIABLE)
-                .map(|v| v.split_whitespace().map(str::to_owned).collect())
-                .unwrap_or_default(),
-            agent: AgentPrograms::from_env(),
+            extra_args: settings::args(setting("args")),
+            agent: AgentPrograms::from_settings(&declared),
         }
     }
 
@@ -328,6 +355,10 @@ fn hiera_files(context: &RunContext) -> Result<Option<HieraFiles>, RunError> {
 }
 
 impl Runner for PuppetRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations {
             plan: true,

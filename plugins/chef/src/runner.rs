@@ -14,6 +14,7 @@ use meridian_sdk::{
     agent_for, credential_for_this_machine, AgentPrograms, Applied, Artifact, Change, ChangeAction,
     Log, Operations, Plan, RunContext, RunError, Runner, SecretFile,
 };
+use meridian_sdk::{settings, Setting};
 
 /// Names the `chef-client` program, when it is not on `PATH`. Cinc's
 /// `cinc-client` takes the same arguments.
@@ -22,8 +23,41 @@ pub const CLIENT_VARIABLE: &str = "MERIDIAN_CHEF_CLIENT";
 pub const RUN_VARIABLE: &str = "MERIDIAN_CHEF_RUN";
 /// `local` or `remote`, to override the choice made from the host.
 pub const TRANSPORT_VARIABLE: &str = "MERIDIAN_CHEF_TRANSPORT";
-/// Extra arguments for every run, split on whitespace.
+/// Extra arguments for every run, split like a shell command line.
 pub const ARGS_VARIABLE: &str = "MERIDIAN_CHEF_ARGS";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    let mut declared = vec![
+        Setting::new(
+            "client",
+            CLIENT_VARIABLE,
+            "chef-client",
+            "The `chef-client` program, when it is not on `PATH`. Cinc's `cinc-client` takes the same arguments.",
+        ),
+        Setting::new(
+            "run",
+            RUN_VARIABLE,
+            "chef-run",
+            "The `chef-run` program, when it is not on `PATH`.",
+        ),
+        Setting::new(
+            "transport",
+            TRANSPORT_VARIABLE,
+            "",
+            "`local` or `remote`, to override the choice made from the host: `local` converges this machine with chef-client, `remote` reaches the host with chef-run.",
+        ),
+        Setting::new(
+            "args",
+            ARGS_VARIABLE,
+            "",
+            "Extra arguments for every run, split like a shell command line.",
+        ),
+    ];
+    declared.extend(meridian_sdk::agent::settings());
+    declared
+}
 
 /// How a cookbook reaches its node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,20 +86,15 @@ pub struct ChefRunner {
     pub agent: AgentPrograms,
 }
 
-fn variable(name: &str, default: &str) -> String {
-    std::env::var(name)
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| default.to_owned())
-}
-
 impl ChefRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         ChefRunner {
-            client: variable(CLIENT_VARIABLE, "chef-client"),
-            run: variable(RUN_VARIABLE, "chef-run"),
-            transport: match variable(TRANSPORT_VARIABLE, "")
+            client: settings::text(setting("client")),
+            run: settings::text(setting("run")),
+            transport: match settings::text(setting("transport"))
                 .to_ascii_lowercase()
                 .as_str()
             {
@@ -73,10 +102,8 @@ impl ChefRunner {
                 "remote" => Some(Transport::Remote),
                 _ => None,
             },
-            extra_args: std::env::var(ARGS_VARIABLE)
-                .map(|v| v.split_whitespace().map(str::to_owned).collect())
-                .unwrap_or_default(),
-            agent: AgentPrograms::from_env(),
+            extra_args: settings::args(setting("args")),
+            agent: AgentPrograms::from_settings(&declared),
         }
     }
 
@@ -243,6 +270,10 @@ fn read_report(stdout: &str) -> Vec<Change> {
 }
 
 impl Runner for ChefRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations {
             plan: true,

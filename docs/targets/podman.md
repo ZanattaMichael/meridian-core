@@ -533,6 +533,11 @@ The runner is configured through the environment of the `meridian` command.
 | `MERIDIAN_PODMAN_QUADLET` | found automatically | Quadlet's generator on the host, when it is not where distributions install it. |
 | `MERIDIAN_PODMAN_UNIT_DIR` | by scope | The directory unit files are installed in. |
 
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.podman`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#podman).
+
 `MERIDIAN_PODMAN_SCOPE` set to anything but `user` or `system` fails every run with a
 message saying so, instead of quietly using the default. `journalctl` and `sudo` are run by
 those names from the host's `PATH`.

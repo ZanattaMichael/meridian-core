@@ -11,6 +11,7 @@ use meridian_sdk::{
     ChangeAction, Log, NoLog, Operations, Output, Plan, RunContext, RunError, Runner, SshAgent,
     Value, Written,
 };
+use meridian_sdk::{settings, Setting};
 
 use crate::podman_secret;
 
@@ -39,9 +40,60 @@ pub const UNIT_DIR_VARIABLE: &str = "MERIDIAN_PODMAN_UNIT_DIR";
 pub const QUADLET_VARIABLE: &str = "MERIDIAN_PODMAN_QUADLET";
 /// Names the `ssh` program used to reach another host.
 pub const SSH_VARIABLE: &str = "MERIDIAN_PODMAN_SSH";
-/// Extra arguments for every `ssh`, split on whitespace: which user, which
-/// key, which port. For example `-l deploy -i ~/.ssh/deploy`.
+/// Extra arguments for every `ssh`, split like a shell command line: which
+/// user, which key, which port. For example `-l deploy -i ~/.ssh/deploy`.
 pub const SSH_ARGS_VARIABLE: &str = "MERIDIAN_PODMAN_SSH_ARGS";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    let mut declared = vec![
+        Setting::new(
+            "podman",
+            PODMAN_VARIABLE,
+            "podman",
+            "The `podman` program on the host, when it is not on its `PATH`.",
+        ),
+        Setting::new(
+            "systemctl",
+            SYSTEMCTL_VARIABLE,
+            "systemctl",
+            "The `systemctl` program on the host.",
+        ),
+        Setting::new(
+            "scope",
+            SCOPE_VARIABLE,
+            "user",
+            "`user` runs the units as the connecting user's own, without root. `system` installs them for the whole machine, using `sudo` when the connecting user is not root.",
+        ),
+        Setting::new(
+            "unit-dir",
+            UNIT_DIR_VARIABLE,
+            "",
+            "The directory unit files are installed in, when it is not the standard one for the scope.",
+        ),
+        Setting::new(
+            "quadlet",
+            QUADLET_VARIABLE,
+            "",
+            "Where Quadlet's generator is on the host, when it is not in one of the places distributions put it.",
+        ),
+        Setting::new(
+            "ssh",
+            SSH_VARIABLE,
+            "ssh",
+            "The `ssh` program used to reach another host.",
+        ),
+        Setting::new(
+            "ssh-args",
+            SSH_ARGS_VARIABLE,
+            "",
+            "Extra arguments for every `ssh`, split like a shell command line: which user, which key, which port. For example `-l deploy -i ~/.ssh/deploy`.",
+        ),
+    ];
+    declared.extend(meridian_sdk::agent::settings());
+    declared
+}
 
 /// The file in the work directory that lists the unit files the last apply
 /// left on the host, which is how a later one knows what to remove.
@@ -111,36 +163,25 @@ impl Default for PodmanRunner {
     }
 }
 
-fn setting(variable: &str) -> Option<String> {
-    std::env::var(variable)
-        .ok()
-        .map(|v| v.trim().to_owned())
-        .filter(|v| !v.is_empty())
-}
-
 impl PodmanRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
-        let mut runner = PodmanRunner::default();
-        if let Some(podman) = setting(PODMAN_VARIABLE) {
-            runner.podman = podman;
-        }
-        if let Some(systemctl) = setting(SYSTEMCTL_VARIABLE) {
-            runner.systemctl = systemctl;
-        }
-        if let Some(ssh) = setting(SSH_VARIABLE) {
-            runner.ssh = ssh;
-        }
-        runner.ssh_args = setting(SSH_ARGS_VARIABLE)
-            .map(|v| v.split_whitespace().map(str::to_owned).collect())
-            .unwrap_or_default();
-        runner.agent = AgentPrograms::from_env();
-        runner.unit_dir = setting(UNIT_DIR_VARIABLE);
-        runner.generator = setting(QUADLET_VARIABLE);
-        match setting(SCOPE_VARIABLE).as_deref() {
-            None | Some("user") => runner.scope = Scope::User,
-            Some("system") => runner.scope = Scope::System,
-            Some(other) => {
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
+        let mut runner = PodmanRunner {
+            podman: settings::text(setting("podman")),
+            systemctl: settings::text(setting("systemctl")),
+            ssh: settings::text(setting("ssh")),
+            ssh_args: settings::args(setting("ssh-args")),
+            unit_dir: settings::optional(setting("unit-dir")),
+            generator: settings::optional(setting("quadlet")),
+            agent: AgentPrograms::from_settings(&declared),
+            ..PodmanRunner::default()
+        };
+        match settings::text(setting("scope")).as_str() {
+            "user" => runner.scope = Scope::User,
+            "system" => runner.scope = Scope::System,
+            other => {
                 runner.misconfigured = Some(format!(
                     "{SCOPE_VARIABLE} is {other:?}; it must be \"user\" or \"system\""
                 ))
@@ -393,6 +434,10 @@ impl PodmanRunner {
 }
 
 impl Runner for PodmanRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations::ALL
     }

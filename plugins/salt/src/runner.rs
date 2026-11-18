@@ -14,6 +14,7 @@ use meridian_sdk::{
     ChangeAction, HeldCredential, Log, Operations, Part, Plan, RunContext, RunError, Runner,
     SecretFile, Value,
 };
+use meridian_sdk::{settings, Setting};
 
 use crate::{STATES_DIR, TOP_PATH};
 
@@ -23,10 +24,43 @@ pub const SALT_CALL_VARIABLE: &str = "MERIDIAN_SALT_CALL";
 pub const SALT_SSH_VARIABLE: &str = "MERIDIAN_SALT_SSH";
 /// `local` or `ssh`, to override the choice made from the host.
 pub const TRANSPORT_VARIABLE: &str = "MERIDIAN_SALT_TRANSPORT";
-/// Extra arguments for every run, split on whitespace. For example
-/// `--config-dir /srv/salt-config` locally, or `--user deploy --priv
+/// Extra arguments for every run, split like a shell command line. For
+/// example `--config-dir /srv/salt-config` locally, or `--user deploy --priv
 /// /home/me/.ssh/deploy -i` over SSH.
 pub const ARGS_VARIABLE: &str = "MERIDIAN_SALT_ARGS";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    let mut declared = vec![
+        Setting::new(
+            "salt-call",
+            SALT_CALL_VARIABLE,
+            "salt-call",
+            "The `salt-call` program, when it is not on `PATH`.",
+        ),
+        Setting::new(
+            "salt-ssh",
+            SALT_SSH_VARIABLE,
+            "salt-ssh",
+            "The `salt-ssh` program, when it is not on `PATH`.",
+        ),
+        Setting::new(
+            "transport",
+            TRANSPORT_VARIABLE,
+            "",
+            "`local` or `ssh`, to override the choice made from the host: `local` applies on this machine with `salt-call --local`, `ssh` reaches the host with `salt-ssh`.",
+        ),
+        Setting::new(
+            "args",
+            ARGS_VARIABLE,
+            "",
+            "Extra arguments for every run, split like a shell command line. For example `--config-dir /srv/salt-config` locally, or `--user deploy --priv /home/me/.ssh/deploy -i` over SSH.",
+        ),
+    ];
+    declared.extend(meridian_sdk::agent::settings());
+    declared
+}
 
 /// The files `salt-ssh` needs beside the states: its configuration, which
 /// points it at the compiled file root and keeps its cache in the work
@@ -60,20 +94,15 @@ pub struct SaltRunner {
     pub agent: AgentPrograms,
 }
 
-fn variable(name: &str, default: &str) -> String {
-    std::env::var(name)
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| default.to_owned())
-}
-
 impl SaltRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         SaltRunner {
-            salt_call: variable(SALT_CALL_VARIABLE, "salt-call"),
-            salt_ssh: variable(SALT_SSH_VARIABLE, "salt-ssh"),
-            transport: match variable(TRANSPORT_VARIABLE, "")
+            salt_call: settings::text(setting("salt-call")),
+            salt_ssh: settings::text(setting("salt-ssh")),
+            transport: match settings::text(setting("transport"))
                 .to_ascii_lowercase()
                 .as_str()
             {
@@ -81,10 +110,8 @@ impl SaltRunner {
                 "ssh" => Some(Transport::Ssh),
                 _ => None,
             },
-            extra_args: std::env::var(ARGS_VARIABLE)
-                .map(|v| v.split_whitespace().map(str::to_owned).collect())
-                .unwrap_or_default(),
-            agent: AgentPrograms::from_env(),
+            extra_args: settings::args(setting("args")),
+            agent: AgentPrograms::from_settings(&declared),
         }
     }
 
@@ -222,6 +249,10 @@ impl SaltRunner {
 }
 
 impl Runner for SaltRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations {
             plan: true,
