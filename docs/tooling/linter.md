@@ -52,8 +52,9 @@ $ meridian lint --fix web.yaml
 fixed 1 finding
 ```
 
-At present one rule has a fix: [`unquoted-mode`](../reference/lint.md#unquoted-mode)
-adds the quotes.
+Two rules have a fix: [`unquoted-mode`](../reference/lint.md#unquoted-mode)
+and [`lossy-number`](../reference/lint.md#lossy-number) both add quotes around
+a number that was meant as text.
 
 ## Silencing a rule
 

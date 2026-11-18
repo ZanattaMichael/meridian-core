@@ -52,6 +52,7 @@ flowchart TD
 | [Credentials](credentials.md) | `spec.credentials`: an identity declared by name and type, its secret fields, and reaching a host as one with `targetHost.credential` |
 | [References](references.md) | `${...}`: syntax, how each target rewrites it, what can be read where |
 | [Outputs and hand-offs](outputs-and-hand-offs.md) | `outputs`, `targetHost` and `imports`: the ties between documents |
+| [YAML pitfalls](yaml-pitfalls.md) | what Meridian does about each YAML trap: booleans, octal, version numbers, dates, tags, tabs, flow style, KYAML and JSON |
 | The four flavour pages above | how all of it is written for each segment |
 
 ## Contents
@@ -75,7 +76,9 @@ flowchart TD
 ## Files
 
 A file is YAML or JSON. Meridian decides which from the content, not from the
-file's extension.
+file's extension. YAML in flow style, including
+[KYAML](https://kubernetes.io/docs/reference/encodings/kyaml/) as `kubectl`
+prints it, is YAML and reads the same as the block form.
 
 | | YAML | JSON |
 |---|---|---|
@@ -101,10 +104,15 @@ handed to the tool with its type:
 | `yes`, `no`, `on`, `off` | text. Only `true` and `false` are booleans |
 | `42`, `-7`, `1_000`, `0x1F`, `0o17`, `0b101` | an integer |
 | `0644` | the integer 420: a leading zero means octal. Quote a file mode: `"0644"` |
-| `1.5`, `1e3`, `.inf`, `.nan` | a floating point number |
+| `08`, `09` | text: not octal, and no number was meant |
+| `1.5`, `1e3`, `.inf`, `.nan` | a floating point number. `1.10` is 1.1 and `3.0` is 3: quote a version number. The [`lossy-number`](../lint.md#lossy-number) lint points these out |
 | `~`, `null`, or nothing | null |
 | `2026-11-17` | text. A date is not converted |
-| anything quoted | text |
+| anything quoted, or tagged `!!str` | text |
+| any other tag (`!!int`, `!!binary`, `!custom`) | an error: write the value plainly, or quote it |
+
+Every one of these traps, and what to do about it, is on
+[YAML pitfalls](yaml-pitfalls.md).
 
 ## The document
 

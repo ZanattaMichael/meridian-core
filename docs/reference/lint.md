@@ -8,6 +8,7 @@ that is allowed and likely to hurt later.
 | Rule | Severity | Fix | What it finds |
 |---|---|---|---|
 | [`unquoted-mode`](#unquoted-mode) | warning | yes | a `mode` param written as a number |
+| [`lossy-number`](#lossy-number) | warning | yes | a param holding a number that is not the one the author wrote |
 | [`literal-secret`](#literal-secret) | warning | | a param that looks like a secret, holding a literal value |
 | [`duplicate-resource`](#duplicate-resource) | warning | | two resources of one type that manage the same thing |
 | [`redundant-dependency`](#redundant-dependency) | info | | a `dependsOn` entry that adds nothing |
@@ -41,6 +42,41 @@ string:
 ```yaml
   mode: "0644"
 ```
+
+`meridian lint --fix`, and the quick fix in an editor, add the quotes around
+exactly what was typed.
+
+## `lossy-number`
+
+**Warning, with a fix.** A param holds a plain number whose spelling is not
+what reaches the tool.
+
+```yaml
+params:
+  image: nginx
+  version: 1.10       # read as the number 1.1
+  release: 3.0        # read as the number 3
+  build: 1_000        # read as the number 1000
+```
+
+YAML reads a plain `1.10` as the floating point number 1.1, `3.0` as 3,
+`1_000` as 1000 and `+7` as 7, and the text the author typed is gone before
+any tool sees it. For a version, an image tag or a build number that is the
+wrong value. Write it as a quoted string:
+
+```yaml
+  version: "1.10"
+```
+
+The rule reports only a number whose canonical spelling differs from the
+text: `42`, `-3` and `1.5` are left alone, as is anything quoted and any
+`${{ ... }}` interpolation. A `mode` param is left to
+[`unquoted-mode`](#unquoted-mode), which knows what a mode is. A param the
+target declares as a number (such as `uid` on the configuration management
+types) is never reported, because the tool gets the number and the spelling
+does not matter. Values inside block lists and nested mappings are checked
+too; a number inside a `[...]` or `{...}` flow collection is not, because the
+rule cannot point at it.
 
 `meridian lint --fix`, and the quick fix in an editor, add the quotes around
 exactly what was typed.

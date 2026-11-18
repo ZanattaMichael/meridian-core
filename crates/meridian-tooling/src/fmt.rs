@@ -63,7 +63,10 @@ pub fn format(name: &str, text: &str, options: Options) -> Result<String, Error>
     let before = meridian_ir::parse_stream(name, text.as_bytes())
         .map_err(|errors| Error::Syntax(errors.to_string()))?;
     let file = syntax::read(text);
-    if file.json {
+    if file.json || file.docs.iter().all(root_is_flow) {
+        // JSON, and a document written as one `{...}` flow mapping (the
+        // style kubectl's KYAML output uses), have a layout of their own
+        // that this formatter does not speak. They are left as they are.
         return Ok(text.to_owned());
     }
 
@@ -94,6 +97,20 @@ pub fn format(name: &str, text: &str, options: Options) -> Result<String, Error>
         ));
     }
     Ok(formatted)
+}
+
+/// Whether a document's root is a `{...}` or `[...]` flow collection.
+fn root_is_flow(doc: &Doc) -> bool {
+    matches!(
+        &doc.root,
+        Some(Node {
+            kind: NodeKind::Scalar(syntax::Scalar {
+                style: syntax::Style::Flow,
+                ..
+            }),
+            ..
+        })
+    )
 }
 
 /// Every whole-line comment, sorted, so two texts can be compared for
@@ -502,6 +519,39 @@ kind: ResourceSet
         assert!(matches!(err, Error::Syntax(_)), "{err}");
         let json = "{\"apiVersion\": \"meridian/v1\",   \"kind\": \"ResourceSet\"}\n";
         assert_eq!(format("x.json", json, Options::default()).unwrap(), json);
+    }
+
+    /// A document written the way kubectl's KYAML output is, as one flow
+    /// mapping with every string quoted and trailing commas, parses and is
+    /// left exactly as written: it has no block layout to normalise.
+    #[test]
+    fn a_kyaml_document_is_left_as_written() {
+        let kyaml = "\
+---
+{
+  apiVersion: \"meridian/v1\",
+  kind: \"ResourceSet\",
+  metadata: {
+    name: \"web\",
+  },
+  spec: {
+    target: \"ansible\",
+    targetHost: {from: \"inline\", host: \"web01\",},
+    resources: [{
+      id: \"conf\",
+      type: \"file\",
+      params: {
+        path: \"/etc/app.conf\",
+        mode: \"0644\",
+      },
+    }],
+  },
+}
+";
+        assert_eq!(fmt(kyaml), kyaml);
+        // Two of them in one stream, likewise.
+        let two = format!("{kyaml}{kyaml}");
+        assert_eq!(fmt(&two), two);
     }
 
     #[test]

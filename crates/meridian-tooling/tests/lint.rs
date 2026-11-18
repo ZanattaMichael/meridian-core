@@ -60,6 +60,79 @@ fn unquoted_mode_is_found_and_fixed() {
 }
 
 #[test]
+fn lossy_number_is_found_and_fixed_where_the_spelling_is_lost() {
+    // Each of these reaches the tool as a different spelling.
+    let noisy = doc("    - id: app
+      type: exec
+      params:
+        command: run
+        creates: /x
+        version: 1.10
+        release: 3.0
+        size: 1_000
+        offset: +7
+        ratio: .5
+        bytes: 1e3
+        tags:
+          - 1.10
+          - two
+        limits:
+          cpu: 2.50
+");
+    assert_eq!(
+        found(&noisy),
+        [
+            pair("lossy-number", "1.10"),
+            pair("lossy-number", "3.0"),
+            pair("lossy-number", "1_000"),
+            pair("lossy-number", "+7"),
+            pair("lossy-number", ".5"),
+            pair("lossy-number", "1e3"),
+            pair("lossy-number", "1.10"),
+            pair("lossy-number", "2.50"),
+        ]
+    );
+    let diagnostics = run(&noisy);
+    assert!(diagnostics.iter().all(|d| d.fix.is_some()));
+    let (fixed, applied) = apply_fixes("doc.yaml", &noisy, &diagnostics);
+    assert_eq!(applied, 8);
+    assert_eq!(found(&fixed), []);
+    assert!(fixed.contains("version: \"1.10\""), "{fixed}");
+    assert!(fixed.contains("          - \"1.10\"\n"), "{fixed}");
+    assert!(fixed.contains("cpu: \"2.50\""), "{fixed}");
+
+    // A number whose spelling is its own, `08` (which is text), a quoted
+    // one, an interpolation, and a `mode` (which `unquoted-mode` owns) are
+    // not this rule's.
+    let quiet = doc("    - id: app
+      type: exec
+      params:
+        command: run
+        creates: /x
+        count: 42
+        ratio: 1.5
+        negative: -3
+        build: 08
+        version: \"1.10\"
+        replicas: ${{ data.replicas }}
+        flow: [1.10, 3.0]
+");
+    // A `[...]` or `{...}` flow collection is kept as text by the syntax
+    // reader, so a number inside one cannot be placed and is not reported.
+    assert_eq!(found(&quiet), []);
+
+    // A param the target declares as a number is never reported: `uid` is a
+    // whole number on every configuration management target.
+    let declared = doc("    - id: deploy
+      type: user
+      params:
+        name: deploy
+        uid: 1_500
+");
+    assert_eq!(found(&declared), []);
+}
+
+#[test]
 fn literal_secret() {
     let text = doc(
         "    - id: db\n      type: exec\n      params:\n        command: init\n        creates: /x\n",
@@ -182,6 +255,52 @@ fn a_comment_silences_a_rule_on_its_line_the_next_line_or_the_file() {
         "mode: 0644 # meridian-lint: disable=literal-secret",
     );
     assert_eq!(found(&another_rule).len(), 1);
+}
+
+/// A document in KYAML (one flow mapping, every string quoted) lints without
+/// a panic. The syntax reader keeps a flow collection as text, so a rule
+/// that needs a value's own position cannot point inside one; rules that
+/// work from the parsed document still report, at the document's first line.
+#[test]
+fn a_kyaml_document_lints_without_a_panic() {
+    let clean = "\
+---
+{
+  apiVersion: \"meridian/v1\",
+  kind: \"ResourceSet\",
+  metadata: {name: \"web\",},
+  spec: {
+    target: \"ansible\",
+    targetHost: {from: \"inline\", host: \"web01\",},
+    resources: [{
+      id: \"conf\",
+      type: \"file\",
+      params: {path: \"/etc/app.conf\", content: \"x\", mode: \"0644\",},
+    }],
+  },
+}
+";
+    assert_eq!(found(clean), []);
+    let noisy = clean
+        .replace("id: \"conf\"", "id: \"a.b\"")
+        .replace("mode: \"0644\"", "mode: 0644");
+    let diagnostics = run(&noisy);
+    let codes: Vec<&str> = diagnostics.iter().map(|d| d.code.as_str()).collect();
+    assert_eq!(
+        codes,
+        ["unquoted-mode", "unreferenceable-id"],
+        "{diagnostics:?}"
+    );
+    // The mode cannot be placed inside the flow mapping, so the report
+    // lands on the document's first line (the `{` under the `---` marker),
+    // names the number, and has no fix.
+    assert_eq!(diagnostics[0].span.start.line, 1);
+    assert!(diagnostics[0].fix.is_none());
+    assert!(
+        diagnostics[0].message.starts_with("mode 420 is read"),
+        "{}",
+        diagnostics[0].message
+    );
 }
 
 #[test]
