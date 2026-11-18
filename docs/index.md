@@ -50,7 +50,7 @@ byte. The reasons, the layout and the order of work are in
 | [Meridian on Windows](quickstart/windows.md) | what is different on Windows, and which targets make sense there |
 | [Your first ResourceSet](quickstart/first-resourceset.md) | one document, from validate to apply, and the same document on another tool |
 | [A two-stage workflow](quickstart/first-two-stage.md) | one tool creates a machine, another configures it |
-| [Worked workflows](quickstart/workflows.md) | seven workflows across every target: three tiers on four tools, a cluster platform, a golden image, Windows on Azure, an edge site, one file for every environment, and one file for every customer |
+| [Worked workflows](quickstart/workflows.md) | eight workflows across every target: three tiers on four tools, a cluster platform, a golden image, Windows on Azure, an edge site, one file for every environment, one file for every customer, and the vertical slice CI applies for real |
 
 | Bringing in what you have | |
 |---|---|

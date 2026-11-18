@@ -1,12 +1,14 @@
 # Worked workflows
 
 A workflow is several documents given to one `meridian` command. This page walks
-through seven of them, each a file under
+through eight of them, each a file under
 [`examples/workflow/`](../../examples/workflow). Between them they use every
 target Meridian ships, and each shows a different way of fitting tools together.
 
 Every file on this page is compiled by a test with the real plugins, in each of
 the ways the page describes, so what you read here is what the command does.
+The last one, the vertical slice, is also applied for real on every push: a
+cluster, Terraform and Ansible, with nothing standing in for a tool.
 
 | Workflow | Tools, in the order they run | Shows |
 |---|---|---|
@@ -17,6 +19,7 @@ the ways the page describes, so what you read here is what the command does.
 | [Edge site](#edge-site) | Pulumi, Chef, OpenVox, Podman | two machines with different roles; containers under systemd |
 | [Environments](#environments) | Terraform, Ansible, Kubernetes | one workflow for every environment, decided by `--data` |
 | [Tenants](#tenants) | Terraform, Salt, Kubernetes, Chef | one workflow for every customer: the plan decides which documents run, which resources they hold and what size they are |
+| [Vertical slice](#vertical-slice) | Kubernetes, Terraform, Ansible | the one that runs for real in CI: an output imported by Terraform, a host read by Ansible, and a second plan that changes nothing |
 
 If you have not yet run a workflow of two documents, start with
 [a two-stage workflow](first-two-stage.md). The rules every workflow follows are
@@ -350,6 +353,70 @@ What the example is there to show:
   fall back on, so the starter data file does not have to mention either.
 - **One thing changed by hand.** `--set tenant=globex` compiles the same
   workflow for another customer without a file of their own.
+
+## Vertical slice
+
+[`examples/workflow/vertical-slice.yaml`](../../examples/workflow/vertical-slice.yaml),
+with [`vertical-slice.data.yaml`](../../examples/workflow/vertical-slice.data.yaml)
+
+```mermaid
+flowchart LR
+    K["app<br/>Kubernetes<br/>namespace, ConfigMap, Deployment"]
+    T["edge<br/>Terraform<br/>terraform_data, local_file"]
+    A["site<br/>Ansible<br/>a directory, a file, an exec"]
+    K -- "output workload<br/>imported as var.workload" --> T
+    T -- "output address<br/>the targetHost" --> A
+```
+
+The smallest workflow that goes through three tools and hands something real
+between each pair. It is the one workflow CI applies with the tools themselves,
+on every push: the `vertical slice` job starts a [kind](https://kind.sigs.k8s.io/)
+cluster, installs Terraform and `ansible-core`, and runs
+[`crates/meridian-cli/tests/vertical_slice.rs`](../../crates/meridian-cli/tests/vertical_slice.rs),
+which drives the real `meridian` binary through `validate`, `compile`, `plan`,
+`apply`, `status`, `report`, `plan` again and `drift`, and checks what each
+tool left behind. Nothing in it needs an account: the cluster runs inside
+Docker, Terraform creates a local value and a file, and Ansible configures the
+machine it runs on.
+
+1. **`app`** (Kubernetes) applies a namespace, a ConfigMap and a Deployment
+   that mounts it. Its outputs are read from the cluster after the apply:
+   `workload` is `meridian-slice/web`.
+2. **`edge`** (Terraform) [imports](../reference/dsl/outputs-and-hand-offs.md#imports)
+   that output, so until `app` has been applied the stage is deferred. The
+   value arrives as the variable `workload`, which the `local` provider writes
+   into `upstream.conf`. A `terraform_data` value stands for the machine, and
+   the output `address` is its name: `localhost`.
+3. **`site`** (Ansible) names its machine with `targetHost` from that output,
+   so it too waits. It creates a directory and a file under `data.root`, and an
+   `exec` that runs once, when the file was written, because the file
+   [notifies](../reference/dsl/notifies.md) it.
+
+What the example is there to show:
+
+- **Two ways to hand a value on.** `edge` asks for a value with `imports` and
+  gets it as its tool's own variable, never spliced into the compiled file;
+  `site` asks for its machine with `targetHost`. Both are deferred by `plan`
+  until the stage they wait on has been applied, and `compile` compiles `edge`
+  all the same, because the value is not part of the artifact.
+- **The second plan is the proof.** After the apply, `meridian plan` reports
+  every stage in sync and `meridian drift` agrees: `kubectl diff`, `terraform
+  plan` and Ansible's check mode each see the world as the documents say.
+- **Data decides where.** `data.root` is where the second and third stages
+  write; the test gives a scratch directory with `--set root=...`, and the
+  data file beside the example gives a path for running it by hand.
+
+To run it yourself, with a cluster in your current kubeconfig context,
+`terraform` and `ansible-playbook` on your path:
+
+```
+MERIDIAN_ANSIBLE_ARGS='--connection local' \
+meridian apply examples/workflow/vertical-slice.yaml \
+    --data examples/workflow/vertical-slice.data.yaml
+```
+
+The namespace `meridian-slice` is what it leaves on the cluster; `kubectl
+delete namespace meridian-slice` removes it.
 
 ## Using these as a starting point
 
