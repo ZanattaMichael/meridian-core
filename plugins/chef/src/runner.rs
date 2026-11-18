@@ -301,6 +301,7 @@ impl Runner for ChefRunner {
             Transport::Local => Ok(Plan {
                 changes: self.converge_here(context, &cookbook, true, log)?,
                 unknown: false,
+                saved: None,
             }),
             Transport::Remote => {
                 log.out(&format!(
@@ -310,6 +311,7 @@ impl Runner for ChefRunner {
                 Ok(Plan {
                     changes: Vec::new(),
                     unknown: true,
+                    saved: None,
                 })
             }
         }

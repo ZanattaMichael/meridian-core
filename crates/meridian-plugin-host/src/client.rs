@@ -234,6 +234,7 @@ impl Client {
                 .collect(),
             operations: wire::operations_from_wire(reply.operations),
             accepts_inputs: reply.accepts_inputs,
+            saves_plans: reply.saves_plans,
             import_formats: wire::import_formats_from_wire(reply.import_formats),
             exports_schemas: reply.exports_schemas,
             settings: wire::settings_from_wire(reply.settings),

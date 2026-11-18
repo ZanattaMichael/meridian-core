@@ -239,6 +239,7 @@ impl Runner for AnsibleRunner {
             // command with no `creates` to test, or a condition only the node
             // can answer.
             unknown: report.skipped,
+            saved: None,
         })
     }
 

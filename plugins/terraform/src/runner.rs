@@ -4,7 +4,7 @@
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, Operations, Output, Plan,
-    RunContext, RunError, Runner, Value,
+    RunContext, RunError, Runner, SavedPlan, Value,
 };
 use meridian_sdk::{settings, Setting};
 
@@ -132,6 +132,36 @@ impl TerraformRunner {
         read_plan(&shown.stdout)
     }
 
+    /// Writes the configuration, initialises the directory and puts back a
+    /// plan `plan` saved, reading what it would do from the tool.
+    fn restore(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        plan: &[u8],
+        log: &dyn Log,
+    ) -> Result<Vec<Change>, RunError> {
+        if !artifact.files.contains_key(CONFIG_PATH) {
+            return Err(RunError::new(format!(
+                "the artifact has no {CONFIG_PATH}; it was not compiled by this plugin"
+            )));
+        }
+        write_artifact(&context.work_dir, artifact)?;
+        self.tool(context)
+            .args(["init", "-input=false", "-no-color"])
+            .args(self.extra_args.iter().cloned())
+            .run_ok("terraform init failed", log)?;
+        std::fs::write(context.work_dir.join(PLAN_FILE), plan)
+            .map_err(|e| RunError::new(format!("writing the saved plan {PLAN_FILE}: {e}")))?;
+        log.out("applying the plan saved by `meridian plan --out`");
+        let shown = self
+            .tool(context)
+            .args(["show", "-json", PLAN_FILE])
+            .capture_stdout()
+            .run_ok("terraform could not show the saved plan", log)?;
+        read_plan(&shown.stdout)
+    }
+
     /// Removes the saved plan once it has served, when the run handed over
     /// secrets: a plan file holds the value of every variable, sensitive
     /// ones included, and the work directory is not the place to keep one.
@@ -183,6 +213,10 @@ impl Runner for TerraformRunner {
         true
     }
 
+    fn saves_plans(&self) -> bool {
+        true
+    }
+
     fn plan(
         &self,
         context: &RunContext,
@@ -190,10 +224,27 @@ impl Runner for TerraformRunner {
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
         let prepared = self.prepare(context, artifact, log);
+        // The plan file is the tool's own saved plan, which `meridian plan
+        // --out` keeps for the apply. It holds the value of every variable,
+        // so when the run handed over a secret it is scrubbed instead of
+        // saved, and the apply from the plan file plans again.
+        let saved = if context.save_plan && context.secrets.is_empty() && prepared.is_ok() {
+            match std::fs::read(context.work_dir.join(PLAN_FILE)) {
+                Ok(bytes) => Some(SavedPlan::new(bytes)),
+                Err(e) => {
+                    return Err(RunError::new(format!(
+                        "the saved plan {PLAN_FILE} could not be read back: {e}"
+                    )))
+                }
+            }
+        } else {
+            None
+        };
         self.scrub(context);
         Ok(Plan {
             changes: prepared?,
             unknown: false,
+            saved,
         })
     }
 
@@ -203,7 +254,15 @@ impl Runner for TerraformRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
-        let changes = match self.prepare(context, artifact, log) {
+        // A plan `meridian plan --out` kept is put back where the tool saved
+        // it and applied as it is; Terraform itself refuses a plan whose
+        // state or configuration has moved on. Without one, the apply plans
+        // first, as it always did.
+        let prepared = match &context.saved_plan {
+            Some(saved) => self.restore(context, artifact, &saved.data, log),
+            None => self.prepare(context, artifact, log),
+        };
+        let changes = match prepared {
             Ok(changes) => changes,
             Err(e) => {
                 self.scrub(context);

@@ -92,7 +92,7 @@ spec:
         address: ${web_ip}
         size: {cpus: 2, memoryGb: 4}
         image: {family: ubuntu, version: "24.04"}
-        sshKey: ssh-ed25519 AAAA... admin@example.com
+        sshKey: ssh-rsa AAAA... admin@example.com
   outputs:
     - name: address
       value: ${vm.publicAddress}
@@ -213,7 +213,7 @@ shown by its `Name` tag, which is the id unless `tags.Name` is given.
 | `subnet` | reference, required | the subnet it is in |
 | `size` | required | `{cpus, memoryGb}`, or the cloud's own size as text |
 | `image` | required | `{family, version}`, or the cloud's own image as text |
-| `sshKey` | text or secret | the public key that may log in. Required on Azure |
+| `sshKey` | text or secret | the public key that may log in. Required on Azure, where it must be an RSA (`ssh-rsa`) key, because Azure Linux VMs accept no other kind |
 | `user` | text | the login the key is for. Azure only; `azureuser` unless given |
 | `address` | reference | an `address` to attach |
 | `firewalls` | list of references | the firewalls that apply. Azure takes one |

@@ -222,6 +222,7 @@ impl Registry {
             settings: Vec::new(),
             operations: Operations::COMPILE_ONLY,
             accepts_inputs: false,
+            saves_plans: false,
             path: String::new(),
             signature: crate::Signature::NotChecked,
         };

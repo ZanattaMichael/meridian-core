@@ -164,6 +164,9 @@ pub struct FakeRunner {
     pub operations: Operations,
     /// Whether the tool takes inputs, which it then echoes when it applies.
     pub accepts_inputs: bool,
+    /// Whether the tool saves a plan when asked and applies exactly a saved
+    /// one; `FAKE_SAVES_PLANS=none` makes it a plugin that does not.
+    pub saves_plans: bool,
 }
 
 /// The one setting the fake runner declares: a greeting the tool writes to
@@ -311,6 +314,18 @@ fn hand_over_credential(
 }
 
 /// What the last apply wrote, by artifact path.
+/// The artifact's files as one value, which is what the fake's saved plan
+/// is made of.
+fn files_of(artifact: &Artifact) -> Value {
+    Value::Map(
+        artifact
+            .files
+            .iter()
+            .map(|(path, content)| (path.clone(), Value::from(content.as_str())))
+            .collect(),
+    )
+}
+
 fn read_state(work_dir: &Path) -> Result<BTreeMap<String, Value>, RunError> {
     match fs::read(work_dir.join("state.json")) {
         Ok(bytes) => decode_map(&bytes).map_err(RunError::new),
@@ -403,6 +418,10 @@ impl Runner for FakeRunner {
         self.accepts_inputs
     }
 
+    fn saves_plans(&self) -> bool {
+        self.saves_plans
+    }
+
     fn plan(
         &self,
         context: &RunContext,
@@ -423,9 +442,23 @@ impl Runner for FakeRunner {
         }
         let changes = diff(&state, artifact);
         log.err(&format!("{} to change", changes.len()));
+        // The saved plan is the files the plan was taken for, so that an
+        // apply handed it can tell a stale one. As Terraform's would, it
+        // holds every value, so it is not saved when the run handed over a
+        // secret: that is the host's fallback being exercised, not a fault.
+        let saved = if context.save_plan && self.saves_plans && context.secrets.is_empty() {
+            let mut plan: BTreeMap<String, Value> = BTreeMap::new();
+            plan.insert("files".to_owned(), files_of(artifact));
+            plan.insert("planned".to_owned(), Value::Int(changes.len() as i64));
+            log.err("plan saved");
+            Some(meridian_sdk::SavedPlan::new(canonical_map(&plan)))
+        } else {
+            None
+        };
         Ok(Plan {
             changes,
             unknown: artifact.files.values().any(|c| c.contains("UNKNOWN")),
+            saved,
         })
     }
 
@@ -438,6 +471,42 @@ impl Runner for FakeRunner {
         let mut state = read_state(&context.work_dir)?;
         let _secrets = hand_over_secrets(context, log)?;
         let _credential = hand_over_credential(context, log)?;
+        // A saved plan is applied as the tool would apply its own: for the
+        // files it was taken for and no others, and what was handed over is
+        // recorded where a host test can read it. The record holds no value.
+        let from_plan = context.work_dir.join("applied-from-plan.json");
+        match &context.saved_plan {
+            None => {
+                let _ = fs::remove_file(&from_plan);
+            }
+            Some(saved) => {
+                let plan = decode_map(&saved.data)
+                    .map_err(|e| RunError::new(format!("the saved plan is unreadable: {e}")))?;
+                if plan.get("files") != Some(&files_of(artifact)) {
+                    return Err(RunError::new(
+                        "the saved plan is stale: it was taken for other files than these",
+                    ));
+                }
+                let mut record: BTreeMap<String, Value> = BTreeMap::new();
+                record.insert("bytes".to_owned(), Value::Int(saved.data.len() as i64));
+                record.insert(
+                    "changes".to_owned(),
+                    Value::List(
+                        saved
+                            .changes
+                            .iter()
+                            .map(|c| Value::from(c.to_string().as_str()))
+                            .collect(),
+                    ),
+                );
+                fs::write(&from_plan, canonical_map(&record))
+                    .map_err(|e| RunError::new(format!("recording the saved plan: {e}")))?;
+                log.err(&format!(
+                    "applying the saved plan of {} changes",
+                    saved.changes.len()
+                ));
+            }
+        }
         // The one setting, written where a host test can read which value
         // reached the tool.
         fs::write(context.work_dir.join("greeting.txt"), greeting())
@@ -623,7 +692,8 @@ impl Importer for FakeImporter {
 /// Serves the fake plugin, offering the operations `FAKE_OPERATIONS` names
 /// (`none`, `plan`, or anything else for all of them), so a host can be
 /// checked against a plugin that offers only some. `FAKE_INPUTS=none` makes
-/// it a plugin that does not take inputs.
+/// it a plugin that does not take inputs, and `FAKE_SAVES_PLANS=none` one
+/// that does not save plans.
 pub fn serve_from_env() -> Result<(), ServeError> {
     let operations = match std::env::var("FAKE_OPERATIONS").as_deref() {
         Ok("none") => None,
@@ -647,6 +717,7 @@ pub fn serve_from_env() -> Result<(), ServeError> {
         Some(operations) => serve(plugin.with_runner(FakeRunner {
             operations,
             accepts_inputs: std::env::var("FAKE_INPUTS").as_deref() != Ok("none"),
+            saves_plans: std::env::var("FAKE_SAVES_PLANS").as_deref() != Ok("none"),
         })),
         None => serve(plugin),
     }

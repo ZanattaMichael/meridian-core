@@ -162,6 +162,21 @@ impl Run<'_> {
                 (document, secrets)
             }
             Read::LeftOut { condition } => {
+                // A plan that previewed this stage promised a change here;
+                // leaving it out now would make the plan a lie.
+                if let Some(planned) = self.planned(&id) {
+                    if planned.status != PlannedStatus::LeftOut {
+                        return fail(
+                            report,
+                            Reason::PlanDiffers,
+                            format!(
+                                "the plan {} this stage, and its spec.when ({condition}) now \
+                                 leaves it out; take a new plan",
+                                planned.status.as_str()
+                            ),
+                        );
+                    }
+                }
                 report.outcome = Outcome::LeftOut { condition };
                 return report;
             }
@@ -233,6 +248,43 @@ impl Run<'_> {
             return report;
         }
         let hash = artifact_hash(&emitted.artifact);
+        // An apply from a saved plan applies what was planned, or nothing:
+        // the document must still compile to the very artifact the plan was
+        // taken for. A stage the plan could not preview is applied as any
+        // apply would, and the report says it was not checked.
+        let mut saved_plan = None;
+        if let Some(planned) = self.planned(&id) {
+            match planned.status {
+                PlannedStatus::Deferred => report.warnings.push(Warning {
+                    target: "plan".to_owned(),
+                    resource: String::new(),
+                    msg: "the plan could not preview this stage, which waited on an output \
+                          that did not exist yet, so its artifact was not checked against \
+                          the plan"
+                        .to_owned(),
+                }),
+                _ if planned.artifact_hash != hash => {
+                    let data = self.changed_data();
+                    return fail(
+                        report,
+                        Reason::PlanDiffers,
+                        format!(
+                            "the document no longer compiles to what was planned (the plan \
+                             has {}, and it now compiles to {hash}){data}; take a new plan",
+                            if planned.artifact_hash.is_empty() {
+                                "no artifact".to_owned()
+                            } else {
+                                planned.artifact_hash.clone()
+                            }
+                        ),
+                    );
+                }
+                _ => {}
+            }
+            if info.saves_plans {
+                saved_plan = planned.saved_for_apply();
+            }
+        }
         // What was last applied here, if anything was.
         let last = self.state.get(&id).cloned();
         if self.mode == Mode::Drift {
@@ -267,10 +319,15 @@ impl Run<'_> {
             Ok(held) => held,
             Err(why) => return fail(report, Reason::CompileRefused, why),
         };
-        let context = match self.context(&id, stage.target(), &report.host, inputs, handed, held) {
-            Ok(context) => context,
-            Err(why) => return fail(report, Reason::StateFailed, why),
-        };
+        let mut context =
+            match self.context(&id, stage.target(), &report.host, inputs, handed, held) {
+                Ok(context) => context,
+                Err(why) => return fail(report, Reason::StateFailed, why),
+            };
+        context.saved_plan = saved_plan;
+        // A plan that will be written asks each tool that can for the plan
+        // it saved, so the apply can carry out exactly that.
+        context.save_plan = self.mode == Mode::Plan && options.save_plan && info.saves_plans;
 
         // A resumed run leaves alone what the run it continues already
         // applied, as long as the document still compiles to the same thing.
@@ -1057,7 +1114,37 @@ impl Run<'_> {
             inputs,
             secrets,
             credential,
+            save_plan: false,
+            saved_plan: None,
         })
+    }
+
+    /// What the saved plan this apply carries out says about a stage, when
+    /// it carries one out.
+    fn planned(&self, id: &StageId) -> Option<&PlannedStage> {
+        self.options
+            .from_plan
+            .as_ref()
+            .and_then(|plan| plan.stage(id))
+    }
+
+    /// The data files that changed since the plan was taken, as words to
+    /// put after a `plan-differs` failure; empty when none did.
+    fn changed_data(&self) -> String {
+        let changed = self
+            .options
+            .from_plan
+            .as_ref()
+            .map(|plan| plan.changed_data.as_slice())
+            .unwrap_or_default();
+        match changed {
+            [] => String::new(),
+            [one] => format!(", and the data file {one} has changed since the plan"),
+            many => format!(
+                ", and the data files {} have changed since the plan",
+                many.join(", ")
+            ),
+        }
     }
 
     pub(crate) fn record(&mut self, id: &StageId, target: &str, hash: &str, applied: bool) {

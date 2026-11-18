@@ -265,7 +265,7 @@ reported in notes.
 | | |
 |---|---|
 | Plan | `Invoke-DscRunner -Mode Test`: every resource is tested, none is set. A resource that is not in its desired state is a change |
-| Apply | a `Test` to learn what has drifted, then `Invoke-DscRunner -Mode Set` |
+| Apply | `Invoke-DscRunner -Mode Set`, in one PowerShell. A Set tests every resource itself and sets the ones that drifted; its result says which had drifted (`Drifted`), and those are the apply's changes. With a DscPipelineRunner older than that, the same PowerShell runs `-Mode Test` first to learn what has drifted |
 | `MERIDIAN_PWSH` | the PowerShell to run, when it is not `pwsh` on `PATH` |
 | `MERIDIAN_DSC_MODULE` | the module to import: a name PowerShell can find, or the path of its manifest. `Dsc.PipelineRunner` by default |
 
@@ -277,6 +277,26 @@ The names, defaults and the splitting rule for argument lists are in the
 In `Test` mode the runner records both drift and a resource that could not be
 tested as a failure, so a plan lists either as a change, with the runner's
 message.
+
+### How long a run takes
+
+Most of a DSC v3 run's time is not the resources: it is starting processes.
+A plan or an apply starts one PowerShell to import the runner (about a second
+on a hosted Windows agent). The runner then starts one `dsc` per resource
+method. Before DscPipelineRunner's
+[PR 100](https://github.com/ZanattaMichael/Dsc.PipelineRunner/pull/100), each of
+those `dsc` processes also ran dsc's full resource discovery. In dsc 3.3 that
+starts yet another PowerShell for the `Microsoft.PowerShell/Discover`
+extension, about 2 seconds a call on a hosted Windows agent, and the runner
+called `get` after every `test` and `set` as well. A one-resource apply through
+DSC v3 took about 25 seconds.
+
+With a runner that has PR 100, the runner looks a type up once and then points
+`dsc` at that resource's manifest alone, about 0.08 seconds a call on the same
+agent, and it makes no `get` call. Meridian's apply also runs one `Set` instead
+of a `Test` and then a `Set`. A one-resource apply is then mostly the one
+PowerShell start. Set `PIPELINERUNNER_DSC_FULL_DISCOVERY=1` to turn the
+runner's narrowing off.
 
 The runner is tested against a real PowerShell, the DscPipelineRunner module
 from the PowerShell Gallery and DSC v3 on Linux, on every pull request that

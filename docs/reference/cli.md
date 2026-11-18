@@ -121,6 +121,16 @@ warnings and its decision are shown above the plan. A stage the policy denies
 is reported as failed and the command exits `1`; the stages after it are
 still planned, so one plan shows every denial.
 
+`--out FILE` (or `-o`) saves the plan: one JSON file holding what was asked,
+the id of the run, and for each stage the hash of the artifact it compiled
+to, the changes, the policy's decision and, where the tool saves a plan of
+its own, that plan. `apply --plan FILE` then carries out exactly that plan.
+The file is written only when every stage planned; a failed or denied stage
+leaves nothing to apply, and the command says the plan was not saved and
+exits `1`. The file never holds a value: a tool's saved plan is left out
+when it would carry one. [A saved plan](../operations/pull-requests.md) has
+the file, the checks and the pull request automation built on it.
+
 ### `apply`
 
 Compiles and applies each document in order, stopping at the first failure. A
@@ -148,6 +158,20 @@ that a file after `--resume` is always a file; `--resume` may come before or
 after the documents. Stages that run already applied, from documents
 that still compile to the same artifact, are left alone; the rest are applied.
 [Picking up where a run stopped](../concepts/run-safety.md#picking-up-where-a-run-stopped)
+has the rules.
+
+`--plan FILE` applies a plan saved by `plan --out`, and nothing else. The
+documents, data, values and selector come from the file and may be left off
+the command line; any that is given must be what the plan was taken with.
+Before anything runs, the plan is held against the run: it must name the
+same stages, and no stage may have been applied since it was taken, by any
+run; otherwise the apply is refused (`kind: plan`, exit `1`) before it holds
+anything but the lock. Then each stage is compiled again and must compile to
+the artifact hash the plan recorded, or it fails with the reason
+`plan-differs` and the stages after it are not run. Where the tool saved a
+plan, it is handed that plan back and applies it. A stage the plan could not
+preview is applied unchecked, with a warning. `--plan` and `--resume` cannot
+be combined. [What `apply --plan` checks](../operations/pull-requests.md#what-apply---plan-checks)
 has the rules.
 
 With `--policy`, the [policy](policy.md) is asked about every stage before
