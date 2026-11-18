@@ -176,7 +176,7 @@ A native resource takes `dependsOn`, `notifies`, `runtimeWhen`, secrets and
 references like any other; what differs is only how `type`, `params` and
 `state` are read. How each target writes a native resource, and what it
 refuses, is on the target's page. The choice is
-[decision 0030](../../decisions/0030-native-types-beside-the-six-and-a-prefix-for-colliding-names.md).
+[decision 0032](../../decisions/0032-native-types-beside-the-six-and-a-prefix-for-colliding-names.md).
 
 ## The native dialect: DSC
 

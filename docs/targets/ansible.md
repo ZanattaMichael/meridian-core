@@ -244,7 +244,7 @@ for Ansible only, since no other target knows the module. The [`native-type`](..
 lint rule marks each such resource. The six shared types stay the portable
 way to say what they can say; a module is for everything else. The split, and
 why `native/file` is refused here, is
-[decision 0030](../decisions/0030-native-types-beside-the-six-and-a-prefix-for-colliding-names.md).
+[decision 0032](../decisions/0032-native-types-beside-the-six-and-a-prefix-for-colliding-names.md).
 
 ## Ordering and notifications
 

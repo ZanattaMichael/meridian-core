@@ -53,4 +53,4 @@ page it affects. The pull request template asks for it.
 | [A secret has one place on each containers target](0022-a-secret-has-one-place-on-each-containers-target.md) | Targets | proposed |
 | [An error's kind is a fixed code that is never reused](0026-error-codes-are-fixed-words-and-never-reused.md) | Core | proposed |
 | [A key reaches a host through an agent Meridian starts](0028-a-key-reaches-a-host-through-an-agent-meridian-starts.md) | Targets | proposed |
-| [A configuration management target takes its tool's own types beside the six, and a colliding name is written `native/<name>`](0030-native-types-beside-the-six-and-a-prefix-for-colliding-names.md) | Targets | proposed |
+| [A configuration management target takes its tool's own types beside the six, and a colliding name is written `native/<name>`](0032-native-types-beside-the-six-and-a-prefix-for-colliding-names.md) | Targets | proposed |
