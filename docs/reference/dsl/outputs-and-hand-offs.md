@@ -156,7 +156,7 @@ machine its own way, with its own credentials:
 | `salt` | the entry in the top file; another machine is reached with `salt-ssh` |
 | `chef` | the machine `chef-run` is pointed at |
 | `cloud-init` | the machine's name in `meta-data`, and where an apply can wait for the first boot |
-| `dsc` | the machine the runner reaches over WinRM or SSH, as its `runner` resource says |
+| `dsc` | the machine the runner reaches over WinRM or SSH, as `spec.settings.target` says |
 
 ## `imports`
 

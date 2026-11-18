@@ -126,16 +126,13 @@ spec:
     from: infrastructure
     ref: web-vm
     output: address
+  # How the configuration is run. The credential is a name the runner
+  # resolves itself; the secret is never in this file.
+  settings:
+    engine: DscV2
+    target: WinRM
+    credential: svcDeploy
   resources:
-    # How the configuration is run, not a DSC resource. The credential is a
-    # name the runner resolves itself; the secret is never in this file.
-    - id: settings
-      type: runner
-      params:
-        engine: DscV2
-        target: WinRM
-        credential: svcDeploy
-
     - id: iis
       type: PSDscResources/WindowsFeature
       params:

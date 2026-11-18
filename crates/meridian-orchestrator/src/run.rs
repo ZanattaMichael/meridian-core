@@ -640,6 +640,28 @@ impl Run<'_> {
                 ));
             }
         }
+        // A setting the target does not read would be dropped on the floor,
+        // and a plugin built before settings existed reads none.
+        if let Some(key) = stage
+            .settings()
+            .keys()
+            .find(|k| !info.settings_keys.contains(k))
+        {
+            let why = if info.settings_keys.is_empty() {
+                format!(
+                    "the document sets spec.settings.{key}, and target {:?} takes no settings; \
+                     remove spec.settings, or use a plugin that takes them",
+                    stage.target()
+                )
+            } else {
+                format!(
+                    "the document sets spec.settings.{key}, and target {:?} takes only: {}",
+                    stage.target(),
+                    info.settings_keys.join(", ")
+                )
+            };
+            return Err(refuse(Reason::CompileRefused, why));
+        }
         if let Some(import) = stage.imports().first() {
             if !info.accepts_inputs {
                 // Dropping the value without a word would compile into

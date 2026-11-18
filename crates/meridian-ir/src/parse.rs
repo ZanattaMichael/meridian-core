@@ -403,6 +403,7 @@ impl Decoder<'_> {
                     conditions: self.conditions(f.get("conditions")),
                     secrets: self.secrets(f.get("secrets"), &pos),
                     credentials: self.credentials(f.get("credentials"), &pos),
+                    settings: self.value_map(f.get("settings"), "spec.settings"),
                     imports: self.imports(f.get("imports"), &pos),
                     resources: self.resources(f.get("resources"), &pos),
                     outputs: self.outputs(f.get("outputs"), &pos),
@@ -425,6 +426,7 @@ impl Decoder<'_> {
                     secrets: self.secrets(f.get("secrets"), &pos),
                     credentials: self.credentials(f.get("credentials"), &pos),
                     target_host: self.target_host(f.get("targetHost"), &pos),
+                    settings: self.value_map(f.get("settings"), "spec.settings"),
                     imports: self.imports(f.get("imports"), &pos),
                     resources: self.resources(f.get("resources"), &pos),
                 };

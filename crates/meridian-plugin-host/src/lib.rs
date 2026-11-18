@@ -81,6 +81,9 @@ pub struct Info {
     /// What an operator can configure about the target's runner, as the
     /// plugin declares it; empty when it declares none.
     pub settings: Vec<meridian_sdk::Setting>,
+    /// The keys the target reads in a document's `spec.settings`; empty when
+    /// it takes none, which is also what a plugin built before the field says.
+    pub settings_keys: Vec<String>,
     /// The binary the plugin was loaded from; empty for an in-process emitter.
     pub path: String,
     /// What checking the binary's signature found, before it was started.
@@ -354,6 +357,7 @@ pub fn to_sdk(graph: &meridian_ast::ResourceGraph) -> meridian_sdk::ResourceGrap
         host: graph.host.clone(),
         target: graph.target.clone(),
         target_version: graph.target_version.clone(),
+        settings: graph.settings.clone(),
         resources: graph
             .resources()
             .iter()

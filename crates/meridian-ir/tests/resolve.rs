@@ -141,6 +141,25 @@ fn a_variable_is_worked_out_once_and_read_anywhere() {
 }
 
 #[test]
+fn settings_are_placed_as_params_are() {
+    let (doc, _) = kept(&resource_set(
+        "variables:\n  transport: \"${{ data.env == 'prod' ? 'WinRM' : 'SSH' }}\"\n\
+         settings:\n  target: \"${{ var.transport }}\"\n  engine: DscV2\n  depth: ${{ data.replicas }}\n\
+         resources:\n  - {id: a, type: file, params: {path: /a}}\n",
+    ));
+    assert_eq!(doc.settings()["target"], text("WinRM"));
+    assert_eq!(doc.settings()["engine"], text("DscV2"));
+    assert_eq!(doc.settings()["depth"], Value::Int(3));
+    // A settings key is a name the target reads, so it cannot be computed.
+    refused(
+        &resource_set(
+            "settings:\n  \"${{ data.env }}\": x\nresources:\n  - {id: a, type: file, params: {path: /a}}\n",
+        ),
+        &["spec.settings.${{ data.env }}", "a setting's name"],
+    );
+}
+
+#[test]
 fn variables_may_be_written_in_any_order() {
     let (doc, _) = kept(&resource_set(
         "variables:\n  a: \"${{ var.b }}!\"\n  b: \"${{ var.c }}-${{ cond.z ? 'p' : 'd' }}\"\n  c: ${{ data.env }}\n\

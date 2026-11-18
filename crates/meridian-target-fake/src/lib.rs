@@ -81,6 +81,12 @@ impl Emitter for Fake {
         vec!["1".to_owned(), "2.4".to_owned()]
     }
 
+    /// One tool-wide setting, so a test can see `spec.settings` arrive and
+    /// another key be refused before the plugin is asked.
+    fn settings_keys(&self) -> Vec<String> {
+        vec!["mode".to_owned()]
+    }
+
     fn emit(&self, graph: &ResourceGraph, data: &Data) -> Result<Emitted, CompileError> {
         let mut emitted = Emitted::default();
         // A secret is written as a reference its tool resolves when it runs,
@@ -125,6 +131,13 @@ impl Emitter for Fake {
                     credential.summary(),
                     credential.secret_fields.join(", ")
                 ),
+            );
+        }
+        // The document's settings, as they arrived.
+        if !graph.settings.is_empty() {
+            emitted.artifact.files.insert(
+                "settings.txt".to_owned(),
+                format!("{}\n", meridian_sdk::canonical_map(&graph.settings)),
             );
         }
         // A declared output is compiled into the artifact, as a real target

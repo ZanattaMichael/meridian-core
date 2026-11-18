@@ -83,8 +83,11 @@ deployed: `provider` and `backend` (Terraform), `stack` (CloudFormation), `provi
 `stack` and `config` (Pulumi), `deployment` and `parameter` (ARM), `variable`,
 `local` and `plugin` (Packer),
 `deployment` (Bicep), `project` (Docker), `cluster` (Kubernetes), `values`,
-`chart`, `release` and `kustomization` (Helm), `runner` (DSC). It is written in the same list so that a document stays one list. Each
-target's page gives its params and whether it is required.
+`chart`, `release` and `kustomization` (Helm). It is written in the same list so that a document stays one list. Each
+target's page gives its params and whether it is required. The `dsc` target has
+none any more: how a DSC configuration is run is said under
+[`spec.settings`](index.md#settings), and its old `runner` resource compiles with
+a warning. Other targets' settings resources will move the same way.
 
 ## `state`
 

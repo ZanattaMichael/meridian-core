@@ -66,6 +66,7 @@ itself is specified in the [language reference](../reference/dsl/index.md).
 | `dependsOn` | cycles and unknown resources are refused; the resources arrive in a valid order |
 | `notifies[].on` | only `changed` is accepted |
 | `spec.targetVersion` | refused unless your plugin declares versions with `Emitter::target_versions`. If it does, the version arrives as `graph.target_version` |
+| `spec.settings` | refused unless your plugin declares the keys it reads with `Emitter::settings_keys`, and refused for any key outside them. What it declares arrives as `graph.settings`, with interpolation placed, and the values are yours to check |
 
 ## Before you start
 
@@ -286,6 +287,14 @@ them, so each one is a promise:
 - `target_versions()`: only if the tool comes in versions that need different
   output, as DSC does. Leave it out otherwise, and a document that asks your
   target for a version is refused instead of being silently ignored.
+- `settings_keys()`: the keys of `spec.settings` your target reads, if the
+  tool has settings that belong to the whole document and to no resource of
+  it: which engine runs it, how the host is reached. DSC declares `engine`,
+  `target` and `credential`. The core refuses a document that sets any other
+  key before `emit` is called, so `graph.settings` holds only keys you listed;
+  check the values as you check params, and document each key on your
+  target's page. Leave it out, and a document that sets any is refused. A
+  tool-wide setting is not a resource: do not add a resource type for it.
 - `placed_text()`: the openings of your tool's own expression syntax, if it
   has any beyond `${`, and how each is written as literal text. The core
   applies them to every value an interpolation places from data before `emit`
