@@ -5,6 +5,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use crate::credential::HeldCredential;
+use crate::settings::Setting;
 use crate::{Artifact, Data, Secrets, Value};
 
 /// The kind of tool a plugin drives. The core routes on it, to decide which
@@ -321,6 +322,20 @@ pub trait Runner: Send + Sync {
     /// the tool.
     fn accepts_inputs(&self) -> bool {
         false
+    }
+
+    /// The settings an operator can configure this runner with: each one's
+    /// name, environment variable, default and what it does. The host
+    /// lists them with `meridian plugins --settings`, generates the
+    /// reference page from them, and refuses a project's `meridian.yaml`
+    /// that names a setting the runner does not declare. Read each one
+    /// through [`crate::settings`], so the project's settings are
+    /// honoured.
+    ///
+    /// The default declares none, which is what a plugin built before
+    /// settings were declared reports.
+    fn settings(&self) -> Vec<Setting> {
+        Vec::new()
     }
 
     /// Previews what `apply` would change. It must change nothing.

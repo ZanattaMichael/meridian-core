@@ -242,7 +242,12 @@ changes made before it.
 | `MERIDIAN_CHEF_CLIENT` | the client to run, when `chef-client` is not on `PATH`. Cinc's `cinc-client` takes the same arguments |
 | `MERIDIAN_CHEF_RUN` | the program to run for another machine, when it is not `chef-run` on `PATH` |
 | `MERIDIAN_CHEF_TRANSPORT` | `local` or `remote`, to override the choice made from the host |
-| `MERIDIAN_CHEF_ARGS` | arguments added to every run, split on spaces: `--chef-license accept`, or `chef-run`'s `--user deploy --identity-file ~/.ssh/deploy` |
+| `MERIDIAN_CHEF_ARGS` | arguments added to every run, split like a shell command line (quotes hold a word together): `--chef-license accept`, or `chef-run`'s `--user deploy --identity-file ~/.ssh/deploy` |
+
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.chef`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#chef).
 
 ## Secrets
 

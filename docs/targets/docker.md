@@ -807,7 +807,12 @@ delete its data too.
 | Variable | Meaning |
 |---|---|
 | `MERIDIAN_DOCKER` | the program to run, when it is not `docker` on `PATH` |
-| `MERIDIAN_DOCKER_ARGS` | arguments added to `docker compose up`, separated by spaces: `--pull always`, `--force-recreate` |
+| `MERIDIAN_DOCKER_ARGS` | arguments added to `docker compose up`, split like a shell command line (quotes hold a word together): `--pull always`, `--force-recreate` |
+
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.docker`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#docker).
 
 Docker's own variables, such as `DOCKER_HOST` and `DOCKER_CONFIG`, apply as
 they do to any `docker` command when the project names no host or context.

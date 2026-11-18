@@ -53,6 +53,7 @@ fn stand_in_for_pulumi(dir: &Path, cases: &str) -> String {
 fn runner(dir: &Path, cases: &str) -> PulumiRunner {
     PulumiRunner {
         program: stand_in_for_pulumi(dir, cases),
+        extra_args: Vec::new(),
         backend_chosen: false,
         passphrase_chosen: false,
     }
@@ -157,6 +158,7 @@ fn state_stays_with_the_project_unless_someone_says_otherwise() {
     let dir = scratch(TMP, "backend-operator");
     PulumiRunner {
         program: stand_in_for_pulumi(&dir, HAPPY),
+        extra_args: Vec::new(),
         backend_chosen: true,
         passphrase_chosen: true,
     }
@@ -363,6 +365,7 @@ fn pulumi_not_being_installed_is_said_plainly() {
     let dir = scratch(TMP, "missing");
     let err = PulumiRunner {
         program: "meridian-no-such-pulumi".into(),
+        extra_args: Vec::new(),
         backend_chosen: false,
         passphrase_chosen: false,
     }
