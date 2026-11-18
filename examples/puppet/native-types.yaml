@@ -1,0 +1,58 @@
+# A web server configured with Puppet, reaching past the six shared types.
+#
+# `package` and `service` are the abstract types every configuration
+# management target takes. `cron` and `mysql::db` are Puppet's own types,
+# written as a declaration names them, and `native/file` is Puppet's own
+# `file`, with the attributes the shared `file` does not take: their params
+# are the type's attributes, passed through as written. From the first such
+# resource on, the document compiles for Puppet and OpenVox only, and
+# `meridian lint` says so (rule native-type).
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: web_types
+spec:
+  target: puppet
+  targetHost:
+    from: inline
+    host: web01.example.com
+  resources:
+    - id: nginx_pkg
+      type: package
+      params:
+        name: nginx
+    - id: html
+      type: native/file
+      state: directory
+      params:
+        path: /var/www/html
+        source: puppet:///modules/web/html
+        recurse: true
+      dependsOn:
+        - resource: nginx_pkg
+    - id: logrotate
+      type: cron
+      state: present
+      params:
+        command: /usr/sbin/logrotate /etc/logrotate.conf
+        user: root
+        hour: 2
+        minute: 0
+      notifies:
+        - resource: nginx_svc
+          action: restart
+    - id: nginx_svc
+      type: service
+      state: running
+      params:
+        name: nginx
+        enabled: true
+      dependsOn:
+        - resource: nginx_pkg
+    - id: app_db
+      type: mysql::db
+      params:
+        user: app
+        password: placeholder
+        host: localhost
+        grant: [SELECT, INSERT]

@@ -45,7 +45,7 @@ pub use runner::{
     CloudInitRunner, Wait, PROGRAM_VARIABLE, SSH_ARGS_VARIABLE, SSH_VARIABLE, VALIDATE_VARIABLE,
     WAIT_VARIABLE,
 };
-pub use transform::supported_resource_types;
+pub use transform::{supported_resource_types, NATIVE_PATTERN};
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "cloud-init";
@@ -123,6 +123,14 @@ pub(crate) struct WriteFile {
 /// the same way.
 pub(crate) type Command = String;
 
+/// One cloud-config module of cloud-init's own, written under its key with
+/// the value the document gave it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Module {
+    pub key: String,
+    pub value: Value,
+}
+
 /// What one resource became.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Item {
@@ -133,6 +141,8 @@ pub(crate) enum Item {
     /// cloud-init has no module for the resource, or the resource is a
     /// command: it runs at the end of the first boot.
     Commands(Vec<Command>),
+    /// A module of cloud-init's own, applied when cloud-init applies it.
+    Module(Module),
 }
 
 /// A whole `#cloud-config` document, each list in the order it is written.
@@ -146,6 +156,8 @@ pub(crate) struct CloudConfig {
     pub users: Vec<Placed<User>>,
     pub packages: Vec<Placed<Package>>,
     pub commands: Vec<Command>,
+    /// The modules of cloud-init's own, in document order.
+    pub modules: Vec<Placed<Module>>,
 }
 
 /// The refusal rules only this target has. Everything else it refuses carries

@@ -69,7 +69,7 @@ fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
 
 pub use emit::{MANIFEST_PATH, SITE_PATH};
 pub use runner::{PuppetRunner, Transport};
-pub use transform::supported_resource_types;
+pub use transform::{supported_resource_types, NATIVE_PATTERNS};
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "puppet";
@@ -97,9 +97,10 @@ pub fn secret_reference(name: &str) -> String {
     format!("Sensitive(lookup('{}'))", secret_key(name))
 }
 
-/// A Puppet resource reference, written `Type['title']` with the type
-/// capitalised. It is a type and not a preformatted string so the emit stage
-/// stays the only place that decides how one is written.
+/// A Puppet resource reference, written `Type['title']` with each segment of
+/// the type capitalised (`Mysql::Db['x']`). It is a type and not a
+/// preformatted string so the emit stage stays the only place that decides
+/// how one is written.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Reference {
     pub r#type: String,
@@ -108,9 +109,14 @@ pub(crate) struct Reference {
 
 impl std::fmt::Display for Reference {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut chars = self.r#type.chars();
-        if let Some(first) = chars.next() {
-            write!(f, "{}{}", first.to_ascii_uppercase(), chars.as_str())?;
+        for (i, segment) in self.r#type.split("::").enumerate() {
+            if i > 0 {
+                f.write_str("::")?;
+            }
+            let mut chars = segment.chars();
+            if let Some(first) = chars.next() {
+                write!(f, "{}{}", first.to_ascii_uppercase(), chars.as_str())?;
+            }
         }
         write!(f, "['{}']", self.title)
     }
@@ -131,6 +137,9 @@ pub(crate) struct Declaration {
     pub require: Vec<Reference>,
     /// References this resource refreshes when it changes.
     pub notify: Vec<Reference>,
+    /// Whether the type is Puppet's own rather than one of the shared six,
+    /// so its attributes are the document's as written.
+    pub native: bool,
     /// Provenance, so a validation failure names the resource the author
     /// wrote.
     pub resource_id: String,

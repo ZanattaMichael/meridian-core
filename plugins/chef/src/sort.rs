@@ -58,8 +58,31 @@ pub(crate) fn apply_ordering(
         }
 
         let notified = graph.resource(&edge.to).map_or("", |r| r.r#type.as_str());
+        // A resource of Chef's own takes the action it is notified with, as
+        // a recipe writes it: which actions it has is the resource's own
+        // business, until its schema is synced.
+        let native = graph
+            .resource(&edge.to)
+            .map(crate::transform::native_resource)
+            .transpose()?
+            .flatten();
+        if let Some(resource) = native {
+            if !is_action(&edge.action) {
+                return Err(refuse_at(
+                    &edge.from,
+                    &edge.pos,
+                    &rules::UNSUPPORTED_ACTION,
+                    format!(
+                        "notifies resource {:?} with action {:?}, which is not a Chef action: \
+                         on resource {resource} the action is written as the recipe writes it, \
+                         one lower-case word such as run or reload",
+                        edge.to, edge.action
+                    ),
+                ));
+            }
+        }
         let actions = mapping(notified).map_or(&[][..], |m| m.actions);
-        if actions.is_empty() {
+        if native.is_none() && actions.is_empty() {
             return Err(refuse_at(
                 &edge.from,
                 &edge.pos,
@@ -71,7 +94,7 @@ pub(crate) fn apply_ordering(
                 ),
             ));
         }
-        if !actions.contains(&edge.action.as_str()) {
+        if native.is_none() && !actions.contains(&edge.action.as_str()) {
             return Err(refuse_at(
                 &edge.from,
                 &edge.pos,
@@ -99,4 +122,12 @@ pub(crate) fn apply_ordering(
         }
     }
     Ok(())
+}
+
+/// Whether `action` is shaped like a Chef action: one lower-case word.
+fn is_action(action: &str) -> bool {
+    action.starts_with(|c: char| c.is_ascii_lowercase())
+        && action
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }

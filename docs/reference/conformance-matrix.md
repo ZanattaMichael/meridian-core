@@ -113,7 +113,7 @@ where the tools themselves differ; the cells say how, and the
 
 | Document | same | ansible | chef | cloud-init | openvox | puppet | salt |
 |---|---|---|---|---|---|---|---|
-| a type outside the dialect (`firewall_rule`) | yes | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
+| a type that is no shared type and no tool's own (`Firewall.Rule`) | yes | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
 | a type in the wrong case (`Package`) | yes | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
 | all six types in one document | yes | ok, warns | ok | ok, warns | ok | ok | ok |
 
@@ -124,10 +124,17 @@ where the tools themselves differ; the cells say how, and the
 | an Ansible module in full (`ansible.builtin.lineinfile`) | no | ok | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
 | an Ansible module in full, with a state | no | ok | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
 | an Ansible module in full, notified with `run` | no | ok, warns | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
-| a bare module name (`lineinfile`) | yes | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
-| the tool's own `file` under the prefix (`native/file`) | no | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
-| a Puppet module type (`mysql::db`) | no | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
-| a Salt state function (`pkgrepo.managed`) | no | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
+| a bare word that is no shared type (`firewall_rule`) | no | `unsupported-resource-type` | ok | ok | ok | ok | `unsupported-resource-type` |
+| a bare module name (`lineinfile`) | no | `unsupported-resource-type` | ok | ok | ok | ok | `unsupported-resource-type` |
+| the tool's own `file` under the prefix (`native/file`) | no | `unsupported-resource-type` | ok | `unsupported-resource-type` | ok | ok | `unsupported-resource-type` |
+| a Puppet module type (`mysql::db`) | no | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | ok | ok | `unsupported-resource-type` |
+| a Salt state function (`pkgrepo.managed`) | no | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | ok |
+| a Chef resource (`template`), notified with `create` | no | `unsupported-resource-type` | ok | `unsupported-action` | `unsupported-action` | `unsupported-action` | `unsupported-resource-type` |
+| a cloud-config module (`ntp`) | no | `unsupported-resource-type` | ok | ok | ok | ok | `unsupported-resource-type` |
+| the tool's own `package` under the prefix, with a state (`native/package`) | no | `unsupported-resource-type` | ok | `unsupported-resource-type` | ok | ok | `unsupported-resource-type` |
+| a Puppet type notified with `refresh` | no | `unsupported-resource-type` | ok | `unsupported-action` | ok | ok | `unsupported-resource-type` |
+| a Salt state function notified with `watch` | no | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | ok |
+| a native type that depends on a shared one | no | `unsupported-resource-type` | ok | `unsupported-resource-type` | ok | ok | `unsupported-resource-type` |
 
 ## `dependsOn`
 

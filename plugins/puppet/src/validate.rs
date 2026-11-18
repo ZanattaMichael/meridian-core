@@ -64,7 +64,9 @@ pub(crate) fn validate(manifest: &Manifest) -> Result<(), CompileError> {
             }
         }
 
-        if d.attrs.is_empty() {
+        // A type of Puppet's own may take nothing: a defined type with
+        // defaults for every parameter is declared by its title alone.
+        if d.attrs.is_empty() && !d.native {
             return Err(fail(
                 d,
                 &rules::MISSING_PARAM,
@@ -123,7 +125,9 @@ fn check_title(d: &Declaration) -> Result<(), CompileError> {
 /// The value Puppet identifies the resource by, when it is a string.
 fn namevar_of(d: &Declaration) -> Option<&str> {
     // The native type names are the IR type names for every type this target
-    // maps, so the table is consulted by the declaration's own type.
+    // maps, so the table is consulted by the declaration's own type. A
+    // Puppet type of the same name reached through `native/` is in the
+    // table too, and compared: `native/file` and `file` manage one path.
     let attribute = mapping(&d.r#type)?.namevar;
     match d.attrs.get(attribute)? {
         Attr::Value(Value::String(s)) => Some(s),

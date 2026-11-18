@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use meridian_sdk::Value;
 use meridian_yaml::Yaml;
 
-use crate::{CloudConfig, Group, Package, User, WriteFile};
+use crate::{CloudConfig, Group, Module, Package, User, WriteFile};
 
 /// The artifact's file names, shared with the runner. They are the names
 /// cloud-init's NoCloud data source looks for, so the artifact is a seed
@@ -59,6 +59,13 @@ pub(crate) fn serialise(config: &CloudConfig) -> BTreeMap<String, String> {
         let mut commands = vec![Yaml::str("set -e")];
         commands.extend(config.commands.iter().map(Yaml::str));
         document.push(("runcmd".to_owned(), Yaml::Seq(commands)));
+    }
+
+    // The modules of cloud-init's own follow, under their keys: cloud-init
+    // reads the document as one mapping, so their place in it means nothing.
+    for module in &config.modules {
+        let Module { key, value } = &module.item;
+        document.push((key.clone(), value_node(value)));
     }
 
     let user_data = format!(

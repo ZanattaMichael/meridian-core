@@ -468,7 +468,7 @@ says why.
 | `unsupported-action` | a `notifies` uses an action other than `replace` |
 | `unknown-dependency` | `dependsOn` or `notifies` names a resource the document does not declare |
 | `unsupported-dependency` | `dependsOn` names, or is written on, a provider, backend, variable, local value or encryption block |
-| `duplicate-resource`, `duplicate-resource`, `duplicate-output` | the same thing is declared twice |
+| `duplicate-resource`, `duplicate-output` | the same thing is declared twice |
 | `missing-param` | a `module` has no `source`, or a `local` has no `value` |
 
 The compile needs no provider schema, because the configuration is written in OpenTofu's

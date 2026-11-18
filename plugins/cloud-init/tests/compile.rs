@@ -149,14 +149,22 @@ fn every_recorded_user_data_is_a_cloud_config_document() {
         let text = fs::read_to_string(&path).unwrap();
         // cloud-init decides what user-data is by its first line alone.
         assert!(text.starts_with("#cloud-config\n"), "{}", path.display());
+        // The native modules document writes keys of cloud-init's own, with
+        // the values the document gave them.
+        let native = path
+            .file_name()
+            .is_some_and(|n| n == "native_modules.user-data");
         for (key, value) in parsed(&text) {
-            assert!(known.contains(&key.as_str()), "unexpected key {key}");
-            assert!(matches!(value, Value::List(_)), "{key} is not a list");
+            if known.contains(&key.as_str()) {
+                assert!(matches!(value, Value::List(_)), "{key} is not a list");
+            } else {
+                assert!(native, "unexpected key {key}");
+            }
         }
     }
     assert_eq!(
-        seen, 5,
-        "three documents of this plugin's and two shared fixtures"
+        seen, 6,
+        "four documents of this plugin's and two shared fixtures"
     );
 }
 
@@ -272,7 +280,7 @@ fn the_target_declares_what_it_is_and_can_express() {
     assert_eq!(CloudInit.category(), Category::ConfigurationManagement);
     assert_eq!(
         CloudInit.supported_resource_types(),
-        ["exec", "file", "group", "package", "service", "user"]
+        ["<module>", "exec", "file", "group", "package", "service", "user"]
     );
     assert_eq!(
         CloudInit.capabilities(),
@@ -1006,14 +1014,15 @@ fn a_notify_action_the_type_cannot_perform_is_refused() {
 
 #[test]
 fn an_unknown_type_names_the_types_that_work_and_the_line() {
-    let err = refusal("    - id: fw\n      type: firewall_rule\n      params:\n        port: 80\n");
+    let err = refusal("    - id: fw\n      type: Firewall.Rule\n      params:\n        port: 80\n");
     assert_eq!(err.rule, "unsupported-resource-type");
     assert_eq!(err.resource, "fw");
     assert_eq!(err.target, "cloud-init");
     assert_eq!(
         err.msg,
-        "unsupported resource type \"firewall_rule\" on this target \
-         (supported: exec, file, group, package, service, user)"
+        "unsupported resource type \"Firewall.Rule\" on this target: it is not one of the \
+         shared types (exec, file, group, package, service, user), and a cloud-config module \
+         is written by its key, such as ntp or apt"
     );
     assert_eq!((err.pos.file.as_str(), err.pos.line), ("site.yaml", 11));
 }
@@ -1090,4 +1099,115 @@ fn a_reference_is_settled_from_the_document_or_refused() {
         "{}",
         err.msg
     );
+}
+
+// ---- cloud-init's own modules beside the six -------------------------------
+
+/// The document behind the `native_modules` golden files: cloud-config
+/// modules beside the shared types, one a mapping, one a scalar, one a
+/// list, and one notifying a service.
+const NATIVE_MODULES: &str = "    - id: nginx_pkg\n      type: package\n      params:\n        name: nginx\n    - id: clock\n      type: ntp\n      params:\n        enabled: true\n        servers: [0.pool.ntp.org, 1.pool.ntp.org]\n    - id: zone\n      type: timezone\n      params:\n        value: Europe/Amsterdam\n    - id: early\n      type: bootcmd\n      params:\n        value: ['echo booting > /dev/kmsg']\n    - id: mirror\n      type: apt\n      params:\n        primary:\n          - arches: [default]\n            uri: http://deb.example.com/debian\n      notifies:\n        - resource: nginx_svc\n          action: restart\n    - id: nginx_svc\n      type: service\n      params:\n        name: nginx\n";
+
+#[test]
+fn a_module_is_written_under_its_key_with_its_value_as_written() {
+    let emitted = compile(NATIVE_MODULES).unwrap_or_else(|e| panic!("{e}"));
+    assert_golden(&golden(), "native_modules", &emitted);
+    let text = &emitted.artifact.files["user-data"];
+    assert!(
+        text.contains(
+            "ntp:\n  enabled: true\n  servers:\n    - 0.pool.ntp.org\n    - 1.pool.ntp.org\n"
+        ),
+        "{text}"
+    );
+    assert!(text.contains("timezone: Europe/Amsterdam\n"), "{text}");
+    assert!(
+        text.contains("bootcmd:\n  - echo booting > /dev/kmsg\n"),
+        "{text}"
+    );
+    assert!(text.contains("apt:\n  primary:\n    - arches:\n        - default\n      uri: http://deb.example.com/debian\n"), "{text}");
+    // A module may notify: the action runs once, last, as every notify does
+    // here.
+    assert!(text.contains("  - systemctl restart nginx\n"), "{text}");
+    assert_eq!(parsed(text).len(), 6, "{text}");
+}
+
+#[test]
+fn a_module_takes_its_whole_value_once_and_no_state() {
+    let err = refusal("    - id: a\n      type: ntp\n      state: present\n      params:\n        enabled: true\n");
+    assert_eq!(err.rule, "unsupported-state");
+
+    let err = refusal("    - id: a\n      type: ntp\n      params:\n        value: {enabled: true}\n        servers: []\n");
+    assert_eq!(err.rule, "invalid-param");
+
+    let err = refusal("    - id: a\n      type: ntp\n      params: {}\n");
+    assert_eq!(err.rule, "missing-param");
+
+    let err = refusal("    - id: a\n      type: ntp\n      params:\n        servers: ~\n");
+    assert_eq!(err.rule, "empty-param");
+
+    let err = refusal(
+        "    - id: a\n      type: ntp\n      params: {enabled: true}\n    - id: b\n      type: ntp\n      params: {enabled: false}\n",
+    );
+    assert_eq!(err.rule, "duplicate-resource");
+    assert_eq!(err.resource, "b");
+}
+
+#[test]
+fn a_name_that_is_not_a_module_or_that_a_shared_type_writes_is_refused() {
+    for r#type in [
+        "Ntp",
+        "ansible.builtin.cron",
+        "mysql::db",
+        "native/cron",
+        "native/ntp",
+    ] {
+        let err = refusal(&format!(
+            "    - id: a\n      type: '{type}'\n      params:\n        value: 1\n"
+        ));
+        assert_eq!(err.rule, "unsupported-resource-type", "{type}");
+    }
+    // The six have no module of their own name, and the keys they write
+    // are theirs alone.
+    let err = refusal("    - id: a\n      type: native/file\n      params:\n        path: /x\n");
+    assert_eq!(err.rule, "unsupported-resource-type");
+    assert!(err.msg.contains("write_files"), "{}", err.msg);
+    let err = refusal("    - id: a\n      type: write_files\n      params:\n        value: []\n");
+    assert_eq!(err.rule, "unsupported-resource-type");
+    assert_eq!(
+        err.msg,
+        "resource type \"write_files\" is the key the shared type file writes; write a file \
+         resource, so that the two never write one key"
+    );
+}
+
+#[test]
+fn nothing_can_be_ordered_around_a_module_and_a_module_cannot_be_notified() {
+    let err = refusal(
+        "    - id: a\n      type: ntp\n      params: {enabled: true}\n    - id: b\n      type: package\n      params: {name: nginx}\n      dependsOn:\n        - resource: a\n",
+    );
+    assert_eq!(err.rule, "unsatisfiable-order");
+    assert_eq!(err.resource, "b");
+    assert!(err.msg.contains("cloud-config module"), "{}", err.msg);
+
+    let err = refusal(
+        "    - id: a\n      type: ntp\n      params: {enabled: true}\n      dependsOn:\n        - resource: b\n    - id: b\n      type: package\n      params: {name: nginx}\n",
+    );
+    assert_eq!(err.rule, "unsatisfiable-order");
+
+    let err = refusal(
+        "    - id: conf\n      type: file\n      params: {path: /a, content: a}\n      notifies:\n        - resource: a\n          action: run\n    - id: a\n      type: ntp\n      params: {enabled: true}\n",
+    );
+    assert_eq!(err.rule, "unsupported-action");
+    assert_eq!(err.resource, "a");
+}
+
+#[test]
+fn the_schemas_offer_any_module_as_an_open_pattern() {
+    let schemas = CloudInit.resource_schemas();
+    let pattern = schemas
+        .iter()
+        .find(|s| s.r#type == meridian_target_cloud_init::NATIVE_PATTERN)
+        .expect("the module pattern is declared");
+    assert!(pattern.open && pattern.is_pattern() && pattern.params.is_empty());
+    assert!(pattern.actions.is_empty());
 }

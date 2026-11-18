@@ -29,7 +29,7 @@ pub use emit::{sls_path, STATES_DIR, TOP_PATH};
 pub use runner::{
     SaltRunner, Transport, ARGS_VARIABLE, SALT_CALL_VARIABLE, SALT_SSH_VARIABLE, TRANSPORT_VARIABLE,
 };
-pub use transform::supported_resource_types;
+pub use transform::{supported_resource_types, NATIVE_PATTERN};
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "salt";
@@ -81,7 +81,7 @@ fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
 /// ID, which Salt writes `- pkg: nginx_pkg`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Reference {
-    pub module: &'static str,
+    pub module: String,
     pub id: String,
 }
 
@@ -94,9 +94,9 @@ pub(crate) struct State {
     /// unique within the file.
     pub id: String,
     /// The state module, for example `pkg`.
-    pub module: &'static str,
+    pub module: String,
     /// The function within it, for example `installed`.
-    pub function: &'static str,
+    pub function: String,
     /// The function's arguments in the order they are written: `name` first,
     /// then the rest by native name.
     pub args: Vec<(String, Value)>,
@@ -113,6 +113,10 @@ pub(crate) struct State {
     /// `when` is pruned long before this stage and must never reach the
     /// output.
     pub when: String,
+    /// Whether the function is Salt's own rather than one of the shared
+    /// six's, so its arguments are the document's as written and its name,
+    /// when none is written, is its ID, as Salt reads it.
+    pub native: bool,
     /// Provenance, kept so a validation failure can name the resource the
     /// author wrote and not the state it became.
     pub resource_id: String,
@@ -122,7 +126,7 @@ pub(crate) struct State {
 impl State {
     pub(crate) fn reference(&self) -> Reference {
         Reference {
-            module: self.module,
+            module: self.module.clone(),
             id: self.id.clone(),
         }
     }
