@@ -38,7 +38,7 @@ jobs:
       AWS_DEFAULT_REGION: us-east-1
       AWS_EC2_METADATA_DISABLED: 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup-rust
 
