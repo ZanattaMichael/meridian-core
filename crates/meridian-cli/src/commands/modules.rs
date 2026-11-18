@@ -67,10 +67,33 @@ pub(crate) fn module(command: ModuleCommand, state_dir: &Path) -> Result<(), Fai
         ModuleCommand::Update { names } => Mode::Update(names),
         ModuleCommand::Verify => {
             let checks = meridian_module::verify(&project).map_err(module_failure)?;
+            let mut failed = 0;
+            if json_output() {
+                let modules: Vec<serde_json::Value> = checks
+                    .iter()
+                    .map(|check| {
+                        let mut object = match output::locked_module(&check.module) {
+                            serde_json::Value::Object(object) => object,
+                            _ => unreachable!("a module is an object"),
+                        };
+                        object.insert("ok".to_owned(), check.problem.is_none().into());
+                        object.insert("problem".to_owned(), check.problem.clone().into());
+                        object.insert("signature".to_owned(), output::signature(&check.signature));
+                        serde_json::Value::Object(object)
+                    })
+                    .collect();
+                failed = checks.iter().filter(|c| c.problem.is_some()).count();
+                emit(failed == 0, body([("modules", modules.into())]));
+                return if failed == 0 {
+                    Ok(())
+                } else {
+                    eprintln!("error: {} failed verification", count(failed, "module"));
+                    Err(Failure::Reported)
+                };
+            }
             if checks.is_empty() {
                 outln!("no modules are pinned");
             }
-            let mut failed = 0;
             for check in &checks {
                 match &check.problem {
                     None => match &check.signature {
@@ -108,6 +131,12 @@ pub(crate) fn module(command: ModuleCommand, state_dir: &Path) -> Result<(), Fai
             let lock = meridian_module::Lock::load(project.dir)
                 .map_err(module_failure)?
                 .unwrap_or_default();
+            if json_output() {
+                let modules: Vec<serde_json::Value> =
+                    lock.modules.iter().map(output::locked_module).collect();
+                emit(true, body([("modules", modules.into())]));
+                return Ok(());
+            }
             if lock.modules.is_empty() {
                 outln!("no modules are pinned");
             }
@@ -128,6 +157,26 @@ pub(crate) fn module(command: ModuleCommand, state_dir: &Path) -> Result<(), Fai
         ModuleCommand::Sign { key } => {
             let key = SecretKey::read(&key).map_err(|e| Failure::Message(e.into()))?;
             let signed = meridian_module::sign(project.dir, &key).map_err(module_failure)?;
+            if json_output() {
+                emit(
+                    true,
+                    body([
+                        ("name", signed.name.as_str().into()),
+                        (
+                            "version",
+                            if signed.version.is_empty() {
+                                serde_json::Value::Null
+                            } else {
+                                signed.version.as_str().into()
+                            },
+                        ),
+                        ("keyId", signed.key_id.as_str().into()),
+                        ("integrity", signed.integrity.as_str().into()),
+                        ("wrote", meridian_module::SIGNATURE_FILE.into()),
+                    ]),
+                );
+                return Ok(());
+            }
             outln!(
                 "signed {}{} with key {}",
                 signed.name,
@@ -152,6 +201,36 @@ pub(crate) fn module(command: ModuleCommand, state_dir: &Path) -> Result<(), Fai
 
     let report = meridian_module::install(&project, mode).map_err(module_failure)?;
     warn_about_modules(&report.warnings());
+    if json_output() {
+        let changes: Vec<serde_json::Value> = report
+            .changes
+            .iter()
+            .map(|(m, change)| {
+                let mut object = match output::locked_module(m) {
+                    serde_json::Value::Object(object) => object,
+                    _ => unreachable!("a module is an object"),
+                };
+                let (word, from) = match change {
+                    Change::Added => ("added", None),
+                    Change::Updated { from } => ("updated", Some(from.clone())),
+                    Change::Removed => ("removed", None),
+                    Change::Unchanged => ("unchanged", None),
+                };
+                object.insert("change".to_owned(), word.into());
+                object.insert("from".to_owned(), from.into());
+                serde_json::Value::Object(object)
+            })
+            .collect();
+        emit(
+            true,
+            body([
+                ("changes", changes.into()),
+                ("wroteLock", report.wrote_lock.into()),
+                ("lockFile", LOCK_FILE.into()),
+            ]),
+        );
+        return Ok(());
+    }
     let mut unchanged = 0;
     for (m, change) in &report.changes {
         match change {
@@ -205,6 +284,20 @@ pub(crate) fn pack_module(
     if let Err(e) = written {
         return Err(Failure::Message(format!("writing {}: {e}", out.display())));
     }
+    if json_output() {
+        emit(
+            true,
+            body([
+                ("name", manifest.name.as_str().into()),
+                ("version", version.to_string().into()),
+                ("file", out.display().to_string().into()),
+                ("size", archive.len().into()),
+                ("integrity", integrity.as_str().into()),
+                ("mediaType", meridian_module::LAYER_MEDIA_TYPE.into()),
+            ]),
+        );
+        return Ok(());
+    }
     outln!("packed {} {version} into {}", manifest.name, out.display());
     outln!("  size:       {} bytes", archive.len());
     outln!("  integrity:  {integrity}");
@@ -240,6 +333,22 @@ pub(crate) fn push_module(
         &archive,
     )
     .map_err(module_failure)?;
+    if json_output() {
+        let integrity = meridian_module::hash_dir(project.dir).map_err(module_failure)?;
+        emit(
+            true,
+            body([
+                ("name", manifest.name.as_str().into()),
+                ("version", version.to_string().into()),
+                ("repository", repository.into()),
+                ("tag", pushed.tag.as_str().into()),
+                ("digest", pushed.digest.as_str().into()),
+                ("integrity", integrity.as_str().into()),
+                ("alreadyPublished", pushed.already_published.into()),
+            ]),
+        );
+        return Ok(());
+    }
     if pushed.already_published {
         outln!(
             "{} {version} is already published in {repository}, with this content",

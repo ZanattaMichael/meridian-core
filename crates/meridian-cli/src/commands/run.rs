@@ -14,10 +14,20 @@ pub(crate) struct How<'a> {
     pub(crate) rollback_on_failure: bool,
     /// `rollback --run`
     pub(crate) rollback_of: Option<&'a str>,
+    /// `plan --detailed-exitcode`
+    pub(crate) detailed_exitcode: bool,
 }
 
 pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Result<(), Failure> {
     let (out, resume) = (how.out, how.resume);
+    if workflow.events.is_some() && json_output() {
+        // Both want standard output for themselves.
+        return Err(Failure::Message(
+            "--events json writes every event to standard output, where --output json writes \
+             the result; use one of them, or --report json=FILE for the run as a file"
+                .to_owned(),
+        ));
+    }
     let bundle = load(&workflow.files, &workflow.state.state_dir)?;
     let mut selector = Selector::all();
     for text in &workflow.selector {
@@ -126,6 +136,7 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
         mode,
         out,
         events: workflow.events.is_some(),
+        json: json_output(),
         seen: Vec::new(),
         sinks: Dispatcher::start(sinks, workflow.sink_timeout).map_err(Failure::Message)?,
     };
@@ -164,7 +175,17 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
     for warning in &report.warnings {
         eprintln!("warning: {warning}");
     }
+    // The one object a machine reads, whatever the run did; the lines that
+    // follow are for the person reading standard error.
+    if json_output() {
+        let ok = report.refused.is_none() && report.succeeded() && !sink_failed;
+        emit(ok, output::run(&report, mode, out));
+    }
     if let Some(refusal) = &report.refused {
+        if json_output() {
+            eprintln!("error: {refusal}");
+            return Err(Failure::Reported);
+        }
         return Err(Failure::Message(refusal.to_string()));
     }
     if mode == Mode::Drift {
@@ -177,7 +198,7 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
             "drift: {drifted} of {} drifted",
             count(report.stages.len(), "stage")
         );
-        if workflow.events.is_some() {
+        if workflow.events.is_some() || json_output() {
             eprintln!("{line}");
         } else {
             outln!("{line}");
@@ -243,6 +264,9 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
     }
     if sink_failed {
         return Err(Failure::Reported);
+    }
+    if how.detailed_exitcode && report.stages.iter().any(stage_has_changes) {
+        return Err(Failure::Changes);
     }
     Ok(())
 }
@@ -325,7 +349,27 @@ pub(crate) fn status(state: &State) -> Result<(), Failure> {
     let backend = backend(state)?;
     let backend = backend.as_ref();
     let held = lock::holder(backend).map_err(Failure::Message)?;
-    match record::last_run(backend, None).map_err(Failure::Message)? {
+    let last = record::last_run(backend, None).map_err(Failure::Message)?;
+    if json_output() {
+        emit(
+            true,
+            body([
+                ("backend", backend.describe().into()),
+                (
+                    "run",
+                    last.as_ref().map_or(serde_json::Value::Null, |run| {
+                        output::record(run, held.as_ref().is_some_and(|lock| lock.id == run.id))
+                    }),
+                ),
+                (
+                    "lock",
+                    held.as_ref().map_or(serde_json::Value::Null, output::lock),
+                ),
+            ]),
+        );
+        return Ok(());
+    }
+    match last {
         None => outln!("no run has been recorded in {}", backend.describe()),
         Some(run) => print_run(&run, held.as_ref().is_some_and(|lock| lock.id == run.id)),
     }
@@ -341,6 +385,24 @@ pub(crate) fn runs(state: &State) -> Result<(), Failure> {
     let backend = backend(state)?;
     let backend = backend.as_ref();
     let ids = record::list_runs(backend).map_err(Failure::Message)?;
+    if json_output() {
+        let held = lock::holder(backend).map_err(Failure::Message)?;
+        let mut runs = Vec::new();
+        for id in ids {
+            if let Some(run) = record::load_run(backend, &id).map_err(Failure::Message)? {
+                let holds = held.as_ref().is_some_and(|lock| lock.id == run.id);
+                runs.push(output::record(&run, holds));
+            }
+        }
+        emit(
+            true,
+            body([
+                ("backend", backend.describe().into()),
+                ("runs", serde_json::Value::Array(runs)),
+            ]),
+        );
+        return Ok(());
+    }
     if ids.is_empty() {
         outln!("no run has been recorded in {}", backend.describe());
         return Ok(());
@@ -412,6 +474,10 @@ pub(crate) fn events(state: &State, run: Option<&str>, types: &[String]) -> Resu
 pub(crate) fn unlock(state: &State, id: &str) -> Result<(), Failure> {
     let backend = backend(state)?;
     let removed = lock::force_unlock(backend.as_ref(), id).map_err(Failure::Message)?;
-    outln!("removed {removed}");
+    if json_output() {
+        emit(true, body([("removed", output::lock(&removed))]));
+    } else {
+        outln!("removed {removed}");
+    }
     Ok(())
 }

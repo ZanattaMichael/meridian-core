@@ -93,6 +93,7 @@ and checked against the file in every build, so none can fall behind the script 
 | Reference | |
 |---|---|
 | [The `meridian` command](reference/cli.md) | commands, options, exit status |
+| [Machine-readable output](reference/cli-json.md) | `--output json`: the one object every command prints for a pipeline, its schema, and `plan --detailed-exitcode` |
 | [Lint rules](reference/lint.md) | every rule of `meridian lint`, with an example and what to do |
 | [Plugin signatures](reference/plugin-signatures.md) | how `meridian` decides a plugin may be started, trusting a plugin from elsewhere, and signing your own |
 | [Policy checks](reference/policy.md) | asking a policy before a change is made: the options, the input a policy sees, Rego with Open Policy Agent, and how to write an engine |

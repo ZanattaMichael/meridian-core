@@ -51,6 +51,11 @@ pub(crate) enum Command {
     Plan {
         #[command(flatten)]
         workflow: Workflow,
+        /// Exit 2 when an apply would do something, 0 when nothing would
+        /// change and 1 on an error, so a pipeline can ask "is there
+        /// anything to apply?" without reading the plan
+        #[arg(long)]
+        detailed_exitcode: bool,
     },
     /// Make the documents' desired state real
     Apply {
@@ -238,6 +243,63 @@ pub(crate) enum Command {
         )]
         state_dir: PathBuf,
     },
+}
+
+impl Command {
+    /// The subcommand as it is typed, such as `plan` or `module verify`,
+    /// which is what a JSON result names itself with.
+    pub(crate) fn name(&self) -> String {
+        match self {
+            Command::Validate { .. } => "validate".to_owned(),
+            Command::Compile { .. } => "compile".to_owned(),
+            Command::Plan { .. } => "plan".to_owned(),
+            Command::Apply { .. } => "apply".to_owned(),
+            Command::Drift { .. } => "drift".to_owned(),
+            Command::Rollback { .. } => "rollback".to_owned(),
+            Command::Status { .. } => "status".to_owned(),
+            Command::Runs { .. } => "runs".to_owned(),
+            Command::Events { .. } => "events".to_owned(),
+            Command::Report { .. } => "report".to_owned(),
+            Command::Unlock { .. } => "unlock".to_owned(),
+            Command::Import { .. } => "import".to_owned(),
+            Command::Plugins { .. } => "plugins".to_owned(),
+            Command::Rules {
+                command: RulesCommand::Check { .. },
+            } => "rules check".to_owned(),
+            Command::Migrate { .. } => "migrate".to_owned(),
+            Command::Version => "version".to_owned(),
+            Command::Secret {
+                command: SecretCommand::Check { .. },
+            } => "secret check".to_owned(),
+            Command::Secret {
+                command: SecretCommand::Set { .. },
+            } => "secret set".to_owned(),
+            Command::Fmt(_) => "fmt".to_owned(),
+            Command::Lint(_) => "lint".to_owned(),
+            Command::Schema(_) => "schema".to_owned(),
+            Command::Lsp(_) => "lsp".to_owned(),
+            Command::Signing { command } => format!(
+                "signing {}",
+                match command {
+                    SigningCommand::Keygen { .. } => "keygen",
+                    SigningCommand::Sign { .. } => "sign",
+                    SigningCommand::Verify { .. } => "verify",
+                }
+            ),
+            Command::Module { command, .. } => format!(
+                "module {}",
+                match command {
+                    ModuleCommand::Install { .. } => "install",
+                    ModuleCommand::Update { .. } => "update",
+                    ModuleCommand::Verify => "verify",
+                    ModuleCommand::List => "list",
+                    ModuleCommand::Sign { .. } => "sign",
+                    ModuleCommand::Pack { .. } => "pack",
+                    ModuleCommand::Push { .. } => "push",
+                }
+            ),
+        }
+    }
 }
 
 #[derive(Subcommand)]

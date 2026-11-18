@@ -1,0 +1,239 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ZanattaMichael/meridian-core/schemas/output/status.schema.json",
+  "title": "status",
+  "description": "The current or last run, and the lock.",
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "const": "status",
+      "description": "The subcommand as it is typed"
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "Whether the command did what was asked: false means it exited 1, or 130 when interrupted"
+    },
+    "backend": {
+      "type": "string"
+    },
+    "run": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/record"
+        }
+      ]
+    },
+    "lock": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/lock"
+        }
+      ]
+    }
+  },
+  "required": [
+    "command",
+    "ok",
+    "backend",
+    "run",
+    "lock"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "record": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "running",
+            "succeeded",
+            "failed",
+            "interrupted"
+          ]
+        },
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "host": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selector": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started": {
+          "type": "string"
+        },
+        "finished": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resumes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Infrastructure",
+                  "ResourceSet"
+                ]
+              },
+              "target": {
+                "type": "string"
+              },
+              "endpoint": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "running",
+                  "succeeded",
+                  "failed",
+                  "skipped",
+                  "deferred",
+                  "not-run",
+                  "rolled-back"
+                ]
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "artifact": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "changes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "previous": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "kind",
+              "target",
+              "endpoint",
+              "status",
+              "reason",
+              "artifact",
+              "changes",
+              "previous"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "mode",
+        "status",
+        "command",
+        "user",
+        "host",
+        "selector",
+        "started",
+        "finished",
+        "resumes",
+        "steps"
+      ]
+    },
+    "lock": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "user": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "host": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "since": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "user",
+        "host",
+        "pid",
+        "command",
+        "since"
+      ]
+    }
+  }
+}
