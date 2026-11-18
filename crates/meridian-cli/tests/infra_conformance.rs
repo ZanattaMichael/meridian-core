@@ -65,8 +65,20 @@ const COLUMNS: &[Column] = &[
         preamble: "",
     },
     Column {
+        title: "cloudformation",
+        target: "cloudformation",
+        settings: "",
+        preamble: "",
+    },
+    Column {
         title: "bicep",
         target: "bicep",
+        settings: "",
+        preamble: "    - id: target\n      type: deployment\n      params: {resourceGroup: rg}\n",
+    },
+    Column {
+        title: "arm",
+        target: "arm",
         settings: "",
         preamble: "    - id: target\n      type: deployment\n      params: {resourceGroup: rg}\n",
     },
@@ -74,7 +86,7 @@ const COLUMNS: &[Column] = &[
 
 /// The targets that take the common types. A target added here must be
 /// given a column.
-const COMMON_TARGETS: &[&str] = &["bicep", "opentofu", "terraform"];
+const COMMON_TARGETS: &[&str] = &["arm", "bicep", "cloudformation", "opentofu", "terraform"];
 
 #[derive(Clone, Copy, PartialEq)]
 enum Agreement {
@@ -607,8 +619,9 @@ fn a_secret_key_is_never_written_as_its_value() {
             .emit(&graph, &no_data())
             .unwrap_or_else(|e| panic!("{}: {e}", column.title));
         let all: String = emitted.artifact.files.values().cloned().collect();
+        // CloudFormation names a parameter in letters and digits only.
         assert!(
-            all.contains("meridian_secret_admin_key"),
+            all.contains("meridian_secret_admin_key") || all.contains("MeridianSecretAdminKey"),
             "{}: {all}",
             column.title
         );

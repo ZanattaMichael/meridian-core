@@ -12,7 +12,7 @@ and deploys it to a resource group or a subscription with the `az` command line.
 | Document kind | `Infrastructure` |
 | Category | Infrastructure as code |
 | Compiles to | `template.json`, the ARM template, and `deployment.json`, where and how to deploy it |
-| Resource types | Azure's own, `Namespace/type`, with the API version in the `apiVersion` param; plus `deployment` for the deployment's settings and `parameter` for a template parameter |
+| Resource types | Azure's own, `Namespace/type`, with the API version in the `apiVersion` param; plus `deployment` for the deployment's settings and `parameter` for a template parameter. Also the [common infrastructure types](#common-infrastructure-types) |
 | Scopes | Resource group and subscription. Management group and tenant deployments are not supported |
 | References | Yes: a resource's id, name, type, API version and state, and parameters. Checked at compile time |
 | ARM expressions | Yes, written in square brackets and passed through after a check that they are well formed |
@@ -452,6 +452,26 @@ the first; the properties rarely differ between neighbouring versions, and
 Azure is the judge of what deploys. The source is tested against the real
 files in the `azure` workflow.
 
+## Common infrastructure types
+
+`network`, `subnet`, `firewall`, `address` and `vm` are Meridian's own types,
+and this target turns each into the same Azure resources the Bicep target
+does ([the common infrastructure types](../reference/dsl/common-infrastructure-types.md)
+has every param and mapping). They go to the deployment's resource group, at
+`[resourceGroup().location]` unless a resource gives a location.
+
+| Common type | Becomes |
+|---|---|
+| `network` | `Microsoft.Network/virtualNetworks`, API version `2023-09-01` |
+| `subnet` | `Microsoft.Network/virtualNetworks/subnets`, named `<network>/<subnet>` so it is deployed after its network |
+| `firewall` | `Microsoft.Network/networkSecurityGroups`, the rules inside it |
+| `address` | `Microsoft.Network/publicIPAddresses`, Standard and static |
+| `vm` | `Microsoft.Compute/virtualMachines` (API version `2024-03-01`) and a `Microsoft.Network/networkInterfaces` named `<id>_nic` |
+
+The mapping is the Bicep plugin's, so the two targets cannot drift apart;
+compare [`examples/common/web-arm.yaml`](../../examples/common/web-arm.yaml)
+with [`web-bicep.yaml`](../../examples/common/web-bicep.yaml).
+
 ## Not covered yet
 
 - Deployments to a management group or a tenant.
@@ -470,6 +490,7 @@ files in the `azure` workflow.
 | [`examples/arm/web-vm.yaml`](../../examples/arm/web-vm.yaml) | A virtual machine with its network, a secret parameter, every kind of reference |
 | [`examples/arm/sql-database.yaml`](../../examples/arm/sql-database.yaml) | Child resources, names made from a parameter, an extension resource, mode `Complete` |
 | [`examples/arm/landing-zone.yaml`](../../examples/arm/landing-zone.yaml) | A deployment to a subscription |
+| [`examples/common/web-arm.yaml`](../../examples/common/web-arm.yaml) | The common infrastructure types |
 
 What each compiles to is kept beside the plugin's tests, in
 [`plugins/arm/testdata`](../../plugins/arm/testdata).

@@ -64,7 +64,16 @@ fn the_plugin_introduces_itself() {
     assert_eq!(info.operations, Operations::ALL);
     assert_eq!(
         info.resource_types,
-        ["<Namespace>/<type>", "deployment", "parameter"]
+        [
+            "<Namespace>/<type>",
+            "address",
+            "deployment",
+            "firewall",
+            "network",
+            "parameter",
+            "subnet",
+            "vm"
+        ]
     );
     client.close().expect("the plugin stops cleanly");
 }

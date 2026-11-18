@@ -241,3 +241,63 @@ fn an_aws_credential_leaves_nothing_in_the_template_and_another_cloud_is_refused
          not azure"
     );
 }
+
+// ---- the common infrastructure types ----
+
+#[test]
+fn the_common_types_compile_to_their_golden_template() {
+    let graph = graph_from_file("examples/common/web-cloudformation.yaml", "cloudformation");
+    let emitted = emit(&graph).unwrap();
+    assert!(!emitted.artifact.files["template.yaml"].contains("${"));
+    assert_golden(&golden(), "common-web-cloudformation", &emitted);
+}
+
+const NET: &str = "    - id: net\n      type: network\n      params: {cidr: 10.0.0.0/16}\n";
+
+#[test]
+fn a_public_subnet_routes_through_a_gateway_only_once_it_is_attached() {
+    let text = template(&format!(
+        "  resources:\n{NET}    - id: a\n      type: subnet\n      params: {{network: \"${{net}}\", cidr: 10.0.1.0/24, public: true}}\n    - id: b\n      type: subnet\n      params: {{network: \"${{net}}\", cidr: 10.0.2.0/24, public: true}}\n"
+    ));
+    assert_eq!(
+        text.matches("Type: AWS::EC2::InternetGateway").count(),
+        1,
+        "{text}"
+    );
+    assert_eq!(text.matches("- NetGatewayLink").count(), 2, "{text}");
+}
+
+#[test]
+fn a_firewall_with_no_outbound_rule_keeps_the_default_and_one_with_one_replaces_it() {
+    let text = template(&format!(
+        "  resources:\n{NET}    - id: fw\n      type: firewall\n      params:\n        network: \"${{net}}\"\n        rules: [{{port: \"22\", cidr: 10.0.0.0/8}}]\n"
+    ));
+    assert!(!text.contains("SecurityGroupEgress"), "{text}");
+    let text = template(&format!(
+        "  resources:\n{NET}    - id: fw\n      type: firewall\n      params:\n        network: \"${{net}}\"\n        rules: [{{direction: out, protocol: any, cidr: \"::/0\"}}]\n"
+    ));
+    assert!(text.contains("SecurityGroupEgress"), "{text}");
+    assert!(text.contains("CidrIpv6: ::/0"), "{text}");
+    assert!(text.contains("IpProtocol: \"-1\""), "{text}");
+}
+
+#[test]
+fn an_image_by_family_is_read_from_the_vendors_public_parameter() {
+    let text = template(&format!(
+        "  resources:\n{NET}    - id: s\n      type: subnet\n      params: {{network: \"${{net}}\", cidr: 10.0.1.0/24}}\n    - id: vm\n      type: vm\n      params: {{subnet: \"${{s}}\", size: t3.micro, image: {{family: debian, version: \"12\"}}}}\n"
+    ));
+    assert!(
+        text.contains("'{{resolve:ssm:/aws/service/debian/release/12/latest/amd64}}'"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_location_on_anything_but_a_subnet_is_refused() {
+    let err = refusal(
+        "  resources:\n    - id: ip\n      type: address\n      params: {location: eu-west-1}\n",
+    );
+    assert_eq!(err.target, "cloudformation");
+    assert_eq!(err.rule, "unsupported-param");
+    assert!(err.msg.contains("stack resource"), "{}", err.msg);
+}

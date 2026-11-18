@@ -263,7 +263,7 @@ on a case marked the same fails the test. Further tests hold all six to:
 **The common infrastructure types.** `infra_conformance.rs` does the same for
 `network`, `subnet`, `firewall`, `address` and `vm`: about forty small
 documents, each compiled for Terraform and OpenTofu on AWS and on Azure, and
-for Bicep, written to the
+for CloudFormation, Bicep and ARM, written to the
 [conformance matrix for the common types](../reference/infra-conformance-matrix.md).
 It also fails when a target declares the five types without a column there, or
 declares only some of them, and it checks that a secret ssh key is never
