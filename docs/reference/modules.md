@@ -1,43 +1,23 @@
 # Modules
 
-A module is Meridian configuration packaged so that someone else can use it:
-documents, the data they read, and a manifest that gives the package a name and
-a version. A project says which modules it needs and where each comes from.
-Meridian fetches them, records exactly what it fetched, and checks on every run
-that nothing has changed since.
+A module packages documents and data with a versioned manifest. A project lists the modules
+it needs; Meridian fetches them, pins them in a lockfile and verifies them on every run.
 
 <p align="center"><img src="../graphics/meridian-modules-flow.svg" alt="Modules: a manifest names what a project needs, install fetches and pins it in the lockfile, and every run verifies the pin without fetching" width="100%"></p>
 
-**What it does**
+- Sources: a directory, git, or an OCI registry. No central index.
+- [SemVer](https://semver.org) requirements, one version per module per project.
+- Content hashes in `meridian.lock`, checked on every use.
+- Files addressed as `@acme/nginx:documents/proxy.yaml`.
+- Published versions cannot be replaced.
+- Optional [signatures](#signatures) (`--module-signatures`, off by default).
+- Only `module install`, `update` and `push` use the network. Installing runs nothing.
 
-- Reads modules from a directory on disk, a git repository or an OCI registry.
-- Picks versions from [SemVer](https://semver.org) requirements, one version of
-  each module per project.
-- Pins every fetched module in `meridian.lock` by a hash of its content, and
-  checks that hash each time the module is used.
-- Lets a command name a file inside a module: `@acme/nginx:documents/proxy.yaml`.
-- Publishes a module to a registry, and refuses to replace a version that is
-  already published with different content.
-- Signs a module, and can refuse a fetched module that no key you trust has
-  [signed](#signatures).
-
-**What it does not do**
-
-- There is no central index and no hosted registry. A requirement says where
-  the module comes from: your git server or your container registry.
-- It does not check signatures unless you ask. A pin proves the content has
-  not changed since you pinned it, not who wrote it; `--module-signatures`
-  adds that, and is off by default.
-- `compile`, `plan` and `apply` never fetch. Only `meridian module install`,
-  `update` and `push` use the network.
-- Installing a module runs nothing from it: no hooks, no scripts.
-
-A complete, runnable project is in
-[`examples/modules`](../../examples/modules/README.md).
+Example project: [`examples/modules`](../../examples/modules/README.md).
 
 ## A first module
 
-A module is a directory with a file named `meridian.yaml` in it:
+A module is a directory with a `meridian.yaml`:
 
 ```
 hardening/
@@ -56,8 +36,7 @@ metadata:
   description: A baseline SSH configuration
 ```
 
-A project that uses it has a `meridian.yaml` of its own, which lists what it
-needs:
+The project's own `meridian.yaml` requires it:
 
 ```yaml
 # site/meridian.yaml
@@ -72,8 +51,6 @@ spec:
       git: https://git.example.com/acme/meridian-hardening.git
 ```
 
-From the project's directory:
-
 ```
 $ meridian module install
 + acme/hardening 1.2.0 (git+https://git.example.com/acme/meridian-hardening.git)
@@ -83,13 +60,11 @@ $ meridian plan web.yaml @acme/hardening:documents/ssh.yaml \
     --data @acme/hardening:data/defaults.yaml
 ```
 
-Commit `meridian.yaml` and `meridian.lock`. Do not commit `.meridian/`, which is
-where the fetched copy is kept.
+Commit `meridian.yaml` and `meridian.lock`, not `.meridian/`.
 
 ## The manifest
 
-`meridian.yaml` is the same file for a module and for a project that uses
-modules. A project is a module that nobody depends on.
+The same file serves a module and a project.
 
 ```yaml
 apiVersion: meridian/v1
@@ -118,13 +93,11 @@ spec:
 | `spec.credentials` | no | Logins for registries, each naming where its password comes from. See [registry logins](#registry-logins) |
 | `spec.settings` | no | How each target's runner is configured for this project, by target and then by setting name. See [plugin settings](#plugin-settings) |
 
-A field that is not in this table is an error, not something silently ignored.
-Write versions and requirements in quotes when they could be read as a number:
-`version: "1.4"`, not `version: 1.4`.
+Unknown fields are errors. Quote versions: `version: "1.4"`.
 
 ### What goes in a module
 
-Content is found by directory. Nothing has to be listed in the manifest.
+Content is found by directory:
 
 | Directory | Holds |
 |---|---|
@@ -134,11 +107,8 @@ Content is found by directory. Nothing has to be listed in the manifest.
 | `composites/`, `functions/` | Reserved for the language's composites and functions |
 | `README.md` | What the module is for and how to use it |
 
-The directory names are a convention: `@<module>:<path>` reaches any file in
-the module. A module cannot contain symbolic links or file names with control
-characters (such as a line break): packing, fetching, verifying and copying
-refuse them, because the [content hash](#integrity) uses a one-line-per-file
-listing. Top-level `.git` and `.meridian` are never included.
+`@<module>:<path>` reaches any file. Symlinks and control characters in names are refused;
+top-level `.git` and `.meridian` are excluded.
 
 ## Requiring a module
 
@@ -163,13 +133,8 @@ or `oci`.
   path: ../modules/base
 ```
 
-For a monorepo, and for working on a module next to the project that uses it.
-The module is read where it is: nothing is copied and nothing is hashed, so an
-edit takes effect on the next command. `version` is optional; when given, the
-module's own `metadata.version` must satisfy it.
-
-A module fetched from git or a registry cannot require another by `path`. That
-path would point at the disk of whoever fetched it.
+Read in place, not copied or hashed. An optional `version` must match `metadata.version`.
+Fetched modules cannot require by `path`.
 
 ### From git: `git`
 
@@ -188,19 +153,11 @@ path would point at the disk of whoever fetched it.
   ref: main
 ```
 
-- With `version`, the versions on offer are the repository's tags named
-  `v1.4.2` or `1.4.2`. Other tags are ignored. The tagged commit's
-  `meridian.yaml` must give the same version as the tag.
-- With `ref`, there is one candidate: that branch, tag or commit. The commit it
-  points at when you install is pinned, and stays pinned when the branch moves,
-  until you run `meridian module update`.
-- Give `version` or `ref`, not both.
+- `version` picks from tags `v1.4.2` or `1.4.2`; the tagged `meridian.yaml` must agree.
+- `ref` pins the commit a branch, tag or commit points at, until `module update`.
+- Not both.
 
-Meridian runs the `git` program on your machine, so every address and login
-that works for `git clone` works here: SSH keys, credential helpers, a
-`.netrc`. Meridian stores no git credentials and never prompts for a password;
-a fetch that cannot authenticate fails. `MERIDIAN_GIT` names a different `git`
-binary.
+Uses your `git` (`MERIDIAN_GIT` to override) and its logins; never prompts.
 
 ### From a registry: `oci`
 
@@ -210,26 +167,13 @@ binary.
   oci: registry.example.com/acme/meridian-postgres
 ```
 
-Any registry that implements the OCI distribution specification can hold
-modules, which includes the container registry you already run. The versions on
-offer are the repository's tags that are versions (`3.2.1` or `v3.2.1`).
-
-Logins are read from the Docker configuration file: `~/.docker/config.json`, or
-`config.json` in the directory `DOCKER_CONFIG` names. So `docker login
-registry.example.com` (or `podman login`, `oras login`) is how you give access.
-Only logins stored in the file's `auths` section are read; credential helpers
-are not run. Token and basic authentication are supported.
-
-For a login from elsewhere (a CI variable, a password manager), declare a
-credential in the manifest and name it on the requirement with `credential`.
-See [registry logins](#registry-logins).
+Any OCI registry. Versions are tags `3.2.1` or `v3.2.1`. Logins come from the `auths` of
+`~/.docker/config.json` (or `$DOCKER_CONFIG`); credential helpers are not run. Or name a
+[credential](#registry-logins).
 
 ## Registry logins
 
-Without anything said, a registry is logged in to with what the Docker
-configuration file holds for it. A project can instead declare a credential in
-`meridian.yaml` and name it for a module. The password is never in the file:
-the credential says where it comes from, and it is fetched when it is needed.
+A project can declare a credential in `meridian.yaml` and name it on a module:
 
 ```yaml
 apiVersion: meridian/v1
@@ -257,21 +201,16 @@ $ REGISTRY_PASSWORD=… meridian module install
 + acme/postgres 3.2.4 (oci:registry.example.com/acme/meridian-postgres)
 ```
 
-These are the same credentials, with the same types, fields and secret
-providers, as [the language's credentials](../concepts/secrets-in-memory.md#a-credential-outside-a-run).
-A registry takes two of the types:
+Same as [the language's credentials](../concepts/secrets-in-memory.md#a-credential-outside-a-run).
+Registries take two types:
 
 | `type` | Fields | Use it when |
 |---|---|---|
 | `registry` | `server`, `user`, `password` | The login is for one registry. `server` is the registry's host as it is written in `oci` (`registry.example.com`, `localhost:5000`), and the login is only ever sent to that host |
 | `usernamePassword` | `user`, `password` (`domain` is not used) | One login serves several registries. It is sent to the registry of every requirement that names it |
 
-A `token` credential is not a registry login, and naming one is refused.
-For a registry that issues access tokens, such as GitHub's or GitLab's, use a
-`registry` credential with the token as its `password` and the user name the
-registry documents.
-
-`password` is always a mapping that says where the secret is:
+`token` is refused; for GitHub or GitLab tokens use `registry` with the token as `password`.
+`password` says where the secret is:
 
 | `from` | Also | The secret is |
 |---|---|---|
@@ -279,30 +218,15 @@ registry documents.
 | `file` | `path: FILE`, and optionally `allowWideMode: true`, `keepTrailingNewline: true` | The contents of `FILE`, without its final newline. The file must be readable by its owner only (mode `0600`) unless `allowWideMode` is set |
 | `exec` | `command: [PROGRAM, ARG, …]` | What the program prints, without its final newline. This is how a password manager or a cloud's token command is used: `command: [pass, show, registry/ci]` |
 
-The rules, each of which is checked:
+- A literal password is refused.
+- `credential` must be declared in the same file, and only on `oci`.
+- Only the project's own manifest counts; to log in for a transitive dependency, require it
+  yourself.
+- A named credential replaces the Docker configuration.
+- Fetched only by `module install`, `update` and `push --credential`, once per command.
+- Never written down; held in [locked memory](../concepts/secrets-in-memory.md).
 
-- **A password written in the manifest is refused**, and the message does not
-  repeat it. `user` and `server` are plain text.
-- **`credential` must name a credential declared in the same file**, and only
-  goes with `oci`. Git sources use git's own credentials.
-- **Only the project's own manifest counts.** A fetched module may declare
-  credentials (for use as a project itself), but as a dependency they are
-  ignored, so a published module cannot send your logins anywhere. To give a
-  login to a transitive dependency, require it in your own `meridian.yaml`
-  with `credential`.
-- **A named credential is the only login tried** for that module; the Docker
-  configuration is not checked.
-- **A secret is fetched only just before contacting a registry** for a module
-  that names it: by `module install`, `module update` and
-  `module push --credential`. Runs, `module verify` and `module list` never
-  fetch one. It is fetched once per command, however many modules use it.
-- **No part of a login is written down**: not in `meridian.lock`, the module
-  store or output. The password lives in
-  [locked memory](../concepts/secrets-in-memory.md) and is wiped when the
-  command ends. Errors name the credential and provider, never a value.
-
-To publish with a declared credential, name it on the command; the module
-being pushed declares it:
+To push with one:
 
 ```
 $ meridian module push registry.example.com/acme/meridian-nginx --credential internal-registry
@@ -310,14 +234,9 @@ $ meridian module push registry.example.com/acme/meridian-nginx --credential int
 
 ## Plugin settings
 
-A runner needs operator choices that no document should carry: where the tool
-is installed, which profile or context to use, extra arguments for every call.
-Each plugin declares these as named settings, each read from an environment
-variable. The [plugin settings reference](plugin-settings.md) lists them all,
-and `meridian plugins --settings` prints them for installed plugins.
-
-`spec.settings` writes them down with the project, so they travel with it
-instead of having to be exported in every shell and CI job that runs it:
+Plugins read operator settings (tool path, profile, extra args) from environment variables
+([reference](plugin-settings.md), `meridian plugins --settings`). `spec.settings` stores them
+with the project:
 
 ```yaml
 spec:
@@ -331,35 +250,18 @@ spec:
       program: tofu
 ```
 
-The first key is the target (as in `spec.target`); the second is the setting's
-short name from the reference, such as `args` or `program`. Values are text,
-numbers or true/false, read as the environment variable would be: argument
-lists split like a shell command line, so quotes keep an argument with a space
-together.
+Keys are target, then the setting's short name (`args`, `program`). Values are read as the
+environment variable would be.
 
-Three rules keep this simple:
+- **The environment wins** when non-blank.
+- **Undeclared names are refused.**
+- **No secrets**; use [`spec.secrets`](dsl/secrets.md#handing-a-secret-to-a-tool).
 
-- **The environment wins.** A non-blank environment variable overrides the
-  project's value, so a shell or CI job can change it without editing the
-  file.
-- **Undeclared names are refused.** Every command that starts plugins reads
-  the manifest in the current directory and passes each target its map first;
-  a plugin given an undeclared name does not start, and the message lists the
-  names it accepts. A typo cannot silently do nothing.
-- **No secrets.** Tokens and passwords do not belong here; the file is
-  committed. Declare them under `spec.secrets` in the document, and the target
-  passes them to its tool privately; see
-  [Secrets](dsl/secrets.md#handing-a-secret-to-a-tool).
-
-Only the project's own manifest is read for settings: a fetched module's
-`spec.settings` does not configure the project that requires it. The manifest
-is read from the current directory, and a `meridian.yaml` that does not read
-stops the command, because a project whose settings were ignored would run its
-tools wrongly.
+Only the current directory's manifest is read; an unreadable one stops the command.
 
 ## Version requirements
 
-Requirements are written the way Cargo writes them.
+Cargo-style requirements:
 
 | Requirement | Means |
 |---|---|
@@ -370,17 +272,14 @@ Requirements are written the way Cargo writes them.
 | `>=1.2, <1.8` | both |
 | `*` | any version |
 
-A pre-release such as `2.0.0-rc.1` is chosen only when the requirement names a
-pre-release.
+Pre-releases are chosen only if the requirement names one.
 
 ### How a version is chosen
 
-- **One version of each module per project.** If two modules require
-  `acme/base`, one version serves both.
-- **The newest version that satisfies every requirement on it** is chosen.
-- **A version already in `meridian.lock` is kept** while it still satisfies
-  every requirement. Adding a module never moves another.
-- **A conflict is an error.** Meridian does not pick a compromise:
+- One version per module per project.
+- The newest that satisfies every requirement.
+- Locked versions are kept while they still fit.
+- Conflicts are errors:
 
 ```
 error: no version of acme/base satisfies every requirement on it
@@ -389,7 +288,7 @@ error: no version of acme/base satisfies every requirement on it
     available: 1.0.0, 1.3.0, 2.1.0
 ```
 
-Requiring the same module name from two different sources is also a conflict.
+So is one name from two sources.
 
 ## The lockfile
 
@@ -421,40 +320,14 @@ modules:
 | `integrity` | The [content hash](#integrity) the module must have |
 | `requires` | The modules this one requires |
 
-A `path` module has no `resolved` and no `integrity`: it is a working copy.
-
-The lockfile is read as carefully as a fetched module is, since a project is
-usually cloned from somewhere else. `name` must be a module name, `version` a
-version, `resolved` a commit or a digest, and a `path+` source the normalized
-relative path install writes. `name` and `version` become directory names under
-`.meridian/modules`, so a lockfile that fails these checks is refused before
-anything is fetched or removed.
-
-The file is sorted and holds no timestamps, so the same resolution always
-writes the same bytes and a diff shows only what moved. Commit it. With it,
-every machine and every CI run uses the same commit of every module.
+`path` modules have no `resolved` or `integrity`. Every field is validated before use. The
+file is sorted with no timestamps. Commit it.
 
 ## Integrity
 
-Every fetched module is pinned by a hash of its files.
-
-`integrity` is `h1:` plus a SHA-256 of a listing with one line per file,
-`<SHA-256 of the file>  <path>`, sorted by path. It hashes files, not an
-archive, so a module has the same hash from git or a registry, and moving it to
-a mirror keeps its pin.
-
-One file is left out of the listing: `meridian.sig`, the module's
-[signature](#signatures), which is made over this hash and so cannot be part
-of it.
-
-The hash is checked:
-
-- **when a module is fetched**, against the lockfile, if the module was already
-  pinned;
-- **every time a module is used** by `validate`, `compile`, `plan` or `apply`;
-- **on demand**, by `meridian module verify`.
-
-What each kind of change looks like:
+`integrity` is `h1:` plus the SHA-256 of a sorted listing of `<file sha256>  <path>` lines,
+excluding `meridian.sig`. It is the same from git or a registry. Checked on fetch, on every
+use, and by `module verify`.
 
 | What happened | What you see |
 |---|---|
@@ -464,54 +337,31 @@ What each kind of change looks like:
 | The source now serves content that does not match the pin | `what git+… now serves does not match meridian.lock`. If the change is expected, run `meridian module update <name>` |
 | The module is pinned but not fetched | `acme/nginx 1.4.2 is not installed; run meridian module install` |
 
-Registry archives are unpacked defensively: non-plain-file entries, paths
-outside the module, duplicate paths, and archives over 256 MiB unpacked are
+Archives with non-plain entries, escaping or duplicate paths, or over 256 MiB unpacked are
 refused.
 
 ## Signatures
 
-The pin answers "is this what I pinned?". A signature answers "who published
-it?". A signed module holds one more file in its top directory,
-`meridian.sig`, made by [`meridian module sign`](#sign) with the publisher's
-secret key. You decide which public keys you trust and whether a signature is
-needed.
-
-It is the mechanism [plugins are signed with](plugin-signatures.md): the same
-key files, the same `--trusted-key` option, the same three policies. One key
-can sign a team's plugins and its modules.
+A signed module has `meridian.sig`, made by [`module sign`](#sign). Same keys,
+`--trusted-key` and policies as [plugin signatures](plugin-signatures.md).
 
 | Option | Environment | Default | Meaning |
 |---|---|---|---|
 | `--module-signatures POLICY` | `MERIDIAN_MODULE_SIGNATURES` | `off` | `off` does not look. `warn` uses a module that is unsigned or whose signature does not pass, and says so on standard error. `require` uses only modules signed by a trusted key |
 | `--trusted-key FILE` | `MERIDIAN_TRUSTED_KEYS` (separated by `:`, or `;` on Windows) | the key a released `meridian` was built with | a public key to trust, or a directory of `*.pub` files; may be repeated |
 
-Both can be given to any command. Set them in the environment of the machines
-that run Meridian, so that every command agrees:
+Set them in the environment:
 
 ```
 export MERIDIAN_MODULE_SIGNATURES=require
 export MERIDIAN_TRUSTED_KEYS=/etc/meridian/trusted-keys
 ```
 
-**What is checked, and when.** Every module fetched from git or a registry,
-including the ones other modules require:
+Checked for every fetched module (not `path`) by `install` and `update` before locking, on
+every use after the hash, and by `module verify`.
 
-- by `meridian module install` and `update`, before `meridian.lock` is
-  written, so a module that may not be used is not pinned either;
-- every time a module is used by `validate`, `compile`, `plan`, `apply` or
-  `rules check`, after its hash;
-- by `meridian module verify`, which also says which key signed each module.
-
-A `path` module is your own working copy and is never checked.
-
-**What a signature covers.** The signature is over a short statement: the
-module's name, version and [content hash](#integrity). It vouches for exactly
-one content of one version of one module; a signature copied from another
-module, or another version with the same files, fails. A module signature
-cannot pass as a plugin's or vice versa, even from the same key, because each
-names its kind in the signed statement. `meridian.sig` is the one file the
-content hash excludes, so signing does not change the pin, and the signature
-travels unchanged through git, a registry or a mirror.
+The signature covers name, version and [content hash](#integrity), so it cannot be reused
+for another module or version, or as a plugin signature.
 
 | What you see | What it means |
 |---|---|
@@ -520,12 +370,7 @@ travels unchanged through git, a registry or a mirror.
 | `its signature does not pass: the module is not the module that was signed: its contents have changed` | The signature belongs to other content, another version or another module |
 | `warning: acme/nginx 1.4.2 is not signed` | The same findings under `warn`: the module was used anyway |
 
-What a signature does not do: it does not say the module is good, only who
-published it. It is checked against keys held on the machine, with no network
-and no revocation list, so retiring a key means removing its `.pub` file from
-where your machines look. And whoever can change the trusted keys or the
-environment of the machine can switch the check off; protect those as you
-protect `meridian` itself.
+There is no revocation list; remove a `.pub` file to retire a key.
 
 ## Using a module's files
 
@@ -538,24 +383,13 @@ meridian apply site.yaml @acme/nginx:documents/proxy.yaml \
     --data @acme/nginx:data/defaults.yaml --data prod.yaml
 ```
 
-It can be used wherever a document or a `--data` file is given, mixed freely
-with ordinary paths. The files of one command are still one workflow, wherever
-they come from.
-
-- The module must be pinned in the project's `meridian.lock`. A module that
-  another module requires counts.
-- The path is relative to the module and cannot leave it.
-- Run the command from the project's directory, the one with `meridian.yaml`.
-
-Data files are merged in the order given, and a later file's key replaces an
-earlier one. Giving the module's defaults first and your own file after it is
-how you override a module's defaults.
-
-In a shell, `@` needs no quoting.
+Anywhere a document or `--data` file is given. The module must be pinned, the path cannot
+leave it, and the command runs from the project directory. Later `--data` files override
+earlier ones.
 
 ## Commands
 
-All of them are run from the project's directory.
+Run from the project directory.
 
 ```
 meridian module install [--locked]
@@ -575,8 +409,7 @@ meridian module push REPOSITORY [--insecure]
 
 ### `install`
 
-Resolves what `meridian.yaml` requires, fetches what is missing, and writes
-`meridian.lock` if it changed.
+Resolves, fetches what is missing, and updates `meridian.lock`.
 
 ```
 $ meridian module install
@@ -592,12 +425,8 @@ wrote meridian.lock
 | `- name version` | no longer required, and removed from the lockfile |
 | `N modules unchanged` | pins that stayed where they were |
 
-Pins that still fit are kept, so running it again changes nothing. On a machine
-that has the lockfile and nothing fetched, it fetches exactly what is pinned
-and does not look for newer versions.
-
-`--locked` fails, and changes nothing, if `meridian.lock` would have to change.
-Use it in CI:
+With a lockfile it fetches exactly what is pinned. `--locked` fails if the lock would
+change (use in CI):
 
 ```
 meridian module install --locked
@@ -606,9 +435,8 @@ meridian plan site.yaml @acme/nginx:documents/proxy.yaml
 
 ### `update`
 
-Moves pins to the newest version that satisfies the requirements. With names,
-only those modules; with none, every module. For a module pinned by `ref`, it
-moves the pin to the commit the branch points at now.
+Moves pins (all, or the named ones) to the newest allowed version, or a `ref`'s current
+commit.
 
 ```
 $ meridian module update acme/nginx
@@ -617,14 +445,12 @@ $ meridian module update acme/nginx
 wrote meridian.lock
 ```
 
-To go past what a requirement allows, change the requirement in
-`meridian.yaml` and run `install`.
+To go further, change the requirement and run `install`.
 
 ### `verify`
 
-Checks every pinned module against its hash and reports on each. It exits `1`
-if any failed. With `--module-signatures warn` or `require` it also checks each
-fetched module's [signature](#signatures) and says who signed it:
+Checks every pin (exit `1` on failure), and with `--module-signatures` each
+[signature](#signatures):
 
 ```
 $ meridian module verify --module-signatures require --trusted-key keys/acme.pub
@@ -632,8 +458,7 @@ ok      acme/base 2.2.1  signed by key 3fa91c0e5d7b2a48
 ok      local
 ```
 
-Under `warn` a module that is unsigned shows as `ok … not signed`; under
-`require` it is `FAILED`.
+Unsigned is `ok … not signed` under `warn`, `FAILED` under `require`.
 
 ```
 $ meridian module verify
@@ -646,7 +471,7 @@ error: 1 module failed verification
 
 ### `list`
 
-The pinned modules, their versions and their sources, from `meridian.lock`.
+Pinned modules from `meridian.lock`.
 
 ```
 $ meridian module list
@@ -657,8 +482,7 @@ local       -      path+../local
 
 ### `sign`
 
-Signs the module in the current directory as it is now, and writes
-`meridian.sig` in it.
+Writes `meridian.sig` for the current directory's module.
 
 ```
 $ meridian module sign --key ~/keys/acme.key
@@ -667,16 +491,12 @@ signed acme/nginx 1.4.2 with key 3fa91c0e5d7b2a48
   wrote:     meridian.sig
 ```
 
-The key is a secret key made by
-[`meridian signing keygen`](cli.md#signing); those who use the module trust
-the public half. Sign last: any change to the module's files afterwards,
-including to `metadata.version`, makes the signature stale, and `sign` must be
-run again. Then commit `meridian.sig` with the release, or push.
+Keys come from [`meridian signing keygen`](cli.md#signing). Sign last; any later change makes
+it stale.
 
 ### `pack`
 
-Writes the module in the current directory as the archive a registry stores.
-The module must have a `metadata.version`.
+Writes the registry archive. Needs `metadata.version`.
 
 ```
 $ meridian module pack
@@ -686,15 +506,12 @@ packed acme/nginx 1.4.2 into .meridian/packages/acme-nginx-1.4.2.tar.gz
   media type: application/vnd.meridian.module.layer.v1.tar+gzip
 ```
 
-`--out FILE` writes it somewhere else. Packing is deterministic: the same files
-give the same bytes on any machine at any time, because file times, owners and
-permissions are left out. The `integrity` line is the hash a consumer's
-lockfile will hold.
+`--out FILE` to choose the path. Output is deterministic; `integrity` is what consumers
+pin.
 
 ### `push`
 
-Publishes the module in the current directory to an OCI registry, under its
-`metadata.version`.
+Publishes to an OCI registry as `metadata.version`.
 
 ```
 $ meridian module push registry.example.com/acme/meridian-nginx
@@ -703,27 +520,13 @@ published acme/nginx 1.4.2 to registry.example.com/acme/meridian-nginx:1.4.2
   integrity:  h1:91c4d7a2…
 ```
 
-`REPOSITORY` is written as in a requirement's `oci`: no scheme and no tag.
-`--insecure` uses plain HTTP. The login comes from the Docker configuration
-file, as it does for fetching. `--credential NAME` logs in with the credential
-`NAME` from this module's `spec.credentials` instead; see
-[registry logins](#registry-logins).
-
-A version is published once:
-
-- Pushing the same content again uploads nothing and says the version is
-  already published.
-- Pushing different content under a version that is already there is refused.
-  Consumers who pinned it would keep the old content while new ones got the
-  new, under one version number. Raise `metadata.version` and push that.
-
-`digest` is what a consumer's lockfile records as `resolved`, and `integrity`
-is the hash it records for the content.
+`REPOSITORY` has no scheme or tag. `--insecure` uses HTTP. `--credential NAME` uses a
+[declared credential](#registry-logins). Re-pushing the same content is a no-op; different
+content under an existing version is refused. `digest` becomes consumers' `resolved`.
 
 ## Testing a module
 
-A module carries its tests under `tests/`, as `Test` documents that name the
-module's own files relative to themselves:
+Tests live under `tests/`:
 
 ```yaml
 # tests/proxy.test.yaml
@@ -740,26 +543,21 @@ spec:
         proxy: {outcome: compiled}
 ```
 
-`meridian test` run in the module's directory finds and runs them, so a
-module is tested as it is before it is tagged, signed or pushed. A project
-that uses the module can test it as it arrives by naming the module's files
-in its own tests, `@acme/nginx:documents/proxy.yaml`, as any command does.
-`module install` fetches no tests and runs none.
-[Testing documents and modules](testing.md) has every field.
+Run `meridian test` in the module directory. `module install` runs no tests. See
+[testing](testing.md).
 
 ## Publishing
 
 ### To git
 
-Commit the module and tag the commit with its version:
+Tag the commit with the version:
 
 ```
 git tag v1.4.2
 git push origin v1.4.2
 ```
 
-To publish it signed, sign before the commit that is tagged, and commit
-`meridian.sig` with it:
+Signed:
 
 ```
 meridian module sign --key ~/keys/acme.key
@@ -767,13 +565,11 @@ git add meridian.sig && git commit -m "Release 1.4.2"
 git tag v1.4.2
 ```
 
-The tag and `metadata.version` must agree. Never move a tag once it is pushed:
-consumers who pinned it keep the old commit, and new consumers get the new one.
-Release a new version instead.
+Tag and `metadata.version` must agree. Never move a pushed tag.
 
 ### To a registry
 
-A module is stored as an OCI artifact with one layer.
+An OCI artifact with one layer:
 
 | | |
 |---|---|
@@ -785,14 +581,8 @@ A module is stored as an OCI artifact with one layer.
 meridian module push registry.example.com/acme/meridian-nginx
 ```
 
-To publish it signed, run `meridian module sign --key FILE` first: the
-signature is a file of the module, so it is in what is pushed. A version is
-published once, so a version that went out unsigned cannot be signed
-afterwards; release the next version signed.
-
-That is all a module needs. A module can also be published with any tool that
-pushes OCI artifacts, as long as it uses the two types above. With
-[`oras`](https://oras.land):
+Run `module sign` before pushing; a published version cannot be signed later. Any OCI tool
+using these media types works, such as [`oras`](https://oras.land):
 
 ```
 meridian module pack --out module.tar.gz
@@ -801,20 +591,18 @@ oras push registry.example.com/acme/meridian-nginx:1.4.2 \
   module.tar.gz:application/vnd.meridian.module.layer.v1.tar+gzip
 ```
 
-A tag cannot hold `+`, so write build metadata with `_`: the tag `1.4.2_build.5`
-is the version `1.4.2+build.5`.
+Tags use `_` for `+`: `1.4.2_build.5` is `1.4.2+build.5`.
 
 ## Where modules are kept
 
-Fetched modules are unpacked under the state directory:
+Under the state directory:
 
 ```
 .meridian/modules/<name>/<version>/
 .meridian/modules/<name>/ref-<commit>/      for a module pinned by ref
 ```
 
-It is a cache. Deleting it costs a fetch and nothing else, and it should not be
-committed. Do not edit files in it: the next command will refuse the module.
+A cache; safe to delete, not to edit.
 
 ## When something goes wrong
 
@@ -844,11 +632,6 @@ committed. Do not edit files in it: the next command will refuse the module.
 
 ## For plugin and tool authors
 
-The crate `meridian-module` is the library behind all of this.
-`Modules::load` opens a project's pinned modules, checking each (its hash, and
-its signature when the `Project` it is given carries a policy);
-`meridian_module::sign` signs one;
-`Modules::resolve` turns `@<module>:<path>` into a file; and `Modules::roots`
-gives each module's directory, for code that confines file access to a set of
-directory trees. The design, and what is still to come, is in
+Crate `meridian-module`: `Modules::load` (verifies), `meridian_module::sign`,
+`Modules::resolve` (`@<module>:<path>`), `Modules::roots`. Design:
 [modules and versioning](../plans/modules-and-versioning.md).

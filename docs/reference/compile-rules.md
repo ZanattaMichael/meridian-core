@@ -1,33 +1,8 @@
 # Compile rules reference
 
-Compile rules are policies over the layers of a hierarchy, checked before
-anything is compiled. This page is the reference: the files, every rule, every
-field and every message. For what the rules are for and how they were
-designed, read [the concept page](../concepts/compile-rules.md).
-
-Every example on this page is in
-[`examples/compile-rules/`](../../examples/compile-rules/README.md), and a
-test runs it through the real command.
-
-## Contents
-
-- [The files](#the-files)
-- [The hierarchy file](#the-hierarchy-file)
-- [The rules file](#the-rules-file)
-- [Groups](#groups) and their [capabilities](#capabilities)
-- [Key patterns](#key-patterns)
-- [Shipped rule sets](#shipped-rule-sets)
-- [Rules](#rules): [`no-override`](#no-override), [`final`](#final),
-  [`restrict`](#restrict), [`required`](#required),
-  [`forbidden-value`](#forbidden-value), [`merge-strategy`](#merge-strategy)
-- [How a rule reads a merge](#how-a-rule-reads-a-merge)
-- [The command line as a layer](#the-command-line-as-a-layer)
-- [Running the check](#running-the-check)
-- [Refusals](#refusals)
-- [Mistakes in the rules file](#mistakes-in-the-rules-file)
-- [Protecting the rules file](#protecting-the-rules-file)
-- [From DscPipelineRunner](#from-dscpipelinerunner)
-- [Using the rules from Rust](#using-the-rules-from-rust)
+Compile rules are policies over hierarchy layers, checked before compiling. Concepts:
+[compile rules](../concepts/compile-rules.md). Examples:
+[`examples/compile-rules/`](../../examples/compile-rules/README.md).
 
 ## The files
 
@@ -44,9 +19,7 @@ config/
     └── web01.yaml        team
 ```
 
-`rules.yaml` is found because it is beside `hierarchy.yaml`. It is not listed
-in the hierarchy and must not be: a hierarchy with a layer path that resolves
-to the rules file is refused.
+`rules.yaml` sits beside `hierarchy.yaml`. A layer path resolving to it is refused.
 
 ```mermaid
 flowchart LR
@@ -61,9 +34,6 @@ flowchart LR
 ```
 
 ## The hierarchy file
-
-The hierarchy file is what the rules are checked against, so its fields are
-listed here.
 
 ```yaml
 hierarchy:
@@ -135,18 +105,10 @@ rules:
 | `use` | no | the [shipped rule sets](#shipped-rule-sets) in force. Left out: the three default ones. `use: []`: none |
 | `rules` | no | your own [rules](#rules) |
 
-**A rules file is a deny list by default.** Everything is allowed except what it
-forbids, and even an otherwise empty file forbids three things through the
-[default rule sets](#shipped-rule-sets):
-
-- changing a variable a less specific layer set;
-- changing a secret or a credential a less specific layer set;
-- a secret or a credential that is empty or a placeholder.
-
-So `rulesVersion: 1` alone is a working policy. The file then has two parts:
-**groups with capabilities** say what each layer may set at all (with
-`default: deny`, an allow list), and **rules** say what a layer may do to a
-value another layer set.
+**By default a rules file is a deny list.** `rulesVersion: 1` alone applies the
+[default sets](#shipped-rule-sets): no changing a less specific layer's variables, secrets or
+credentials, and no empty or placeholder secrets. **Groups with capabilities** say what each
+layer may set; **rules** say what a layer may do to another's values.
 
 | You want | Write |
 |---|---|
@@ -156,10 +118,8 @@ value another layer set.
 | no shipped set at all | `use: []` |
 | an allow list: a layer may set only what its group lists | `default: deny`, and `capabilities` on each group |
 
-With no rules file at all, nothing is checked; `--require-rules` makes that
-an error.
-
-Every rule has these fields, and then its own:
+With no rules file nothing is checked (`--require-rules` makes that an error). Every rule
+has:
 
 | Field | Required | Value |
 |---|---|---|
@@ -168,10 +128,7 @@ Every rule has these fields, and then its own:
 | `keys` | yes | the [key patterns](#key-patterns) the rule is about |
 | `message` | no | your own words, added to every refusal the rule produces: who to ask, where the policy is written down |
 
-The file is read strictly. An unknown field, a field the rule kind does not
-take, or an undeclared group is an error, because a rule that silently does
-nothing is worse than none. See
-[mistakes in the rules file](#mistakes-in-the-rules-file).
+Unknown fields and undeclared groups are [errors](#mistakes-in-the-rules-file).
 
 ## Groups
 
@@ -188,9 +145,7 @@ layers:
       keys: [variables, packages, web]
 ```
 
-A group is a named set of layers. It says what those layers may set, and
-rules use group names to say whose values are protected and who is
-constrained.
+A group is a named set of layers, used by capabilities and rules.
 
 | Field | Value |
 |---|---|
@@ -198,9 +153,7 @@ constrained.
 | `paths` | patterns matched against a layer's path as the hierarchy expands it, such as `node/web01.yaml` |
 | `capabilities` | what the group's layers may use; see [capabilities](#capabilities) |
 
-In a path pattern, `*` and `?` match within one path element, and `**` as a
-whole element matches any number of elements, including none. Matching is
-exact about case.
+`*` and `?` match within one path element; `**` matches any number. Case-sensitive.
 
 | Pattern | Matches | Does not match |
 |---|---|---|
@@ -209,29 +162,18 @@ exact about case.
 | `node/**` | `node/web01.yaml`, `node/eu/web01.yaml` | `role/web.yaml` |
 | `**/*.yaml` | every `.yaml` layer at any depth | `common.json` |
 
-**The first group whose pattern matches owns the layer.** Put a narrower group
-before a broader one.
-
-**A layer no group claims may set nothing.** When the file declares groups,
-every layer the hierarchy loads must belong to one. Otherwise a new path added
-to the hierarchy would be a layer no rule that names a group applies to:
+**The first matching group owns the layer.** **An unclaimed layer may set nothing:**
 
 ```
 [meridian/unclaimed-layer] layer "extra.yaml" is not claimed by any group under `layers`; a layer nobody owns may set nothing
 ```
 
-Two group names are Meridian's own and can be used in a rule without being
-declared: `(command line)`, for [values given on the command
-line](#the-command-line-as-a-layer), and `(unclaimed)`.
-
-Groups are optional. A rules file without `layers` can still use every rule
-that does not name a group, and its refusals name layers by path alone.
+Built-in groups: `(command line)` ([see](#the-command-line-as-a-layer)) and `(unclaimed)`.
+Groups are optional.
 
 ### Capabilities
 
-A group's capabilities are what its layers are allowed to use. This is
-DscPipelineRunner's `Policy.yml` in Meridian: each layer lists what it may do,
-and `default` decides everything it does not list.
+What a group's layers may set; `default` decides the rest.
 
 | Capability | Value | Governs |
 |---|---|---|
@@ -247,27 +189,18 @@ and `default` decides everything it does not list.
 [meridian/capabilities] layer "Projects/x.yaml" (teams) sets "b", which teams is not allowed to set: it lists no `capabilities.keys`, and the default is deny
 ```
 
-- **Each layer is held to its own group.** A value several layers contribute
-  to must be allowed for each, so a team setting a key under an
-  organization-owned mapping is judged as the team.
-- **Writing above an allowed key is not writing the allowed key.** A group
-  that may set `variables.Owner` may not write `variables: null`.
-- **A layer no group claims may set nothing, whatever `default` says.**
-- **`default: deny` needs groups.** With none, no layer could set anything,
-  so the file is refused.
-- Capabilities are checked and reported before rules. Permission to set a key
-  does not excuse breaking a rule: a team that may set `variables` still may
-  not change the organization's under `protect-variables`.
-- Command-line values belong to whoever runs the command, not a group, so
-  capabilities do not apply. Every rule still does; see [the command line as a layer](#the-command-line-as-a-layer).
+- Each layer is judged by its own group.
+- May set `variables.Owner` does not allow `variables: null`.
+- Unclaimed layers may set nothing.
+- `default: deny` without groups is refused.
+- Capabilities are checked before rules and do not excuse breaking one.
+- Capabilities do not apply to the [command line](#the-command-line-as-a-layer); rules do.
 
-`keys` is the capability there is today, because data is what is layered
-today. Which targets a layer's documents may compile for is the same idea,
-and belongs here once documents can be layered.
+`keys` is the only capability today.
 
 ## Key patterns
 
-A key pattern selects values inside a layer by their path, written with dots.
+Dotted paths to values in a layer:
 
 | Pattern | Selects |
 |---|---|
@@ -279,19 +212,13 @@ A key pattern selects values inside a layer by their path, written with dots.
 | `secrets.*.path` | `path` of every entry under `secrets` |
 | `**` | everything |
 
-- `*` is any one key. `**` is any run of keys, including none.
-- A pattern selects the key it names and everything beneath it. A rule that
-  protects a mapping protects what is in it.
-- Keys are compared exactly, including case: `variables.Region` does not
-  select `variables.region`. They are two different keys in the data too.
-- A key that contains a dot, a star or a quote is written in double quotes:
-  `variables."app.kubernetes.io/name"`. In YAML that means quoting the whole
-  pattern with single quotes: `'variables."a.b"'`.
-- A list is one value. A pattern selects the list by its key, and a rule that
-  looks at values ([`forbidden-value`](#forbidden-value)) looks at each item.
+- `*` is one key, `**` any number.
+- A pattern covers everything beneath it.
+- Case-sensitive.
+- Quote keys with dots, stars or quotes: `'variables."app.kubernetes.io/name"'`.
+- A list is one value; [`forbidden-value`](#forbidden-value) checks each item.
 
-Refusals write keys the same way, so a key from a refusal can be pasted into
-a rule.
+Refusals print keys the same way.
 
 ## Shipped rule sets
 
@@ -302,24 +229,18 @@ a rule.
 | `no-placeholder-secrets` | yes | `meridian/no-placeholder-secrets` | nothing under `secrets` or `credentials` may be empty or a placeholder |
 | `protect-all` | no | `meridian/protect-all` | a more specific layer may not change any key a less specific layer set |
 
-**The three default sets are in force in every rules file that leaves `use`
-out.** Writing `use` replaces them: exactly the sets it lists are in force,
-and `use: []` switches all of them off. A file's own `rules` and its
-`capabilities` do not affect which sets are on.
+**The three defaults apply unless `use` is given.** `use` lists exactly the sets in force;
+`use: []` turns them off.
 
 ```yaml
 use: [protect-variables, protect-secrets, no-placeholder-secrets]   # the same as leaving `use` out
 ```
 
-`protect-variables`, `protect-secrets` and `protect-all` are
-[`no-override`](#no-override) rules over every layer. A layer may add a
-variable or a secret nobody has set, and may repeat one unchanged, and may
-not change or remove one a less specific layer set. To protect only what one
-group set, or to constrain only some groups, switch the set off and write the
-rule yourself with [`setBy` and `appliesTo`](#no-override).
+The `protect-*` sets are [`no-override`](#no-override) rules over every layer. For narrower
+scope, turn them off and use [`setBy` and `appliesTo`](#no-override).
 
-`no-placeholder-secrets` is a [`forbidden-value`](#forbidden-value) rule over
-every layer. It refuses, anywhere under `secrets` or `credentials`:
+`no-placeholder-secrets` is a [`forbidden-value`](#forbidden-value) rule refusing, under
+`secrets` or `credentials`:
 
 | Value | Examples |
 |---|---|
@@ -332,8 +253,7 @@ every layer. It refuses, anywhere under `secrets` or `credentials`:
 [meridian/no-placeholder-secrets] layer "node/web01.yaml" (team) sets "secrets.api.token" to a value the rule forbids (matches[0])
 ```
 
-The whole value has to be the placeholder: `todo-list-service` is fine. To
-forbid other values, add a `forbidden-value` rule of your own beside it.
+Only whole values match (`todo-list-service` is fine).
 
 ## Rules
 
@@ -373,8 +293,7 @@ What counts, for a selected value a less specific layer set:
 [org-values-hold] layer "node/web01.yaml" (team) sets "variables", which is merged by replacing it whole (first-found), and so drops "variables.Region", which layer "common.yaml" (organization) set
 ```
 
-When several less specific layers set the value, the refusal names the least
-specific one: that is whose value the rule protects.
+The refusal names the least specific layer that set it.
 
 ### `final`
 
@@ -391,10 +310,7 @@ to the same value. Takes `setBy` and `appliesTo` as `no-override` does.
 [region-is-final] layer "node/web01.yaml" (team) sets "variables.Region", which is final once set, and layer "common.yaml" (organization) set it
 ```
 
-`final` does not say which layer sets the key first. Whichever does, that is
-the last word. Use it where a second copy would be a copy that can go stale,
-and use `no-override` where repeating a value is harmless. A final list cannot
-be added to either, whatever its merge strategy.
+Whichever layer sets it first wins. A final list cannot be added to.
 
 ### `restrict`
 
@@ -416,18 +332,14 @@ Only the named groups may set the key.
 [no-debug] layer "common.yaml" (organization) sets "debug", which no layer may set
 ```
 
-A layer that may not set a restricted key also may not replace it from above.
-With `keys: [secrets.db.password]`, a team layer that writes `secrets: null`
-never names the key, and is refused all the same when an allowed layer set
-it:
+Replacing a parent (`secrets: null`) counts as setting it:
 
 ```
 [s] layer "node/x.yaml" (team) sets "secrets", replacing "secrets.db.password.from", which layer "common.yaml" (organization) set and only organization may set
 ```
 
-`restrict` is about who may write a key. It does not stop an allowed group's
-more specific layer from changing an allowed group's less specific value; that
-is [`no-override`](#no-override).
+It does not stop allowed groups overriding each other; that is
+[`no-override`](#no-override).
 
 ### `required`
 
@@ -457,9 +369,7 @@ A key that is `null` is not set.
 [team-layers-name-an-owner] layer "node/web01.yaml" (team) does not set "variables.Owner", which every layer of team must set
 ```
 
-The first form checks the merged result, so a value the merge discards does
-not count. A missing layer file is not a layer, so the second form ignores it;
-use both when the value must exist regardless.
+The first form checks the merged result; the second ignores missing layer files.
 
 ### `forbidden-value`
 
@@ -481,20 +391,17 @@ The key may not hold one of these values.
 | `ignoreCase` | `true`: compare text without regard to case. Default `false` |
 | `appliesTo` | the groups that are checked. Left out: every layer |
 
-At least one of `values` and `matches` is needed. Items of a list are checked
-one by one, and the refusal says which:
+Needs `values` or `matches`. List items are checked one by one:
 
 ```
 [no-floating-tags] layer "node/web01.yaml" (team) sets "app.sidecars[0].image" to a value the rule forbids (matches[0])
 ```
 
-The refusal names the entry of the rule that matched, by its position, and
-not the value that was found.
+The refusal names the rule entry, not the value.
 
 ### `merge-strategy`
 
-The key may only be merged with one of these strategies. `keys` are exact
-top-level keys, because that is what a strategy belongs to.
+Limits the merge strategy of exact top-level keys.
 
 ```yaml
 - id: variables-merge-deep
@@ -507,15 +414,11 @@ top-level keys, because that is what a strategy belongs to.
 [variables-merge-deep] "variables" is merged with first-found, and may only be merged with deep-merge
 ```
 
-This is a rule about the hierarchy file and not about a layer, so it names no
-layer. It is how a policy can insist on the merge direction it was written
-for: under `first-found`, a layer that sets one variable replaces all of
-them.
+It names no layer. Under `first-found`, one layer's `variables` replaces them all.
 
 ## How a rule reads a merge
 
-`no-override` and `final` ask what a more specific layer's value does to a
-less specific layer's, and the answer depends on the key's strategy.
+For `no-override` and `final`, it depends on the key's strategy:
 
 ```mermaid
 flowchart TD
@@ -543,11 +446,8 @@ flowchart TD
 
 ## The command line as a layer
 
-A `--data` file is merged over the hierarchy and wins, so it is checked as
-the most specific layer. Each file is a layer of its own, named
-`--data <file>`, in the group `(command line)`, whatever the file is called.
-A command-line value replaces the top-level key it names whole, so it is
-judged the way `first-found` is.
+Each `--data` file is the most specific layer, `--data <file>`, group `(command line)`,
+judged as `first-found`.
 
 ```
 [meridian/protect-variables] layer "--data override.yaml" ((command line)) changes "variables.OrganizationName", which layer "common.yaml" (organization) set
@@ -571,9 +471,7 @@ meridian rules check --hierarchy FILE [--rules FILE] [--require-rules]
 | `--data FILE` | a YAML or JSON file of values, as on `compile`: merged over the hierarchy, each key it names replacing that key whole, and checked as a layer named `--data FILE` in the group `(command line)`; may be repeated |
 | `--set KEY=VALUE` | one value, as on `compile`: applied after every `--data` file, `KEY` may be dotted to set one key inside a mapping and keep the keys beside it, and the value is typed as YAML types it. All of them are checked together as one last layer named `--set`, in the group `(command line)`. A layer path's `%{KEY}` reads the same value; may be repeated |
 
-It loads the layers one node would get, checks every rule, and compiles
-nothing. Run it once for each node, or each combination of variables, that
-your pipeline compiles:
+Checks one node's layers without compiling. Run it per node:
 
 ```
 $ meridian rules check --hierarchy config/hierarchy.yaml --set env=prod --set role=web --set node=web01
@@ -587,12 +485,8 @@ layers, least specific first:
 no violations
 ```
 
-The list shows which group owns each layer, which is the first thing to look
-at when a rule does not apply where you expected. The `--set` row is there
-because `--set` means here what it means on `compile`: `env`, `role` and
-`node` pick the layer files and are also values in the merged data, set last.
-A rule holds them like any other layer, so a `--set` that changes a protected
-value is refused:
+It lists each layer's group. `--set` is a layer too, so changing a protected value with it
+is refused:
 
 ```
 $ meridian rules check --hierarchy config/hierarchy.yaml --set env=prod --set role=web --set node=web01 --set variables.Region=us
@@ -601,10 +495,8 @@ error: compile rules: 2 violations; nothing was compiled
   - [region-is-final] layer "--set" ((command line)) sets "variables.Region", which is final once set, and layer "common.yaml" (organization) set it
 ```
 
-`--set` names one key and keeps the keys beside it, so it drops nothing; a
-`--data` file replaces each key it names whole, so one that sets `variables`
-also drops every variable it leaves out.
-[`capabilities`](#capabilities) do not apply to either.
+`--set` changes one key; a `--data` file replaces each top-level key whole.
+[Capabilities](#capabilities) apply to neither.
 
 | Exit status | Meaning |
 |---|---|
@@ -612,9 +504,8 @@ also drops every variable it leaves out.
 | `1` | a rule is broken, or the hierarchy, a layer or the rules file is wrong |
 | `2` | a mistake in the command line (a `--set` without `=` is reported with status `1`, as on `compile`) |
 
-`compile`, `plan` and `apply` do not read a hierarchy yet, so they do not run
-the rules by themselves; run `rules check` before them in a pipeline. See
-[how this fits the rest of the language](../concepts/compile-rules.md#how-this-fits-the-rest-of-the-language).
+`compile`, `plan` and `apply` do not run rules yet; run `rules check` first
+([see](../concepts/compile-rules.md#how-this-fits-the-rest-of-the-language)).
 
 ## Refusals
 
@@ -633,20 +524,13 @@ error: compile rules: 10 violations; nothing was compiled
   - [no-floating-tags] layer "node/rogue.yaml" (team) sets "web.image" to a value the rule forbids (matches[0])
 ```
 
-Each line gives `[rule id]`, the layer and its group, the key, and the
-violation, then the rule's own `message` if it has one.
-
-- **Every violation is listed**, not only the first.
-- **The order is fixed**: rules in file order (shipped sets first), then
-  layers least to most specific, then keys. The same files always print the
-  same text.
-- **No value is ever printed**, neither the new one nor the one it replaced.
-- **Nothing is handed over.** A hierarchy that breaks a rule produces no
-  merged data.
+Each line: `[rule id]`, layer and group, key, violation, and the rule's `message`. All
+violations are listed in a fixed order, no values are printed, and no merged data is
+produced.
 
 ## Mistakes in the rules file
 
-These are errors in the file itself, reported before any layer is looked at.
+Reported before any layer is read:
 
 | Message | Cause |
 |---|---|
@@ -671,25 +555,16 @@ These are errors in the file itself, reported before any layer is looked at.
 
 ## Protecting the rules file
 
-`rules.yaml` is in the configuration repository, so whoever can change it
-decides what every layer may do.
-
-- Give `rules.yaml` and `hierarchy.yaml` to your most trusted owners, with
-  CODEOWNERS and branch protection.
-- Pass `--require-rules` in the pipeline, so deleting the file is an error,
-  not a way to switch the rules off.
-- For more, keep the rules where contributors cannot write and pass
-  `--rules FILE`, which replaces the repository's file.
-- Give every folder of layers to a group. A layer outside every group is
-  refused, so a new folder cannot appear outside the policy.
+- Protect `rules.yaml` and `hierarchy.yaml` with CODEOWNERS and branch protection.
+- Pass `--require-rules` in pipelines.
+- Or keep rules elsewhere and pass `--rules FILE`.
+- Put every layer folder in a group.
 
 ## From DscPipelineRunner
 
 DscPipelineRunner's
 [`Policy.yml`](https://github.com/ZanattaMichael/Dsc.PipelineRunner/blob/main/Example%20Policy%20Configuration/Policy.yml)
-says what each layer of a configuration may use. It sits beside `Datum.yml`,
-outside the hierarchy, so no layer can add to it or override it. `rules.yaml`
-is the same file for Meridian, and reads the same way:
+maps to `rules.yaml`:
 
 <table>
 <tr><th>DscPipelineRunner <code>Policy.yml</code></th><th>Meridian <code>rules.yaml</code></th></tr>
@@ -759,20 +634,11 @@ layers:
 | `-PolicyPath`, `-RequirePolicy` | `--rules`, `--require-rules` | yes |
 | `<node>.provenance.json` lists each layer and its owner | `meridian rules check` prints each layer and its group | printed, not written to a file |
 
-**What differs, and why.** `Policy.yml` governs what a layer's *resources* may
-use (Target, engine, scripts), because a DscPipelineRunner layer holds
-resources. A Meridian hierarchy layer holds *data*; documents (with the target
-and resources) are not layered, so the capability to govern is which keys a
-layer may set. Per-layer targets and engines will join `keys` under
-`capabilities` once documents can be layered.
+Differences: Meridian layers hold data, not resources, so capabilities govern keys.
+Overriding a platform variable is refused by the default `protect-variables`
+([sets](#shipped-rule-sets)).
 
-`Policy.yml` does not stop a team's file from changing a variable the
-platform set: DscPipelineRunner merges `variables` deeply and the most
-specific file wins. In Meridian that is a rule, `protect-variables`, and it
-is in force in the file above because it is one of the
-[default sets](#shipped-rule-sets).
-
-The hierarchy file for the same configuration:
+The hierarchy file:
 
 | DscPipelineRunner `Datum.yml` | Meridian `hierarchy.yaml` |
 |---|---|
@@ -783,7 +649,7 @@ The hierarchy file for the same configuration:
 
 ## Using the rules from Rust
 
-The crate is `meridian-rules`. A compiler makes one call:
+Crate `meridian-rules`:
 
 ```rust
 let loaded = meridian_rules::enforce(&rules, &hierarchy, &scope, &loader, &command_line)?;
@@ -799,5 +665,4 @@ let loaded = meridian_rules::enforce(&rules, &hierarchy, &scope, &loader, &comma
 | `MergePlan` | how a stack merges: `kind(path)` gives `Replace`, `Deep` or `Append`. Implemented for `meridian_resolve::Hierarchy`; implement it to check another way of layering with the same rules |
 | `Violation` | `rule`, `check`, `layer`, `group`, `key` and `text`, for a caller that reports in its own format |
 
-`evaluate` is not tied to data files. Anything that can be presented as an
-ordered stack of layers of keyed values can be checked by the same rules.
+`evaluate` works on any ordered stack of keyed layers.
