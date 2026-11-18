@@ -224,15 +224,16 @@ Environment=POSTGRES_DB=app
 Secret=meridian_secret_db_password,type=env,target=POSTGRES_PASSWORD
 ```
 
-**How the value reaches Podman.** An apply, after it has surveyed the host and before it
-writes or starts any unit, creates each secret in Podman on the host with
-`podman secret create meridian_secret_<name> -`, reading the value from the script's own
-standard input, the same channel every other step of an apply uses: over `ssh` for a
-remote host, as the unit's user for user units and with `sudo` for system units. A secret
-that already exists is replaced first (`podman secret rm`), so the value is current every
-apply. The value is on no command line and in no environment, and in no file Meridian
-writes; a plan creates nothing and reads nothing. The log says which secrets were created
-and never what they hold.
+**How the value reaches Podman.** After surveying the host and before writing or
+starting any unit, an apply creates each secret with
+`podman secret create meridian_secret_<name> -`. The value comes on the script's
+standard input, the channel every apply step uses: over `ssh` for a remote host, as the
+unit's user for user units, and with `sudo` for system units.
+
+- An existing secret is replaced first (`podman secret rm`), so the value is current.
+- The value is on no command line, in no environment and in no file Meridian writes.
+- A plan creates and reads nothing.
+- The log names the secrets created, never their values.
 
 **What Podman keeps.** Podman stores the secret with its default driver, `file`, which
 writes it under the user's Podman directory base64-encoded and unencrypted, readable by
@@ -251,10 +252,13 @@ own `Secret` key and create it yourself:
         Secret: db-password,type=env,target=POSTGRES_PASSWORD
 ```
 
-The handover is tested against a stand-in `podman` that keeps what it was given on
-standard input (`plugins/podman/tests/run.rs`) and against the real Podman in CI
-(`plugins/podman/tests/real.rs`): the value reaches the container's environment, and is in
-no unit file, no argument, and nothing the plan or apply prints.
+The handover is tested two ways:
+
+- against a stand-in `podman` that records its standard input
+  (`plugins/podman/tests/run.rs`)
+- against the real Podman in CI (`plugins/podman/tests/real.rs`): the value reaches the
+  container's environment, and is in no unit file, no argument and no plan or apply
+  output
 
 ### Literal values and systemd's expansions
 

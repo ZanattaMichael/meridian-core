@@ -379,23 +379,25 @@ end
 The compiled recipe holds the key, never the value, so it can be reviewed and
 kept. A resource without a secret is not made sensitive: its diff still shows.
 
-**How the value reaches the tool.** On this machine, the runner writes an
-attributes file with each secret under its key into a directory only the user
-can enter (mode `0700`, the file `0600`, on a memory filesystem where the
-system has one) and passes it as `--json-attributes <dir>/attributes.json`.
-Local mode writes the node object, attributes and all, back to a `nodes`
-directory under the repository after every run, which would leave the value
-in the stage's work directory; so the run is also given a `client.rb` beside
-the attributes, `--config <dir>/client.rb`, that names the work directory as
-the repository and the private directory as `node_path`. Both files, and the
-node Chef wrote, are overwritten and removed when the run ends. Neither the
-command line nor the tool's environment ever holds the value, and nothing in
-the work directory does.
+**How the value reaches the tool.** On this machine:
+
+1. The runner writes an attributes file with each secret under its key into a
+   directory only the user can enter (mode `0700`, the file `0600`, on a memory
+   filesystem where the system has one), and passes it as
+   `--json-attributes <dir>/attributes.json`.
+2. Local mode writes the node object, attributes included, to a `nodes`
+   directory after every run. To keep the value out of the work directory, the
+   run also gets `--config <dir>/client.rb`, which names the work directory as
+   the repository and the private directory as `node_path`.
+3. Both files, and the node Chef wrote, are overwritten and removed when the run
+   ends.
+
+The value is never on the command line, in the tool's environment or in the
+work directory.
 
 **For another machine the apply stops.** `chef-run` takes attributes on its
-command line only (`--json-attributes` is not among its options, and `--attr`
-puts the value in `ps` for every user of this machine), so a document with a
-secret and a host that is not this machine fails before anything is started:
+command line only, where `ps` shows them to every user of this machine. A
+document with a secret and another host fails before anything starts:
 
 ```
 chef-run has no private way to hand a secret to web01.example.com: it takes attributes on its command line only, where every user of this machine could read them. Run chef-client on the host, with the local transport, or keep the secret out of this document
@@ -405,12 +407,13 @@ A plan for that host is reported as unknown, as every `chef-run` plan is, and
 runs nothing. To converge such a document, run Meridian on the node with
 `MERIDIAN_CHEF_TRANSPORT=local`.
 
-The handover is tested against a stand-in `chef-client` that keeps a copy of
-the attributes file, its mode, the configuration, its arguments and its
-environment, and against the real client in CI (`MERIDIAN_TEST_REAL_CHEF=1`),
-which converges a file whose content is a secret and whose value then appears
-in the file and in nothing Chef printed or the plugin wrote, the node file
-included.
+The handover is tested two ways:
+
+- against a stand-in `chef-client` that records the attributes file, its mode,
+  the configuration, its arguments and its environment
+- against the real client in CI (`MERIDIAN_TEST_REAL_CHEF=1`), which converges a
+  file whose content is a secret and checks the value is in the file and nowhere
+  in Chef's output or the plugin's files, the node file included
 
 ## Credentials
 

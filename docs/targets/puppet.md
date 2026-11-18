@@ -388,18 +388,20 @@ and in a file's diff.
 The compiled manifest holds the key, never the value, so it can be reviewed
 and kept. `meridian compile` writes exactly this.
 
-**How the value reaches the tool.** When a stage runs, the runner writes a
-Hiera data file, `common.yaml`, with each secret under its key, into a
-directory only the user can enter (mode `0700`, the file `0600`, on a memory
-filesystem where the system has one), and a `hiera.yaml` beside it that names
-that directory as its data directory. The run is given the configuration and
-nothing more: `puppet apply ... --hiera_config <dir>/hiera.yaml` on this
-machine, `bolt apply ... --hiera-config <dir>/hiera.yaml` for another host.
-Over Bolt the catalog is compiled on this machine, so the lookup is answered
-here and the value travels to the node inside the catalog, the way Bolt sends
-every catalog. Both files are overwritten and removed when the run ends.
-Neither the command line nor the tool's environment ever holds the value, and
-nothing in the stage's work directory does.
+**How the value reaches the tool.** When a stage runs:
+
+1. The runner writes a Hiera data file, `common.yaml`, with each secret under its key,
+   into a directory only the user can enter (mode `0700`, the file `0600`, on a memory
+   filesystem where the system has one), with a `hiera.yaml` beside it that names that
+   directory as its data directory.
+2. The run gets only the configuration: `puppet apply ... --hiera_config
+   <dir>/hiera.yaml` on this machine, `bolt apply ... --hiera-config <dir>/hiera.yaml`
+   for another host. Bolt compiles the catalog here, so the value travels to the node
+   inside the catalog, as every Bolt catalog does.
+3. Both files are overwritten and removed when the run ends.
+
+The value is never on the command line, in the tool's environment or in the work
+directory.
 
 **What is refused.** A secret is a whole param. One inside a list or a map
 (`groups: [..., "${{ secret.x }}"]`) is refused at compile, rule
@@ -408,11 +410,13 @@ not build a list around it. A document's own Hiera is not read: the
 configuration the run is given names Meridian's data file alone, so a
 `hiera.yaml` of your own is not consulted during a Meridian run.
 
-The handover is tested against a stand-in `puppet` that keeps a copy of the
-data file, its mode, its arguments and its environment, and against the real
-`puppet` in CI (`MERIDIAN_TEST_REAL_PUPPET=1`), which applies a file whose
-content is a secret and whose value then appears in the file and in nothing
-Puppet printed or the plugin wrote.
+The handover is tested two ways:
+
+- against a stand-in `puppet` that records the data file, its mode, its arguments and
+  its environment
+- against the real `puppet` in CI (`MERIDIAN_TEST_REAL_PUPPET=1`), which applies a file
+  whose content is a secret and checks the value is in the file and nowhere in Puppet's
+  output or the plugin's files
 
 ## Credentials
 

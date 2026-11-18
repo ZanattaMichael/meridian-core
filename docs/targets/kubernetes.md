@@ -122,27 +122,31 @@ namespace reads it. An output that reads a Secret's `data` is marked sensitive a
 masked wherever Meridian shows it.
 
 **What the plan says.** A Secret written with `stringData` is planned as an update on
-every run after the first, whether or not its values changed. The cluster stores
-`stringData` as `data` and keeps no `stringData`, so the manifest's `stringData` is a
-patch every time `kubectl apply` compares the two. That is kubectl's behaviour for any
-Secret written this way, with or without Meridian; a document whose plan has to be in sync
-can write a Secret's other fields in `data`, base64-encoded, but a secret's value cannot go
-there, so a Secret that holds one is always reported as an update.
+every run after the first, even when nothing changed. The cluster stores `stringData` as
+`data`, so `kubectl apply` always sees a patch. This is kubectl's behaviour with or
+without Meridian. Other fields can go in `data`, base64-encoded, to keep a plan in sync,
+but a secret's value cannot, so a Secret that holds one always shows as an update.
 
 **What is refused.** A secret anywhere else is refused at compile, rule
-`unsupported-secret-place`: in the `cluster` resource it would be on `kubectl`'s command
-line; in any other object it would be written into the object for every reader to see;
-in a Secret's `data` the document would have to base64-encode it itself, which turns a
-secret into text; and inside a `stringData` value, such as `postgres://app:${{
-secret.db_password }}@db/app`, because a value is one string, so the secret has to be the
-whole value. Text that reads as a token, `${meridian_secret_`, is refused too, rule
-`reserved-name`, so a document cannot make the runner fill a value in where the document
-wrote the token itself.
+`unsupported-secret-place`:
 
-The handover is tested against a stand-in `kubectl` that keeps what it reads
-(`plugins/kubernetes/tests/run.rs`) and against a real `kubectl` and a kind cluster in CI
-(`plugins/kubernetes/tests/real.rs`): the value is in the Secret the cluster holds, in no
-file the plugin wrote, and in nothing the plan or apply prints.
+- in the `cluster` resource, where it would be on `kubectl`'s command line
+- in any other object, where every reader would see it
+- in a Secret's `data`, where the document would have to base64-encode it, turning a
+  secret into text
+- inside a `stringData` value, such as `postgres://app:${{ secret.db_password }}@db/app`:
+  the secret has to be the whole value
+
+Text that reads as a token, `${meridian_secret_`, is refused too, rule `reserved-name`,
+so a document cannot make the runner fill a value in where it wrote the token itself.
+
+The handover is tested two ways:
+
+- against a stand-in `kubectl` that records what it reads
+  (`plugins/kubernetes/tests/run.rs`)
+- against a real `kubectl` and a kind cluster in CI (`plugins/kubernetes/tests/real.rs`):
+  the value is in the Secret the cluster holds, and not in any file the plugin wrote or
+  in the plan or apply output
 
 ## Notifications
 

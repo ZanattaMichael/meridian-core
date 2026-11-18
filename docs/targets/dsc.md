@@ -243,12 +243,15 @@ is what a script full of computed values imports as.
 
 `meridian schema sync` asks DSC what each resource's properties are, so an
 editor completes and checks them ([Tool schemas](../tooling/schema-sync.md)).
-Both generations answer: a PowerShell module's resources are read with
-`Get-DscResource -Module` (in the `pwsh` that `MERIDIAN_PWSH` names), or,
-where that lists nothing, as it does on Linux for a class-based module, from
-the module's `[DscResource()]` classes themselves, which give the same
-properties, types, key and mandatory flags and enum values; and when the `dsc` command is installed (or `MERIDIAN_DSC` names it) its own
-resources are read with `dsc resource list` and `dsc resource schema`.
+Both generations answer:
+
+- A PowerShell module's resources are read with `Get-DscResource -Module` (in
+  the `pwsh` that `MERIDIAN_PWSH` names). Where that lists nothing, as on Linux
+  for a class-based module, they are read from the module's `[DscResource()]`
+  classes, which give the same properties, types, key and mandatory flags and
+  enum values.
+- When the `dsc` command is installed (or `MERIDIAN_DSC` names it), its
+  resources are read with `dsc resource list` and `dsc resource schema`.
 
 | | |
 |---|---|

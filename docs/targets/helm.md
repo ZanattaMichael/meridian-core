@@ -404,13 +404,16 @@ may read Secrets in that namespace reads them. An output that reads a Secret's `
 marked sensitive and masked wherever Meridian shows it.
 
 **What is refused.** A secret anywhere else is refused at compile, rule
-`unsupported-secret-place`: in the `chart`, `release` or `kustomization` resource it would
-be on `helm`'s command line; in an object's params it would be written into a template
-file as it stands. A document with a [Kustomize overlay](#kustomize-overlays) takes no
-secret in its values either: Kustomize reads the rendered manifests from a file in the
-work directory, where a secret cannot go. Text that reads as a token,
-`${meridian_secret_`, is refused too, rule `reserved-name`, so a document cannot make the
-runner fill a value in where the document wrote the token itself.
+`unsupported-secret-place`:
+
+- in the `chart`, `release` or `kustomization` resource, where it would be on `helm`'s
+  command line
+- in an object's params, where it would be written into a template file as it stands
+- in the values of a document with a [Kustomize overlay](#kustomize-overlays), since
+  Kustomize reads the rendered manifests from a file in the work directory
+
+Text that reads as a token, `${meridian_secret_`, is refused too, rule `reserved-name`,
+so a document cannot make the runner fill a value in where it wrote the token itself.
 
 The handover is tested against a stand-in `helm` that keeps what it reads
 (`plugins/helm/tests/run.rs`) and against the real `helm` in CI

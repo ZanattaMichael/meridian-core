@@ -103,11 +103,9 @@ so you can read exactly what Packer is given.
 (`metadata.name`) and builds every source the document declares. For a second build, write
 a second document.
 
-The plugin does not hide Packer's vocabulary behind a smaller one. Packer's builders,
-provisioners and post-processors come from its own plugins and there are hundreds of them,
-so after the prefix that says what part of a build a resource is, a resource's `type` is
-Packer's type and its `params` are that type's arguments, exactly as its documentation
-lists them.
+The plugin does not hide Packer's vocabulary behind a smaller one. After the prefix
+that says what part of a build a resource is, its `type` is Packer's type and its
+`params` are that type's arguments, as Packer's documentation lists them.
 
 What Meridian adds:
 
@@ -453,21 +451,23 @@ one variables file, `secrets.pkrvars.json`, in a directory only the user can ent
 `0700`, the file `0600`, on a memory filesystem where the system has one), and passes it as
 `-var-file=<path>` to `packer validate` and `packer build`. `packer init` has no use for
 it and is not given it. The file is overwritten and removed when the build ends. The
-command line names the file's path and nothing more, and Packer's environment holds
-nothing of the value. A step that uses the value is run by Packer as Packer runs every
-step: a `shell-local` step's commands are written to a script Packer keeps in its own
-temporary directory for the length of the step.
+command line names only the file's path, and Packer's environment holds nothing of the
+value. Packer runs a step that uses the value like any other step: a `shell-local`
+step's commands go into a script in Packer's temporary directory for the length of the
+step.
 
 **What is refused.** A secret in the declaration of a `variable` or a `plugin` is refused
 at compile, rule `unsupported-secret-place`: a declaration is written into the template
 as it stands. Put the secret in a `local`, a provisioner, a post-processor or a source,
 which are compiled to a reference.
 
-The handover is tested against a stand-in `packer` that keeps a copy of the variables
-file, its mode, its arguments and its environment
-(`plugins/packer/tests/run.rs`), and against the real `packer` in CI
-(`plugins/packer/tests/packer.rs`), where a step writes the value to a file and the value
-is in nothing Packer printed and in no other file the plugin wrote.
+The handover is tested two ways:
+
+- against a stand-in `packer` that records the variables file, its mode, its arguments
+  and its environment (`plugins/packer/tests/run.rs`)
+- against the real `packer` in CI (`plugins/packer/tests/packer.rs`): a step writes the
+  value to a file, and the value is not in Packer's output or any other file the plugin
+  wrote
 
 ## What the plugin refuses
 

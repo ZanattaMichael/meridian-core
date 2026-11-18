@@ -430,16 +430,16 @@ is refused unless the resource says `shell: true`:
 Any state function is a resource type, written by its dotted name as a state file
 writes it: `pkgrepo.managed`, `file.symlink`, `docker_container.running`,
 `postgres_database.present`. The function's arguments are the resource's `params`,
-written into the state exactly as given; Meridian checks nothing against a list of what
-the function takes. An argument the function does not have, or a module the minion does
-not ship, is Salt's to refuse when the state is applied, as a provider's type is
-Terraform's, until the module's schema is synced and the editor reports it in place.
+written into the state as given. Meridian does not check them. Salt refuses an
+unknown argument, or a module the minion does not ship, when the state is applied.
+Once the module's schema is synced, the editor reports these in place.
 
-A Salt state is always dotted, so no state function has the bare name of a shared type
-and `native/<name>` reaches nothing here: `native/file` is refused, with `file.managed`
-as what to write. The shared `file` and `file.managed` written in full are both Salt's
-`file.managed`; the shared one takes the six's params and moves between tools, the
-dotted one takes every argument the function has and compiles for Salt only.
+A Salt state is always dotted, so `native/<name>` reaches nothing here.
+`native/file` is refused, with `file.managed` as what to write. The shared `file`
+and `file.managed` both compile to Salt's `file.managed`:
+
+- the shared `file` takes the six's params and moves between tools
+- `file.managed` takes every argument the function has and compiles for Salt only
 
 ```yaml
 resources:
@@ -722,15 +722,20 @@ one, and no setting keeps it out, so the value would be in the report Meridian r
 compile refuses it, rule `unsupported-secret-place`; put the secret in a file the command
 reads, or use it in a `runtimeWhen`.
 
-The handover is tested against a stand-in `salt-call` that keeps a copy of the pillar
-files, their mode, its arguments and its environment, and against the real `salt-call` in
-CI, which applies a file whose content is a secret, and whose value then appears in the
-file and in nothing Salt printed or the plugin wrote.
+The handover is tested two ways:
+
+- against a stand-in `salt-call` that records the pillar files, their mode, its
+  arguments and its environment
+- against the real `salt-call` in CI, which applies a file whose content is a
+  secret and checks the value appears in the file and nowhere in Salt's output or
+  the plugin's
 
 ## Credentials
 
 `targetHost.credential` names the [credential](../reference/dsl/credentials.md) the host is
-reached as. Another machine is reached with `salt-ssh`, which reads how to sign in from its roster, so the plugin writes the credential into the roster it already writes for the run, and the roster into a private place when it holds a password:
+reached as. Another machine is reached with `salt-ssh`, which reads how to sign in
+from its roster. The plugin writes the credential into the run's roster, and keeps
+the roster in a private place when it holds a password:
 
 ```yaml
 spec:

@@ -418,26 +418,33 @@ config:
     type: string
 ```
 
-The compiled program holds the key and never the value. Pulumi keeps a secret
-configuration value as a secret wherever it is handed on as it is: the resource input it
-becomes, the output property of the same name and a stack output of either are encrypted
-in the state and printed as `[secret]`. What a provider makes *from* it is not followed:
-an output property built from a secret input is an ordinary output unless the resource
-names it in `resourceOptions.additionalSecretOutputs` or the stack output wraps it in
-`fn::secret`; a secret inside a map input is not followed into the map that comes back;
-and a resource's ID is never a secret, so a secret should not shape one: a `RandomPet`
-whose prefix is a secret has its name in the open in the state. A document that hands
-Pulumi a secret should say which outputs the secret shapes.
+The compiled program holds the key, never the value. Pulumi keeps a secret
+configuration value secret wherever it is passed on unchanged: the resource input it
+becomes, the output property of the same name, and a stack output of either are
+encrypted in the state and printed as `[secret]`.
 
-**How the value reaches the tool.** When a stage runs, after the stack is selected and
-before anything else, the runner runs `pulumi config set --secret
-meridian_secret_<name>` for each secret with the value on standard input, so that it is
-on no command line and in no environment. Pulumi encrypts it with the stack's secrets
-provider and writes the ciphertext into the stack's settings file beside the program.
-`preview` and `up` then read it as any configuration value. When the stage is over, and
-also when the preview fails, the runner runs `pulumi config rm meridian_secret_<name>` for
-each, so the settings file in the work directory names no secret between runs. The
-command line names the key and nothing more.
+What a provider makes *from* it is not followed:
+
+- An output property built from a secret input is an ordinary output, unless the
+  resource names it in `resourceOptions.additionalSecretOutputs` or the stack output
+  wraps it in `fn::secret`.
+- A secret inside a map input is not followed into the map that comes back.
+- A resource's ID is never a secret. A `RandomPet` whose prefix is a secret has its name
+  in the open in the state.
+
+A document that hands Pulumi a secret should say which outputs the secret shapes.
+
+**How the value reaches the tool.** When a stage runs:
+
+1. After the stack is selected, the runner runs
+   `pulumi config set --secret meridian_secret_<name>` for each secret, with the value on
+   standard input. The command line names only the key.
+2. Pulumi encrypts it with the stack's secrets provider and writes the ciphertext into
+   the stack's settings file beside the program.
+3. `preview` and `up` read it as any configuration value.
+4. When the stage ends, or the preview fails, the runner runs
+   `pulumi config rm meridian_secret_<name>` for each, so the settings file names no
+   secret between runs.
 
 **What Pulumi keeps.** The state keeps what the resources were given, encrypted with the
 stack's secrets provider, as it keeps every secret. The protection is the provider's:
@@ -453,12 +460,14 @@ resource's declaration (`default`, `value`), is refused at compile, rule
 `unsupported-secret-place`: the settings are the command line `pulumi` is given, and a
 declaration is written into the program as it stands.
 
-The handover is tested against a stand-in `pulumi` that keeps what it reads on standard
-input, its arguments and its environment (`plugins/pulumi/tests/run.rs`), and against
-the real `pulumi` in CI (`plugins/pulumi/tests/real.rs`), where a secret is a string
-input of a random string: it comes back as a secret output holding the value, the string
-does not, the value is in nothing Pulumi printed and in no file in the work directory in
-the open, and the settings file no longer names the key when the run is over.
+The handover is tested two ways:
+
+- against a stand-in `pulumi` that records its standard input, arguments and
+  environment (`plugins/pulumi/tests/run.rs`)
+- against the real `pulumi` in CI (`plugins/pulumi/tests/real.rs`), where a secret is a
+  random string's input. It comes back as a secret output holding the value; the
+  string does not. The value is not in Pulumi's output or in the open in any work
+  directory file, and the settings file no longer names the key after the run.
 
 ## What is refused
 

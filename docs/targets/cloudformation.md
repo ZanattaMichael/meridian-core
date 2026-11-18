@@ -317,11 +317,10 @@ into one parameters file, `[{"ParameterKey": ..., "ParameterValue": ...}]`, in a
 directory only the user can enter (mode `0700`, the file `0600`, on a memory
 filesystem where the system has one), and passes it as `--parameters file://<path>`
 to `create-change-set`. The file is overwritten and removed as soon as the change set
-exists. Executing the change set names nothing more: the change set carries the
-values, as every change set carries its parameters, and CloudFormation shows `****`
-for a `NoEcho` parameter wherever it describes the stack or the change set. The
-command line names the file's path and nothing more, and `aws`'s environment holds
-nothing of the value.
+exists. The change set carries the values, and CloudFormation shows `****` for a
+`NoEcho` parameter wherever it describes the stack or change set. The command
+line names only the file's path, and `aws`'s environment holds nothing of the
+value.
 
 **What CloudFormation keeps.** The stack keeps the parameter's value, masked in every
 description, as it keeps every parameter. A resource property given the value is kept
@@ -332,12 +331,14 @@ Choose a type or a resource that protects what it holds.
 **What is refused.** A secret in the `stack` resource's settings is refused at compile,
 rule `unsupported-secret-place`: the settings are the command line `aws` is given.
 
-The handover is tested against a stand-in `aws` that keeps a copy of the parameters
-file, its mode, its arguments and its environment
-(`plugins/cloudformation/tests/run.rs`), and against the real `aws` and LocalStack in
-CI (`plugins/cloudformation/tests/real.rs`), where the value reaches a Systems Manager
-parameter and is in nothing the plugin printed or wrote and not in the stack's
-description.
+The handover is tested two ways:
+
+- against a stand-in `aws` that records the parameters file, its mode, its
+  arguments and its environment (`plugins/cloudformation/tests/run.rs`)
+- against the real `aws` and LocalStack in CI
+  (`plugins/cloudformation/tests/real.rs`): the value reaches a Systems Manager
+  parameter and is not in the plugin's output, its files or the stack's
+  description
 
 ## Settings
 

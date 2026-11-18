@@ -432,13 +432,17 @@ keeps OpenTofu's full address.
 
 A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a resource's
 params is compiled as `${var.meridian_secret_<name>}`, with the variable declared
-`sensitive`. When the stage runs, the values are written into a variables file only the
-user can read, held in memory where the system allows, and passed to `tofu plan` as
-`-var-file=<path>`; the file is removed once the plan is saved, and the saved plan, which
-holds every variable's value, is overwritten and removed as soon as it has been applied
-or shown. The value is never on the command line and never in OpenTofu's environment. A
-document that hands OpenTofu a secret should [encrypt its state](#state-and-plan-encryption),
-since a resource's arguments are written there whichever variable they came from.
+`sensitive`. When the stage runs:
+
+1. The values are written into a variables file only the user can read, held in memory
+   where the system allows, and passed to `tofu plan` as `-var-file=<path>`.
+2. The file is removed once the plan is saved.
+3. The saved plan, which holds every variable's value, is overwritten and removed as soon
+   as it has been applied or shown.
+
+The value is never on the command line or in OpenTofu's environment. A document that
+hands OpenTofu a secret should [encrypt its state](#state-and-plan-encryption), since
+resource arguments are written there whatever variable they came from.
 
 | Environment variable | Effect |
 |---|---|

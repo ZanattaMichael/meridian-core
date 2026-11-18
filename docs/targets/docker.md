@@ -437,11 +437,13 @@ a literal there would be written into the file. Text that reads as a variable's 
 document cannot make Compose fill a value in where the document wrote the reference
 itself.
 
-The handover is tested against a stand-in `docker` that keeps the file and the environment
-it was given (`plugins/docker/tests/run.rs`), and against the real Compose in CI
-(`plugins/docker/tests/real.rs`): the value reaches a service's environment and its
-`/run/secrets` file, is in nothing the plan or apply prints, and in no file the plugin
-wrote.
+The handover is tested two ways:
+
+- against a stand-in `docker` that records the file and environment it was given
+  (`plugins/docker/tests/run.rs`)
+- against the real Compose in CI (`plugins/docker/tests/real.rs`): the value
+  reaches a service's environment and its `/run/secrets` file, and is not in the
+  plan or apply output or any file the plugin wrote
 
 ## Fields every resource has
 
@@ -948,12 +950,14 @@ reads them. The imported document is
 ## How it is tested
 
 Beside the compile and runner tests, the plugin is driven as a real process over
-the plugin protocol, and end to end against a real Docker daemon: a project is
-brought up, its outputs are read and the page it serves is fetched, a service is
-changed and another removed, and a container stopped behind Compose's back is
-found by the next plan. Those tests run wherever `docker compose` and a daemon
-are available, which includes CI, and are skipped with a note where they are
-not. `MERIDIAN_TEST_REAL_DOCKER=1` makes a missing Docker a failure, and
+the plugin protocol, and end to end against a real Docker daemon:
+
+- a project is brought up, its outputs read and the page it serves fetched
+- a service is changed and another removed
+- a container stopped behind Compose's back is found by the next plan
+
+These tests run wherever `docker compose` and a daemon are available, CI
+included, and are skipped with a note elsewhere. `MERIDIAN_TEST_REAL_DOCKER=1` makes a missing Docker a failure, and
 `MERIDIAN_TEST_REAL_DOCKER=0` skips them.
 
 ```console

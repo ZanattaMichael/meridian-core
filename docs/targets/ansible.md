@@ -287,15 +287,16 @@ resource's id, and one handler per distinct notification. `inventory.ini`
 holds the document's host on one line, in a group named `meridian`. They are separate so the play can be
 run against an inventory of your own.
 
-Ansible renders every string in a task through Jinja on the control machine,
-so a Jinja expression written in the document, such as
-`{{ ansible_facts['os_family'] }}`, is passed through and evaluated when the
-play runs. A value Meridian places from `--data`, `--set`, a data layer or
-`env()` is not: the plugin declares Jinja's openings (`{{`, `{%`, `{#`), and
-the core writes each one in a placed value as an expression that yields itself
-(`{{ '{{' }}`), which Jinja renders back to the text. So a data value holding
-`{{ lookup('pipe', 'id') }}` reaches the host as that text, and never runs
-`id` on the control machine
+Ansible renders every task string through Jinja on the control machine.
+
+- A Jinja expression written in the document, such as
+  `{{ ansible_facts['os_family'] }}`, is passed through and evaluated when the
+  play runs.
+- A value Meridian places from `--data`, `--set`, a data layer or `env()` is
+  not. The plugin declares Jinja's openings (`{{`, `{%`, `{#`), and the core
+  writes each one as an expression that yields itself (`{{ '{{' }}`). A data
+  value holding `{{ lookup('pipe', 'id') }}` reaches the host as that text and
+  never runs `id` on the control machine
 ([values from data are literal](../reference/dsl/interpolation.md#a-tools-own-expressions)).
 
 The host in `inventory.ini` is one line, so the plugin refuses a host that is
@@ -318,11 +319,14 @@ each play. [Importing existing configuration](../operations/importing.md) is the
 are recognised; for another name say `--from ansible`.
 
 A playbook says far more than the six resource types do, so this importer reports more
-than any other. What it carries over is real and exact; what it does not is listed, not
-approximated. A task that one of the six carries whole becomes that type, so the document
-still moves to other tools; a task the six cannot carry whole becomes the module itself,
-by its full name, with every argument as written, and the document says it is now written
-for Ansible. It never turns a task it does not understand into an `exec`.
+than any other. What it carries over is exact. What it does not is listed, not
+approximated.
+
+- A task one of the six carries whole becomes that type, so the document still moves to
+  other tools.
+- Any other task becomes the module itself, by its full name, with every argument as
+  written, and the document says it is now written for Ansible.
+- A task it does not understand never becomes an `exec`.
 
 | In the playbook | In the document |
 |---|---|
