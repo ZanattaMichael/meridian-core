@@ -52,6 +52,9 @@ fn isolated(dir: &Path) -> Vec<String> {
         format!("--codedir={}", dir.join("puppet/code").display()),
         format!("--logdir={}", dir.join("puppet/log").display()),
         format!("--rundir={}", dir.join("puppet/run").display()),
+        // The public directory is under ~/.puppetlabs/opt too, and every
+        // run makes it; two tests making it at once trip over each other.
+        format!("--publicdir={}", dir.join("puppet/public").display()),
     ]
 }
 
