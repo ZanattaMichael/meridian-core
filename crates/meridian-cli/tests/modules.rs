@@ -23,6 +23,7 @@ fn write(path: &Path, content: &str) {
 
 fn meridian(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(args)
         .current_dir(dir)
         .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())
@@ -238,6 +239,7 @@ fn a_module_changed_after_it_was_pinned_stops_the_run() {
     // A reader that goes away (`meridian module verify | head -0`) ends the
     // printing, not the verdict: the exit status still says it failed.
     let mut child = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(["module", "verify"])
         .current_dir(&site)
         .env_remove("MERIDIAN_STATE_DIR")

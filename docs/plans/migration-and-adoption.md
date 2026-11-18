@@ -243,6 +243,7 @@ either.
 | 5 | Move hierarchy data into `hierarchy.yaml` | Deliberately after step 4: changing the data layer and the emission layer at once makes a diff impossible to attribute |
 | 6 | Add a second target, compile the same IR, read the output | The first real payoff, and safe because the IR is already proven on one target |
 | 7 | Only now, the two-stage `Infrastructure` → `ResourceSet` handoff | The most powerful and most complex feature. It needs the single-stage model to be understood first |
+| 8 | Put the pilot in the pipeline the team already runs | One job that runs `meridian apply`; the engine keeps its triggers, identity, secrets and approvals. [Running Meridian in a pipeline](../operations/running-in-a-pipeline.md) has a snippet per engine, and the GitHub Actions one is tested on every change |
 
 ### 4.3 What not to pilot on
 

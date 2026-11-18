@@ -167,6 +167,21 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
                 Err(why) => eprintln!("warning: {why}"),
             }
         }
+        // The pipeline engine, where there is one, is shown the same report
+        // as its job summary, and each failed step as an annotation at its
+        // document.
+        if engine().is_some() {
+            annotate(&meridian_report::engine::problems(
+                &folded,
+                &positions(&bundle),
+            ));
+            let kept_in = options
+                .backend
+                .as_ref()
+                .map(|backend| backend.describe())
+                .unwrap_or_default();
+            summarise(&meridian_report::engine::run_summary(&folded, &kept_in));
+        }
     }
     // A plugin that will not exit is worth a warning, not a failed run.
     if let Err(e) = registry.close() {
@@ -184,6 +199,7 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
     if let Some(refusal) = &report.refused {
         if json_output() {
             eprintln!("error: {refusal}");
+            report_refusal(&refusal.to_string());
             return Err(Failure::Reported);
         }
         return Err(Failure::Message(refusal.to_string()));

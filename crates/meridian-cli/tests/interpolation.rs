@@ -20,6 +20,7 @@ fn scratch(test: &str) -> PathBuf {
 
 fn meridian(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(args)
         .current_dir(dir)
         .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())
@@ -364,6 +365,7 @@ fn compile_example(name: &str, target: &str, extra: &[&str]) -> Result<(String, 
     let example = repo_root().join("examples/language").join(name);
     let plugin = plugin_binary(&format!("meridian-target-{target}"));
     let mut command = Command::new(env!("CARGO_BIN_EXE_meridian"));
+    command.env("MERIDIAN_ANNOTATIONS", "off");
     command
         .arg("compile")
         .arg(example.with_extension("yaml"))

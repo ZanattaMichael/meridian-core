@@ -27,6 +27,7 @@ fn scratch(test: &str) -> PathBuf {
 /// session bus or unit credentials unless `env` gives them.
 fn meridian(dir: &Path, args: &[&str], env: &[(&str, &str)], input: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_meridian"));
+    command.env("MERIDIAN_ANNOTATIONS", "off");
     command
         .args(args)
         .current_dir(dir)
