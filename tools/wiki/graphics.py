@@ -642,6 +642,34 @@ def test_flow() -> str:
     return doc(W, H, "meridian test: a Test document names documents and cases; each case compiles or plans them with its data in a scratch directory and checks the outcome, the files, the refusal and the changes", "".join(p))
 
 
+def common_types() -> str:
+    """One document of common infrastructure types, and what each target and cloud makes of it."""
+    W, H = 1200, 520
+    p: list[str] = []
+    p.append(heading(40, 40, "Written once"))
+    rows = [("network", "cidr"), ("subnet", "network, cidr, public"), ("firewall", "network, rules"), ("address", ""), ("vm", "subnet, size, image, sshKey")]
+    for i, (name, params) in enumerate(rows):
+        y = 60 + i * 80
+        p.append(card(40, y, 280, 64, f"type: {name}", [params] if params else ["a fixed public IP"], IAC, 16, 12.5, True))
+    cols = [
+        ("terraform · aws", ["aws_vpc", "aws_subnet + routes", "aws_security_group + rules", "aws_eip", "aws_instance + key, ami"]),
+        ("terraform · azure", ["azurerm_virtual_network", "azurerm_subnet", "azurerm_network_security_group", "azurerm_public_ip", "azurerm_linux_virtual_machine"]),
+        ("bicep", ["virtualNetworks", "virtualNetworks/subnets", "networkSecurityGroups", "publicIPAddresses", "virtualMachines + nic"]),
+    ]
+    for c, (title, natives) in enumerate(cols):
+        x = 380 + c * 270
+        p.append(heading(x, 40, title, IAC))
+        for i, native in enumerate(natives):
+            y = 60 + i * 80
+            p.append(rect(x, y + 10, 255, 44, TILE, TILE_EDGE))
+            p.append(text(x + 12, y + 37, native, 11.5, 400, TEXT_SOFT, "start", mono=True))
+    for i in range(5):
+        y = 92 + i * 80
+        p.append(flow(f"M320 {y}C350 {y} 350 {y} 380 {y}", IAC, delay=i * 0.35, seconds=2.4))
+    p.append(caption(W, H, "The same outputs on every cloud: id, privateAddress, publicAddress. What a cloud cannot express is refused, never dropped."))
+    return doc(W, H, "The common infrastructure types: network, subnet, firewall, address and vm written once, and the native resources Terraform for AWS, Terraform for Azure and Bicep compile each of them to", "".join(p))
+
+
 GRAPHIC_FILES = {
     "meridian-architecture.svg": architecture,
     "meridian-compile-pipeline.svg": compile_pipeline,
@@ -652,6 +680,7 @@ GRAPHIC_FILES = {
     "meridian-in-a-pipeline.svg": in_a_pipeline,
     "meridian-modules-flow.svg": modules_flow,
     "meridian-test-flow.svg": test_flow,
+    "meridian-common-types.svg": common_types,
 }
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,55 @@
+# The web server of web-aws.yaml and web-azure.yaml, deployed with Bicep:
+# the same common resources, mapped to Azure resource types.
+#
+# Bicep places every resource in the deployment's resource group and, unless
+# a resource gives a location, at the group's own location.
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: web-bicep
+spec:
+  target: bicep
+  resources:
+    - id: target
+      type: deployment
+      params:
+        resourceGroup: web-prod
+
+    - id: net
+      type: network
+      params:
+        cidr: 10.0.0.0/16
+
+    - id: web
+      type: subnet
+      params:
+        network: ${net}
+        cidr: 10.0.1.0/24
+
+    - id: web_fw
+      type: firewall
+      params:
+        network: ${net}
+        rules:
+          - {port: "22", cidr: 203.0.113.0/24}
+          - {port: "80", cidr: 0.0.0.0/0}
+          - {port: "443", cidr: 0.0.0.0/0}
+
+    - id: web_ip
+      type: address
+
+    - id: vm
+      type: vm
+      params:
+        subnet: ${web}
+        firewalls: ["${web_fw}"]
+        address: ${web_ip}
+        size: {cpus: 2, memoryGb: 4}
+        image: {family: ubuntu, version: "24.04"}
+        sshKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyOnly admin@example.com
+
+  outputs:
+    - name: address
+      value: ${vm.publicAddress}
+    - name: private_address
+      value: ${vm.privateAddress}

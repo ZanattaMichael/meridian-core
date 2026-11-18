@@ -112,12 +112,14 @@ and checked against the file in every build, so none can fall behind the script 
 | [How it fits together](reference/dsl/how-it-fits-together.md) | a document's path from file to running tool, with diagrams and a worked example |
 | The language item by item | [resources](reference/dsl/resources.md), [`dependsOn`](reference/dsl/dependson.md), [`notifies`](reference/dsl/notifies.md), [conditions](reference/dsl/conditions.md), [references](reference/dsl/references.md), [outputs and hand-offs](reference/dsl/outputs-and-hand-offs.md) |
 | The language by segment | how `type`, `state`, `params`, references and notifies are written for [configuration management](reference/dsl/configuration-management.md), [infrastructure as code](reference/dsl/infrastructure-as-code.md), [containerization](reference/dsl/containerization.md) and [container orchestration](reference/dsl/container-orchestration.md) |
+| [Common infrastructure types](reference/dsl/common-infrastructure-types.md) | `network`, `subnet`, `firewall`, `address`, `vm`: written once, compiled to each cloud's own resources; sizes, images and what each cloud refuses |
 | [Configuration management resource types](reference/resource-types.md) | `package`, `file`, `service`, `user`, `group`, `exec`, and how each target differs |
 | [Testing documents and modules](reference/testing.md) | `meridian test`: the `Test` document, its cases, expectations and assertions, what `stages` holds, tests in a module, JUnit output |
 | [Modules](reference/modules.md) | packaging configuration to share it: the manifest, sources (path, git, registry), versions, the lockfile, integrity, the `meridian module` commands |
 | [Capability matrix](reference/capability-matrix.md) | generated from the plugins |
 | [Plugin settings](reference/plugin-settings.md) | every setting of every target's runner, how a value is found, how argument lists are split; generated from the plugins |
 | [Conformance matrix](reference/conformance-matrix.md) | the same document on every configuration management target, cell by cell; generated from the plugins |
+| [Conformance matrix for the common infrastructure types](reference/infra-conformance-matrix.md) | the same `network`, `subnet`, `firewall`, `address` or `vm` on every target and cloud that maps them; generated from the plugins |
 | [Refusal rules](reference/refusal-rules.md) | every rule a compile-time refusal can carry, what it refuses and what to write instead; generated from the registry and the plugins |
 | [Compatibility](reference/compatibility.md) | which language versions a build reads, and which plugins it loads; generated from the code |
 | [Compile rules](reference/compile-rules.md) | the rules file, every rule and every refusal, and `meridian rules check` |

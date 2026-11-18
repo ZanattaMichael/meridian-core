@@ -8,7 +8,7 @@ they created, and can report facts about the result. This page is how the
 |---|---|
 | Category, as `meridian plugins` prints it | `infrastructure-as-code` |
 | Kind of document | `Infrastructure`. A `ResourceSet` is refused: these tools create things, and are not pointed at one machine |
-| `type` and `params` | the tool's own, passed through |
+| `type` and `params` | the tool's own, passed through; or one of the [common infrastructure types](common-infrastructure-types.md) on `terraform`, `opentofu` and `bicep` |
 | Outputs | yes |
 
 ## Targets
@@ -31,8 +31,9 @@ resource's `type` is the tool's own type, and its `params` are that type's
 arguments exactly as the tool's documentation gives them, in the tool's own
 spelling (`instance_type` for Terraform, `InstanceType` for CloudFormation).
 
-So a document in this flavour is written for one tool and does not move to
-another by changing `spec.target`. What it shares with every other Meridian
+So a document written with the tool's own types is written for one tool and
+does not move to another by changing `spec.target`. The
+[common types](#common-types-beside-the-native-ones) below are the exception. What it shares with every other Meridian
 document is everything around the resource: the document format, ids,
 `dependsOn`, references checked at compile time, outputs, and one way to plan
 and apply.
@@ -73,6 +74,36 @@ A longer one for each tool:
 [`examples/terraform/web-vm.yaml`](../../../examples/terraform/web-vm.yaml),
 [`examples/cloudformation/web-vm.yaml`](../../../examples/cloudformation/web-vm.yaml),
 [`examples/bicep/web-vm.yaml`](../../../examples/bicep/web-vm.yaml).
+
+## Common types beside the native ones
+
+Five resource types are Meridian's own and mean the same on every cloud:
+`network`, `subnet`, `firewall`, `address` and `vm`. On `terraform` and
+`opentofu` (for AWS and Azure) and `bicep`, each becomes the cloud's own resources, and the same
+document compiles for each. They are used beside the tool's own types, so a
+document mixes `vm` with an `aws_s3_bucket` where the common type falls short.
+
+```yaml
+    - id: net
+      type: network
+      params: {cidr: 10.0.0.0/16}
+    - id: web
+      type: subnet
+      params: {network: "${net}", cidr: 10.0.1.0/24}
+    - id: vm
+      type: vm
+      params:
+        subnet: ${web}
+        size: {cpus: 2, memoryGb: 4}
+        image: {family: ubuntu, version: "24.04"}
+        sshKey: ssh-ed25519 AAAA...
+```
+
+Every param, what each type becomes on each cloud, the size and image tables,
+and what each cloud refuses are on
+[the common infrastructure types page](common-infrastructure-types.md). The
+[conformance matrix for them](../infra-conformance-matrix.md) shows what each
+target and cloud does with about forty small documents.
 
 ## The settings resource
 

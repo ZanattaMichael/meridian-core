@@ -1,0 +1,151 @@
+{
+  "output": {
+    "address": {
+      "value": "${azurerm_public_ip.web_ip.ip_address}"
+    },
+    "private_address": {
+      "value": "${azurerm_linux_virtual_machine.vm.private_ip_address}"
+    }
+  },
+  "provider": {
+    "azurerm": {
+      "features": {}
+    }
+  },
+  "resource": {
+    "azurerm_linux_virtual_machine": {
+      "vm": {
+        "admin_ssh_key": [
+          {
+            "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyOnly admin@example.com",
+            "username": "azureuser"
+          }
+        ],
+        "admin_username": "azureuser",
+        "location": "westeurope",
+        "name": "vm",
+        "network_interface_ids": [
+          "${azurerm_network_interface.vm_nic.id}"
+        ],
+        "os_disk": {
+          "caching": "ReadWrite",
+          "storage_account_type": "Standard_LRS"
+        },
+        "resource_group_name": "web-prod",
+        "size": "Standard_B2s",
+        "source_image_reference": {
+          "offer": "ubuntu-24_04-lts",
+          "publisher": "Canonical",
+          "sku": "server",
+          "version": "latest"
+        }
+      }
+    },
+    "azurerm_network_interface": {
+      "vm_nic": {
+        "ip_configuration": [
+          {
+            "name": "primary",
+            "private_ip_address_allocation": "Dynamic",
+            "public_ip_address_id": "${azurerm_public_ip.web_ip.id}",
+            "subnet_id": "${azurerm_subnet.web.id}"
+          }
+        ],
+        "location": "westeurope",
+        "name": "vm-nic",
+        "resource_group_name": "web-prod"
+      }
+    },
+    "azurerm_network_interface_security_group_association": {
+      "vm_nic_firewall": {
+        "network_interface_id": "${azurerm_network_interface.vm_nic.id}",
+        "network_security_group_id": "${azurerm_network_security_group.web_fw.id}"
+      }
+    },
+    "azurerm_network_security_group": {
+      "web_fw": {
+        "location": "${azurerm_virtual_network.net.location}",
+        "name": "web_fw",
+        "resource_group_name": "web-prod"
+      }
+    },
+    "azurerm_network_security_rule": {
+      "web_fw_rule_0": {
+        "access": "Allow",
+        "destination_address_prefix": "*",
+        "destination_port_range": "22",
+        "direction": "Inbound",
+        "name": "rule-0",
+        "network_security_group_name": "${azurerm_network_security_group.web_fw.name}",
+        "priority": 100,
+        "protocol": "Tcp",
+        "resource_group_name": "web-prod",
+        "source_address_prefix": "203.0.113.0/24",
+        "source_port_range": "*"
+      },
+      "web_fw_rule_1": {
+        "access": "Allow",
+        "destination_address_prefix": "*",
+        "destination_port_range": "80",
+        "direction": "Inbound",
+        "name": "rule-1",
+        "network_security_group_name": "${azurerm_network_security_group.web_fw.name}",
+        "priority": 101,
+        "protocol": "Tcp",
+        "resource_group_name": "web-prod",
+        "source_address_prefix": "0.0.0.0/0",
+        "source_port_range": "*"
+      },
+      "web_fw_rule_2": {
+        "access": "Allow",
+        "destination_address_prefix": "*",
+        "destination_port_range": "443",
+        "direction": "Inbound",
+        "name": "rule-2",
+        "network_security_group_name": "${azurerm_network_security_group.web_fw.name}",
+        "priority": 102,
+        "protocol": "Tcp",
+        "resource_group_name": "web-prod",
+        "source_address_prefix": "0.0.0.0/0",
+        "source_port_range": "*"
+      }
+    },
+    "azurerm_public_ip": {
+      "web_ip": {
+        "allocation_method": "Static",
+        "location": "westeurope",
+        "name": "web_ip",
+        "resource_group_name": "web-prod",
+        "sku": "Standard"
+      }
+    },
+    "azurerm_subnet": {
+      "web": {
+        "address_prefixes": [
+          "10.0.1.0/24"
+        ],
+        "name": "web",
+        "resource_group_name": "web-prod",
+        "virtual_network_name": "${azurerm_virtual_network.net.name}"
+      }
+    },
+    "azurerm_virtual_network": {
+      "net": {
+        "address_space": [
+          "10.0.0.0/16"
+        ],
+        "location": "westeurope",
+        "name": "net",
+        "resource_group_name": "web-prod"
+      }
+    }
+  },
+  "terraform": {
+    "required_providers": {
+      "azurerm": {
+        "source": "hashicorp/azurerm",
+        "version": "~> 4.0"
+      }
+    }
+  }
+}

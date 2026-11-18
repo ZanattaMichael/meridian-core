@@ -50,6 +50,14 @@ is the page to start with: it follows one document from a file to a tool that ha
 | [`kubernetes`](docs/targets/kubernetes.md) | container orchestration | manifests | `kubectl apply` |
 | [`helm`](docs/targets/helm.md) | container orchestration | a Helm chart, with an optional Kustomize overlay | `helm upgrade --install`, with `kustomize build` for an overlay |
 
+Five resource types are Meridian's own and mean the same on every cloud: `network`,
+`subnet`, `firewall`, `address` and `vm`. Terraform and OpenTofu (on AWS and Azure) and Bicep turn each
+into the cloud's own resources, so one document compiles for each, and the tool's own types
+stay usable beside them. See
+[the common infrastructure types](docs/reference/dsl/common-infrastructure-types.md).
+
+<p align="center"><img src="docs/graphics/meridian-common-types.svg" alt="The common infrastructure types: network, subnet, firewall, address and vm written once, and what Terraform for AWS, Terraform for Azure and Bicep compile each to" width="100%"></p>
+
 Configuration that already exists can be brought in: `meridian import` reads Terraform and
 OpenTofu configuration, Ansible playbooks, Compose files, Kubernetes manifests and DSC
 configurations, writes the documents that describe the same thing, and marks whatever it

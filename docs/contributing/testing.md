@@ -23,7 +23,7 @@ flowchart TD
 | Property tests | `crates/meridian-cli/tests/properties.rs` | `cargo test -p meridian-cli --test properties` |
 | Placement tests | `crates/meridian-cli/tests/placement.rs`, `placement_properties.rs` | `cargo test -p meridian-cli --test placement --test placement_properties` |
 | Secret tests | `crates/meridian-cli/tests/secret_places.rs`, `secret_properties.rs`, `secrets.rs` | `cargo test -p meridian-cli --test secret_places --test secret_properties --test secrets` |
-| Conformance tests | `crates/meridian-cli/tests/conformance.rs`, `condition_conformance.rs`, `secret_conformance.rs` | `cargo test -p meridian-cli --test conformance --test condition_conformance --test secret_conformance` |
+| Conformance tests | `crates/meridian-cli/tests/conformance.rs`, `infra_conformance.rs`, `condition_conformance.rs`, `secret_conformance.rs` | `cargo test -p meridian-cli --test conformance --test infra_conformance --test condition_conformance --test secret_conformance` |
 | Robustness tests | `crates/meridian-cli/tests/robustness.rs` | `cargo test -p meridian-cli --test robustness` |
 | Examples | `crates/meridian-cli/tests/examples.rs` | `cargo test -p meridian-cli --test examples` |
 | Real tools | a workflow per tool under `.github/workflows/` | in CI; [Real-tool tests](real-tool-tests.md) lists what each one runs and how to run it yourself |
@@ -259,6 +259,15 @@ on a case marked the same fails the test. Further tests hold all six to:
 - a settled `${...}` leaves no marker in any output, and the value it named is
   there;
 - a dependency is written before what depends on it.
+
+**The common infrastructure types.** `infra_conformance.rs` does the same for
+`network`, `subnet`, `firewall`, `address` and `vm`: about forty small
+documents, each compiled for Terraform and OpenTofu on AWS and on Azure, and
+for Bicep, written to the
+[conformance matrix for the common types](../reference/infra-conformance-matrix.md).
+It also fails when a target declares the five types without a column there, or
+declares only some of them, and it checks that a secret ssh key is never
+written as its value.
 
 **Every target.** Each example under `examples/<target>/` is put through rules
 that hold whatever the segment: it compiles deterministically to relative
