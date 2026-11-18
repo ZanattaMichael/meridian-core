@@ -116,6 +116,7 @@ spec:
 | `spec.meridian` | no | The releases of `meridian` the module works with, as a [version requirement](#version-requirements). A release outside it refuses the module by name |
 | `spec.modules` | no | The modules this one needs. See [requiring a module](#requiring-a-module) |
 | `spec.credentials` | no | Logins for registries, each naming where its password comes from. See [registry logins](#registry-logins) |
+| `spec.settings` | no | How each target's runner is configured for this project, by target and then by setting name. See [plugin settings](#plugin-settings) |
 
 A field that is not in this table is an error, not something silently ignored.
 Write versions and requirements in quotes when they could be read as a number:
@@ -306,6 +307,57 @@ being pushed declares it:
 ```
 $ meridian module push registry.example.com/acme/meridian-nginx --credential internal-registry
 ```
+
+## Plugin settings
+
+A runner needs an operator's choices that no document should carry: where its
+tool is installed, which profile or context to use, extra arguments for every
+call. Each plugin declares these as named settings, each read from an
+environment variable; the [plugin settings reference](plugin-settings.md)
+lists every one, and `meridian plugins --settings` prints them for the plugins
+it finds.
+
+`spec.settings` writes them down with the project, so they travel with it
+instead of having to be exported in every shell and CI job that runs it:
+
+```yaml
+spec:
+  settings:
+    ansible:
+      args: --user deploy --private-key "/home/deploy/.ssh/my key"
+    kubernetes:
+      args: --context prod
+      output-wait: 300
+    terraform:
+      program: tofu
+```
+
+The first key is the target, as `spec.target` names it in a document; the
+second is the setting's short name from the reference, such as `args` or
+`program`. A value is text, a number or true/false, and is read as the
+environment variable would be: an argument list is split like a shell command
+line, so quotes hold an argument with a space together.
+
+Three rules keep this simple:
+
+- **The environment wins.** A setting's variable, when set and not blank,
+  overrides the project's value, so a shell or a CI job can change one
+  without editing the file.
+- **A name the plugin does not declare is refused.** Every command that starts
+  plugins reads the manifest in the current directory and hands each target
+  its map before the plugin starts; a plugin that does not declare one of the
+  names is not started, and the message lists the names it does declare. A
+  typo cannot silently do nothing.
+- **No secrets.** A token or a password does not belong here, and the file is
+  committed with the project. Declare it under `spec.secrets` in the document,
+  and the target hands it to its tool by a private channel; see
+  [Secrets](dsl/secrets.md#handing-a-secret-to-a-tool).
+
+Only the project's own manifest is read for settings: a fetched module's
+`spec.settings` does not configure the project that requires it. The manifest
+is read from the current directory, and a `meridian.yaml` that does not read
+stops the command, because a project whose settings were ignored would run its
+tools wrongly.
 
 ## Version requirements
 

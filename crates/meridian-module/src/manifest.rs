@@ -101,6 +101,24 @@ pub struct Manifest {
     /// The identities the project declares, for a registry that wants a
     /// login. They say where each secret comes from and hold none.
     pub credentials: Vec<CredentialDeclaration>,
+    /// `spec.settings`: how each target's runner is configured for this
+    /// project, by target name and then by the setting's short name, as the
+    /// plugin declares it. The host hands a target its map when it starts
+    /// the plugin; an environment variable still wins over it.
+    pub settings: BTreeMap<String, BTreeMap<String, String>>,
+}
+
+/// Whether `name` has the shape a setting name, or a target name under
+/// `spec.settings`, must have: lower-case words of letters and digits joined
+/// by `-`.
+fn valid_setting_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('-')
+        && !name.ends_with('-')
+        && !name.contains("--")
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
 /// Whether `name` is one to three segments of `a-z`, `0-9` and `-`.
@@ -169,6 +187,86 @@ impl Reader<'_> {
             return self.err(&at, "unknown field");
         }
         Ok(Some(map))
+    }
+
+    /// `spec.settings`: a mapping of target name to a mapping of setting
+    /// name to a value that is text, a number or true/false. Which names a
+    /// target takes is the plugin's to say, and the host checks it when the
+    /// plugin starts; here only the shape is checked.
+    fn settings(
+        &self,
+        value: Option<&Value>,
+    ) -> Result<BTreeMap<String, BTreeMap<String, String>>, Error> {
+        let mut settings = BTreeMap::new();
+        let targets = match value {
+            None | Some(Value::Null) => return Ok(settings),
+            Some(Value::Map(map)) => map,
+            Some(other) => {
+                return self.err(
+                    "spec.settings",
+                    format!(
+                        "expected a mapping of target names, found {}",
+                        other.describe()
+                    ),
+                )
+            }
+        };
+        for (target, value) in targets {
+            let field = format!("spec.settings.{target}");
+            if !valid_setting_name(target) {
+                return self.err(
+                    &field,
+                    format!(
+                        "{target:?} is not a target name: use lower-case letters, digits and `-`"
+                    ),
+                );
+            }
+            let map = match value {
+                Value::Null => continue,
+                Value::Map(map) => map,
+                other => {
+                    return self.err(
+                        &field,
+                        format!(
+                            "expected a mapping of setting names to values, found {}",
+                            other.describe()
+                        ),
+                    )
+                }
+            };
+            let mut of_target = BTreeMap::new();
+            for (name, value) in map {
+                let field = format!("{field}.{name}");
+                if !valid_setting_name(name) {
+                    return self.err(
+                        &field,
+                        format!(
+                            "{name:?} is not a setting name: use the short name the plugin \
+                             declares, in lower-case letters, digits and `-`, such as args"
+                        ),
+                    );
+                }
+                let text = match value {
+                    Value::String(s) => s.clone(),
+                    Value::Bool(b) => b.to_string(),
+                    Value::Int(n) => n.to_string(),
+                    Value::Uint(n) => n.to_string(),
+                    Value::Float(n) => n.to_string(),
+                    other => {
+                        return self.err(
+                            &field,
+                            format!(
+                                "expected text, a number or true/false, found {}",
+                                other.describe()
+                            ),
+                        )
+                    }
+                };
+                of_target.insert(name.clone(), text);
+            }
+            settings.insert(target.clone(), of_target);
+        }
+        Ok(settings)
     }
 
     fn string(&self, value: Option<&Value>, field: &str) -> Result<Option<String>, Error> {
@@ -534,8 +632,9 @@ impl Manifest {
         let spec = r.map(
             top.get("spec"),
             "spec",
-            &["meridian", "modules", "credentials"],
+            &["meridian", "modules", "credentials", "settings"],
         )?;
+        let settings = r.settings(spec.and_then(|s| s.get("settings")))?;
         let mut credentials: Vec<CredentialDeclaration> = Vec::new();
         match spec.and_then(|s| s.get("credentials")) {
             None | Some(Value::Null) => {}
@@ -626,6 +725,7 @@ impl Manifest {
             meridian,
             modules,
             credentials,
+            settings,
         })
     }
 }
@@ -661,6 +761,53 @@ spec:
         Manifest::parse("meridian.yaml", manifest.as_bytes())
             .unwrap_err()
             .to_string()
+    }
+
+    #[test]
+    fn settings_are_read_by_target_and_name() {
+        let m = Manifest::parse(
+            "meridian.yaml",
+            br#"apiVersion: meridian/v1
+kind: Module
+metadata:
+  name: site
+spec:
+  settings:
+    ansible:
+      args: --user deploy --private-key "/home/me/my key"
+    kubernetes:
+      output-wait: 30
+      args: ""
+    podman: ~
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            m.settings["ansible"]["args"],
+            r#"--user deploy --private-key "/home/me/my key""#
+        );
+        assert_eq!(m.settings["kubernetes"]["output-wait"], "30");
+        assert_eq!(m.settings["kubernetes"]["args"], "");
+        assert!(!m.settings.contains_key("podman"));
+    }
+
+    #[test]
+    fn settings_must_have_the_right_shape() {
+        let at = |body: &str| {
+            refused(&format!(
+                "apiVersion: meridian/v1\nkind: Module\nmetadata:\n  name: site\nspec:\n{body}"
+            ))
+        };
+        assert!(at("  settings: [a]\n")
+            .contains("spec.settings: expected a mapping of target names, found a list"));
+        assert!(at("  settings:\n    Ansible: {}\n")
+            .contains("spec.settings.Ansible: \"Ansible\" is not a target name"));
+        assert!(at("  settings:\n    ansible: args\n")
+            .contains("spec.settings.ansible: expected a mapping of setting names"));
+        assert!(at("  settings:\n    ansible:\n      MERIDIAN_ANSIBLE_ARGS: x\n").contains("spec.settings.ansible.MERIDIAN_ANSIBLE_ARGS: \"MERIDIAN_ANSIBLE_ARGS\" is not a setting name"));
+        assert!(at("  settings:\n    ansible:\n      args: [x]\n").contains(
+            "spec.settings.ansible.args: expected text, a number or true/false, found a list"
+        ));
     }
 
     #[test]

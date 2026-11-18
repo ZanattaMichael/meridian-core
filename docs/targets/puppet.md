@@ -244,7 +244,12 @@ empty, so a run never says "nothing to do" on no evidence.
 | `MERIDIAN_PUPPET` | the `puppet` program, when it is not on `PATH` |
 | `MERIDIAN_BOLT` | the `bolt` program, when it is not on `PATH` |
 | `MERIDIAN_PUPPET_TRANSPORT` | `local` or `bolt`, to override the choice made from the host |
-| `MERIDIAN_PUPPET_ARGS` | arguments added to every run, split on spaces: `--confdir /tmp/p --vardir /tmp/v --codedir /tmp/c` for an isolated run, or Bolt's `--inventoryfile inventory.yaml` |
+| `MERIDIAN_PUPPET_ARGS` | arguments added to every run, split like a shell command line (quotes hold a word together): `--confdir /tmp/p --vardir /tmp/v --codedir /tmp/c` for an isolated run, or Bolt's `--inventoryfile inventory.yaml` |
+
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.puppet`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#puppet).
 
 ## Secrets
 

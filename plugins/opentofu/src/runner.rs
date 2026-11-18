@@ -6,11 +6,34 @@ use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, Operations, Output, Plan,
     RunContext, RunError, Runner, Value,
 };
+use meridian_sdk::{settings, Setting};
 
 use crate::CONFIG_PATH;
 
 /// Names the program to run, when it is not `tofu` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_TOFU";
+/// Extra arguments for `tofu init`, `tofu plan` and `tofu apply`, split like
+/// a shell command line: `-parallelism=4`, `-lock-timeout=30s`.
+pub const ARGS_VARIABLE: &str = "MERIDIAN_TOFU_ARGS";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "program",
+            PROGRAM_VARIABLE,
+            "tofu",
+            "The `tofu` program to run, when it is not on `PATH`.",
+        ),
+        Setting::new(
+            "args",
+            ARGS_VARIABLE,
+            "",
+            "Extra arguments for `tofu init`, `tofu plan` and `tofu apply`, split like a shell command line: `-parallelism=4`, `-lock-timeout=30s`. The calls that read a saved plan or the outputs get none.",
+        ),
+    ]
+}
 
 /// The saved plan, so that what an apply does is exactly what was planned.
 /// When the document encrypts its plan, this file is encrypted too.
@@ -24,16 +47,18 @@ const PLAN_FILE: &str = "meridian.tfplan";
 pub struct OpenTofuRunner {
     /// The program to run.
     pub program: String,
+    /// Arguments added to `init`, `plan` and `apply`, after OpenTofu's own.
+    pub extra_args: Vec<String>,
 }
 
 impl OpenTofuRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         OpenTofuRunner {
-            program: std::env::var(PROGRAM_VARIABLE)
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or_else(|| "tofu".to_owned()),
+            program: settings::text(setting("program")),
+            extra_args: settings::args(setting("args")),
         }
     }
 
@@ -72,6 +97,7 @@ impl OpenTofuRunner {
 
         self.tool(context)
             .args(["init", "-input=false", "-no-color"])
+            .args(self.extra_args.iter().cloned())
             .run_ok("tofu init failed", log)?;
         // Secrets reach tofu as input variables read from a file only the
         // user can read, named on the command line by its path and nothing
@@ -91,6 +117,7 @@ impl OpenTofuRunner {
         let mut plan = self
             .tool(context)
             .args(["plan", "-input=false", "-no-color"])
+            .args(self.extra_args.iter().cloned())
             .arg(format!("-out={PLAN_FILE}"));
         if let Some(file) = &secrets {
             plan = plan.arg(format!("-var-file={}", file.path().display()));
@@ -145,6 +172,10 @@ impl OpenTofuRunner {
 }
 
 impl Runner for OpenTofuRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations::ALL
     }
@@ -184,7 +215,9 @@ impl Runner for OpenTofuRunner {
         // reported. A plan file is its own approval.
         let applied = self
             .tool(context)
-            .args(["apply", "-input=false", "-no-color", PLAN_FILE])
+            .args(["apply", "-input=false", "-no-color"])
+            .args(self.extra_args.iter().cloned())
+            .arg(PLAN_FILE)
             .run_ok("tofu apply failed", log);
         self.scrub(context);
         applied?;
