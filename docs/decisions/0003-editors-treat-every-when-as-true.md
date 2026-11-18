@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Area | Language |
-| Status | **proposed**: made during the work and merged, not yet accepted or changed by the owner |
+| Status | **accepted** 2026-11-18 |
 | Made in | PR 73 |
 | Where it shows | [Language server](../tooling/language-server.md) |
 

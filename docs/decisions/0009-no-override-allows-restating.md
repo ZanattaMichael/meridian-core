@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Area | Compile rules |
-| Status | **proposed**: made during the work and merged, not yet accepted or changed by the owner |
+| Status | **accepted** 2026-11-18 |
 | Made in | PR 64 |
 | Where it shows | [Compile rules reference: rules](../reference/compile-rules.md#rules) |
 

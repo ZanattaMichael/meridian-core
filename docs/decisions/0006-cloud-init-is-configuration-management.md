@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Area | Categories |
-| Status | **proposed**: made during the work and merged, not yet accepted or changed by the owner |
+| Status | **accepted** 2026-11-18 |
 | Made in | PR 33 |
 | Where it shows | [cloud-init](../targets/cloud-init.md), [capability model](../concepts/capability-model.md) |
 

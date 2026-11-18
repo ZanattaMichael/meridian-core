@@ -25,15 +25,15 @@ page it affects. The pull request template asks for it.
 
 | Record | Area | Status |
 |---|---|---|
-| [A notify's `on` accepts only `changed`](0001-notify-on-accepts-only-changed.md) | Language | proposed |
-| [`metadata.labels` select documents and are not passed to plugins](0002-labels-select-documents-only.md) | Language | proposed |
-| [With no data given, editors treat every `when` as true](0003-editors-treat-every-when-as-true.md) | Language | proposed |
-| [A value placed by interpolation is always literal text](0004-placed-values-are-literal.md) | Language | proposed |
-| [Packer sits under infrastructure as code](0005-packer-is-infrastructure-as-code.md) | Categories | proposed |
-| [cloud-init sits under configuration management](0006-cloud-init-is-configuration-management.md) | Categories | proposed |
-| [Containerization accepts both document kinds](0007-containerization-accepts-both-kinds.md) | Categories | proposed |
-| [`compile`, `plan` and `apply` do not run compile rules](0008-compile-rules-are-a-separate-command.md) | Compile rules | proposed |
-| [`no-override` allows restating a value and `final` does not](0009-no-override-allows-restating.md) | Compile rules | proposed |
+| [A notify's `on` accepts only `changed`](0001-notify-on-accepts-only-changed.md) | Language | accepted 2026-11-18 |
+| [`metadata.labels` select documents and are not passed to plugins](0002-labels-select-documents-only.md) | Language | accepted 2026-11-18 |
+| [With no data given, editors treat every `when` as true](0003-editors-treat-every-when-as-true.md) | Language | accepted 2026-11-18 |
+| [A value placed by interpolation is always literal text](0004-placed-values-are-literal.md) | Language | accepted 2026-11-18 |
+| [Packer sits under infrastructure as code](0005-packer-is-infrastructure-as-code.md) | Categories | accepted 2026-11-18 |
+| [cloud-init sits under configuration management](0006-cloud-init-is-configuration-management.md) | Categories | accepted 2026-11-18 |
+| [Containerization accepts both document kinds](0007-containerization-accepts-both-kinds.md) | Categories | accepted 2026-11-18 |
+| [`compile`, `plan` and `apply` do not run compile rules](0008-compile-rules-are-a-separate-command.md) | Compile rules | accepted 2026-11-18 |
+| [`no-override` allows restating a value and `final` does not](0009-no-override-allows-restating.md) | Compile rules | accepted 2026-11-18 |
 | [Group and layer paths are case-sensitive](0010-group-paths-are-case-sensitive.md) | Compile rules | proposed |
 | [There is no central module index](0011-no-central-module-index.md) | Modules | proposed |
 | [One version of each module per project](0012-one-version-of-a-module-per-project.md) | Modules | proposed |

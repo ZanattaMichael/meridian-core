@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Area | Categories |
-| Status | **proposed**: made during the work and merged, not yet accepted or changed by the owner |
+| Status | **accepted** 2026-11-18 |
 | Made in | PR 30 |
 | Where it shows | [Containerization](../reference/dsl/containerization.md), [capability model](../concepts/capability-model.md) |
 

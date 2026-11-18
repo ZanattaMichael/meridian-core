@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Area | Language |
-| Status | **proposed**: made during the work and merged, not yet accepted or changed by the owner |
+| Status | **accepted** 2026-11-18 |
 | Made in | PR 39 |
 | Where it shows | [Labels and selectors](../reference/dsl/index.md#labels-and-selectors) |
 

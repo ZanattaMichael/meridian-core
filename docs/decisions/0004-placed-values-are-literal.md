@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Area | Language |
-| Status | **proposed**: made during the work and merged, not yet accepted or changed by the owner |
+| Status | **accepted** 2026-11-18 |
 | Made in | PR 71 and issues 134 to 136 |
 | Where it shows | [Values from data are literal](../reference/dsl/interpolation.md#values-from-data-are-literal) |
 
