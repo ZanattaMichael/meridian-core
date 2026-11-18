@@ -1,0 +1,68 @@
+# A web server on AWS written with the common infrastructure types, and
+# compiled by Terraform.
+#
+# network, subnet, firewall, address and vm are Meridian's own types: the same
+# five resources compile for Azure by changing spec.settings.cloud (see
+# web-azure.yaml) and for Bicep (web-bicep.yaml). A native type is used beside
+# them where the common ones fall short: here, the S3 bucket for logs.
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: web-aws
+spec:
+  target: terraform
+  settings:
+    cloud: aws
+  resources:
+    - id: aws
+      type: provider
+      params:
+        source: hashicorp/aws
+        version: "~> 5.0"
+        region: eu-west-1
+
+    - id: net
+      type: network
+      params:
+        cidr: 10.0.0.0/16
+
+    - id: web
+      type: subnet
+      params:
+        network: ${net}
+        cidr: 10.0.1.0/24
+        public: true
+
+    - id: web_fw
+      type: firewall
+      params:
+        network: ${net}
+        rules:
+          - {port: "22", cidr: 203.0.113.0/24}
+          - {port: "80", cidr: 0.0.0.0/0}
+          - {port: "443", cidr: 0.0.0.0/0}
+
+    - id: web_ip
+      type: address
+
+    - id: vm
+      type: vm
+      params:
+        subnet: ${web}
+        firewalls: ["${web_fw}"]
+        address: ${web_ip}
+        size: {cpus: 2, memoryGb: 4}
+        image: {family: ubuntu, version: "24.04"}
+        sshKey: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCy3ccG4bHhpvuPdv4+wFBzkP+U7qF4nTg+rghAkKjOLbSJa/yUPZ0EwpJaXm+rtItFerUJK41JH4bArOJJazkHMdWR6iXYQtu5BB/CZALQHiS0LYg5zUhKMxISCESlzNDWFBza28pPjfpj3gnmrPc8D1bAsnKSaHGOffZxtJ62q3Rq0ESwzN/9ahvaiBW707kT/9NC9GqMcSk1HS1Z7Wz6sJEiCC/qIfbS3TAjJ+SloXlTC8+FIdptsxJ3KgWczg4q6Z1aiv9agASdEXMJTo+sUNt7C6qNKY1W03VxFf0cj59Zh6YIo2/ZQ1NyyUOB3rO2U2pbVGLaTvEnF6GSc0TH admin@example.com
+
+    # The tool's own type, beside the common ones.
+    - id: logs
+      type: aws_s3_bucket
+      params:
+        bucket_prefix: web-logs-
+
+  outputs:
+    - name: address
+      value: ${vm.publicAddress}
+    - name: private_address
+      value: ${vm.privateAddress}

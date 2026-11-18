@@ -1,0 +1,13 @@
+{
+  "name": "web-bicep",
+  "resourceGroup": "web-prod",
+  "resources": {
+    "microsoft.compute/virtualmachines/vm": "vm",
+    "microsoft.network/networkinterfaces/vm-nic": "vm_nic",
+    "microsoft.network/networksecuritygroups/web_fw": "web_fw",
+    "microsoft.network/publicipaddresses/web_ip": "web_ip",
+    "microsoft.network/virtualnetworks/net": "net",
+    "microsoft.network/virtualnetworks/subnets/web": "web"
+  },
+  "subscription": ""
+}

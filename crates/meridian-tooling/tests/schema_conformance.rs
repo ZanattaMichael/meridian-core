@@ -96,7 +96,13 @@ fn a_schema_matches_what_the_target_compiles() {
     let registry = common::registry();
     let catalog = Catalog::from_registry(&registry);
     let mut checked = 0;
-    for target in catalog.targets() {
+    // The configuration management targets, whose closed types are the
+    // shared six; the common infrastructure types are held to the same
+    // promise by crates/meridian-cli/tests/infra_conformance.rs.
+    for target in catalog
+        .targets()
+        .filter(|t| t.category == meridian_sdk::Category::ConfigurationManagement)
+    {
         for schema in target.types.iter().filter(|t| !t.open) {
             let name = format!("{} {}", target.name, schema.r#type);
             let base = || Doc {
@@ -208,7 +214,10 @@ fn a_target_that_passes_types_through_is_open() {
     let registry = common::registry();
     let catalog = Catalog::from_registry(&registry);
     let terraform = catalog.target("terraform").unwrap();
-    assert!(terraform.types.iter().all(|t| t.open));
+    assert!(terraform
+        .types
+        .iter()
+        .all(|t| t.open || meridian_sdk::infra::is_common_type(&t.r#type)));
     assert_eq!(
         terraform.resource("aws_instance").unwrap().r#type,
         "<provider>_<type>"

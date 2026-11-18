@@ -12,6 +12,7 @@ on:
     paths:
       - 'plugins/terraform/**'
       - 'examples/terraform/**'
+      - 'examples/common/**'
       - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
