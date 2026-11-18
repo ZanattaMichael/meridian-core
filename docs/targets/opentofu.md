@@ -443,8 +443,14 @@ since a resource's arguments are written there whichever variable they came from
 | Environment variable | Effect |
 |---|---|
 | `MERIDIAN_TOFU` | The program to run, when it is not `tofu` on `PATH` |
+| `MERIDIAN_TOFU_ARGS` | Arguments added to `init`, `plan` and `apply`, split like a shell command line (quotes hold a word together): `-parallelism=4`, `-lock-timeout=30s`. The calls that read the saved plan and the outputs get none |
 | `TF_VAR_<name>` | The value of the variable `<name>` |
 | Anything else OpenTofu reads | Passed through, such as `AWS_PROFILE`, `TF_CLI_ARGS` or `TF_ENCRYPTION` |
+
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.opentofu`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#opentofu).
 
 ## What the target does not do
 

@@ -17,6 +17,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use meridian_sdk::tool::{write_artifact, Tool};
+use meridian_sdk::{settings, Setting};
 use meridian_sdk::{
     Applied, Artifact, Change, ChangeAction, Log, Operations, Output, Plan, RunContext, RunError,
     Runner, Value,
@@ -33,9 +34,46 @@ pub const VALIDATE_VARIABLE: &str = "MERIDIAN_CLOUD_INIT_VALIDATE";
 pub const WAIT_VARIABLE: &str = "MERIDIAN_CLOUD_INIT_WAIT";
 /// Names the `ssh` program to wait with, when it is not on `PATH`.
 pub const SSH_VARIABLE: &str = "MERIDIAN_CLOUD_INIT_SSH";
-/// Extra arguments for `ssh`, split on whitespace: which user, which key.
-/// For example `-l ubuntu -i ~/.ssh/deploy`.
+/// Extra arguments for `ssh`, split like a shell command line: which user,
+/// which key. For example `-l ubuntu -i ~/.ssh/deploy`.
 pub const SSH_ARGS_VARIABLE: &str = "MERIDIAN_CLOUD_INIT_SSH_ARGS";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "program",
+            PROGRAM_VARIABLE,
+            "cloud-init",
+            "The `cloud-init` program to run, when it is not on `PATH`.",
+        ),
+        Setting::new(
+            "validate",
+            VALIDATE_VARIABLE,
+            "on",
+            "`on` or `off`: whether a plan and an apply check the user-data against cloud-init's schema. Set it to `off` on a machine that has no cloud-init to run the check with.",
+        ),
+        Setting::new(
+            "wait",
+            WAIT_VARIABLE,
+            "off",
+            "`ssh` or `off`: whether an apply waits, over SSH, for the host's first boot to finish.",
+        ),
+        Setting::new(
+            "ssh",
+            SSH_VARIABLE,
+            "ssh",
+            "The `ssh` program to wait with, when it is not on `PATH`.",
+        ),
+        Setting::new(
+            "ssh-args",
+            SSH_ARGS_VARIABLE,
+            "",
+            "Extra arguments for `ssh`, split like a shell command line: which user, which key. For example `-l ubuntu -i ~/.ssh/deploy`.",
+        ),
+    ]
+}
 
 /// The directory, inside a stage's work directory, that holds the files the
 /// last apply accepted.
@@ -70,32 +108,26 @@ pub struct CloudInitRunner {
 impl CloudInitRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
-        let var = |name: &str| {
-            std::env::var(name)
-                .ok()
-                .map(|v| v.trim().to_owned())
-                .filter(|v| !v.is_empty())
-        };
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         let mut misconfigured = None;
-        let validate = match var(VALIDATE_VARIABLE).as_deref() {
-            None | Some("on") => true,
-            Some("off") => false,
-            Some(other) => {
+        let validate = match settings::text(setting("validate")).as_str() {
+            "on" => true,
+            "off" => false,
+            other => {
                 misconfigured = Some(format!(
                     "{VALIDATE_VARIABLE} is {other:?}; it can be \"on\" or \"off\""
                 ));
                 true
             }
         };
-        let wait = match var(WAIT_VARIABLE).as_deref() {
-            None | Some("off") => None,
-            Some("ssh") => Some(Wait {
-                program: var(SSH_VARIABLE).unwrap_or_else(|| "ssh".to_owned()),
-                args: var(SSH_ARGS_VARIABLE)
-                    .map(|v| v.split_whitespace().map(str::to_owned).collect())
-                    .unwrap_or_default(),
+        let wait = match settings::text(setting("wait")).as_str() {
+            "off" => None,
+            "ssh" => Some(Wait {
+                program: settings::text(setting("ssh")),
+                args: settings::args(setting("ssh-args")),
             }),
-            Some(other) => {
+            other => {
                 misconfigured = Some(format!(
                     "{WAIT_VARIABLE} is {other:?}; it can be \"ssh\" or \"off\""
                 ));
@@ -103,7 +135,7 @@ impl CloudInitRunner {
             }
         };
         CloudInitRunner {
-            program: var(PROGRAM_VARIABLE).unwrap_or_else(|| "cloud-init".to_owned()),
+            program: settings::text(setting("program")),
             validate,
             wait,
             misconfigured,
@@ -243,6 +275,10 @@ fn seed_outputs(seed: &Path) -> Vec<Output> {
 }
 
 impl Runner for CloudInitRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations::ALL
     }

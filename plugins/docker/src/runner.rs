@@ -15,14 +15,34 @@ use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
     RunContext, RunError, Runner, Value,
 };
+use meridian_sdk::{settings, Setting};
 
 use crate::{COMPOSE_PATH, PROJECT_PATH};
 
 /// Names the program to run, when it is not `docker` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_DOCKER";
-/// Extra arguments for `docker compose up`, split on whitespace:
+/// Extra arguments for `docker compose up`, split like a shell command line:
 /// `--pull always`, `--force-recreate`.
 pub const ARGS_VARIABLE: &str = "MERIDIAN_DOCKER_ARGS";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "program",
+            PROGRAM_VARIABLE,
+            "docker",
+            "The `docker` program to run, when it is not on `PATH`.",
+        ),
+        Setting::new(
+            "args",
+            ARGS_VARIABLE,
+            "",
+            "Extra arguments for `docker compose up`, split like a shell command line: `--pull always`, `--force-recreate`.",
+        ),
+    ]
+}
 
 /// Brings a compiled Compose project up on a Docker daemon.
 ///
@@ -124,14 +144,11 @@ impl Project {
 impl DockerRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         DockerRunner {
-            program: std::env::var(PROGRAM_VARIABLE)
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or_else(|| "docker".to_owned()),
-            extra_args: std::env::var(ARGS_VARIABLE)
-                .map(|v| v.split_whitespace().map(str::to_owned).collect())
-                .unwrap_or_default(),
+            program: settings::text(setting("program")),
+            extra_args: settings::args(setting("args")),
         }
     }
 
@@ -565,6 +582,10 @@ pub(crate) fn diff(desired: &Desired, actual: &Actual) -> Plan {
 }
 
 impl Runner for DockerRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations::ALL
     }

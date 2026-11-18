@@ -486,6 +486,11 @@ Set these in the environment of the machine that runs Meridian.
 | `MERIDIAN_KUBECTL` | `kubectl` | The program that reads outputs. |
 | `MERIDIAN_KUBECTL_ARGS` | none | Arguments added to every `kubectl` call: `--context prod`. |
 
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.helm`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#helm).
+
 Helm and kubectl find the cluster the way they always do: the current context of your
 kubeconfig, or `KUBECONFIG`. Point both at the same cluster.
 

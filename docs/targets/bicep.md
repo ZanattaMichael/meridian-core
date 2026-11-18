@@ -299,7 +299,12 @@ the compiled parameter is built by the real Bicep compiler in CI
 | Variable | Meaning |
 |---|---|
 | `MERIDIAN_AZ` | the program to run, when it is not `az` on `PATH` |
-| `MERIDIAN_AZ_ARGS` | arguments added to every call, split on spaces: `--only-show-errors`, or `--subscription <id>` for every document |
+| `MERIDIAN_AZ_ARGS` | arguments added to every call, split like a shell command line (quotes hold a word together): `--only-show-errors`, or `--subscription <id>` for every document |
+
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.bicep`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#bicep).
 
 Credentials are the `az` command's own (`az login`).
 

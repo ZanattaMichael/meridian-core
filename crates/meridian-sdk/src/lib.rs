@@ -52,6 +52,7 @@ pub mod schema;
 mod schemas;
 mod secrets;
 mod serve;
+pub mod settings;
 pub mod tool;
 mod types;
 pub mod version;
@@ -84,6 +85,7 @@ pub use schemas::{version_in, SchemaExport, SchemaRequest, SchemaSource};
 pub use secrets::holds_secret;
 pub use secrets::{SecretName, Secrets};
 pub use serve::{serve, Plugin, ServeError};
+pub use settings::Setting;
 pub use types::{
     Artifact, Capabilities, CompileError, Data, Edge, EdgeKind, Emitted, Emitter,
     OutputDeclaration, Position, Resource, ResourceGraph, Warning,

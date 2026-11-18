@@ -11,9 +11,32 @@ use meridian_sdk::{
 };
 
 use crate::{PROGRAM_PATH, STACK_PATH};
+use meridian_sdk::{settings, Setting};
 
 /// Names the program to run, when it is not `pulumi` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_PULUMI";
+/// Extra arguments for `pulumi preview` and `pulumi up`, split like a shell
+/// command line: `--parallel 4`, `--diff`.
+pub const ARGS_VARIABLE: &str = "MERIDIAN_PULUMI_ARGS";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "program",
+            PROGRAM_VARIABLE,
+            "pulumi",
+            "The `pulumi` program to run, when it is not on `PATH`.",
+        ),
+        Setting::new(
+            "args",
+            ARGS_VARIABLE,
+            "",
+            "Extra arguments for `pulumi preview` and `pulumi up`, split like a shell command line: `--parallel 4`. The calls that select the stack or read its outputs get none. Pulumi's own `PULUMI_BACKEND_URL` and `PULUMI_CONFIG_PASSPHRASE` are read as Pulumi reads them.",
+        ),
+    ]
+}
 
 /// Pulumi's own variable for the backend that keeps a stack's state.
 const BACKEND_VARIABLE: &str = "PULUMI_BACKEND_URL";
@@ -33,6 +56,8 @@ const MASKED: &str = "[secret]";
 pub struct PulumiRunner {
     /// The program to run.
     pub program: String,
+    /// Arguments added to `preview` and `up`, after Pulumi's own.
+    pub extra_args: Vec<String>,
     /// The operator chose a backend through `PULUMI_BACKEND_URL`, so the
     /// runner must not choose one.
     pub backend_chosen: bool,
@@ -83,11 +108,11 @@ fn set(variable: &str) -> bool {
 impl PulumiRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         PulumiRunner {
-            program: std::env::var(PROGRAM_VARIABLE)
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or_else(|| "pulumi".to_owned()),
+            program: settings::text(setting("program")),
+            extra_args: settings::args(setting("args")),
             backend_chosen: set(BACKEND_VARIABLE),
             // A passphrase that is set but empty is still a choice.
             passphrase_chosen: PASSPHRASE_VARIABLES
@@ -210,7 +235,9 @@ impl PulumiRunner {
             stack.name
         ));
         let preview = Self::with_inputs(
-            self.on_stack(context, &stack, &["preview"]).arg("--json"),
+            self.on_stack(context, &stack, &["preview"])
+                .args(self.extra_args.iter().cloned())
+                .arg("--json"),
             context,
         )
         .capture_stdout()
@@ -281,6 +308,10 @@ impl PulumiRunner {
 }
 
 impl Runner for PulumiRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations::ALL
     }
@@ -314,6 +345,7 @@ impl Runner for PulumiRunner {
         // second one.
         let updated = Self::with_inputs(
             self.on_stack(context, &stack, &["up"])
+                .args(self.extra_args.iter().cloned())
                 .args(["--yes", "--skip-preview"]),
             context,
         )

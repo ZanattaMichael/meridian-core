@@ -16,6 +16,7 @@ use crate::run::*;
 use crate::schema::{ParamKind, ParamSchema, ResourceSchema};
 use crate::schemas::{SchemaExport, SchemaRequest};
 use crate::secrets::{SecretName, Secrets};
+use crate::settings::Setting;
 use crate::types::*;
 
 fn to_i32(n: usize) -> i32 {
@@ -875,6 +876,30 @@ pub fn outputs_response_from_wire(
         return Ok(Err(run_error_from_wire(e, Vec::new())));
     }
     Ok(Ok(outputs_from_wire(r.outputs)?))
+}
+
+pub fn settings_to_wire(settings: Vec<Setting>) -> Vec<pb::Setting> {
+    settings
+        .into_iter()
+        .map(|s| pb::Setting {
+            name: s.name,
+            variable: s.variable,
+            default_value: s.default,
+            description: s.description,
+        })
+        .collect()
+}
+
+pub fn settings_from_wire(settings: Vec<pb::Setting>) -> Vec<Setting> {
+    settings
+        .into_iter()
+        .map(|s| Setting {
+            name: s.name,
+            variable: s.variable,
+            default: s.default_value,
+            description: s.description,
+        })
+        .collect()
 }
 
 pub fn import_formats_to_wire(formats: Vec<ImportFormat>) -> Vec<pb::ImportFormat> {
