@@ -325,14 +325,17 @@ impl Runner for OpenTofuRunner {
             ));
         }
         let log = &meridian_sdk::NoLog;
+        // A backend in the cloud is read as the document's cloud credential,
+        // the way a plan reads it.
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
         // The state is read through the tool, which needs the directory
         // initialised for its backend and providers.
-        self.tool(context)
+        self.tool(context, cloud.as_ref())
             .args(["init", "-input=false", "-no-color"])
             .args(self.extra_args.iter().cloned())
             .run_ok("tofu init failed", log)?;
         let shown = self
-            .tool(context)
+            .tool(context, cloud.as_ref())
             .args(["show", "-json", "-no-color"])
             .capture_stdout()
             .run_ok("tofu could not show its state", log)?;

@@ -477,8 +477,11 @@ impl Runner for PulumiRunner {
         let stack = Stack::read(&settings)?;
         // The export holds secrets encrypted, never in the clear; only the
         // ids are read from it.
+        // A backend in the cloud is read as the document's cloud credential,
+        // the way a preview reads it.
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
         let exported = self
-            .on_stack(context, &stack, &["stack", "export"])
+            .on_stack(context, cloud.as_ref(), &stack, &["stack", "export"])
             .capture_stdout()
             .run_ok("pulumi could not export the stack", &meridian_sdk::NoLog)?;
         read_identifiers(&exported.stdout)
