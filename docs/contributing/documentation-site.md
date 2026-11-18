@@ -137,19 +137,30 @@ It is CSS inside each SVG (`stroke-dasharray` on a copy of the line with
 `pathLength="100"`, moved by `stroke-dashoffset`), so it plays wherever the file is
 shown as an image, including a README on GitHub, and needs no script on the page.
 
-The site itself moves a little too: each page rises in as it opens, the line under a
-page's title drifts through the four category colours, links underline themselves,
-and the graphics lift under the pointer. All of it is in
-[`tools/wiki/theme/meridian.css`](../../tools/wiki/theme/meridian.css), and the
-animated mark in the top bar is put there by
-[`tools/wiki/theme/meridian.js`](../../tools/wiki/theme/meridian.js); without
-scripts the still mark is drawn by the stylesheet instead.
+The site itself moves too, and every part of it is in two files:
+[`tools/wiki/theme/meridian.css`](../../tools/wiki/theme/meridian.css) and
+[`tools/wiki/theme/meridian.js`](../../tools/wiki/theme/meridian.js).
+
+| What | Where | How |
+|---|---|---|
+| **The sky.** Behind every page, nine meridians drawn between two poles, a faint grid of points, three slow glows in the category colours, and light travelling along four of the lines. The top bar and the sidebar frost it; the page lets it through. It leans a little towards the pointer | `meridian.js` draws it as inline SVG as the page loads; `meridian.css` colours it for each of mdBook's themes (`--meridian-sky-*` on `.light`, `.rust`, `.navy`, `.coal`, `.ayu`) | the lines and dots are a tenth as strong as the text, so nothing behind a paragraph competes with it |
+| The mark in the top bar | `meridian.js` puts the animated mark there and makes it a link home | without scripts the still mark is drawn by the stylesheet |
+| A line of the four meridians across the top of the window | `meridian.js` fills it as far as the page has been read | |
+| Each block of a page rises in as it scrolls into view, and each section heading draws its own short line when it arrives | `meridian.js` adds `meridian-reveal` to the blocks and an observer marks each `is-visible`; the classes are added only when the observer exists, so nothing is ever left hidden | |
+| Each page rises in as it opens; the line under its title drifts through the four colours; links underline themselves from the left; sidebar entries slide under the pointer; the graphics and the mark lift when hovered; table rows ease | `meridian.css` | |
 
 A reader who has asked their system for less motion
-(`prefers-reduced-motion: reduce`) gets none of it: the stylesheet keeps its motion
-inside a `prefers-reduced-motion: no-preference` media query, and each SVG hides its
-travelling light under the matching `reduce` query and leaves the still drawing. Keep
+(`prefers-reduced-motion: reduce`) gets the same site, still: the sky without its
+travelling light, no reveals, no parallax. The stylesheet keeps its motion inside a
+`prefers-reduced-motion: no-preference` media query, the script checks the same
+setting before it starts an observer or listens to the pointer, and each SVG under
+`docs/graphics/` hides its travelling light under the matching `reduce` query. Keep
 that rule when adding motion anywhere.
+
+To change the sky, change `sky()` in `meridian.js`: the two poles, the shares that
+place the nine lines, which four carry light, and where the glows sit are the short
+lists at its top. The sky is drawn by the page, not kept as a file, so it is the same
+on every page and in every theme.
 
 The site's look is `meridian.css` on top of mdBook's stock themes, and its settings are
 [`tools/wiki/book.toml`](../../tools/wiki/book.toml).
