@@ -53,9 +53,11 @@ $ meridian lint --fix web.yaml
 fixed 1 finding
 ```
 
-At present one rule has a fix: [`unquoted-mode`](../reference/lint.md#unquoted-mode)
-adds the quotes. That one also clears the `invalid-param` error the plugin
-reports on the same line, since the two describe one mistake.
+Two rules have a fix: [`unquoted-mode`](../reference/lint.md#unquoted-mode)
+and [`lossy-number`](../reference/lint.md#lossy-number) both add quotes around
+a number that was meant as text. The `unquoted-mode` fix also clears the
+`invalid-param` error the plugin reports on the same line, since the two
+describe one mistake.
 
 ## Silencing a rule
 

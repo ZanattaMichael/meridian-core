@@ -20,6 +20,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use meridian_ir::{Document, Resource, Value};
+use meridian_sdk::ParamKind;
 
 use crate::catalog::Catalog;
 use crate::check::{Diagnostic, Fix, Parsed, ParsedDoc, Severity, Workspace};
@@ -45,6 +46,15 @@ pub const RULES: &[Rule] = &[
         explanation: "YAML reads `mode: 0644` as the number 644, not as the permissions \
                       0644, and the leading zero is lost. Write it as a quoted string: \
                       `mode: \"0644\"`. `meridian lint --fix` adds the quotes.",
+    },
+    Rule {
+        code: "lossy-number",
+        severity: Severity::Warning,
+        summary: "A param holds a number that is not the one the author wrote.",
+        explanation: "YAML reads `1.10` as the number 1.1, `3.0` as 3 and `1_000` as 1000, \
+                      and the spelling is lost before any tool sees it. A version, an image \
+                      tag or a build number is text, not a number: write it as a quoted string. `meridian lint --fix` adds the quotes. A param the target \
+                      declares as a number is never reported.",
     },
     Rule {
         code: "literal-secret",
@@ -331,7 +341,12 @@ impl Ctx<'_> {
                         .and_then(|l| l.get(span.start.col..span.end.col))
                         .unwrap_or_default()
                         .to_owned();
-                    let fix = (!typed.is_empty()).then(|| Fix {
+                    // Inside a `{...}` flow collection the value cannot be
+                    // placed, and the span is the document's first line:
+                    // then there is nothing to quote.
+                    let placed = typed.bytes().next().is_some_and(|b| b.is_ascii_digit());
+                    let typed = if placed { typed } else { value.canonical() };
+                    let fix = placed.then(|| Fix {
                         title: format!("Quote the mode: \"{typed}\""),
                         span,
                         text: format!("\"{typed}\""),
@@ -362,6 +377,8 @@ impl Ctx<'_> {
                 }
             }
         }
+
+        self.lossy_numbers(r);
 
         // Dependencies that repeat, or that another dependency implies.
         let doc = &self.parsed.doc;
@@ -446,6 +463,95 @@ impl Ctx<'_> {
                     format!("{:?} has no `when`, so it is never missing", n.resource),
                 );
             }
+        }
+    }
+
+    /// The kind the document's target declares for a top-level param of
+    /// this resource's type, when the catalog knows the type.
+    fn declared_kind(&self, r: &Resource, name: &str) -> Option<ParamKind> {
+        self.catalog
+            .target(self.parsed.doc.target())?
+            .resource(&r.r#type)?
+            .params
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.kind)
+    }
+
+    /// `lossy-number`: a plain scalar inside `params` that YAML read as a
+    /// number whose canonical spelling is not what the author typed. `mode`
+    /// is left to `unquoted-mode`, which says what a mode is; a param the
+    /// target declares as a number is never reported, because the tool gets
+    /// the number and the spelling does not matter.
+    fn lossy_numbers(&mut self, r: &Resource) {
+        fn collect(path: String, value: &Value, out: &mut Vec<(String, String)>) {
+            match value {
+                Value::Int(_) | Value::Uint(_) | Value::Float(_) => {
+                    out.push((path, value.canonical()));
+                }
+                Value::List(items) => {
+                    for (i, item) in items.iter().enumerate() {
+                        collect(format!("{path}[{i}]"), item, out);
+                    }
+                }
+                Value::Map(map) => {
+                    for (key, item) in map {
+                        collect(format!("{path}.{key}"), item, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let mut numbers = Vec::new();
+        for (name, value) in &r.params {
+            if name == "mode"
+                || matches!(
+                    self.declared_kind(r, name),
+                    Some(ParamKind::Integer | ParamKind::Number)
+                )
+            {
+                continue;
+            }
+            collect(format!("params.{name}"), value, &mut numbers);
+        }
+        let id_span = self.at(r, "id");
+        for (path, canonical) in numbers {
+            let span = self.at(r, &path);
+            // A value the syntax reader could not place, such as one inside
+            // a `{...}` flow collection, falls back to the resource's id.
+            if span == id_span {
+                continue;
+            }
+            let typed = self
+                .file
+                .file
+                .lines
+                .get(span.start.line)
+                .and_then(|l| l.get(span.start.col..span.end.col))
+                .unwrap_or_default()
+                .to_owned();
+            let looks_numeric = typed
+                .bytes()
+                .next()
+                .is_some_and(|b| b.is_ascii_digit() || matches!(b, b'-' | b'+' | b'.'));
+            if !looks_numeric || typed == canonical {
+                continue;
+            }
+            let fix = Some(Fix {
+                title: format!("Quote it: \"{typed}\""),
+                span,
+                text: format!("\"{typed}\""),
+            });
+            self.report_with(
+                "lossy-number",
+                span,
+                format!(
+                    "{typed} is read as the number {canonical}, not as the text {typed:?}; \
+                     quote it if the spelling matters"
+                ),
+                fix,
+            );
         }
     }
 

@@ -136,6 +136,29 @@ impl<'a> YamlLoader<'a> {
         Error::new(self.pos(node.line, node.column), "", msg)
     }
 
+    /// `!!str` is the one tag a document may carry: it makes a value text,
+    /// which quoting does as well. Every other tag is refused rather than
+    /// ignored, because an ignored `!!int "12"` or `!!binary` would read as
+    /// something other than what the author wrote.
+    fn check_tag(&self, tag: &saphyr_parser::Tag, at: (usize, usize)) -> Result<(), Error> {
+        if tag.is_yaml_core_schema() && tag.suffix == "str" {
+            return Ok(());
+        }
+        let written = if tag.is_yaml_core_schema() {
+            format!("!!{}", tag.suffix)
+        } else {
+            format!("{}{}", tag.handle, tag.suffix)
+        };
+        Err(Error::new(
+            self.pos(at.0, at.1),
+            "",
+            format!(
+                "the tag {written} is not supported; only !!str is. Write the value in its \
+                 plain form, or quote it for text"
+            ),
+        ))
+    }
+
     fn count(&mut self, n: usize, at: (usize, usize)) -> Result<(), Error> {
         self.nodes += n;
         if self.nodes > MAX_NODES {
@@ -160,9 +183,12 @@ impl<'a> YamlLoader<'a> {
         let (node, anchor) = match event {
             Event::Scalar(value, style, anchor, tag) => {
                 self.count(1, (line, column))?;
+                if let Some(t) = &tag {
+                    self.check_tag(t, (line, column))?;
+                }
                 let resolved = match (&tag, style) {
                     // An explicit !!str, or any quoting, makes it a string.
-                    (Some(t), _) if t.is_yaml_core_schema() && t.suffix == "str" => Scalar::Str,
+                    (Some(_), _) => Scalar::Str,
                     (_, ScalarStyle::Plain) => resolve_plain(&value),
                     _ => Scalar::Str,
                 };
@@ -172,8 +198,11 @@ impl<'a> YamlLoader<'a> {
                 };
                 (Node { kind, line, column }, anchor)
             }
-            Event::SequenceStart(anchor, _) => {
+            Event::SequenceStart(anchor, tag) => {
                 self.count(1, (line, column))?;
+                if let Some(t) = &tag {
+                    self.check_tag(t, (line, column))?;
+                }
                 let mut items = Vec::new();
                 loop {
                     let (event, span) = self.next()?;
@@ -191,8 +220,11 @@ impl<'a> YamlLoader<'a> {
                     anchor,
                 )
             }
-            Event::MappingStart(anchor, _) => {
+            Event::MappingStart(anchor, tag) => {
                 self.count(1, (line, column))?;
+                if let Some(t) = &tag {
+                    self.check_tag(t, (line, column))?;
+                }
                 let mut entries = Vec::new();
                 loop {
                     let (event, span) = self.next()?;
