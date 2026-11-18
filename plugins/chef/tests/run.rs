@@ -299,10 +299,12 @@ fn chef_run_is_refused_a_secret_because_it_would_put_it_on_the_command_line() {
         .unwrap_err();
     assert!(
         err.msg.starts_with("chef-run has no private way to hand a secret to web01.example.com: it takes attributes on its command line only"),
-        "{}",
-        err.msg
+        "unexpected error prefix for rejected secret with chef-run"
     );
-    assert!(err.msg.contains("local transport"), "{}", err.msg);
+    assert!(
+        err.msg.contains("local transport"),
+        "expected guidance to use local transport"
+    );
     assert!(!err.msg.contains("hunter2"));
     assert!(!dir.join("chef-run.args").exists(), "chef-run was started");
     // A plan for that host says it is unknown, as it does without secrets,
