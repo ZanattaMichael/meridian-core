@@ -222,10 +222,10 @@ fn the_slice_is_applied_through_three_real_tools_and_then_in_sync() {
     let applied = ok(&dir, &root, &["apply", file]);
     for line in [
         "app (Infrastructure, target kubernetes)\n",
-        "  output workload = meridian-slice/web\n",
-        "  output greeting = hello from the slice\n",
+        "  output workload = \"meridian-slice/web\"\n",
+        "  output greeting = \"hello from the slice\"\n",
         "edge (Infrastructure, target terraform)\n",
-        "  output address = localhost\n",
+        "  output address = \"localhost\"\n",
         "site (ResourceSet, target ansible on localhost)\n",
     ] {
         assert!(applied.contains(line), "missing {line:?} in:\n{applied}");
