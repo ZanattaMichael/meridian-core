@@ -41,7 +41,8 @@
                 "locked",
                 "state",
                 "resume",
-                "rollback"
+                "rollback",
+                "plan"
               ]
             },
             "message": {
@@ -84,6 +85,44 @@
       "items": {
         "type": "string"
       }
+    },
+    "plan": {
+      "description": "plan --out: the plan that was saved; apply --plan: the plan that was carried out. Null when neither was asked",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "The plan file, as it was named on the command line"
+            },
+            "run": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "apply --plan: the id of the run that took the plan; null for the plan that is being saved"
+            },
+            "hasChanges": {
+              "type": "boolean",
+              "description": "Whether the plan leaves an apply something to do"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "file",
+            "run",
+            "hasChanges"
+          ]
+        }
+      ]
     },
     "summary": {
       "type": "object",
@@ -136,6 +175,7 @@
     "stages",
     "rollbacks",
     "warnings",
+    "plan",
     "summary"
   ],
   "additionalProperties": false,

@@ -219,6 +219,7 @@ impl Runner for DscRunner {
         Ok(Plan {
             changes,
             unknown: false,
+            saved: None,
         })
     }
 

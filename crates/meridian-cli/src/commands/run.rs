@@ -16,6 +16,34 @@ pub(crate) struct How<'a> {
     pub(crate) rollback_of: Option<&'a str>,
     /// `plan --detailed-exitcode`
     pub(crate) detailed_exitcode: bool,
+    /// `plan --out`
+    pub(crate) plan_out: Option<&'a Path>,
+    /// `apply --plan`
+    pub(crate) from_plan: Option<&'a Path>,
+}
+
+/// What `apply --plan` is given, against what the plan was taken with: a
+/// thing left out on the command line is the plan's, and one given must be
+/// the plan's, so the apply is of the plan and not of something like it.
+fn from_the_plan<T: Clone + PartialEq>(
+    what: &str,
+    given: &[T],
+    planned: &[T],
+    show: impl Fn(&T) -> String,
+) -> Result<Vec<T>, Failure> {
+    if given.is_empty() {
+        return Ok(planned.to_vec());
+    }
+    if given != planned {
+        let list = |items: &[T]| items.iter().map(&show).collect::<Vec<_>>().join(" ");
+        return Err(Failure::Message(format!(
+            "the plan was taken with {what} `{}`, and this apply names `{}`; give the plan's, \
+             or leave {what} out to take it from the plan",
+            list(planned),
+            list(given)
+        )));
+    }
+    Ok(given.to_vec())
 }
 
 pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Result<(), Failure> {
@@ -28,13 +56,86 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
                 .to_owned(),
         ));
     }
-    let bundle = load(&workflow.files, &workflow.state.state_dir)?;
+    // What is run: the command line's, or with `apply --plan` the plan's
+    // where the command line left it out.
+    let mut plan_file = match how.from_plan {
+        None => None,
+        Some(path) => Some(PlanFile::read(path).map_err(Failure::Message)?),
+    };
+    // Which data files are not what the plan was taken with. This never
+    // refuses the apply: it only names the file when a stage then fails
+    // with `plan-differs`.
+    if let Some(plan) = plan_file.as_mut() {
+        plan.changed_data = plan
+            .asked
+            .data
+            .iter()
+            .zip(&plan.asked.data_hashes)
+            .filter(|(path, hash)| {
+                std::fs::read(path).map_or(true, |bytes| file_hash(&bytes) != **hash)
+            })
+            .map(|(path, _)| path.clone())
+            .collect();
+    }
+    let planned = plan_file.as_ref().map(|plan| &plan.asked);
+    let path_text = |path: &PathBuf| path.display().to_string();
+    let (files, data_files, sets, selectors) = match planned {
+        None => (
+            workflow.files.clone(),
+            workflow.data.clone(),
+            workflow.set.clone(),
+            workflow.selector.clone(),
+        ),
+        Some(asked) => (
+            from_the_plan(
+                "the documents",
+                &workflow.files,
+                &asked.files.iter().map(PathBuf::from).collect::<Vec<_>>(),
+                path_text,
+            )?,
+            from_the_plan(
+                "--data",
+                &workflow.data,
+                &asked.data.iter().map(PathBuf::from).collect::<Vec<_>>(),
+                path_text,
+            )?,
+            from_the_plan("--set", &workflow.set, &asked.set, String::clone)?,
+            if workflow.selector.is_empty() && !asked.selector.is_empty() {
+                vec![asked.selector.clone()]
+            } else {
+                workflow.selector.clone()
+            },
+        ),
+    };
+    if files.is_empty() {
+        return Err(Failure::Usage(format!(
+            "the following required arguments were not provided:\n  <FILES>...\n\nUsage: \
+             meridian {} <FILES>...{}",
+            mode.as_str(),
+            if mode == Mode::Apply {
+                "\n\nWith `apply --plan FILE`, the documents may be left out and are taken from \
+                 the plan"
+            } else {
+                ""
+            }
+        )));
+    }
+    let bundle = load(&files, &workflow.state.state_dir)?;
     let mut selector = Selector::all();
-    for text in &workflow.selector {
+    for text in &selectors {
         selector = selector.and(Selector::parse(text).map_err(Failure::Message)?);
     }
-    let mut data = read_data(&workflow.data, &workflow.state.state_dir)?;
-    apply_sets(&mut data, &workflow.set)?;
+    if let Some(asked) = planned {
+        if selector.to_string() != asked.selector {
+            return Err(Failure::Message(format!(
+                "the plan was taken with the selector `{}`, and this apply selects `{selector}`; \
+                 give the plan's, or leave -l out to take it from the plan",
+                asked.selector
+            )));
+        }
+    }
+    let mut data = read_data(&data_files, &workflow.state.state_dir)?;
+    apply_sets(&mut data, &sets)?;
     if selected(&bundle, &selector, &data) == 0 {
         // Doing nothing and reporting success would read as "all applied".
         return Err(Failure::Message(format!(
@@ -59,9 +160,15 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
     // What was typed, for the record: the files and the selection. Backend
     // settings are left out, because one of them can be a credential.
     let mut command = vec![mode.as_str().to_owned()];
-    command.extend(workflow.files.iter().map(|f| f.display().to_string()));
-    for text in &workflow.selector {
+    command.extend(files.iter().map(|f| f.display().to_string()));
+    for text in &selectors {
         command.push(format!("-l {text}"));
+    }
+    if let Some(path) = how.plan_out {
+        command.push(format!("--out {}", path.display()));
+    }
+    if let Some(path) = how.from_plan {
+        command.push(format!("--plan {}", path.display()));
     }
     match resume {
         None => {}
@@ -121,6 +228,8 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
             Some(id) => Resume::Run(id.to_owned()),
         },
         policy,
+        save_plan: how.plan_out.is_some(),
+        from_plan: plan_file.as_ref().map(|plan| Arc::new(plan.clone())),
         strict_secrets: workflow.strict_secrets,
         // Compiling drives no tool, so there is nothing to interrupt but the
         // process itself, which Ctrl-C does as it always did.
@@ -190,11 +299,66 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
     for warning in &report.warnings {
         eprintln!("warning: {warning}");
     }
+    // The plan is written once the run is over and every stage planned; a
+    // plan with a failed stage is nothing anyone can apply, and saying so
+    // beats a file that looks like one.
+    let mut plan_about = None;
+    let mut plan_failed = false;
+    if let Some(path) = how.plan_out {
+        if report.refused.is_none() {
+            let written = options
+                .backend
+                .as_ref()
+                .ok_or_else(|| "a plan keeps a record".to_owned())
+                .and_then(|backend| RunState::read(backend.as_ref()))
+                .and_then(|state| {
+                    PlanFile::from_report(
+                        &report,
+                        &state,
+                        Asked {
+                            files: files.iter().map(|f| f.display().to_string()).collect(),
+                            data: data_files.iter().map(|f| f.display().to_string()).collect(),
+                            data_hashes: data_files
+                                .iter()
+                                .map(|f| {
+                                    std::fs::read(f).map(|b| file_hash(&b)).unwrap_or_default()
+                                })
+                                .collect(),
+                            set: sets.clone(),
+                            selector: selector.to_string(),
+                            command: options.command.clone(),
+                        },
+                    )
+                })
+                .and_then(|plan| plan.write(path).map(|()| plan));
+            match written {
+                Ok(plan) => {
+                    eprintln!("plan: wrote {}", path.display());
+                    plan_about = Some(PlanAbout {
+                        file: path.to_path_buf(),
+                        run: String::new(),
+                        has_changes: plan.has_changes(),
+                    });
+                }
+                Err(why) => {
+                    eprintln!("error: the plan was not saved: {why}");
+                    plan_failed = true;
+                }
+            }
+        }
+    }
+    if let Some(plan) = &plan_file {
+        plan_about = Some(PlanAbout {
+            file: how.from_plan.map(Path::to_path_buf).unwrap_or_default(),
+            run: plan.run.clone(),
+            has_changes: plan.has_changes(),
+        });
+    }
     // The one object a machine reads, whatever the run did; the lines that
     // follow are for the person reading standard error.
     if json_output() {
-        let ok = report.refused.is_none() && report.succeeded() && !sink_failed;
-        emit(ok, output::run(&report, mode, out));
+        let ok = report.refused.is_none() && report.succeeded() && !sink_failed && !plan_failed;
+        emit(ok, output::run(&report, mode, out, plan_about.as_ref()));
     }
     if let Some(refusal) = &report.refused {
         if json_output() {
@@ -264,6 +428,12 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
                 "run {} was stopped by its policy before anything was applied",
                 report.run_id
             );
+        } else if mode == Mode::Apply && how.from_plan.is_some() {
+            eprintln!(
+                "run {} failed. A saved plan is applied whole: take a new plan with \
+                 `meridian plan --out` and apply that",
+                report.run_id
+            );
         } else if mode == Mode::Apply && report.rollbacks.is_empty() {
             eprintln!(
                 "run {} failed. Once the cause is fixed, `meridian apply --resume {}{}` \
@@ -279,6 +449,9 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
         return Err(Failure::Drifted);
     }
     if sink_failed {
+        return Err(Failure::Reported);
+    }
+    if plan_failed {
         return Err(Failure::Reported);
     }
     if how.detailed_exitcode && report.stages.iter().any(stage_has_changes) {
