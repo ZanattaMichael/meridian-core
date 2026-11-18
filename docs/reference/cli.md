@@ -268,8 +268,9 @@ second one collide with it.
 
 Lists every plugin Meridian can find: its category, what it can do, the resource
 types it takes, the versions of its tool it compiles for (when it declares any),
-the keys of a document's `spec.settings` it reads (when it takes any), where its
-binary is, and what checking its signature found.
+the keys of a document's `spec.settings` it reads (when it takes any), the
+[refusal rules](refusal-rules.md) it has of its own (when it declares any),
+where its binary is, and what checking its signature found.
 
 ```
 dsc
@@ -299,6 +300,9 @@ file names each of its formats claims under `imports`.
 `meridian plugins --settings` adds, under each plugin, every setting its
 runner declares: the short name to use under `spec.settings` in
 `meridian.yaml`, the environment variable, the default and what it does.
+`meridian plugins --rules` adds each plugin's own [refusal rules](refusal-rules.md),
+with what each refuses and what to write instead; a plugin that has none says
+so, and refuses only under the general rules of that page.
 
 ```
 ansible

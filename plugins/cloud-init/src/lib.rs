@@ -34,6 +34,7 @@ mod validate;
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules::Rule;
 use meridian_sdk::{
     Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
     ResourceGraph, Value, Warning,
@@ -63,11 +64,12 @@ pub(crate) struct Placed<T> {
 }
 
 impl<T> Placed<T> {
-    fn refuse(&self, rule: &str, msg: String) -> CompileError {
+    fn refuse(&self, rule: &Rule, msg: String) -> CompileError {
         CompileError {
             target: NAME.to_owned(),
             resource: self.id.clone(),
-            rule: rule.to_owned(),
+            rule: rule.name.to_owned(),
+            hint: rule.hint.to_owned(),
             msg,
             pos: self.pos.clone(),
         }
@@ -158,8 +160,23 @@ pub(crate) struct CloudConfig {
     pub modules: Vec<Placed<Module>>,
 }
 
+/// The refusal rules only this target has. Everything else it refuses carries
+/// a general rule from `meridian_sdk::rules`.
+pub(crate) mod own {
+    use meridian_sdk::rules::Rule;
+
+    pub(crate) const UNSATISFIABLE_ORDER: Rule = Rule::new(
+        "unsatisfiable-order",
+        "`dependsOn` asks for an order cloud-init cannot keep: the order of a first boot is cloud-init's own, and a document cannot change it",
+        "remove the `dependsOn`, or move the work to a resource cloud-init runs later",
+    );
+
+    /// Every rule here, for `Emitter::rules` and the reference page.
+    pub(crate) const ALL: &[Rule] = &[UNSATISFIABLE_ORDER];
+}
+
 /// A refusal of one resource, stamped with this target.
-pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         ..CompileError::for_resource(r, rule, msg)
@@ -206,6 +223,9 @@ impl Emitter for CloudInit {
             secrets: false,
             credentials: false,
         }
+    }
+    fn rules(&self) -> Vec<Rule> {
+        own::ALL.to_vec()
     }
 
     fn category(&self) -> Category {

@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, Value};
 
 use crate::transform::mapping;
@@ -13,7 +14,8 @@ pub(crate) fn validate(manifest: &Manifest) -> Result<(), CompileError> {
     if manifest.host.is_empty() {
         return Err(CompileError {
             target: NAME.to_owned(),
-            rule: "missing-host".to_owned(),
+            rule: rules::MISSING_HOST.name.to_owned(),
+            hint: rules::MISSING_HOST.hint.to_owned(),
             msg: "manifest has no node to assign the class to".to_owned(),
             ..CompileError::default()
         });
@@ -38,7 +40,7 @@ pub(crate) fn validate(manifest: &Manifest) -> Result<(), CompileError> {
         if let Some(previous) = titles.insert((&d.r#type, &d.title), &d.resource_id) {
             return Err(fail(
                 d,
-                "duplicate-title",
+                &rules::DUPLICATE_RESOURCE,
                 format!(
                     "a {} titled {:?} is already declared by resource {:?}; \
                      Puppet requires a title to be unique for its type across the catalog",
@@ -51,7 +53,7 @@ pub(crate) fn validate(manifest: &Manifest) -> Result<(), CompileError> {
             if let Some(previous) = names.insert((&d.r#type, namevar), &d.resource_id) {
                 return Err(fail(
                     d,
-                    "duplicate-namevar",
+                    &rules::DUPLICATE_RESOURCE,
                     format!(
                         "this {} manages {:?}, which resource {:?} already manages; \
                          two declarations of one thing is a conflict Puppet reports on the \
@@ -67,7 +69,7 @@ pub(crate) fn validate(manifest: &Manifest) -> Result<(), CompileError> {
         if d.attrs.is_empty() && !d.native {
             return Err(fail(
                 d,
-                "empty-resource",
+                &rules::MISSING_PARAM,
                 format!(
                     "{} resource {:?} was given no attributes",
                     d.r#type, d.title
@@ -79,7 +81,7 @@ pub(crate) fn validate(manifest: &Manifest) -> Result<(), CompileError> {
             if !declared.contains(reference.title.as_str()) {
                 return Err(fail(
                     d,
-                    "dangling-reference",
+                    &rules::INVALID_REFERENCE,
                     format!("references {reference}, which this manifest does not declare"),
                 ));
             }
@@ -95,21 +97,21 @@ fn check_title(d: &Declaration) -> Result<(), CompileError> {
     if d.title.trim().is_empty() {
         return Err(fail(
             d,
-            "empty-title",
+            &rules::INVALID_NAME,
             "resource has an empty title".to_owned(),
         ));
     }
     if d.title.contains(['\n', '\r']) {
         return Err(fail(
             d,
-            "multiline-title",
+            &rules::INVALID_NAME,
             format!("resource title {:?} spans more than one line", d.title),
         ));
     }
     if d.title.contains('\'') {
         return Err(fail(
             d,
-            "quoted-title",
+            &rules::INVALID_NAME,
             format!(
                 "resource title {:?} contains a single quote, which would \
                  terminate the title Puppet reads",
@@ -191,36 +193,36 @@ mod tests {
         type Break = fn(&mut Manifest);
         let table: &[(&str, &str, Break)] = &[
             ("missing-host", "", |m| m.host.clear()),
-            ("empty-title", "pkg", |m| {
+            ("invalid-name", "pkg", |m| {
                 m.resources[0].title = " ".to_owned()
             }),
-            ("multiline-title", "pkg", |m| {
+            ("invalid-name", "pkg", |m| {
                 m.resources[0].title = "pkg\nother".to_owned();
             }),
-            ("multiline-title", "pkg", |m| {
+            ("invalid-name", "pkg", |m| {
                 m.resources[0].title = "pkg\rother".to_owned();
             }),
-            ("quoted-title", "pkg", |m| {
+            ("invalid-name", "pkg", |m| {
                 m.resources[0].title = "pkg' }".to_owned();
             }),
-            ("duplicate-title", "again", |m| {
+            ("duplicate-resource", "again", |m| {
                 let mut d = declaration("package", "again", "name", "curl");
                 d.title = "pkg".to_owned();
                 m.resources.push(d);
             }),
-            ("duplicate-namevar", "again", |m| {
+            ("duplicate-resource", "again", |m| {
                 m.resources
                     .push(declaration("package", "again", "name", "nginx"));
             }),
-            ("duplicate-namevar", "copy", |m| {
+            ("duplicate-resource", "copy", |m| {
                 m.resources
                     .push(declaration("file", "copy", "path", "/etc/nginx/nginx.conf"));
             }),
-            ("empty-resource", "pkg", |m| m.resources[0].attrs.clear()),
-            ("dangling-reference", "conf", |m| {
+            ("missing-param", "pkg", |m| m.resources[0].attrs.clear()),
+            ("invalid-reference", "conf", |m| {
                 m.resources[1].require.push(to("package", "gone"));
             }),
-            ("dangling-reference", "svc", |m| {
+            ("invalid-reference", "svc", |m| {
                 m.resources[2].notify = vec![to("exec", "gone")];
             }),
         ];

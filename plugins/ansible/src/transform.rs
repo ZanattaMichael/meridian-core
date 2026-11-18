@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use meridian_sdk::rules;
 use meridian_sdk::{
     CompileError, EdgeKind, Resource, ResourceGraph, ResourceSchema, TypeName, Value,
 };
@@ -213,7 +214,7 @@ pub(crate) fn native_module(r: &Resource) -> Result<Option<&str>, CompileError> 
         TypeName::Shared(_) => Ok(None),
         TypeName::NativeNamedLikeShared(bare) => Err(refuse(
             r,
-            "unsupported-resource-type",
+            &rules::UNSUPPORTED_RESOURCE_TYPE,
             format!(
                 "resource type {:?} is not how a module is reached on this target: an Ansible \
                  module is written by its full name, ansible.builtin.{bare}",
@@ -281,7 +282,7 @@ fn lookup(pairs: &[(&'static str, &'static str)], key: &str) -> Option<&'static 
 fn unsupported_type(r: &Resource) -> CompileError {
     refuse(
         r,
-        "unsupported-resource-type",
+        &rules::UNSUPPORTED_RESOURCE_TYPE,
         format!(
             "unsupported resource type {:?} on this target: it is not one of the shared types \
              ({}), and an Ansible module is written by its full name, such as \
@@ -302,8 +303,10 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Playbook, CompileError>
         // The shared types are checked the same way on every configuration
         // management target, so a document moves between tools without the
         // type rules changing under it.
-        meridian_sdk::schema::check_shared(resource)
-            .map_err(|e| refuse(resource, &e.rule, e.msg))?;
+        meridian_sdk::schema::check_shared(resource).map_err(|e| CompileError {
+            target: NAME.to_owned(),
+            ..e
+        })?;
         let mut task = task_for(resource, &resource.state)?;
         task.notify = notify.remove(&resource.id).unwrap_or_default();
         tasks.push(task);
@@ -316,7 +319,8 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Playbook, CompileError>
         meridian_sdk::check_host(&graph.host).map_err(|why| CompileError {
             target: NAME.to_owned(),
             resource: String::new(),
-            rule: "invalid-host".to_owned(),
+            rule: rules::INVALID_HOST.name.to_owned(),
+            hint: rules::INVALID_HOST.hint.to_owned(),
             msg: format!("the target host cannot be written into the inventory: {why}"),
             pos: Default::default(),
         })?;
@@ -343,7 +347,8 @@ fn inventory_vars(
     let refuse = |msg: String| CompileError {
         target: NAME.to_owned(),
         resource: String::new(),
-        rule: "unsupported-credential".to_owned(),
+        rule: rules::UNSUPPORTED_CREDENTIAL.name.to_owned(),
+        hint: rules::UNSUPPORTED_CREDENTIAL.hint.to_owned(),
         msg: format!("the credential {:?}: {msg}", credential.name),
         pos: Default::default(),
     };
@@ -410,7 +415,7 @@ fn task_for(r: &Resource, state: &str) -> Result<Task, CompileError> {
         let Some(native) = lookup(allowed, name) else {
             return Err(refuse(
                 r,
-                "unsupported-param",
+                &rules::UNSUPPORTED_PARAM,
                 format!(
                     "resource type {:?} does not accept param {:?} on this target (accepted: {})",
                     r.r#type,
@@ -425,7 +430,7 @@ fn task_for(r: &Resource, state: &str) -> Result<Task, CompileError> {
         if *value == Value::Null {
             return Err(refuse(
                 r,
-                "empty-param",
+                &rules::EMPTY_PARAM,
                 format!(
                     "param {:?} on resource type {:?} has no value",
                     name, r.r#type
@@ -439,7 +444,7 @@ fn task_for(r: &Resource, state: &str) -> Result<Task, CompileError> {
         if !r.params.contains_key(*need) {
             return Err(refuse(
                 r,
-                "missing-param",
+                &rules::MISSING_PARAM,
                 format!(
                     "resource type {:?} requires param {:?} on this target",
                     r.r#type, need
@@ -474,7 +479,7 @@ fn native_task(r: &Resource, module: &str, state: &str) -> Result<Task, CompileE
         if *value == Value::Null {
             return Err(refuse(
                 r,
-                "empty-param",
+                &rules::EMPTY_PARAM,
                 format!("param {name:?} on module {module} has no value"),
             ));
         }
@@ -484,7 +489,7 @@ fn native_task(r: &Resource, module: &str, state: &str) -> Result<Task, CompileE
         if r.params.contains_key("state") {
             return Err(refuse(
                 r,
-                "param-conflicts-with-state",
+                &rules::PARAM_CONFLICTS_WITH_STATE,
                 format!(
                     "state {state:?} and param \"state\" both set the module's state argument; \
                      write one of them"
@@ -519,7 +524,7 @@ fn apply_state(
         if !state.is_empty() {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!(
                     "resource type {:?} accepts no state on this target, got {:?}",
                     r.r#type, state
@@ -537,7 +542,7 @@ fn apply_state(
     let Some(native) = lookup(m.states, state) else {
         return Err(refuse(
             r,
-            "unsupported-state",
+            &rules::UNSUPPORTED_STATE,
             format!(
                 "resource type {:?} does not accept state {:?} on this target (accepted: {})",
                 r.r#type,
@@ -551,10 +556,24 @@ fn apply_state(
             args.insert(arg.to_owned(), Value::String(native.to_owned()));
         }
         None if m.states_without_arg.contains(&native) => {}
+        // A file with content is a copy, and a copy has no state: the
+        // content is what conflicts, so the refusal is the same one every
+        // configuration management target gives a directory with content.
+        None if module == COPY => {
+            return Err(refuse(
+                r,
+                &rules::PARAM_CONFLICTS_WITH_STATE,
+                format!(
+                    "param \"content\" cannot be used with state {state:?}: a file with content \
+                     is written as it is given, and only a file in state \"file\" or \"present\" \
+                     has content"
+                ),
+            ));
+        }
         None => {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!(
                     "resource type {:?} cannot have state {:?} as compiled to {} on this target",
                     r.r#type, state, module
@@ -583,7 +602,7 @@ fn handler_names(graph: &ResourceGraph) -> Result<BTreeMap<String, Vec<String>>,
             let from = graph.resource(&edge.from).cloned().unwrap_or_default();
             return Err(refuse(
                 &from,
-                "unknown-notify-target",
+                &rules::UNKNOWN_NOTIFY_TARGET,
                 format!("notifies an unknown resource {:?}", edge.to),
             ));
         };
@@ -627,7 +646,7 @@ fn handler_for(r: &Resource, action: &str) -> Result<Task, CompileError> {
         if action != "run" {
             return Err(refuse(
                 r,
-                "unsupported-action",
+                &rules::UNSUPPORTED_ACTION,
                 format!(
                     "resource type {module:?} is a module, which can only be run again when \
                      notified (action \"run\"), got action {action:?}"
@@ -654,7 +673,7 @@ fn handler_for(r: &Resource, action: &str) -> Result<Task, CompileError> {
                 keys(m.actions)
             )
         };
-        return Err(refuse(r, "unsupported-action", msg));
+        return Err(refuse(r, &rules::UNSUPPORTED_ACTION, msg));
     };
 
     let mut task = task_for(r, state)?;

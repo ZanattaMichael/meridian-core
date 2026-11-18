@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, EdgeKind, ResourceGraph, Warning};
 
 use crate::NAME;
@@ -34,7 +35,7 @@ pub(crate) fn check_order(graph: &ResourceGraph) -> Result<Vec<Warning>, Compile
             target: NAME.to_owned(),
             ..CompileError::for_resource(
                 repeated,
-                "duplicate-resource",
+                &rules::DUPLICATE_RESOURCE,
                 format!("resource id {:?} is used twice", repeated.id),
             )
         });
@@ -56,7 +57,8 @@ pub(crate) fn check_order(graph: &ResourceGraph) -> Result<Vec<Warning>, Compile
     if placed != order.len() {
         return Err(CompileError {
             target: NAME.to_owned(),
-            rule: "cycle".to_owned(),
+            rule: rules::DEPENDENCY_CYCLE.name.to_owned(),
+            hint: rules::DEPENDENCY_CYCLE.hint.to_owned(),
             msg: "a dependency cycle reached this target's sort stage; \
                   the graph stage should have rejected it first"
                 .to_owned(),
@@ -70,7 +72,8 @@ pub(crate) fn check_order(graph: &ResourceGraph) -> Result<Vec<Warning>, Compile
         if before > after {
             return Err(CompileError {
                 target: NAME.to_owned(),
-                rule: "ordering-violated".to_owned(),
+                rule: rules::ORDERING_VIOLATED.name.to_owned(),
+                hint: rules::ORDERING_VIOLATED.hint.to_owned(),
                 resource: edge.to.clone(),
                 pos: edge.pos.clone(),
                 msg: format!(

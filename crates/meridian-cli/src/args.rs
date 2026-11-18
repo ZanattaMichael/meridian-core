@@ -186,6 +186,11 @@ pub(crate) enum Command {
         /// default and what it does
         #[arg(long)]
         settings: bool,
+        /// Also list each plugin's own refusal rules, with what each refuses
+        /// and what to write instead. The general rules every target shares
+        /// are on the refusal rules reference page
+        #[arg(long)]
+        rules: bool,
         #[command(flatten)]
         plugins: PluginDirs,
     },

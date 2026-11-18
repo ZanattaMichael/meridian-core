@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, EdgeKind, ResourceGraph};
 
 use crate::{refuse_at, Kind, Template};
@@ -36,7 +37,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.to,
                 &edge.pos,
-                "unknown-dependency",
+                &rules::UNKNOWN_DEPENDENCY,
                 format!("an edge names resource {missing:?}, which this document does not declare"),
             ));
         };
@@ -45,7 +46,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.from,
                 &edge.pos,
-                "unsupported-action",
+                &rules::UNSUPPORTED_ACTION,
                 format!(
                     "notifies resource {:?} with action {:?}, which this target cannot express: \
                      a Packer build runs each step once on a machine it then discards, so \
@@ -56,7 +57,7 @@ pub(crate) fn apply_ordering(
         }
 
         let unsupported =
-            |msg: String| refuse_at(&edge.to, &edge.pos, "unsupported-dependency", msg);
+            |msg: String| refuse_at(&edge.to, &edge.pos, &rules::UNSUPPORTED_DEPENDENCY, msg);
 
         if from.kind == Kind::ErrorCleanup {
             return Err(unsupported(format!(

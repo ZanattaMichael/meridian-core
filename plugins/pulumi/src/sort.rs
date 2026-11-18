@@ -1,5 +1,6 @@
 //! Stage two: Pulumi's ordering semantics.
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, EdgeKind, ResourceGraph, Value};
 
 use crate::{refuse_at, Kind, Program};
@@ -21,7 +22,7 @@ pub(crate) fn apply_ordering(
                 return Err(refuse_at(
                     &edge.to,
                     &edge.pos,
-                    "unsupported-dependency",
+                    &rules::UNSUPPORTED_DEPENDENCY,
                     format!(
                         "{id:?} holds the stack's settings, which are read before anything \
                          runs; nothing can depend on it or be ordered by it"
@@ -38,7 +39,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.to,
                 &edge.pos,
-                "unknown-dependency",
+                &rules::UNKNOWN_DEPENDENCY,
                 format!("an edge names resource {missing:?}, which this document does not declare"),
             ));
         };
@@ -62,7 +63,7 @@ pub(crate) fn apply_ordering(
                     return Err(refuse_at(
                         &edge.to,
                         &edge.pos,
-                        "unsupported-dependency",
+                        &rules::UNSUPPORTED_DEPENDENCY,
                         format!("{:?} is a {}: {why}", other.id, other.kind.noun()),
                     ));
                 }
@@ -80,7 +81,7 @@ pub(crate) fn apply_ordering(
                     return Err(refuse_at(
                         &edge.to,
                         &edge.pos,
-                        "invalid-param",
+                        &rules::INVALID_PARAM,
                         "the resource option \"dependsOn\" must be a list".to_owned(),
                     ));
                 };
@@ -92,7 +93,7 @@ pub(crate) fn apply_ordering(
                 return Err(refuse_at(
                     &edge.from,
                     &edge.pos,
-                    "unsupported-action",
+                    &rules::UNSUPPORTED_ACTION,
                     format!(
                         "notifies resource {:?} with action {:?}, which this target cannot \
                          express: nothing in a Pulumi YAML program makes one resource react to \

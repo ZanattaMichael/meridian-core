@@ -78,7 +78,11 @@ pub(crate) fn import_configuration(
     outcome
 }
 
-pub(crate) fn list_plugins(plugins: &PluginDirs, with_settings: bool) -> Result<(), Failure> {
+pub(crate) fn list_plugins(
+    plugins: &PluginDirs,
+    with_settings: bool,
+    with_rules: bool,
+) -> Result<(), Failure> {
     let registry = registry(plugins)?;
     let names = registry.names();
     if names.is_empty() && !json_output() {
@@ -124,6 +128,10 @@ pub(crate) fn list_plugins(plugins: &PluginDirs, with_settings: bool) -> Result<
         if !info.settings_keys.is_empty() {
             outln!("  settings:  {}", info.settings_keys.join(", "));
         }
+        if !info.rules.is_empty() {
+            let names: Vec<&str> = info.rules.iter().map(|r| r.name.as_str()).collect();
+            outln!("  rules:     {}", names.join(", "));
+        }
         for format in &info.import_formats {
             outln!(
                 "  imports:   {} ({})",
@@ -155,6 +163,20 @@ pub(crate) fn list_plugins(plugins: &PluginDirs, with_settings: bool) -> Result<
                         }
                     );
                     outln!("      {}", setting.description);
+                }
+            }
+        }
+        if with_rules {
+            if info.rules.is_empty() {
+                outln!("  rules:     only the general ones");
+            } else {
+                outln!("  rules:");
+                for rule in &info.rules {
+                    outln!("    {}", rule.name);
+                    outln!("      {}", rule.meaning);
+                    if !rule.hint.is_empty() {
+                        outln!("      Instead: {}", rule.hint);
+                    }
                 }
             }
         }

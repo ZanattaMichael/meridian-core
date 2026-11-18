@@ -427,11 +427,11 @@ fn settings_are_checked() {
     );
     assert_eq!(
         rule("    - id: c\n      type: chart\n      params: {name: My Chart}\n"),
-        "invalid-chart-name"
+        "invalid-name"
     );
     assert_eq!(
         rule("    - id: a\n      type: values\n      params: {a: 1}\n    - id: b\n      type: values\n      params: {b: 2}\n"),
-        "duplicate-settings"
+        "duplicate-resource"
     );
 
     let err = refusal(&format!(
@@ -454,7 +454,7 @@ fn the_release_is_named_by_the_document_unless_told() {
     assert!(release.contains("\"namespace\": \"default\""), "{release}");
 
     let err = compile_named("web_app", &format!("  resources:\n{CONFIG}")).unwrap_err();
-    assert_eq!(err.rule, "invalid-release-name");
+    assert_eq!(err.rule, "invalid-name");
 
     let files = compile_named(
         "web_app",
@@ -483,14 +483,14 @@ fn names_and_objects_are_checked() {
     let err = refusal(
         "  resources:\n    - id: web_config\n      type: v1/ConfigMap\n      params: {data: {k: v}}\n    - id: web-config\n      type: v1/ConfigMap\n      params: {data: {k: w}}\n",
     );
-    assert_eq!(err.rule, "duplicate-object");
+    assert_eq!(err.rule, "duplicate-resource");
     assert_eq!(
         err.msg,
         "resources \"web_config\" and \"web-config\" are both the ConfigMap named \"web-config\"; a release holds an object once"
     );
 
     let err = refusal("  resources:\n    - id: v\n      type: values\n      params: {a: 1}\n");
-    assert_eq!(err.rule, "empty-chart");
+    assert_eq!(err.rule, "empty-document");
 }
 
 #[test]
@@ -656,6 +656,6 @@ fn text_that_reads_as_a_secrets_token_is_refused() {
     let err = refusal(
         "  resources:\n    - id: values\n      type: values\n      params:\n        x: \"${meridian_secret_db_password}\"\n",
     );
-    assert_eq!(err.rule, "reserved-text");
+    assert_eq!(err.rule, "reserved-name");
     assert!(err.msg.contains("choose other text"), "{err}");
 }

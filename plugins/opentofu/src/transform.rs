@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::expr::{self, Part};
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
 
 use crate::{address, expression, refuse, refuse_at, Block, Config, Kind, OutputBlock};
@@ -39,7 +40,7 @@ fn classify(r: &Resource) -> Result<(Kind, String), CompileError> {
                 Some(_) => {
                     return Err(refuse(
                         r,
-                        "invalid-param",
+                        &rules::INVALID_PARAM,
                         "a provider's name must be a string".to_owned(),
                     ))
                 }
@@ -72,7 +73,7 @@ fn classify(r: &Resource) -> Result<(Kind, String), CompileError> {
 fn unsupported(r: &Resource) -> CompileError {
     refuse(
         r,
-        "unsupported-resource-type",
+        &rules::UNSUPPORTED_RESOURCE_TYPE,
         format!(
             "{:?} is not an OpenTofu resource type. Use a provider's own type, such as \
              aws_instance, or one of: provider, backend, encryption, module, variable, local, \
@@ -116,7 +117,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Config, CompileError> {
         if NAMESPACES.contains(&r.id.as_str()) {
             return Err(refuse(
                 r,
-                "reserved-name",
+                &rules::RESERVED_NAME,
                 format!(
                     "resource id {:?} is a name OpenTofu reserves for its own expressions, so \
                      ${{{}.…}} could not tell the two apart; give the resource another id",
@@ -140,8 +141,13 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Config, CompileError> {
         let mut refs = BTreeSet::new();
         let mut body = BTreeMap::new();
         for (name, value) in &r.params {
-            let rewritten = rewrite(value, &addresses, &mut refs)
-                .map_err(|msg| refuse(r, "invalid-reference", format!("param {name:?}: {msg}")))?;
+            let rewritten = rewrite(value, &addresses, &mut refs).map_err(|msg| {
+                refuse(
+                    r,
+                    &rules::INVALID_REFERENCE,
+                    format!("param {name:?}: {msg}"),
+                )
+            })?;
             body.insert(name.clone(), rewritten);
         }
         refs.remove(&r.id);
@@ -184,7 +190,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Config, CompileError> {
                 refuse_at(
                     "",
                     &output.pos,
-                    "invalid-reference",
+                    &rules::INVALID_REFERENCE,
                     format!("output {:?}: {msg}", output.name),
                 )
             },
@@ -205,7 +211,7 @@ fn check_meta(r: &Resource, kind: Kind) -> Result<(), CompileError> {
     if !r.runtime_when.is_empty() {
         return Err(refuse(
             r,
-            "unsupported-runtime-condition",
+            &rules::UNSUPPORTED_RUNTIME_CONDITION,
             format!(
                 "resource carries runtimeWhen {:?}, which this target cannot express: \
                  OpenTofu computes its whole plan before it changes anything, so there is \
@@ -219,7 +225,7 @@ fn check_meta(r: &Resource, kind: Kind) -> Result<(), CompileError> {
         "absent" if kind == Kind::Managed || kind == Kind::Module => {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 "state \"absent\" has no meaning on this target: OpenTofu destroys whatever \
                  its configuration no longer declares, so remove the resource from the document"
                     .to_owned(),
@@ -228,7 +234,7 @@ fn check_meta(r: &Resource, kind: Kind) -> Result<(), CompileError> {
         other => {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!(
                     "resource type {:?} does not accept state {other:?} on this target \
                      (accepted: present)",

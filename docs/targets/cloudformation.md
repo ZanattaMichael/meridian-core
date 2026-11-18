@@ -173,7 +173,7 @@ holds how the stack is deployed:
 | `region` | the region to deploy to | the `aws` command's own default |
 | `capabilities` | the capabilities the deployment acknowledges: `CAPABILITY_IAM`, `CAPABILITY_NAMED_IAM`, `CAPABILITY_AUTO_EXPAND` | none |
 
-A second `stack` resource is refused (`duplicate-stack`), and a `stack` may
+A second `stack` resource is refused (`duplicate-resource`), and a `stack` may
 not take part in `dependsOn` (`unsupported-dependency`).
 
 Logical ids hold only letters and digits, so a resource id such as `web_vm`
@@ -339,12 +339,12 @@ target can raise, and what to do:
 | `unsupported-dependency` | a `dependsOn` to or from the `stack` resource | the stack is not a resource of the template |
 | `unsupported-param` | a param the `stack` resource does not take | only `name`, `region` and `capabilities` |
 | `invalid-param` | a `stack` param of the wrong kind, or a capability CloudFormation does not know | a string for `name` and `region`, a list of `CAPABILITY_*` strings for `capabilities` |
-| `invalid-stack-name` | a stack name that does not start with a letter or holds something other than letters, digits and hyphens | rename it |
-| `duplicate-stack` | two resources of type `stack` | keep one |
+| `invalid-name` | a stack name that does not start with a letter or holds something other than letters, digits and hyphens | rename it |
+| `duplicate-resource` | two resources of type `stack` | keep one |
 | `invalid-name` | a resource or output id with no letters or digits to make a logical id from | rename it |
-| `duplicate-logical-id`, `duplicate-output` | two resources, or two outputs, that become the same logical id (`web_vm` and `WebVm`) | rename one |
+| `duplicate-resource`, `duplicate-output` | two resources, or two outputs, that become the same logical id (`web_vm` and `WebVm`) | rename one |
 | `invalid-reference` | `${...}` that is not a resource of the document, one attribute of it, or a pseudo parameter | fix the reference |
-| `empty-template` | a document with no resources but the stack | add a resource, or delete the stack yourself |
+| `empty-document` | a document with no resources but the stack | add a resource, or delete the stack yourself |
 
 ## Troubleshooting
 

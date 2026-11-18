@@ -1,1 +1,1 @@
-fixtures/web_stack.yaml:15:7: template: resource "nginx_pkg" [unsupported-resource-type]: has the type "package", which this target cannot express (supported: file)
+fixtures/web_stack.yaml:15:7: template: resource "nginx_pkg" [unsupported-resource-type]: has the type "package", which this target cannot express (supported: file) (hint: use a type from the target's resource types; `meridian plugins` lists them)

@@ -102,27 +102,25 @@ fn the_guide_documents_every_refusal_rule() {
     let mut rules = std::collections::BTreeSet::new();
     for file in ["transform.rs", "sort.rs", "validate.rs"] {
         let source = std::fs::read_to_string(root.join("plugins/salt/src").join(file)).unwrap();
-        // A rule is a kebab-case string literal on a line of its own, or
-        // the first argument of a call that builds a refusal.
+        // A rule is a constant of the registry (`rules::UNSUPPORTED_PARAM`)
+        // or of this plugin's own table (`own::SHELL_REQUIRED`); its name is
+        // the constant's, in lower case with hyphens.
         for line in source.lines() {
-            let line = line.trim();
-            for prefix in ["\"", "fail(\"", "fail_document(\"", "rule: \""] {
-                let Some(rest) = line.strip_prefix(prefix) else {
-                    continue;
-                };
-                let Some(end) = rest.find('"') else { continue };
-                let word = &rest[..end];
-                let after = rest[end + 1..].trim_start_matches(".to_owned()");
-                if word.contains('-')
-                    && word.chars().all(|c| c.is_ascii_lowercase() || c == '-')
-                    && matches!(after, "," | "")
-                {
-                    rules.insert(word.to_owned());
+            for prefix in ["rules::", "own::"] {
+                for (at, _) in line.match_indices(prefix) {
+                    let rest = &line[at + prefix.len()..];
+                    let end = rest
+                        .find(|c: char| !(c.is_ascii_uppercase() || c == '_'))
+                        .unwrap_or(rest.len());
+                    let word = &rest[..end];
+                    if word.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+                        rules.insert(word.to_ascii_lowercase().replace('_', "-"));
+                    }
                 }
             }
         }
     }
-    assert!(rules.len() >= 25, "only found {rules:?}");
+    assert!(rules.len() >= 15, "only found {rules:?}");
     for rule in &rules {
         assert!(
             guide.contains(&format!("`{rule}`")),
@@ -675,11 +673,11 @@ fn a_document_whose_name_cannot_name_a_state_file_is_refused() {
     let mut graph = fixture("accounts", "salt");
     graph.name = "web.prod".into();
     let err = emit(&graph).unwrap_err();
-    assert_eq!(err.rule, "invalid-sls-name");
+    assert_eq!(err.rule, "invalid-name");
     graph.name = "top".into();
-    assert_eq!(emit(&graph).unwrap_err().rule, "reserved-sls-name");
+    assert_eq!(emit(&graph).unwrap_err().rule, "reserved-name");
     graph.name.clear();
-    assert_eq!(emit(&graph).unwrap_err().rule, "missing-name");
+    assert_eq!(emit(&graph).unwrap_err().rule, "missing-param");
 }
 
 #[test]
@@ -698,7 +696,7 @@ fn an_id_salt_reads_for_itself_is_refused() {
     graph.edges.clear();
     graph.resources[0].id = "include".into();
     let err = emit(&graph).unwrap_err();
-    assert_eq!(err.rule, "reserved-id");
+    assert_eq!(err.rule, "reserved-name");
     assert_eq!(err.resource, "include");
 }
 
@@ -709,7 +707,7 @@ fn a_resource_named_like_a_reaction_is_refused() {
         CONF.replace("ACTION", "reload")
     );
     let err = refusal(&resources);
-    assert_eq!(err.rule, "duplicate-state-id");
+    assert_eq!(err.rule, "duplicate-resource");
     assert_eq!(
         err.msg,
         "state ID \"reload svc\" is already used by resource \"reload svc\""
@@ -738,7 +736,7 @@ fn a_dependency_cycle_is_refused() {
         action: String::new(),
         pos: Position::default(),
     });
-    assert_eq!(emit(&graph).unwrap_err().rule, "cycle");
+    assert_eq!(emit(&graph).unwrap_err().rule, "dependency-cycle");
 }
 
 #[test]

@@ -25,6 +25,7 @@ mod validate;
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules::Rule;
 use meridian_sdk::{
     Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, PlacedEscape, Position,
     Resource, ResourceGraph, Value,
@@ -101,7 +102,7 @@ pub(crate) struct Playbook {
 }
 
 /// A refusal of one resource, stamped with this target.
-pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         ..CompileError::for_resource(r, rule, msg)

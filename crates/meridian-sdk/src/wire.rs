@@ -14,6 +14,7 @@ use meridian_value::{
 use crate::credential::{Credential, HeldCredential};
 use crate::import::*;
 use crate::pb;
+use crate::rules::{DescribedRule, Rule};
 use crate::run::*;
 use crate::schema::{ParamKind, ParamSchema, ResourceSchema};
 use crate::schemas::{SchemaExport, SchemaRequest};
@@ -380,6 +381,7 @@ pub fn emit_response(outcome: Result<Emitted, CompileError>) -> pb::EmitResponse
                 rule: e.rule,
                 msg: e.msg,
                 pos: Some(position_to_wire(&e.pos)),
+                hint: e.hint,
             }),
         },
     }
@@ -399,6 +401,7 @@ pub fn emit_response_from_wire(
             rule: e.rule,
             msg: e.msg,
             pos: position_from_wire(e.pos),
+            hint: e.hint,
         });
     }
     Ok(Emitted {
@@ -908,6 +911,28 @@ pub fn settings_from_wire(settings: Vec<pb::Setting>) -> Vec<Setting> {
             variable: s.variable,
             default: s.default_value,
             description: s.description,
+        })
+        .collect()
+}
+
+pub fn rules_to_wire(rules: &[Rule]) -> Vec<pb::Rule> {
+    rules
+        .iter()
+        .map(|r| pb::Rule {
+            name: r.name.to_owned(),
+            meaning: r.meaning.to_owned(),
+            hint: r.hint.to_owned(),
+        })
+        .collect()
+}
+
+pub fn rules_from_wire(rules: Vec<pb::Rule>) -> Vec<DescribedRule> {
+    rules
+        .into_iter()
+        .map(|r| DescribedRule {
+            name: r.name,
+            meaning: r.meaning,
+            hint: r.hint,
         })
         .collect()
 }

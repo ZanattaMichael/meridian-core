@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, EdgeKind, ResourceGraph};
 
 use crate::{refuse_at, Template};
@@ -22,7 +23,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.from,
                 &edge.pos,
-                "unsupported-action",
+                &rules::UNSUPPORTED_ACTION,
                 format!(
                     "notifies resource {:?} with action {:?}, which this target cannot express: \
                      Resource Manager has no way to act on one resource because another changed",
@@ -35,7 +36,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.to,
                 &edge.pos,
-                "unsupported-dependency",
+                &rules::UNSUPPORTED_DEPENDENCY,
                 "a dependency must be between two resources of the template; a parameter and \
                  the deployment's own settings are not resources"
                     .to_owned(),
@@ -53,7 +54,7 @@ pub(crate) fn apply_ordering(
         return Err(refuse_at(
             &first.id,
             &first.pos,
-            "dependency-cycle",
+            &rules::DEPENDENCY_CYCLE,
             format!(
                 "resources depend on each other in a circle, which Resource Manager refuses: {}",
                 cycle.join(" -> ")

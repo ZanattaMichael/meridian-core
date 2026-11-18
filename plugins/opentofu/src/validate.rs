@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, Value};
 
 use crate::{refuse_at, Config, Kind};
@@ -25,7 +26,7 @@ pub(crate) fn validate(config: &Config) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &block.name,
                 &block.pos,
-                "invalid-name",
+                &rules::INVALID_NAME,
                 format!(
                     "resource id {:?} cannot be an OpenTofu name: a name starts with a letter \
                      or underscore and holds only letters, digits, underscores and hyphens",
@@ -42,7 +43,7 @@ pub(crate) fn validate(config: &Config) -> Result<(), CompileError> {
                         return Err(refuse_at(
                             &block.name,
                             &block.pos,
-                            "invalid-param",
+                            &rules::INVALID_PARAM,
                             "a provider's alias must be a string".to_owned(),
                         ))
                     }
@@ -62,7 +63,7 @@ pub(crate) fn validate(config: &Config) -> Result<(), CompileError> {
                     return Err(refuse_at(
                         &block.name,
                         &block.pos,
-                        "duplicate-provider",
+                        &rules::DUPLICATE_RESOURCE,
                         msg,
                     ));
                 }
@@ -73,7 +74,7 @@ pub(crate) fn validate(config: &Config) -> Result<(), CompileError> {
                     return Err(refuse_at(
                         &block.name,
                         &block.pos,
-                        "duplicate-backend",
+                        &rules::DUPLICATE_RESOURCE,
                         "a configuration stores its state in one backend; this document declares two"
                             .to_owned(),
                     ));
@@ -84,7 +85,7 @@ pub(crate) fn validate(config: &Config) -> Result<(), CompileError> {
                     return Err(refuse_at(
                         &block.name,
                         &block.pos,
-                        "missing-param",
+                        &rules::MISSING_PARAM,
                         "resource type \"module\" requires param \"source\" on this target"
                             .to_owned(),
                     ));
@@ -96,7 +97,7 @@ pub(crate) fn validate(config: &Config) -> Result<(), CompileError> {
                     return Err(refuse_at(
                         &block.name,
                         &block.pos,
-                        "duplicate-encryption",
+                        &rules::DUPLICATE_RESOURCE,
                         "a configuration has one encryption block; this document declares two"
                             .to_owned(),
                     ));
@@ -107,7 +108,7 @@ pub(crate) fn validate(config: &Config) -> Result<(), CompileError> {
                     return Err(refuse_at(
                         &block.name,
                         &block.pos,
-                        "missing-param",
+                        &rules::MISSING_PARAM,
                         "resource type \"local\" requires param \"value\" on this target"
                             .to_owned(),
                     ));
@@ -116,7 +117,7 @@ pub(crate) fn validate(config: &Config) -> Result<(), CompileError> {
                     return Err(refuse_at(
                         &block.name,
                         &block.pos,
-                        "invalid-param",
+                        &rules::INVALID_PARAM,
                         format!(
                             "a local value has one param, \"value\"; {extra:?} has nowhere to go"
                         ),
@@ -133,7 +134,7 @@ pub(crate) fn validate(config: &Config) -> Result<(), CompileError> {
             return Err(refuse_at(
                 "",
                 &output.pos,
-                "invalid-name",
+                &rules::INVALID_NAME,
                 format!("output name {:?} cannot be an OpenTofu name", output.name),
             ));
         }
@@ -141,7 +142,7 @@ pub(crate) fn validate(config: &Config) -> Result<(), CompileError> {
             return Err(refuse_at(
                 "",
                 &output.pos,
-                "duplicate-output",
+                &rules::DUPLICATE_OUTPUT,
                 format!("output {:?} is declared twice", output.name),
             ));
         }
@@ -222,10 +223,10 @@ mod tests {
             ("invalid-param", "aws", |c| {
                 at(c, "aws").body.insert("alias".to_owned(), Value::Int(1));
             }),
-            ("duplicate-provider", "again", |c| {
+            ("duplicate-resource", "again", |c| {
                 c.blocks.push(block(Kind::Provider, "aws", "again", &[]));
             }),
-            ("duplicate-provider", "east2", |c| {
+            ("duplicate-resource", "east2", |c| {
                 for name in ["east", "east2"] {
                     c.blocks.push(block(
                         Kind::Provider,
@@ -235,10 +236,10 @@ mod tests {
                     ));
                 }
             }),
-            ("duplicate-backend", "other", |c| {
+            ("duplicate-resource", "other", |c| {
                 c.blocks.push(block(Kind::Backend, "local", "other", &[]));
             }),
-            ("duplicate-encryption", "other", |c| {
+            ("duplicate-resource", "other", |c| {
                 c.blocks.push(block(Kind::Encryption, "", "other", &[]));
             }),
             ("missing-param", "vpc", |c| at(c, "vpc").body.clear()),

@@ -3,10 +3,11 @@
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{CompileError, Position, Value, Warning};
 
 use crate::expression;
-use crate::{refuse_at, Scope, Template, NAME};
+use crate::{own, refuse_at, Scope, Template, NAME};
 
 /// The types a template parameter can have.
 pub(crate) const PARAMETER_TYPES: &[&str] = &[
@@ -43,10 +44,11 @@ pub(crate) fn is_secure(parameter_type: &str) -> bool {
         || parameter_type.eq_ignore_ascii_case("secureObject")
 }
 
-fn document(rule: &str, msg: String) -> CompileError {
+fn document(rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         ..CompileError::default()
     }
@@ -66,7 +68,7 @@ pub(crate) fn validate(template: &Template) -> Result<Vec<Warning>, CompileError
     let settings = &template.settings;
     if !is_azure_name(&settings.name, 64) {
         return Err(document(
-            "invalid-deployment-name",
+            &rules::INVALID_NAME,
             format!(
                 "{:?} cannot be a deployment name: one holds up to 64 letters, digits and \
                  the characters -_.(). Name the deployment with a resource of type \"deployment\"",
@@ -78,7 +80,7 @@ pub(crate) fn validate(template: &Template) -> Result<Vec<Warning>, CompileError
         Scope::ResourceGroup => {
             if settings.resource_group.is_empty() {
                 return Err(document(
-                    "missing-param",
+                    &rules::MISSING_PARAM,
                     "a deployment needs the resource group it deploys to: add a resource of \
                      type \"deployment\" with param \"resourceGroup\", or give it scope \
                      \"subscription\""
@@ -89,7 +91,7 @@ pub(crate) fn validate(template: &Template) -> Result<Vec<Warning>, CompileError
                 || settings.resource_group.ends_with('.')
             {
                 return Err(document(
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     format!(
                         "{:?} cannot be a resource group name: one holds up to 90 letters, \
                          digits and the characters -_.(), and does not end with a period",
@@ -99,7 +101,7 @@ pub(crate) fn validate(template: &Template) -> Result<Vec<Warning>, CompileError
             }
             if !settings.location.is_empty() {
                 return Err(document(
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     "a deployment to a resource group takes no \"location\": it is stored in \
                      the group's own. Give each resource its location instead"
                         .to_owned(),
@@ -109,7 +111,7 @@ pub(crate) fn validate(template: &Template) -> Result<Vec<Warning>, CompileError
         Scope::Subscription => {
             if settings.location.is_empty() {
                 return Err(document(
-                    "missing-param",
+                    &rules::MISSING_PARAM,
                     "a deployment to a subscription needs param \"location\": the region that \
                      stores the deployment's record"
                         .to_owned(),
@@ -117,7 +119,7 @@ pub(crate) fn validate(template: &Template) -> Result<Vec<Warning>, CompileError
             }
             if !settings.resource_group.is_empty() {
                 return Err(document(
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     "a deployment to a subscription takes no \"resourceGroup\"".to_owned(),
                 ));
             }
@@ -127,13 +129,13 @@ pub(crate) fn validate(template: &Template) -> Result<Vec<Warning>, CompileError
         ("Incremental", _) | ("Complete", Scope::ResourceGroup) => {}
         ("Complete", Scope::Subscription) => {
             return Err(document(
-                "invalid-param",
+                &rules::INVALID_PARAM,
                 "mode \"Complete\" exists only for a deployment to a resource group".to_owned(),
             ))
         }
         (other, _) => {
             return Err(document(
-                "invalid-param",
+                &rules::INVALID_PARAM,
                 format!("{other:?} is not a deployment mode (accepted: Incremental, Complete)"),
             ))
         }
@@ -141,7 +143,7 @@ pub(crate) fn validate(template: &Template) -> Result<Vec<Warning>, CompileError
 
     if template.entries.is_empty() {
         return Err(document(
-            "empty-template",
+            &rules::EMPTY_DOCUMENT,
             "a template needs at least one resource".to_owned(),
         ));
     }
@@ -152,7 +154,7 @@ pub(crate) fn validate(template: &Template) -> Result<Vec<Warning>, CompileError
     ] {
         if count > max {
             return Err(document(
-                "template-too-large",
+                &own::TEMPLATE_TOO_LARGE,
                 format!("the document has {count} {what}, and a template holds at most {max}"),
             ));
         }
@@ -161,11 +163,11 @@ pub(crate) fn validate(template: &Template) -> Result<Vec<Warning>, CompileError
     let mut warnings = Vec::new();
     for parameter in &template.parameters {
         let refuse =
-            |rule: &str, msg: String| refuse_at(&parameter.name, &parameter.pos, rule, msg);
+            |rule: &Rule, msg: String| refuse_at(&parameter.name, &parameter.pos, rule, msg);
         for key in parameter.definition.keys() {
             if !PARAMETER_KEYS.contains(&key.as_str()) {
                 return Err(refuse(
-                    "unsupported-param",
+                    &rules::UNSUPPORTED_PARAM,
                     format!(
                         "resource type \"parameter\" does not accept param {key:?} on this \
                          target (accepted: {})",
@@ -178,13 +180,13 @@ pub(crate) fn validate(template: &Template) -> Result<Vec<Warning>, CompileError
             Some(Value::String(t)) => t,
             Some(_) => {
                 return Err(refuse(
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     "param \"type\" of a parameter must be text".to_owned(),
                 ))
             }
             None => {
                 return Err(refuse(
-                    "missing-param",
+                    &rules::MISSING_PARAM,
                     format!(
                         "a parameter needs param \"type\" (accepted: {})",
                         PARAMETER_TYPES.join(", ")
@@ -197,7 +199,7 @@ pub(crate) fn validate(template: &Template) -> Result<Vec<Warning>, CompileError
             .any(|t| t.eq_ignore_ascii_case(parameter_type))
         {
             return Err(refuse(
-                "invalid-param",
+                &rules::INVALID_PARAM,
                 format!(
                     "{parameter_type:?} is not a type a parameter can have (accepted: {})",
                     PARAMETER_TYPES.join(", ")
@@ -243,7 +245,7 @@ pub(crate) fn validate(template: &Template) -> Result<Vec<Warning>, CompileError
                 return Err(refuse_at(
                     &entry.id,
                     &entry.pos,
-                    "duplicate-resource",
+                    &rules::DUPLICATE_RESOURCE,
                     format!(
                         "resources {previous:?} and {:?} are both the {} named {:?}; a template \
                          declares a resource once",
@@ -262,7 +264,7 @@ pub(crate) fn validate(template: &Template) -> Result<Vec<Warning>, CompileError
             return Err(refuse_at(
                 "",
                 pos,
-                "duplicate-output",
+                &rules::DUPLICATE_OUTPUT,
                 format!(
                     "outputs {previous:?} and {name:?} differ only in case, and Resource \
                      Manager does not tell them apart"
@@ -274,7 +276,7 @@ pub(crate) fn validate(template: &Template) -> Result<Vec<Warning>, CompileError
                 refuse_at(
                     "",
                     pos,
-                    "invalid-expression",
+                    &own::INVALID_EXPRESSION,
                     format!(
                         "output {name:?}: {value:?} is not a well-formed ARM expression: {why}"
                     ),
@@ -293,7 +295,7 @@ fn check_expressions(value: &Value, resource: &str, pos: &Position) -> Result<()
                 refuse_at(
                     resource,
                     pos,
-                    "invalid-expression",
+                    &own::INVALID_EXPRESSION,
                     format!("{text:?} is not a well-formed ARM expression: {why}"),
                 )
             }),
@@ -378,13 +380,11 @@ mod tests {
     fn each_rule_refuses_the_one_mistake_it_is_for() {
         type Break = fn(&mut Template);
         let table: &[(&str, &str, Break)] = &[
-            ("invalid-deployment-name", "", |t| t.settings.name.clear()),
-            ("invalid-deployment-name", "", |t| {
+            ("invalid-name", "", |t| t.settings.name.clear()),
+            ("invalid-name", "", |t| {
                 t.settings.name = "my site".to_owned()
             }),
-            ("invalid-deployment-name", "", |t| {
-                t.settings.name = "a".repeat(65)
-            }),
+            ("invalid-name", "", |t| t.settings.name = "a".repeat(65)),
             ("missing-param", "", |t| t.settings.resource_group.clear()),
             ("invalid-param", "", |t| {
                 t.settings.resource_group = "rg site".to_owned()
@@ -414,7 +414,7 @@ mod tests {
                 t.settings.mode = "incremental".to_owned()
             }),
             ("invalid-param", "", |t| t.settings.mode.clear()),
-            ("empty-template", "", |t| t.entries.clear()),
+            ("empty-document", "", |t| t.entries.clear()),
             ("template-too-large", "", |t| {
                 t.entries = (0..=MAX_RESOURCES)
                     .map(|i| entry(&format!("r{i}"), &format!("r{i}")))

@@ -114,6 +114,20 @@ fn plugins_lists_what_each_plugin_is_and_can_do() {
     );
 }
 
+#[test]
+fn plugins_rules_lists_a_plugins_own_refusal_rules() {
+    let dir = scratch("plugins-rules", WORKFLOW);
+    let out = meridian(&dir, &["plugins", "--rules"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    // The fake target refuses only under the general rules, which the
+    // reference page lists; the command says so instead of printing nothing.
+    assert!(
+        text.ends_with("  signature: not checked\n  rules:     only the general ones\n"),
+        "{text}"
+    );
+}
+
 /// Runs `meridian` with its stdout closed before it writes, as
 /// `meridian ... | head -0` does.
 fn meridian_with_stdout_closed(dir: &Path, args: &[&str]) -> Output {

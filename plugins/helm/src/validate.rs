@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::CompileError;
 
 use crate::{refuse_at, Chart, NAME};
@@ -67,9 +68,10 @@ fn is_duration(text: &str) -> bool {
 }
 
 pub(crate) fn validate(chart: &Chart) -> Result<(), CompileError> {
-    let document = |rule: &str, msg: String| CompileError {
+    let document = |rule: &Rule, msg: String| CompileError {
         target: NAME.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         ..CompileError::default()
     };
@@ -77,7 +79,7 @@ pub(crate) fn validate(chart: &Chart) -> Result<(), CompileError> {
     let release = &chart.release;
     if !is_label(&release.name, 53) {
         return Err(document(
-            "invalid-release-name",
+            &rules::INVALID_NAME,
             format!(
                 "{:?} cannot be a release name: one holds only lowercase letters, digits and \
                  hyphens, starts and ends with a letter or a digit, and is at most 53 \
@@ -88,7 +90,7 @@ pub(crate) fn validate(chart: &Chart) -> Result<(), CompileError> {
     }
     if !is_label(&release.namespace, 63) {
         return Err(document(
-            "invalid-param",
+            &rules::INVALID_PARAM,
             format!(
                 "{:?} cannot be the release's namespace: one holds only lowercase letters, \
                  digits and hyphens, and is at most 63 characters",
@@ -98,7 +100,7 @@ pub(crate) fn validate(chart: &Chart) -> Result<(), CompileError> {
     }
     if !release.timeout.is_empty() && !is_duration(&release.timeout) {
         return Err(document(
-            "invalid-param",
+            &rules::INVALID_PARAM,
             format!(
                 "{:?} is not a timeout Helm reads: write a duration such as 90s, 5m or 1h30m",
                 release.timeout
@@ -107,7 +109,7 @@ pub(crate) fn validate(chart: &Chart) -> Result<(), CompileError> {
     }
     if !is_label(&chart.chart.name, 63) {
         return Err(document(
-            "invalid-chart-name",
+            &rules::INVALID_NAME,
             format!(
                 "{:?} cannot be a chart name: one holds only lowercase letters, digits and \
                  hyphens. Name the chart with a resource of type \"chart\"",
@@ -117,7 +119,7 @@ pub(crate) fn validate(chart: &Chart) -> Result<(), CompileError> {
     }
     if !is_semver(&chart.chart.version) {
         return Err(document(
-            "invalid-param",
+            &rules::INVALID_PARAM,
             format!(
                 "{:?} is not a version a chart can have: Helm requires a semantic version \
                  such as 1.4.0",
@@ -127,7 +129,7 @@ pub(crate) fn validate(chart: &Chart) -> Result<(), CompileError> {
     }
     if chart.manifests.is_empty() {
         return Err(document(
-            "empty-chart",
+            &rules::EMPTY_DOCUMENT,
             "a chart needs at least one Kubernetes object".to_owned(),
         ));
     }
@@ -138,7 +140,7 @@ pub(crate) fn validate(chart: &Chart) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &manifest.id,
                 &manifest.pos,
-                "invalid-name",
+                &rules::INVALID_NAME,
                 format!(
                     "{:?} cannot be the name of a Kubernetes object: one holds only lowercase \
                      letters, digits, hyphens and dots, starts and ends with a letter or a \
@@ -157,7 +159,7 @@ pub(crate) fn validate(chart: &Chart) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &manifest.id,
                 &manifest.pos,
-                "duplicate-object",
+                &rules::DUPLICATE_RESOURCE,
                 format!(
                     "resources {previous:?} and {:?} are both the {} named {:?}; a release \
                      holds an object once",
@@ -171,7 +173,7 @@ pub(crate) fn validate(chart: &Chart) -> Result<(), CompileError> {
     for output in &chart.outputs {
         if outputs.insert(&output.name, ()).is_some() {
             return Err(document(
-                "duplicate-output",
+                &rules::DUPLICATE_OUTPUT,
                 format!("two outputs are named {:?}", output.name),
             ));
         }
@@ -236,13 +238,9 @@ mod tests {
     fn each_rule_refuses_the_one_mistake_it_is_for() {
         type Break = fn(&mut Chart);
         let table: &[(&str, &str, Break)] = &[
-            ("invalid-release-name", "", |c| c.release.name.clear()),
-            ("invalid-release-name", "", |c| {
-                c.release.name = "Site".to_owned()
-            }),
-            ("invalid-release-name", "", |c| {
-                c.release.name = "a".repeat(54)
-            }),
+            ("invalid-name", "", |c| c.release.name.clear()),
+            ("invalid-name", "", |c| c.release.name = "Site".to_owned()),
+            ("invalid-name", "", |c| c.release.name = "a".repeat(54)),
             ("invalid-param", "", |c| c.release.namespace.clear()),
             ("invalid-param", "", |c| {
                 c.release.namespace = "web_ns".to_owned()
@@ -252,20 +250,18 @@ mod tests {
             }),
             ("invalid-param", "", |c| c.release.timeout = "5".to_owned()),
             ("invalid-param", "", |c| c.release.timeout = "5d".to_owned()),
-            ("invalid-chart-name", "", |c| {
-                c.chart.name = "my_chart".to_owned()
-            }),
-            ("invalid-chart-name", "", |c| c.chart.name.clear()),
+            ("invalid-name", "", |c| c.chart.name = "my_chart".to_owned()),
+            ("invalid-name", "", |c| c.chart.name.clear()),
             ("invalid-param", "", |c| c.chart.version = "1.4".to_owned()),
             ("invalid-param", "", |c| {
                 c.chart.version = "v1.4.0".to_owned()
             }),
-            ("empty-chart", "", |c| c.manifests.clear()),
+            ("empty-document", "", |c| c.manifests.clear()),
             ("invalid-name", "cfg", |c| {
                 c.manifests[0].name = "site_config".to_owned()
             }),
             ("invalid-name", "svc", |c| c.manifests[1].name.clear()),
-            ("duplicate-object", "again", |c| {
+            ("duplicate-resource", "again", |c| {
                 c.manifests
                     .push(manifest("again", "Service", "web", "site"));
             }),

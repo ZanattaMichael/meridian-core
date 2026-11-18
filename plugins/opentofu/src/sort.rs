@@ -1,5 +1,6 @@
 //! Stage two: OpenTofu's ordering semantics.
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, EdgeKind, ResourceGraph, Value, Warning};
 
 use crate::{refuse_at, Config, Kind, NAME};
@@ -27,7 +28,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.to,
                 &edge.pos,
-                "unknown-dependency",
+                &rules::UNKNOWN_DEPENDENCY,
                 format!("an edge names resource {missing:?}, which this document does not declare"),
             ));
         };
@@ -36,7 +37,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.to,
                 &edge.pos,
-                "unsupported-dependency",
+                &rules::UNSUPPORTED_DEPENDENCY,
                 format!(
                     "{:?} is {}, which OpenTofu works out before or alongside \
                      everything else; nothing can depend on it or be ordered by it",
@@ -72,7 +73,7 @@ pub(crate) fn apply_ordering(
                     return Err(refuse_at(
                         &edge.from,
                         &edge.pos,
-                        "unsupported-action",
+                        &rules::UNSUPPORTED_ACTION,
                         format!(
                             "notifies resource {:?} with action {:?}, which this target cannot \
                              express: the only thing OpenTofu can do to a resource when another \
@@ -85,7 +86,7 @@ pub(crate) fn apply_ordering(
                     return Err(refuse_at(
                         &edge.from,
                         &edge.pos,
-                        "unsupported-action",
+                        &rules::UNSUPPORTED_ACTION,
                         format!(
                             "notifies resource {:?}: only a managed resource can be replaced \
                              when another managed resource changes",
@@ -115,7 +116,7 @@ pub(crate) fn apply_ordering(
                     return Err(refuse_at(
                         &edge.to,
                         &edge.pos,
-                        "invalid-param",
+                        &rules::INVALID_PARAM,
                         "param \"lifecycle\" must be a map".to_owned(),
                     ));
                 };
@@ -147,7 +148,7 @@ fn push_unique(
         return Err(refuse_at(
             resource,
             pos,
-            "invalid-param",
+            &rules::INVALID_PARAM,
             format!("param {key:?} must be a list"),
         ));
     };

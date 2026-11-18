@@ -213,7 +213,7 @@ fn types_states_and_missing_images_are_checked() {
     assert_eq!(err.rule, "missing-param");
 
     let err = refusal(SITE);
-    assert_eq!(err.rule, "empty-project");
+    assert_eq!(err.rule, "empty-document");
 
     let err = refusal(
         "    - id: db\n      type: service\n      state: absent\n      params: {image: x}\n",

@@ -17,6 +17,7 @@
 //! A schema is also data: it is written to the cache as JSON, and read back
 //! by an editor that never started the plugin.
 
+use crate::rules;
 use crate::types::{CompileError, Resource};
 use std::collections::BTreeMap;
 
@@ -793,7 +794,11 @@ pub fn check_shared(resource: &Resource) -> Result<(), CompileError> {
             }
             _ => {}
         }
-        return Err(CompileError::for_resource(resource, "invalid-param", msg));
+        return Err(CompileError::for_resource(
+            resource,
+            &rules::INVALID_PARAM,
+            msg,
+        ));
     }
     Ok(())
 }

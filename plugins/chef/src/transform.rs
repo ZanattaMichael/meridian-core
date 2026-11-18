@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, Resource, ResourceGraph, ResourceSchema, TypeName, Value};
 
 use crate::{refuse, Block, Cookbook, NAME};
@@ -172,7 +173,7 @@ pub(crate) fn native_resource(r: &Resource) -> Result<Option<&str>, CompileError
         TypeName::Shared(_) => Ok(None),
         TypeName::NativeNamedLikeShared("exec") => Err(refuse(
             r,
-            "unsupported-resource-type",
+            &rules::UNSUPPORTED_RESOURCE_TYPE,
             format!(
                 "resource type {:?} names no Chef resource: Chef runs a command with execute, \
                  which is written as it is",
@@ -186,7 +187,7 @@ pub(crate) fn native_resource(r: &Resource) -> Result<Option<&str>, CompileError
         // resource has one spelling.
         TypeName::NativeNamedLikeShared(_) => Err(refuse(
             r,
-            "unsupported-resource-type",
+            &rules::UNSUPPORTED_RESOURCE_TYPE,
             format!(
                 "resource type {:?} carries the native/ prefix, which reaches only a Chef \
                  resource whose name is a shared type ({}); every other resource is written \
@@ -212,7 +213,7 @@ fn is_word(name: &str) -> bool {
 fn unsupported_type(r: &Resource) -> CompileError {
     refuse(
         r,
-        "unsupported-resource-type",
+        &rules::UNSUPPORTED_RESOURCE_TYPE,
         format!(
             "unsupported resource type {:?} on this target: it is not one of the shared types \
              ({}), and a Chef resource is written as a recipe names it, such as template or \
@@ -235,7 +236,7 @@ fn native_block(r: &Resource, resource: &str) -> Result<Block, CompileError> {
         if *value == Value::Null {
             return Err(refuse(
                 r,
-                "empty-param",
+                &rules::EMPTY_PARAM,
                 format!("param {name:?} on resource {resource} has no value"),
             ));
         }
@@ -246,7 +247,7 @@ fn native_block(r: &Resource, resource: &str) -> Result<Block, CompileError> {
         if r.params.contains_key("action") {
             return Err(refuse(
                 r,
-                "param-conflicts-with-state",
+                &rules::PARAM_CONFLICTS_WITH_STATE,
                 format!(
                     "state {:?} and param \"action\" both set the resource's action; write one \
                      of them",
@@ -257,7 +258,7 @@ fn native_block(r: &Resource, resource: &str) -> Result<Block, CompileError> {
         if !is_word(&r.state) {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!(
                     "state {:?} is not a Chef action: on resource {resource} the state is the \
                      action the resource takes, one lower-case word such as create or upgrade",
@@ -295,8 +296,10 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Cookbook, CompileError>
         // The shared types are checked the same way on every configuration
         // management target, so a document moves between tools without the
         // type rules changing under it.
-        meridian_sdk::schema::check_shared(resource)
-            .map_err(|e| refuse(resource, &e.rule, e.msg))?;
+        meridian_sdk::schema::check_shared(resource).map_err(|e| CompileError {
+            target: NAME.to_owned(),
+            ..e
+        })?;
         blocks.extend(blocks_for(resource)?);
     }
     Ok(Cookbook {
@@ -318,7 +321,7 @@ fn blocks_for(r: &Resource) -> Result<Vec<Block>, CompileError> {
         let Some(native) = lookup(m.params, name) else {
             return Err(refuse(
                 r,
-                "unsupported-param",
+                &rules::UNSUPPORTED_PARAM,
                 format!(
                     "resource type {:?} does not accept param {:?} on this target (accepted: {})",
                     r.r#type,
@@ -330,7 +333,7 @@ fn blocks_for(r: &Resource) -> Result<Vec<Block>, CompileError> {
         if *value == Value::Null {
             return Err(refuse(
                 r,
-                "empty-param",
+                &rules::EMPTY_PARAM,
                 format!(
                     "param {:?} on resource type {:?} has no value",
                     name, r.r#type
@@ -345,7 +348,7 @@ fn blocks_for(r: &Resource) -> Result<Vec<Block>, CompileError> {
         if !r.params.contains_key(*need) {
             return Err(refuse(
                 r,
-                "missing-param",
+                &rules::MISSING_PARAM,
                 format!(
                     "resource type {:?} requires param {:?} on this target",
                     r.r#type, need
@@ -364,7 +367,7 @@ fn blocks_for(r: &Resource) -> Result<Vec<Block>, CompileError> {
         if !r.state.is_empty() {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!(
                     "resource type {:?} accepts no state on this target, got {:?}",
                     r.r#type, r.state
@@ -376,7 +379,7 @@ fn blocks_for(r: &Resource) -> Result<Vec<Block>, CompileError> {
         let Some(action) = lookup(m.states, state) else {
             return Err(refuse(
                 r,
-                "unsupported-state",
+                &rules::UNSUPPORTED_STATE,
                 format!(
                     "resource type {:?} does not accept state {:?} on this target (accepted: {})",
                     r.r#type,
@@ -397,7 +400,7 @@ fn blocks_for(r: &Resource) -> Result<Vec<Block>, CompileError> {
             Some(_) => {
                 return Err(refuse(
                     r,
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     "param \"enabled\" must be true or false".to_owned(),
                 ))
             }
@@ -406,7 +409,7 @@ fn blocks_for(r: &Resource) -> Result<Vec<Block>, CompileError> {
             if r.params.contains_key("content") {
                 return Err(refuse(
                     r,
-                    "invalid-param",
+                    &rules::PARAM_CONFLICTS_WITH_STATE,
                     "a directory has no content; remove param \"content\" or the state".to_owned(),
                 ));
             }
@@ -441,7 +444,7 @@ fn blocks_for(r: &Resource) -> Result<Vec<Block>, CompileError> {
         let invalid = || {
             refuse(
                 r,
-                "invalid-param",
+                &rules::INVALID_PARAM,
                 "param \"groups\" must be a list of group names".to_owned(),
             )
         };
@@ -477,7 +480,8 @@ pub(crate) fn cookbook_name(document: &str) -> Result<String, CompileError> {
     {
         return Err(CompileError {
             target: NAME.to_owned(),
-            rule: "invalid-cookbook-name".to_owned(),
+            rule: rules::INVALID_NAME.name.to_owned(),
+            hint: rules::INVALID_NAME.hint.to_owned(),
             msg: format!(
                 "document name {document:?} cannot become a Chef cookbook name: {:?} is not \
                  allowed, and a cookbook name may hold only lower-case letters, digits, hyphens \
