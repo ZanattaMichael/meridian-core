@@ -353,9 +353,12 @@ fn a_secret_reaches_the_program_as_secret_configuration_and_is_in_nothing_kept_i
     }
     let dir = scratch(TMP, "real-secret");
     let runner = runner();
-    // The secret is a pet's prefix, so the name Pulumi makes carries it:
-    // what is made from a secret is a secret to Pulumi too.
-    let document = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: pets\nspec:\n  target: pulumi\n  resources:\n    - id: pet\n      type: random:index:RandomPet\n      params:\n        prefix: placeholder\n        length: 1\n  outputs:\n    - name: pet_name\n      value: ${pet.id}\n";
+    // The secret is a pet's prefix. Pulumi keeps the input it was given as
+    // a secret, and so the output of the same name; the name it makes from
+    // the prefix is a secret only because the document says so, with
+    // `additionalSecretOutputs`, as Pulumi does not follow a value through
+    // a provider.
+    let document = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: pets\nspec:\n  target: pulumi\n  resources:\n    - id: pet\n      type: random:index:RandomPet\n      params:\n        prefix: placeholder\n        length: 1\n        resourceOptions:\n          additionalSecretOutputs: [id]\n  outputs:\n    - name: pet_prefix\n      value: ${pet.prefix}\n    - name: pet_name\n      value: ${pet.id}\n    - name: pet_length\n      value: ${pet.length}\n";
     let mut graph = graph_from_text("infra.yaml", document, "pulumi");
     secret_in_param(&mut graph, "pet", "prefix", "token");
     let artifact = Pulumi.emit(&graph, &Data::new()).unwrap().artifact;
@@ -374,14 +377,19 @@ fn a_secret_reaches_the_program_as_secret_configuration_and_is_in_nothing_kept_i
     let applied = runner
         .apply(&context, &artifact, &log)
         .unwrap_or_else(|e| fail("the apply", e));
-    // The program was given the value, and Pulumi treats what it made from
-    // it as a secret.
+    // The program was given the value: it comes back as the secret output
+    // of the same name, and the name made from it starts with it. The
+    // length is nothing secret, so the masking tells the two apart.
+    let pet_prefix = output(&applied.outputs, "pet_prefix");
+    assert!(pet_prefix.sensitive, "the secret input is a secret output");
+    assert_eq!(text(pet_prefix), SECRET);
     let pet_name = output(&applied.outputs, "pet_name");
-    assert!(pet_name.sensitive, "a name made from a secret is a secret");
+    assert!(pet_name.sensitive, "an output named secret is a secret");
     assert!(
         text(pet_name).starts_with(&format!("{SECRET}-")),
         "the pet's name does not start with the prefix"
     );
+    assert!(!output(&applied.outputs, "pet_length").sensitive);
     // Nothing printed holds it, and nothing left in the open: the stack's
     // settings file no longer names the key, and the state holds the value
     // encrypted, as Pulumi keeps every secret.
