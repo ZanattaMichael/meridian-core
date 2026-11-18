@@ -4,10 +4,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::expr::{self, Part};
-use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
+use meridian_sdk::{holds_secret, CompileError, Resource, ResourceGraph, SecretName, Value};
 
 use crate::keys::{self, Lookup};
-use crate::{refuse, refuse_at, Kind, OutputPart, OutputValue, Unit, Units};
+use crate::{refuse, refuse_at, secret_reference, Kind, OutputPart, OutputValue, Unit, Units};
 
 /// The params that are sections of the unit file and not keys of its own
 /// section.
@@ -54,7 +54,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Units, CompileError> {
     };
     for r in &graph.resources {
         check_meta(r)?;
-        units.units.push(unit(r, &names)?);
+        units.units.push(unit(r, &names, &graph.secrets)?);
     }
 
     for output in &graph.outputs {
@@ -155,7 +155,7 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
     }
 }
 
-fn unit(r: &Resource, names: &NameTable) -> Result<Unit, CompileError> {
+fn unit(r: &Resource, names: &NameTable, secrets: &[SecretName]) -> Result<Unit, CompileError> {
     let me = &names[&r.id];
     let kind = me.kind;
     let mut unit = Unit {
@@ -168,8 +168,18 @@ fn unit(r: &Resource, names: &NameTable) -> Result<Unit, CompileError> {
         linked: BTreeSet::new(),
         pos: r.pos.clone(),
     };
+    let (environment, secret_lines) = split_secrets(r, kind, secrets)?;
 
     for (key, value) in &r.params {
+        // A container's `Environment` without its secrets, which became
+        // `Secret=` lines instead.
+        let value = match &environment {
+            Some(rest) if key == "Environment" => rest,
+            _ => value,
+        };
+        if matches!(value, Value::Map(m) if m.is_empty()) && key == "Environment" {
+            continue;
+        }
         let invalid = |msg: String| refuse(r, "invalid-param", format!("param {key:?}: {msg}"));
         let bad_reference =
             |msg: String| refuse(r, "invalid-reference", format!("param {key:?}: {msg}"));
@@ -234,6 +244,12 @@ fn unit(r: &Resource, names: &NameTable) -> Result<Unit, CompileError> {
         }
     }
     unit.linked.remove(&r.id);
+    if !secret_lines.is_empty() {
+        unit.body
+            .entry("Secret".to_owned())
+            .or_default()
+            .extend(secret_lines);
+    }
 
     // Something that runs should still be running after a reboot. Quadlet
     // units cannot be enabled with systemctl, so the unit says so itself.
@@ -242,6 +258,76 @@ fn unit(r: &Resource, names: &NameTable) -> Result<Unit, CompileError> {
             .insert("WantedBy".to_owned(), vec!["default.target".to_owned()]);
     }
     Ok(unit)
+}
+
+/// Takes the secrets out of a container's `Environment` map: each becomes a
+/// `Secret=<podman secret>,type=env,target=<variable>` line, and the map
+/// comes back without them. A secret anywhere else in the unit is refused,
+/// because a unit file is installed on the host for anyone who can read the
+/// directory, and Quadlet has no other key that reads a Podman secret into
+/// a setting.
+fn split_secrets(
+    r: &Resource,
+    kind: Kind,
+    secrets: &[SecretName],
+) -> Result<(Option<Value>, Vec<String>), CompileError> {
+    let mut lines = Vec::new();
+    let mut environment = None;
+    for (key, value) in &r.params {
+        if !holds_secret(value) {
+            continue;
+        }
+        if kind == Kind::Container && key == "Environment" {
+            if let Value::Map(entries) = value {
+                let mut rest = BTreeMap::new();
+                for (variable, entry) in entries {
+                    match entry {
+                        Value::Secret(slot) => {
+                            let name = secrets
+                                .iter()
+                                .find(|s| s.secret == *slot)
+                                .map(|s| s.name.as_str())
+                                .unwrap_or(meridian_sdk::SENSITIVE);
+                            lines.push(secret_reference(name, variable));
+                        }
+                        other if holds_secret(other) => {
+                            return Err(refuse(
+                                r,
+                                "unsupported-secret-place",
+                                format!(
+                                    "param \"Environment\": {variable} holds a secret inside a \
+                                     value; a variable's value is one string, so write the secret \
+                                     as the whole value"
+                                ),
+                            ))
+                        }
+                        other => {
+                            rest.insert(variable.clone(), other.clone());
+                        }
+                    }
+                }
+                environment = Some(Value::Map(rest));
+                continue;
+            }
+        }
+        let where_else = if kind == Kind::Container {
+            "put it in Environment as a map, where it becomes a Podman secret the container \
+             reads into the variable"
+        } else {
+            "only a container's Environment can take one, as a Podman secret the container \
+             reads into a variable"
+        };
+        return Err(refuse(
+            r,
+            "unsupported-secret-place",
+            format!(
+                "param {key:?} of the {} holds a secret, and a unit file is written onto the \
+                 host as it stands, where a secret cannot go; {where_else}",
+                kind.as_str()
+            ),
+        ));
+    }
+    Ok((environment, lines))
 }
 
 /// Why a value could not be written.

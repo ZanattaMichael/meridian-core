@@ -37,12 +37,19 @@ const TAKE_A_SECRET: &[(&str, &str)] = &[
     ("bicep", "meridian_secret_db_password"),
     ("chef", "node['meridian_secret_db_password']"),
     ("cloudformation", "MeridianSecretDbPassword"),
+    ("docker", "${meridian_secret_db_password}"),
+    ("helm", "${meridian_secret_db_password}"),
+    ("kubernetes", "${meridian_secret_db_password}"),
     (
         "openvox",
         "Sensitive(lookup('meridian_secret_db_password'))",
     ),
     ("opentofu", "var.meridian_secret_db_password"),
     ("packer", "var.meridian_secret_db_password"),
+    (
+        "podman",
+        "meridian_secret_db_password,type=env,target=PASSWORD",
+    ),
     ("pulumi", "${meridian_secret_db_password}"),
     ("puppet", "Sensitive(lookup('meridian_secret_db_password'))"),
     (
@@ -52,12 +59,29 @@ const TAKE_A_SECRET: &[(&str, &str)] = &[
     ("terraform", "var.meridian_secret_db_password"),
 ];
 
+/// Where a target's example has no scalar param a secret may go in, because
+/// every one is a name, a setting or a field of an object that is written
+/// as it stands: a resource of the target's own to add to the example, with
+/// `VALUE` where the secret goes. The place is the one the target documents.
+const PLACE_FOR_A_SECRET: &[(&str, &str)] = &[
+    (
+        "kubernetes",
+        "    - id: conformance_login\n      type: v1/Secret\n      params:\n        stringData:\n          \
+         password: VALUE\n",
+    ),
+    (
+        "podman",
+        "    - id: conformance_probe\n      type: container\n      params:\n        Image: \
+         docker.io/library/busybox:stable\n        Environment:\n          PASSWORD: VALUE\n",
+    ),
+];
+
 /// The targets that reach a host as a credential.
 const TAKE_A_CREDENTIAL: &[&str] = &["ansible"];
 
-/// The targets, each with the first example of its own that holds one
-/// document and decides nothing from data.
-fn examples() -> Vec<(String, PathBuf)> {
+/// The targets, each with the examples of its own that hold one document
+/// and decide nothing from data, in name order.
+fn examples() -> Vec<(String, Vec<PathBuf>)> {
     let root = repo_root();
     let open = ["$", "{{"].concat();
     let mut found = Vec::new();
@@ -71,19 +95,22 @@ fn examples() -> Vec<(String, PathBuf)> {
             .filter(|file| file.extension().is_some_and(|e| e == "yaml"))
             .collect();
         files.sort();
-        let plain = files.into_iter().find(|file| {
-            let text = fs::read_to_string(file).unwrap();
-            text.lines()
-                .filter(|line| line.starts_with("  target: "))
-                .count()
-                == 1
-                && !text.contains(&open)
-                && !text
-                    .lines()
-                    .any(|line| line.trim_start().starts_with("when:"))
-        });
-        if let Some(file) = plain {
-            found.push((target, file));
+        let plain: Vec<PathBuf> = files
+            .into_iter()
+            .filter(|file| {
+                let text = fs::read_to_string(file).unwrap();
+                text.lines()
+                    .filter(|line| line.starts_with("  target: "))
+                    .count()
+                    == 1
+                    && !text.contains(&open)
+                    && !text
+                        .lines()
+                        .any(|line| line.trim_start().starts_with("when:"))
+            })
+            .collect();
+        if !plain.is_empty() {
+            found.push((target, plain));
         }
     }
     found.sort();
@@ -95,8 +122,16 @@ const SECRETS: &str = "  secrets:\n    - name: db_password\n      from: env\n   
                        CONFORMANCE_KEY\n";
 
 /// The example with the secrets declared, and one of its text params
-/// replaced by `value`. `index` picks which param, in document order.
-fn with_secret_in_param(example: &str, index: usize, value: &str) -> Option<String> {
+/// replaced by `value`. `index` picks which param, in document order. For a
+/// target in [`PLACE_FOR_A_SECRET`], the one place is that resource, added
+/// to the example's resources.
+fn with_secret_in_param(target: &str, example: &str, index: usize, value: &str) -> Option<String> {
+    if let Some((_, place)) = PLACE_FOR_A_SECRET.iter().find(|(name, _)| *name == target) {
+        if index > 0 {
+            return None;
+        }
+        return Some(with_resource(example, &place.replace("VALUE", value)));
+    }
     let mut out = String::new();
     let mut declared = false;
     let mut seen = 0;
@@ -133,6 +168,39 @@ fn with_secret_in_param(example: &str, index: usize, value: &str) -> Option<Stri
         out.push('\n');
     }
     (declared && replaced).then_some(out)
+}
+
+/// The example with the secrets declared and `resource` added at the end of
+/// its resources, which end at the next key of the spec or at the end.
+fn with_resource(example: &str, resource: &str) -> String {
+    let mut out = String::new();
+    let mut in_resources = false;
+    let mut added = false;
+    for line in example.lines() {
+        if line.starts_with("  target: ") {
+            out.push_str(line);
+            out.push('\n');
+            out.push_str(SECRETS);
+            continue;
+        }
+        if line.starts_with("  resources:") {
+            in_resources = true;
+        } else if in_resources
+            && !added
+            && line.starts_with("  ")
+            && !line.starts_with("   ")
+            && !line.trim().is_empty()
+        {
+            out.push_str(resource);
+            added = true;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if !added {
+        out.push_str(resource);
+    }
+    out
 }
 
 /// The example with a credential declared whose key is a secret, named by
@@ -256,10 +324,16 @@ fn takers() -> String {
     names.join(", ")
 }
 
-/// One target: the secret in a param, bare and then inside text.
-fn secret_in_a_param(target: &str, file: &Path) -> Vec<String> {
+/// One target: the secret in a param, bare and then inside text. The first
+/// of the target's examples that takes the secret somewhere is the one
+/// checked; an example may have no place for one, such as a Helm chart with
+/// a Kustomize overlay, and that is the target's own rule.
+fn secret_in_a_param(target: &str, files: &[PathBuf]) -> Vec<String> {
     let mut failures = Vec::new();
-    let example = fs::read_to_string(file).unwrap();
+    let examples: Vec<String> = files
+        .iter()
+        .map(|file| fs::read_to_string(file).unwrap())
+        .collect();
     let dir = scratch(
         env!("CARGO_TARGET_TMPDIR"),
         &format!("secret-conformance-{target}"),
@@ -287,18 +361,20 @@ fn secret_in_a_param(target: &str, file: &Path) -> Vec<String> {
         // a path may refuse what is written there; that is the target's own
         // rule and not this test's business, as long as nothing leaks.
         let mut compiled = None;
-        for index in 0.. {
-            let Some(document) = with_secret_in_param(&example, index, value) else {
-                break;
-            };
-            let outcome = meridian(&dir, "compile", &document);
-            nothing_leaked(
-                &format!("{target}: {what}, param {index}, compile"),
-                &outcome,
-            );
-            if outcome.succeeded {
-                compiled = Some((document, outcome));
-                break;
+        'examples: for example in &examples {
+            for index in 0.. {
+                let Some(document) = with_secret_in_param(target, example, index, value) else {
+                    break;
+                };
+                let outcome = meridian(&dir, "compile", &document);
+                nothing_leaked(
+                    &format!("{target}: {what}, param {index}, compile"),
+                    &outcome,
+                );
+                if outcome.succeeded {
+                    compiled = Some((document, outcome));
+                    break 'examples;
+                }
             }
         }
         let Some((document, outcome)) = compiled else {
@@ -353,10 +429,10 @@ fn secret_in_a_param(target: &str, file: &Path) -> Vec<String> {
     failures
 }
 
-/// One target: a credential whose key is a secret.
-fn credential(target: &str, file: &Path) -> Vec<String> {
+/// One target: a credential whose key is a secret, in its first example.
+fn credential(target: &str, files: &[PathBuf]) -> Vec<String> {
     let mut failures = Vec::new();
-    let example = fs::read_to_string(file).unwrap();
+    let example = fs::read_to_string(&files[0]).unwrap();
     let dir = scratch(
         env!("CARGO_TARGET_TMPDIR"),
         &format!("credential-conformance-{target}"),
@@ -422,7 +498,7 @@ fn credential(target: &str, file: &Path) -> Vec<String> {
     failures
 }
 
-fn all(check: fn(&str, &Path) -> Vec<String>) -> Vec<String> {
+fn all(check: fn(&str, &[PathBuf]) -> Vec<String>) -> Vec<String> {
     let examples = examples();
     let targets = fs::read_dir(repo_root().join("plugins")).unwrap().count();
     assert_eq!(
@@ -433,7 +509,7 @@ fn all(check: fn(&str, &Path) -> Vec<String>) -> Vec<String> {
     std::thread::scope(|scope| {
         let running: Vec<_> = examples
             .iter()
-            .map(|(target, file)| scope.spawn(move || check(target, file)))
+            .map(|(target, files)| scope.spawn(move || check(target, files)))
             .collect();
         running
             .into_iter()

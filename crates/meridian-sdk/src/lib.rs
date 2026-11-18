@@ -81,7 +81,7 @@ pub use run::{
 };
 pub use schema::{ParamKind, ParamSchema, ResourceSchema};
 pub use schemas::{version_in, SchemaExport, SchemaRequest, SchemaSource};
-pub use secrets::holds_secret;
+pub use secrets::{holds_secret, Written};
 pub use secrets::{SecretName, Secrets};
 pub use serve::{serve, Plugin, ServeError};
 pub use types::{

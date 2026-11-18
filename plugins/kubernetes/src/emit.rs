@@ -5,7 +5,9 @@ use std::collections::BTreeMap;
 use meridian_sdk::Value;
 use meridian_yaml::Yaml;
 
-use crate::{Manifests, OutputPart};
+use meridian_sdk::SecretName;
+
+use crate::{secret_token, Manifests, OutputPart};
 
 /// Every object, one YAML document each, in apply order.
 pub const MANIFESTS_PATH: &str = "manifests.yaml";
@@ -13,7 +15,7 @@ pub const MANIFESTS_PATH: &str = "manifests.yaml";
 /// read each output. The runner reads it; Kubernetes never does.
 pub const CLUSTER_PATH: &str = "cluster.json";
 
-fn yaml(value: &Value) -> Yaml {
+fn yaml(value: &Value, secrets: &[SecretName]) -> Yaml {
     match value {
         Value::Null => Yaml::Null,
         Value::Bool(b) => Yaml::Bool(*b),
@@ -21,24 +23,33 @@ fn yaml(value: &Value) -> Yaml {
         Value::Uint(u) => Yaml::Uint(*u),
         Value::Float(f) => Yaml::Float(*f),
         Value::String(s) => Yaml::str(s),
-        // A plugin is never sent a secret as a value; one would be written as its mask.
-        Value::Secret(_) => Yaml::str(meridian_sdk::SENSITIVE),
-        Value::List(items) => Yaml::Seq(items.iter().map(yaml).collect()),
-        Value::Map(map) => Yaml::Map(map.iter().map(|(k, v)| (k.clone(), yaml(v))).collect()),
+        // A secret is written as its token, between the quotes of a JSON
+        // string, so the runner can put the value between the same quotes.
+        // A slot the graph does not name is written as its mask.
+        Value::Secret(slot) => match secrets.iter().find(|s| s.secret == *slot) {
+            Some(named) => Yaml::Raw(format!("\"{}\"", secret_token(&named.name))),
+            None => Yaml::str(meridian_sdk::SENSITIVE),
+        },
+        Value::List(items) => Yaml::Seq(items.iter().map(|v| yaml(v, secrets)).collect()),
+        Value::Map(map) => Yaml::Map(
+            map.iter()
+                .map(|(k, v)| (k.clone(), yaml(v, secrets)))
+                .collect(),
+        ),
     }
 }
 
 /// A map with the keys a reader looks for first moved to the front.
-fn leading(map: &BTreeMap<String, Value>, first: &[&str]) -> Yaml {
+fn leading(map: &BTreeMap<String, Value>, first: &[&str], secrets: &[SecretName]) -> Yaml {
     let mut pairs = Vec::with_capacity(map.len());
     for key in first {
         if let Some(value) = map.get(*key) {
-            pairs.push(((*key).to_owned(), yaml(value)));
+            pairs.push(((*key).to_owned(), yaml(value, secrets)));
         }
     }
     for (key, value) in map {
         if !first.contains(&key.as_str()) {
-            pairs.push((key.clone(), yaml(value)));
+            pairs.push((key.clone(), yaml(value, secrets)));
         }
     }
     Yaml::Map(pairs)
@@ -61,12 +72,12 @@ pub(crate) fn serialise(manifests: &Manifests) -> BTreeMap<String, String> {
         if let Some(Value::Map(metadata)) = object.body.get("metadata") {
             pairs.push((
                 "metadata".to_owned(),
-                leading(metadata, &["name", "namespace"]),
+                leading(metadata, &["name", "namespace"], &manifests.secrets),
             ));
         }
         for (key, value) in &object.body {
             if key != "metadata" {
-                pairs.push((key.clone(), yaml(value)));
+                pairs.push((key.clone(), yaml(value, &manifests.secrets)));
             }
         }
         text.push_str("---\n");

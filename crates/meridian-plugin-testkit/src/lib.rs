@@ -320,6 +320,35 @@ pub fn secret_in_param(graph: &mut ResourceGraph, id: &str, param: &str, name: &
     slot
 }
 
+/// As [`secret_in_param`], for a place inside a param: `path` is the param
+/// and then the keys of the maps below it, and the last key's value becomes
+/// the secret. Every map on the way is made when it is missing.
+pub fn secret_at(graph: &mut ResourceGraph, id: &str, path: &[&str], name: &str) -> SecretRef {
+    let slot = SecretRef::new(graph.secrets.len() as u64 + 40);
+    let resource = graph
+        .resources
+        .iter_mut()
+        .find(|r| r.id == id)
+        .unwrap_or_else(|| panic!("no resource {id:?} in the graph"));
+    let (last, inner) = path.split_last().expect("a path has at least one key");
+    let mut map = &mut resource.params;
+    for key in inner {
+        let entry = map
+            .entry((*key).to_owned())
+            .or_insert_with(|| Value::Map(Default::default()));
+        match entry {
+            Value::Map(next) => map = next,
+            other => panic!("{key} of {id} is {}, not a map", other.describe()),
+        }
+    }
+    map.insert((*last).to_owned(), Value::Secret(slot));
+    graph.secrets.push(SecretName {
+        secret: slot,
+        name: name.to_owned(),
+    });
+    slot
+}
+
 /// The secrets a run context hands a runner, from slot, name and value.
 pub fn secrets(values: &[(SecretRef, &str, &str)]) -> Secrets {
     Secrets::from_values(

@@ -55,8 +55,8 @@ mod validate;
 use std::collections::BTreeMap;
 
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, Value,
+    holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph, Value,
 };
 
 pub use emit::{COMPOSE_PATH, PROJECT_PATH};
@@ -164,6 +164,41 @@ pub(crate) struct Composition {
     pub outputs: Vec<(String, Vec<OutputPart>)>,
 }
 
+/// The variable Compose reads a secret from: the runner hands every secret
+/// over in a private `.env` file given to each `docker compose` call with
+/// `--env-file`, and the file names the variables.
+pub fn secret_variable(name: &str) -> String {
+    format!("meridian_secret_{name}")
+}
+
+/// What a secret in a param is written as in the Compose file: Compose's
+/// own interpolation of the variable, resolved when the file is read and
+/// never written to disk by Meridian.
+pub fn secret_reference(name: &str) -> String {
+    format!("${{{}}}", secret_variable(name))
+}
+
+/// A secret in the `project` resource would go onto the command line
+/// `docker` is given, so it is refused; everywhere else Compose interpolates
+/// it from the environment file.
+fn refuse_secret_in_project(graph: &ResourceGraph) -> Result<(), CompileError> {
+    for r in graph.resources.iter().filter(|r| r.r#type == "project") {
+        if let Some((name, _)) = r.params.iter().find(|(_, value)| holds_secret(value)) {
+            return Err(refuse(
+                r,
+                "unsupported-secret-place",
+                format!(
+                    "param {name:?} of the project holds a secret, and the project's settings \
+                     are the command line docker is given, where a secret cannot go. A secret \
+                     goes in a service's params, or as the value of a secret element, which \
+                     Compose reads from a private environment file"
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// A refusal of one resource, stamped with this target.
 pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
     CompileError {
@@ -207,7 +242,7 @@ impl Emitter for Docker {
             native_notify: true,
             synthetic_notify: true,
             runtime_condition: false,
-            secrets: false,
+            secrets: true,
             credentials: false,
         }
     }
@@ -217,6 +252,7 @@ impl Emitter for Docker {
     }
 
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        refuse_secret_in_project(graph)?;
         let mut composition = transform::transform(graph)?;
         let mut warnings = sort::apply_ordering(graph, &mut composition)?;
         validate::validate(&composition)?;
