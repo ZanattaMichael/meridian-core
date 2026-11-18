@@ -452,6 +452,7 @@ impl Runner for PodmanRunner {
         Ok(Plan {
             changes: self.survey(context, artifact, agent.as_ref(), log)?.changes,
             unknown: false,
+            saved: None,
         })
     }
 

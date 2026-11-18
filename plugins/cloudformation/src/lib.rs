@@ -27,14 +27,18 @@
 // A refusal carries its position and resource by value, as the SDK's does.
 #![allow(clippy::result_large_err)]
 
+mod common;
 mod emit;
 mod runner;
+mod schemas;
 mod sort;
 mod transform;
 mod validate;
+mod zip;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
     holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
     Resource, ResourceGraph, Value,
@@ -43,6 +47,7 @@ use meridian_yaml::Yaml;
 
 pub use emit::{STACK_PATH, TEMPLATE_PATH};
 pub use runner::CloudFormationRunner;
+pub use schemas::CloudFormationSchemas;
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "cloudformation";
@@ -104,18 +109,19 @@ pub(crate) struct Template {
 }
 
 /// A refusal of one resource, stamped with this target.
-pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         ..CompileError::for_resource(r, rule, msg)
     }
 }
 
-pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         resource: resource.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         pos: pos.clone(),
     }
@@ -169,7 +175,7 @@ fn refuse_secret_in(graph: &ResourceGraph, types: &[&str], what: &str) -> Result
         if let Some((name, _)) = r.params.iter().find(|(_, value)| holds_secret(value)) {
             return Err(refuse(
                 r,
-                "unsupported-secret-place",
+                &rules::UNSUPPORTED_SECRET_PLACE,
                 format!(
                     "param {name:?} of the {} holds a secret, and {what}, where a secret cannot \
                      go. A secret goes in a resource's params, which the tool is handed by a \
@@ -188,9 +194,17 @@ impl Emitter for CloudFormation {
     }
 
     fn supported_resource_types(&self) -> Vec<String> {
-        ["<Vendor>::<Service>::<Type>", "stack"]
-            .map(str::to_owned)
-            .to_vec()
+        [
+            "<Vendor>::<Service>::<Type>",
+            "address",
+            "firewall",
+            "network",
+            "stack",
+            "subnet",
+            "vm",
+        ]
+        .map(str::to_owned)
+        .to_vec()
     }
 
     /// CloudFormation cannot act on one resource because another changed,
@@ -208,7 +222,19 @@ impl Emitter for CloudFormation {
         Category::InfrastructureAsCode
     }
 
+    /// The common infrastructure types, described for editors. AWS's own
+    /// types come from `meridian schema sync`.
+    fn resource_schemas(&self) -> Vec<meridian_sdk::ResourceSchema> {
+        meridian_sdk::infra::common_type_names()
+            .into_iter()
+            .map(|name| meridian_sdk::infra::common_schema(name, &common::params(name)))
+            .collect()
+    }
+
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        // The common types become AWS resources first, so every later stage
+        // sees CloudFormation types only.
+        let graph = &common::lower(graph)?;
         // A secret in a param is written as a reference to a NoEcho
         // parameter, which the runner gives its value from a private file.
         refuse_secret_in(

@@ -20,7 +20,7 @@ const PROTOCOL_HISTORY: &[(u32, &str)] = &[
     ),
     (
         2,
-        "The plugin's category and operations in `Describe`; the `Runner` service (plan, apply, outputs). Later additions within 2, each ignored by a side that predates it: `Describe` fields up to `settings_keys` (a plugin without `settings_keys` takes no `spec.settings`, and a document that sets any is refused before it is asked); `ResourceGraph.settings_json`; `Runner.Cancel`, which stops a plan or apply (a plugin without it cannot be stopped, and `meridian` says so)",
+        "The plugin's category and operations in `Describe`; the `Runner` service (plan, apply, outputs). Later additions within 2, each ignored by a side that predates it: `Describe` fields up to `settings_keys` (a plugin without `settings_keys` takes no `spec.settings`, and a document that sets any is refused before it is asked); `ResourceGraph.settings_json`; `Runner.Cancel`, which stops a plan or apply (a plugin without it cannot be stopped, and `meridian` says so); `Describe.saves_plans`, `RunContext.save_plan` and `RunContext.saved_plan`, and `PlanResult.saved`, for a [saved plan](../operations/pull-requests.md) (a plugin without them is checked by its artifact hash and plans again at apply); `Resource.adopt`, `Capabilities.adopt` and the `adopt` change action (a plugin without them reports `none`, and `adopt` is refused before it is asked); `Describe.reads_identifiers` and `Runner.Identifiers`, for [`meridian retarget`](../operations/retargeting.md) (a plugin without them cannot be the old target of a move that adopts)",
     ),
 ];
 

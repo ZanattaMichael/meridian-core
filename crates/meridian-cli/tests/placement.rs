@@ -233,6 +233,7 @@ fn given(index: usize, row: &Row) -> Result<String, String> {
     fs::write(dir.join("site.yaml"), document(row)).unwrap();
     fs::write(dir.join("data.yaml"), row.data).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args([
             "compile",
             "site.yaml",

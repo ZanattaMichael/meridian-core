@@ -26,6 +26,7 @@ fn plugin_dir(test: &str) -> (PathBuf, PathBuf) {
 
 fn meridian(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(args)
         .env_remove("MERIDIAN_PLUGIN_DIR")
         .env_remove("MERIDIAN_PLUGIN_SIGNATURES")

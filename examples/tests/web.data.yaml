@@ -1,0 +1,7 @@
+# The values web.yaml reads. The tests give their own; this file is what a
+# compile outside the tests uses.
+web: true
+env: dev
+# Quoted: a bare 0644 is the number 420 in YAML, and the test below shows
+# what happens to it.
+mode: "0644"

@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, Value};
 
 use crate::{refuse_at, Block, Cookbook, NAME};
@@ -9,7 +10,7 @@ use crate::{refuse_at, Block, Cookbook, NAME};
 /// The property Chef identifies the managed thing by, for the resources
 /// where two blocks managing one thing would fight each other.
 fn identity(block: &Block) -> Option<(&'static str, &Value)> {
-    let property = match block.resource {
+    let property = match block.resource.as_str() {
         "package" => "package_name",
         "service" => "service_name",
         "file" | "directory" => "path",
@@ -25,7 +26,8 @@ pub(crate) fn validate(cookbook: &Cookbook) -> Result<(), CompileError> {
     if cookbook.blocks.is_empty() {
         return Err(CompileError {
             target: NAME.to_owned(),
-            rule: "empty-cookbook".to_owned(),
+            rule: rules::EMPTY_DOCUMENT.name.to_owned(),
+            hint: rules::EMPTY_DOCUMENT.hint.to_owned(),
             msg: "there is nothing to converge: the document declares no resources".to_owned(),
             ..CompileError::default()
         });
@@ -40,13 +42,13 @@ pub(crate) fn validate(cookbook: &Cookbook) -> Result<(), CompileError> {
         let kind = if block.resource == "directory" {
             "file"
         } else {
-            block.resource
+            block.resource.as_str()
         };
         if let Some(previous) = seen.insert((kind, value.canonical()), &block.resource_id) {
             return Err(refuse_at(
                 &block.resource_id,
                 &block.pos,
-                "duplicate-resource",
+                &rules::DUPLICATE_RESOURCE,
                 format!(
                     "manages the same {kind} as resource {previous:?}: both set {property} to {}",
                     value.canonical()
@@ -59,7 +61,7 @@ pub(crate) fn validate(cookbook: &Cookbook) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &block.resource_id,
                 &block.pos,
-                "invalid-runtime-condition",
+                &rules::INVALID_RUNTIME_CONDITION,
                 "runtimeWhen must be one line of Ruby on this target".to_owned(),
             ));
         }
@@ -74,7 +76,7 @@ mod tests {
 
     fn block(resource: &'static str, id: &str, property: &str, value: &str) -> Block {
         Block {
-            resource,
+            resource: resource.to_owned(),
             name: id.to_owned(),
             properties: [(property.to_owned(), Value::String(value.to_owned()))].into(),
             resource_id: id.to_owned(),
@@ -109,7 +111,7 @@ mod tests {
         };
         type Break = Box<dyn Fn(&mut Cookbook)>;
         let table: Vec<(&str, &str, Break)> = vec![
-            ("empty-cookbook", "", Box::new(|c| c.blocks.clear())),
+            ("empty-document", "", Box::new(|c| c.blocks.clear())),
             (
                 "duplicate-resource",
                 "again",

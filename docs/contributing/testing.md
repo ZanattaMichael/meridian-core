@@ -1,8 +1,6 @@
 # How Meridian is tested
 
-This page says what tests exist today, what each kind is for, and how to add to
-them. The [testing plan](../plans/testing-plan.md) says where testing is
-heading; this page is what CI enforces now.
+What CI tests today. Future work: [testing plan](../plans/testing-plan.md).
 
 ```mermaid
 flowchart TD
@@ -23,66 +21,41 @@ flowchart TD
 | Property tests | `crates/meridian-cli/tests/properties.rs` | `cargo test -p meridian-cli --test properties` |
 | Placement tests | `crates/meridian-cli/tests/placement.rs`, `placement_properties.rs` | `cargo test -p meridian-cli --test placement --test placement_properties` |
 | Secret tests | `crates/meridian-cli/tests/secret_places.rs`, `secret_properties.rs`, `secrets.rs` | `cargo test -p meridian-cli --test secret_places --test secret_properties --test secrets` |
-| Conformance tests | `crates/meridian-cli/tests/conformance.rs`, `condition_conformance.rs`, `secret_conformance.rs` | `cargo test -p meridian-cli --test conformance --test condition_conformance --test secret_conformance` |
+| Conformance tests | `crates/meridian-cli/tests/conformance.rs`, `infra_conformance.rs`, `condition_conformance.rs`, `secret_conformance.rs` | `cargo test -p meridian-cli --test conformance --test infra_conformance --test condition_conformance --test secret_conformance` |
 | Robustness tests | `crates/meridian-cli/tests/robustness.rs` | `cargo test -p meridian-cli --test robustness` |
 | Examples | `crates/meridian-cli/tests/examples.rs` | `cargo test -p meridian-cli --test examples` |
 | Real tools | a workflow per tool under `.github/workflows/` | in CI; [Real-tool tests](real-tool-tests.md) lists what each one runs and how to run it yourself |
 
-Everything except the real-tool workflows runs with `cargo test --workspace`,
-needs no tool installed, and takes a few minutes.
+All but the real-tool tests run with `cargo test --workspace`, no tools needed.
 
 ## Unit tests and golden files
 
-A plugin's `tests/compile.rs` compiles documents in process and checks two
-things. What a valid document compiles to is compared with a golden file,
-because the exact bytes are the contract with the tool. What an invalid document
-is refused with is asserted field by field: the rule, the resource, the message
-and the line. A refusal's wording is part of what a user sees, so it is tested
-as closely as the output is.
+A plugin's `tests/compile.rs` compares valid output with golden files and asserts each
+refusal's rule, resource, message and line. `tests/run.rs` tests the runner against a
+stand-in script. See [writing a plugin](writing-a-plugin.md).
 
-`tests/run.rs` tests the runner against a stand-in: a shell script that takes
-the tool's place, sees its real arguments and working directory, and answers as
-the tool would. [Writing a plugin](writing-a-plugin.md) has both in detail.
+Both use `crates/meridian-plugin-testkit` (tested in `tests/kit.rs`):
 
-Both come from the plugin test kit, `crates/meridian-plugin-testkit`, which
-has tests of its own (`tests/kit.rs`) so a plugin's test cannot be wrong
-because the kit is. Two of its rules are easy to trip over:
-
-- A golden file is `testdata/<case>.<suffix>`, where the suffix is one word
-  with no dot in it and is not a source extension (`yaml`, `json`, `rs`, `md`
-  and the like), so `web.playbook_yml` is a golden of `web` and `web.yaml` is
-  not. With `UPDATE_GOLDEN=1` the kit deletes only the golden files of the
-  case being recorded, so a fixture, a note or another case's files are never
-  removed by a rename.
-- A stand-in is written to a unique staging name and renamed into place, so
-  tests that place a stand-in of the same name at once, in threads or across
-  test binaries, each get a whole script.
+- A golden is `testdata/<case>.<suffix>`, the suffix one word and not a source extension
+  (`web.playbook_yml`, not `web.yaml`). `UPDATE_GOLDEN=1` rewrites only that case's goldens.
+- Stand-ins are written atomically, so concurrent tests are safe.
 
 ### A table for every validation rule
 
-Some of a plugin's validation rules cannot be reached from a document: the
-earlier stages never produce a model that breaks them, and the rule is there
-for a tree assembled some other way. A test in `tests/compile.rs` cannot break
-those, so each plugin's `src/validate.rs` ends with a test module that builds
-the stage's own model and has two tables.
+Some rules cannot be reached from a document, so each plugin's `src/validate.rs` tests
+the model directly with two tables:
 
 | Test | What it holds |
 |---|---|
 | `each_rule_refuses_the_one_mistake_it_is_for` | one row for each way to break each rule: the rule's name, the resource the refusal must name, and one change to a model the stage accepts. The refusal must also carry the target and the resource's line |
 | `what_looks_alike_but_is_allowed_is_accepted` | models a reader might expect to be refused and are not: one provider twice under two aliases, a user and a group of one name, one object name in two namespaces |
 
-A rule about names has a table of its own, of names accepted and names
-refused, with the longest allowed and the first too long. A rule that warns
-and does not refuse is tested for the warning and for the cases that stay
-quiet. When you add a rule, add its rows; a rule with no row is a rule nothing
-holds in place.
+Name rules have accepted and refused tables, including the length boundary. Warnings are
+tested both ways. Add rows for every new rule.
 
 ## Property tests
 
-An example-based test says "this input gives that output". A property test
-says what must hold for every input, and lets the machine look for an input that
-breaks it. `properties.rs` runs about twenty-five of them, a few thousand
-generated inputs each, in three shapes:
+`properties.rs` runs about 25 properties, thousands of inputs each:
 
 | Shape | Examples |
 |---|---|
@@ -90,59 +63,28 @@ generated inputs each, in three shapes:
 | **Round trips** | YAML Meridian writes is read back as the same value; canonical JSON decodes to what was encoded; a document is the same document in YAML and in JSON |
 | **A model agrees** | a second, naive implementation written in the test decides the same as the real one: the condition language, the topological sort, `when` pruning, label selectors, and each hierarchy merge strategy |
 
-The model tests are the ones behind the claims the documentation makes. "A
-condition means the same on every target" rests on the condition language
-having one meaning, and
-`a_condition_is_decided_as_the_documented_language_says` holds the evaluator to
-the grammar and the rules in [conditions](../reference/dsl/conditions.md) for
-three thousand generated expressions a run, with their precedence, their
-short-circuiting and their errors. The model covers the core of the language:
-literals, paths into the data, `defined()`, `!`, `&&`, `||`, `==` and `!=`.
-The other operators and the functions are tested in `crates/meridian-expr`.
+`a_condition_is_decided_as_the_documented_language_says` checks the evaluator against
+[conditions](../reference/dsl/conditions.md) on 3,000 expressions per run (literals, paths,
+`defined()`, `!`, `&&`, `||`, `==`, `!=`); the rest is tested in `crates/meridian-expr`.
+Examples needing data are compiled by `examples.rs`.
 
-An example that decides by `when`, or interpolates a value, needs its data
-before it can be compiled, so the conformance and robustness tests, which
-build a tree straight from a file, pass over it. `examples.rs` compiles it through the command with its
-data files.
-
-When a property fails, the output ends with the smallest input that still
-fails:
+A failure ends with the smallest failing input:
 
 ```
 minimal failing input: original = List([Float(8.038549324716471e-175)])
 ```
 
-proptest also writes that input to
-`crates/meridian-cli/tests/properties.proptest-regressions`, and tries it first
-on every later run. Commit the file with the fix. To look harder for a failure
-locally, raise the number of cases:
+It is saved to `crates/meridian-cli/tests/properties.proptest-regressions`; commit it with the
+fix. To search harder:
 
 ```
 PROPTEST_CASES=20000 cargo test -p meridian-cli --test properties
 ```
 
-What these tests have found so far, each fixed with a test of its own:
-
-- A float in a JSON document or crossing the plugin boundary could change in
-  its last digit. JSON numbers are now read exactly.
-- A document nested a few hundred levels deep could overflow the stack of a
-  thread with a small one. The limit is now 64 levels, in YAML and in JSON, and
-  holds on a 1 MiB stack.
-- A condition with quoted text that holds the opening of an interpolation,
-  such as `data.motd != '${{'`, was taken for an interpolation nobody closed
-  and refused. It showed up as a test that failed about once in a few
-  thousand runs. In a bare condition that text is now text, and the case is a
-  fixed test beside the property.
-
 ### Placement: what data supplies is text
 
-[Interpolation](../reference/dsl/interpolation.md) makes one promise that is
-easy to break: whatever text data supplies, a tool reads it as text. Only what
-the author wrote is ever a reference. Two files hold it in place.
-
-`placement.rs` is a table. Each row is a value an author might write, the data
-it reads, and exactly what the plugin must be given, compiled by the real
-command:
+[Interpolated](../reference/dsl/interpolation.md) data is always text to the tool.
+`placement.rs` is a table of value, data and exact plugin input:
 
 | Row | Written | Data | The plugin is given |
 |---|---|---|---|
@@ -151,40 +93,23 @@ command:
 | a reference beside data | `${web.id}-${{ data.v }}` | `${x}` | the reference to `web`, then text |
 | a dollar from data before a reference | `${{ data.v }}${web.id}` | `costs $` | refused: the reference would be lost |
 
-There are twenty-four rows, and a test that the references a plugin reads are
-exactly the ones the author wrote. To add a case, add a `Row`.
-
-`placement_properties.rs` asks the same of generated values. It builds a value
-from pieces, some the author's text and some from data, out of the characters
-that matter (`$`, `{`, `}`, `$$`, `${`, `}}`). The model is a few lines: read
-each of the author's pieces the way a plugin reads it, and put the data
-between them as plain text. The implementation has to reach the same reading by
-escaping, and the test fails wherever the two differ. Its failures are kept in
-`placement_properties.proptest-regressions`.
-
-The table found one: a value from data ending in `$`, placed directly before a
-reference, turned the reference into literal text, because a `$` before `${` is
-how a plugin is told the text is literal. That is now refused, with a message
-that says to put a space between the two.
+Add a `Row` for a new case. `placement_properties.rs` generates values from `$`, `{`, `}`,
+`$$`, `${` and `}}` pieces and compares with a simple model.
 
 ### Secrets: who may read a value, and never the value
 
-[A secret](../reference/dsl/secrets.md) makes two promises. Its value is in
-nothing Meridian prints or writes, and marking a value as a secret changes
-nothing else about what a document means.
+[Secrets](../reference/dsl/secrets.md) are never printed or written, and otherwise behave as
+plain values. `secret_properties.rs` evaluates each expression with secrets and as plain text:
 
-`secret_properties.rs` holds the second. Its model is the expression engine
-itself: every generated expression is worked out twice from the same text,
-once where `secret.a` and `secret.b` are secrets and once where they are
-ordinary text with the same characters. A comparison must give the same yes or
-no. A secret must hold exactly the characters the plain reading gave. Anything
-readable that comes out must hold no secret. A function that is not on the
-short list must refuse a secret, name the functions that take one, and repeat
-nothing of the value, and must do its work when the same expression holds no
-secret. Nothing made from a secret may outlive the wipe.
+- comparisons must give the same answer;
+- a secret must hold exactly the characters of the plain result;
+- nothing readable that comes out may hold a secret;
+- a function not on the short list must refuse a secret, name the functions
+  that accept one, repeat nothing of the value, and still work when the
+  expression holds no secret;
+- nothing made from a secret may outlive the wipe.
 
-`secret_places.rs` holds the first, through the real command. It is a table
-of every place a document can ask a question of a secret:
+`secret_places.rs` tables every place a document can test a secret:
 
 | Place | Written as |
 |---|---|
@@ -196,29 +121,16 @@ of every place a document can ask a question of a secret:
 | an edge | `when:` on a `dependsOn` or `notifies` entry |
 | a file's content | `${{ secret.password == 'changeme' ? 'default' : 'changed' }}` |
 
-Each row is planned with a password that makes the question true and one that
-makes it false, and must give both answers. `compile` must stop at that place
-and name it. With no password, every row must stop the same way. And after
-`plan`, `apply` and `plan` again, the password must be in nothing printed and
-in no file the run left behind, the state directory included. To cover a new
-place, add a `Place`.
+Each row is planned true and false, `compile` must stop and name it, and after `plan`,
+`apply`, `plan` the password must appear nowhere. Add a `Place` for a new one. A workflow
+test checks three stages sharing one environment secret.
 
-One more test there is a workflow: three documents that each declare the same
-environment variable as a secret. The first stage takes the variable out of
-Meridian's environment so that no tool inherits it, and every later stage must
-still be given the secret. Writing the table found that the second stage was
-not, and stopped with "is not set".
-
-`secrets.rs` covers the providers and what each command does. The two examples
-that use secrets are tested in `examples.rs`: one is planned and applied for
-six machines that differ only in the secrets they have, the other is compiled
-with a password in the environment that must not appear in any file.
+`secrets.rs` covers providers and commands; `examples.rs` tests the two secret examples.
 
 ### Writing one
 
-Add a property when you add something that parses, orders, merges or decides.
-State the rule as the documentation states it, write the slowest, most obvious
-implementation of that rule in the test, and assert the two agree:
+Add one for anything that parses, orders, merges or decides: write the obvious model and
+assert agreement:
 
 ```rust
 proptest! {
@@ -236,129 +148,82 @@ proptest! {
 }
 ```
 
-Generate inputs that are nearly right as well as inputs that are random: a
-valid document with one edit finds more than noise does.
+Generate near-valid inputs as well as random ones.
 
 ## Conformance tests
 
-`conformance.rs` compiles the same document with every target that should
-agree about it.
+`conformance.rs` compiles the same document for every target that should agree.
 
-**The shared dialect.** About ninety small documents, covering every type,
-state and param of the [configuration management types](../reference/resource-types.md),
-`dependsOn`, `notifies`, references and `runtimeWhen`, are each compiled by
-Ansible, Chef, cloud-init, OpenVox, Puppet and Salt. How each compile came out
-is written to the [conformance matrix](../reference/conformance-matrix.md), and
-the test fails when that page is out of date. Each case is marked as one the
-targets must agree on or one where the tools differ; a target that breaks ranks
-on a case marked the same fails the test. Further tests hold all six to:
+**Shared dialect.** About 90 documents covering the
+[configuration management types](../reference/resource-types.md), `dependsOn`, `notifies`,
+references and `runtimeWhen` are compiled by Ansible, Chef, cloud-init, OpenVox, Puppet and
+Salt into the [conformance matrix](../reference/conformance-matrix.md) (stale page fails).
+Also:
 
 - Puppet and OpenVox compile every case to the same manifest;
-- every case compiles to the same bytes twice;
+- output is deterministic;
 - every refusal names its target, its resource and a line;
-- a settled `${...}` leaves no marker in any output, and the value it named is
-  there;
-- a dependency is written before what depends on it.
+- a settled `${...}` leaves no marker;
+- dependencies come first.
 
-**Every target.** Each example under `examples/<target>/` is put through rules
-that hold whatever the segment: it compiles deterministically to relative
-paths; a `runtimeWhen` on any of its resources is compiled in or refused, never
-dropped; a target that declares no notify refuses one between any two
-resources; an unknown type is refused under one rule. A document written for
-Terraform compiles to the same configuration for OpenTofu.
+**Common infrastructure types.** `infra_conformance.rs` compiles about 40 documents using
+`network`, `subnet`, `firewall`, `address` and `vm` for Terraform and OpenTofu (AWS, Azure),
+CloudFormation, Bicep and ARM into the
+[infra conformance matrix](../reference/infra-conformance-matrix.md). It fails if a target
+declares only some of the five or has no column, and checks a secret ssh key is never
+written.
 
-Conditions are held to it too, in `condition_conformance.rs`. Each target's
-own example is given the same `when` on every resource and every output, and
-compiled by the real command with the real plugin for each row of a table:
-one row for each kind of thing a condition can do (a comparison, logic, a
-pattern, a function, a fallback, a choice, a short circuit) and three that
-cannot be decided. True must give, byte for byte, the files the example
-compiles to with no condition in it. False must report every resource and
-output removed, in the document's own words. A condition that cannot be
-decided must be refused in the same words on every target. The same is asked
-of a `when` on the whole document. Conditions are decided before any plugin is
-started, so this holds by construction; the test is there so that a target
-that began to read a condition itself could not go unnoticed. A new target is
-covered as soon as it has an example of its own.
+**Every target.** Each `examples/<target>/` example must compile deterministically to
+relative paths, never drop `runtimeWhen`, refuse undeclared notifies, and refuse unknown
+types under one rule. Terraform and OpenTofu output must match.
 
-Literal text is held to the same standard on all eighteen. Every text param of
-every example is compiled three ways: with plain text, with text that looks
-like a reference but is marked literal, and with the reference itself. Where
-the target accepts the text at all, the literal reaches the output as the
-characters it is, and never as what the reference compiles to. No target may
-read text as a reference because of what it holds.
+`condition_conformance.rs` puts the same `when` on every resource of each example, per kind
+of condition: true gives the unconditioned files, false reports every removal, undecidable
+is refused identically.
 
-Secrets and credentials are held to it in `secret_conformance.rs`, again on
-each target's own example with the real command and plugin. A secret is placed
-in a param, bare and joined to text, and the document is compiled and planned
-with every plugin loaded. A target that takes a secret must write the tool's
-own reference for it (an Ansible variable, a sensitive Terraform or OpenTofu
-variable; a joined value under a derived name) and never the compile-time
-placeholder. Every other target must write the placeholder, and `plan` must
-stop in the same words on all of them, naming the targets that do take one. A
-named credential on the target host is validated everywhere; where the target
-cannot pass it to a host, compile and plan refuse in the same words. In both
-halves, the value itself is a made-up string, and no file written and nothing
-printed may hold it. A target that gains a way to take a secret or a credential
-moves from one list to the other in the test, and nothing else changes.
+Literal text: every text param is compiled as plain, literal-looking-like-a-reference, and
+reference; the literal must reach the output unchanged.
 
-To add a case, add a `case(...)` to `CASES` and record the page:
+`secret_conformance.rs`: targets that take secrets write the tool's own reference; others
+write the placeholder and `plan` stops with the same words. Credentials likewise. A target
+gaining support moves between the test's lists.
+
+To add a case, add `case(...)` to `CASES` and regenerate the page:
 
 ```
 UPDATE_GOLDEN=1 cargo test -p meridian-cli --test conformance
 ```
 
-Read the row it adds. If the targets disagree where you expected them to
-agree, that is a finding: either a target is wrong, or the case is `Varies` and
-the reference should say why.
+Unexpected disagreement means a target is wrong, or the case is `Varies`.
 
 ## Robustness tests
 
-A plugin is a separate program, and must not trust that the tree it is handed
-was checked. `robustness.rs` takes every example's tree and damages it in the
-ways a careless or hostile host could: about fifty awkward strings (empty,
-newlines, quotes, every tool's own interpolation syntax, path traversal,
-control characters) and a dozen awkward values in every name, id, type, state
-and param; resources missing, doubled or reversed; edges that point nowhere or
-in a circle; outputs that read nothing. Tens of thousands of trees per run,
-and one rule for every target: the answer is files at relative paths, or a
-refusal that names the target and the rule. Never a panic.
+`robustness.rs` damages every example's tree (about 50 awkward strings in every field;
+missing, doubled or reversed resources; dangling or circular edges; empty outputs). Every
+target must return relative files or a named refusal, never panic.
 
-The first run found one: a resource id used twice made the Ansible, Puppet and
-OpenVox sort stages panic. They now refuse it as `duplicate-resource`.
+## Tests people write for their own documents
+
+Users test their documents with [`meridian test`](../reference/testing.md); `examples/tests/`
+is run by the examples test.
 
 ## Examples
 
-Every `.yaml` file under `examples/` is validated and compiled by the real
-`meridian` command with the real plugin binaries. The workflows under
-`examples/workflow/` are held to more:
+Every `.yaml` under `examples/` is validated and compiled with the real binaries. Workflows
+under `examples/workflow/` also:
 
-- each document that can be compiled is written to a directory named after it,
-  and each ResourceSet that waits for an output is reported as deferred;
-- each deferred document is compiled again with a host filled in, so a mistake
-  in a document that waits is still caught;
-- a workflow with data files is compiled once per data set
-  (`site.data.yaml`, then `site.<name>.data.yaml` layered over it), and
-  `environments.yaml` is checked resource by resource against what its
-  conditions should keep in development and in production;
-- a document left out by its own `spec.when` is expected to be reported as
-  skipped and to compile nothing, and every document must be kept by at least
-  one of the workflow's data sets, so no document goes untested;
-- `tenants.yaml` is checked for what each plan decides: which documents run,
-  which resources and outputs they hold, the values functions work out, the
-  types those values keep, and that text from data reaches a file unchanged;
-- an example whose conditions read a secret cannot be compiled, because
-  `compile` fetches none. It must be refused for exactly that reason, and is
-  planned and applied with its secrets by a test of its own.
+- report deferred ResourceSets, then compile them with a host filled in;
+- compile once per data set (`site.data.yaml`, then `site.<name>.data.yaml`);
+  `environments.yaml` is checked per resource;
+- report `spec.when` exclusions as skipped, and every document is kept by some data set;
+- check `tenants.yaml` plans in detail;
+- refuse examples whose conditions read a secret; those are planned and applied separately.
 
-An example the documentation shows is always one of these files, so it cannot
-rot.
+Documentation examples are always these files.
 
 ## Coverage
 
-The `coverage` workflow measures line, function and region coverage of the
-whole workspace on every pull request, writes the table to the run's summary,
-and fails if line coverage falls below its floor. To measure it yourself:
+The `coverage` workflow fails if line coverage drops below its floor. Locally:
 
 ```
 cargo install cargo-llvm-cov --locked
@@ -367,11 +232,4 @@ cargo llvm-cov --workspace --locked --summary-only
 cargo llvm-cov --workspace --locked --html      # target/llvm-cov/html/index.html
 ```
 
-Each plugin's `main.rs` shows as uncovered. It is three lines that hand the
-plugin to the SDK, and it runs in a separate process the measurement does not
-follow; the tests that start the plugin's real binary, and the examples test,
-are what exercise it.
-
-A number is a way to find code no test reaches, not a goal. A refusal that no
-test triggers is the usual finding, and the fix is a test that names the rule
-and the message.
+Plugin `main.rs` files show as uncovered because they run in a separate process.

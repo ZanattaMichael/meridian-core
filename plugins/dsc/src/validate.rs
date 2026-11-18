@@ -1,19 +1,21 @@
 //! Stage three: the constraints that are the runner's and not Meridian's.
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::CompileError;
 
 use crate::{refuse_at, Configuration, NAME};
 
 pub(crate) fn validate(configuration: &Configuration) -> Result<(), CompileError> {
-    let whole = |rule: &str, msg: String| CompileError {
+    let whole = |rule: &Rule, msg: String| CompileError {
         target: NAME.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         ..CompileError::default()
     };
     if configuration.instances.is_empty() {
         return Err(whole(
-            "empty-configuration",
+            &rules::EMPTY_DOCUMENT,
             "there is nothing to configure: the document declares no DSC resources".to_owned(),
         ));
     }
@@ -27,7 +29,7 @@ pub(crate) fn validate(configuration: &Configuration) -> Result<(), CompileError
         && !node.contains("..");
     if !safe {
         return Err(whole(
-            "invalid-name",
+            &rules::INVALID_NAME,
             format!(
                 "document name {node:?} cannot name a DscPipelineRunner node: it becomes a file \
                  name, so it may hold only letters, digits, hyphens, underscores and periods"
@@ -36,7 +38,7 @@ pub(crate) fn validate(configuration: &Configuration) -> Result<(), CompileError
     }
     if configuration.settings.target != "Local" && configuration.host.is_empty() {
         return Err(whole(
-            "missing-param",
+            &rules::MISSING_PARAM,
             format!(
                 "the runner's target is {}, which needs a machine to reach; give the document a \
                  targetHost",
@@ -46,7 +48,7 @@ pub(crate) fn validate(configuration: &Configuration) -> Result<(), CompileError
     }
     if configuration.settings.target == "Local" && !configuration.settings.credential.is_empty() {
         return Err(whole(
-            "invalid-param",
+            &rules::INVALID_PARAM,
             "the runner has a credential but its target is Local, which connects to nothing"
                 .to_owned(),
         ));
@@ -58,7 +60,7 @@ pub(crate) fn validate(configuration: &Configuration) -> Result<(), CompileError
             return Err(refuse_at(
                 &instance.id,
                 &instance.pos,
-                "invalid-name",
+                &rules::INVALID_NAME,
                 "a resource id cannot hold a slash on this target".to_owned(),
             ));
         }
@@ -66,7 +68,7 @@ pub(crate) fn validate(configuration: &Configuration) -> Result<(), CompileError
             return Err(refuse_at(
                 &instance.id,
                 &instance.pos,
-                "invalid-runtime-condition",
+                &rules::INVALID_RUNTIME_CONDITION,
                 "runtimeWhen must be one line of PowerShell on this target".to_owned(),
             ));
         }
@@ -113,7 +115,7 @@ mod tests {
     fn each_rule_refuses_the_one_mistake_it_is_for() {
         type Break = fn(&mut Configuration);
         let table: &[(&str, &str, Break)] = &[
-            ("empty-configuration", "", |c| c.instances.clear()),
+            ("empty-document", "", |c| c.instances.clear()),
             ("missing-param", "", |c| c.host.clear()),
             ("missing-param", "", |c| {
                 c.settings.target = "SSH".to_owned();

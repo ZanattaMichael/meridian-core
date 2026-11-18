@@ -41,6 +41,7 @@ pub mod history;
 mod journal;
 pub mod lock;
 mod options;
+pub mod plan;
 pub mod policy;
 mod reason;
 pub mod record;
@@ -75,6 +76,7 @@ pub use backend::{Backend, ExecBackend, LocalBackend, MemoryBackend};
 pub use event::Event;
 pub use lock::{LockError, LockInfo};
 pub use options::{mask, Observer, OnFailure, Options, Quiet, Resume, DEFAULT_KEEP_RUNS, MASK};
+pub use plan::{file_hash, Asked, PlanFile, PlannedStage, PlannedStatus, PLAN_FILE_VERSION};
 pub use policy::{Decisions, Policy};
 pub use reason::{Reason, UnknownReason};
 pub use record::{RunRecord, RunStatus, StepRecord, StepStatus};
@@ -176,6 +178,32 @@ pub fn run_selected(
         },
     };
 
+    if let Some(plan) = &options.from_plan {
+        if mode != Mode::Apply {
+            report.refused = Some(Refusal::Plan(
+                "only an apply carries out a saved plan".to_owned(),
+            ));
+            return report;
+        }
+        if resume.is_some() {
+            report.refused = Some(Refusal::Plan(
+                "a saved plan is applied whole, so it cannot be combined with --resume; apply                  the plan again, or take a new one"
+                    .to_owned(),
+            ));
+            return report;
+        }
+        // The plan must fit this run before anything runs: the same stages,
+        // none of them applied by anyone since the plan was taken.
+        let ids: Vec<StageId> = stages(bundle, selector, &options.data)
+            .iter()
+            .map(Stage::id)
+            .collect();
+        if let Err(refusal) = plan::check(plan, &ids, &state) {
+            report.refused = Some(refusal);
+            return report;
+        }
+    }
+
     let rolling_back = if mode == Mode::Rollback {
         match rollback::find(backend.as_ref(), &options.rollback_of) {
             Ok(record) => Some(record),
@@ -223,6 +251,15 @@ pub fn run_selected(
             ("mode", Value::from(mode.as_str())),
             ("command", Value::from(journal.record.command.as_str())),
             ("resumes", Value::from(journal.record.resumes.as_str())),
+            (
+                "plan",
+                Value::from(
+                    options
+                        .from_plan
+                        .as_ref()
+                        .map_or("", |plan| plan.run.as_str()),
+                ),
+            ),
             (
                 "rollsBack",
                 Value::from(rolling_back.as_ref().map_or("", |r| r.id.as_str())),
@@ -428,4 +465,50 @@ pub fn run_selected(
     report.warnings = run.warnings;
     report.warnings.append(&mut journal.warnings);
     report
+}
+
+/// Asks the tool a document was applied with for the identifier of each
+/// resource it manages, by resource id: what `meridian retarget` writes as
+/// `adopt:` for the next tool. Reads the tool's state; changes nothing.
+pub fn identifiers(
+    registry: &Registry,
+    state_dir: &Path,
+    id: &StageId,
+    target: &str,
+) -> Result<BTreeMap<String, String>, String> {
+    if !meridian_ir::is_document_name(&id.name) {
+        return Err(format!(
+            "{:?} is not a safe directory name; run `meridian validate`",
+            id.name
+        ));
+    }
+    let Some(plugin) = registry.target(target) else {
+        return Err(format!("no plugin is installed for the target {target:?}"));
+    };
+    if !plugin.info().reads_identifiers {
+        return Err(format!(
+            "the {target} plugin cannot report what it manages, so there is nothing to adopt; \
+             give the identifiers as `adopt:` by hand"
+        ));
+    }
+    let dir = work_dir(state_dir, id, target);
+    if !dir.is_dir() {
+        return Err(format!(
+            "{id} has not been applied with {target} in {}, so it manages nothing yet",
+            state_dir.display()
+        ));
+    }
+    let context = RunContext {
+        document: id.name.clone(),
+        host: String::new(),
+        work_dir: meridian_sdk::tool::absolute_path(&dir),
+        inputs: Data::new(),
+        secrets: meridian_sdk::Secrets::none(),
+        credential: None,
+        save_plan: false,
+        saved_plan: None,
+    };
+    plugin
+        .identifiers(&context)
+        .map_err(|e| format!("reading what {target} manages for {id}: {e}"))
 }

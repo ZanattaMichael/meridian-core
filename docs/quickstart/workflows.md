@@ -1,14 +1,8 @@
 # Worked workflows
 
-A workflow is several documents given to one `meridian` command. This page walks
-through eight of them, each a file under
-[`examples/workflow/`](../../examples/workflow). Between them they use every
-target Meridian ships, and each shows a different way of fitting tools together.
-
-Every file on this page is compiled by a test with the real plugins, in each of
-the ways the page describes, so what you read here is what the command does.
-The last one, the vertical slice, is also applied for real on every push: a
-cluster, Terraform and Ansible, with nothing standing in for a tool.
+Eight workflows under [`examples/workflow/`](../../examples/workflow), covering every
+target. A test compiles each one. The vertical slice is also applied on every push with a
+real cluster, Terraform and Ansible.
 
 | Workflow | Tools, in the order they run | Shows |
 |---|---|---|
@@ -21,16 +15,13 @@ cluster, Terraform and Ansible, with nothing standing in for a tool.
 | [Tenants](#tenants) | Terraform, Salt, Kubernetes, Chef | one workflow for every customer: the plan decides which documents run, which resources they hold and what size they are |
 | [Vertical slice](#vertical-slice) | Kubernetes, Terraform, Ansible | the one that runs for real in CI: an output imported by Terraform, a host read by Ansible, and a second plan that changes nothing |
 
-If you have not yet run a workflow of two documents, start with
-[a two-stage workflow](first-two-stage.md). The rules every workflow follows are
-in [the language reference](../reference/dsl/index.md#workflows-several-documents);
-the three that matter most here:
+Rules ([full list](../reference/dsl/index.md#workflows-several-documents)):
 
 - Every Infrastructure document runs before any ResourceSet. Within a kind,
   documents run in the order they are given.
 - A ResourceSet names its machine with `targetHost`. When that is an output of an
   Infrastructure document, the ResourceSet is **deferred** until the output
-  exists: `compile` and `plan` say so, and compile nothing for it against a guess.
+  exists: `compile` and `plan` report it and compile nothing for it.
 - When a stage fails, the stages after it do not run. Nothing is rolled back.
 
 ## Three-tier application
@@ -46,9 +37,8 @@ flowchart LR
     W -. "listed first, so it runs first" .-> S
 ```
 
-One Infrastructure document creates two machines and promises three outputs.
-Three ResourceSets each take a host from one of them. No address is written
-anywhere in the file.
+One Infrastructure document creates two machines and declares three outputs.
+Three ResourceSets each take a host from one. No address appears in the file.
 
 ```
 $ meridian compile examples/workflow/three-tier.yaml --out out
@@ -62,19 +52,16 @@ shop (ResourceSet, target docker)
   deferred: needs the output "web_address" of Infrastructure "network", which has not been applied yet
 ```
 
-`meridian apply` runs OpenTofu, reads the outputs, and then compiles and runs
-each ResourceSet against the address it was waiting for.
-
-Things to notice in the file:
+`meridian apply` runs OpenTofu, reads the outputs, then compiles and runs each
+ResourceSet against its address.
 
 - **Two ResourceSets, one machine.** `web_host` (Ansible) and `shop` (Docker)
   both read `web_address`. Ansible installs Docker and Compose then runs the
-  containers. `shop` is listed after `web_host`, which is the whole of what
-  orders them: ResourceSets run in the order given.
+  containers. `shop` runs after `web_host` only because it is listed after it:
+  ResourceSets run in the order given.
 - **The same six types on two tools.** `database` compiles for Salt and
   `web_host` for Ansible. Both use `package`, `file`, `service`, `user`,
-  `group` and `exec`, and either could be pointed at the other tool by changing
-  `target`.
+  `group` and `exec`; either could switch tools by changing `target`.
 - **A reference inside a file's content.** `data_directory = '${data_dir.path}'`
   is settled when the document is compiled: the path is written once.
 - **Labels.** Every document carries `stage` and, where it applies, `tier`:
@@ -84,9 +71,9 @@ Things to notice in the file:
   meridian apply examples/workflow/three-tier.yaml -l 'stage!=provision'
   ```
 
-  The first runs only the database. The second leaves OpenTofu alone and
-  configures the machines it created the last time it was applied; a selected
-  ResourceSet finds its host from that document's last apply.
+  The first runs only the database. The second skips OpenTofu and configures
+  the machines from its last apply; each ResourceSet reads its host from that
+  apply.
 
 ## Cluster platform
 
@@ -97,28 +84,28 @@ flowchart LR
     C["cluster<br/>Terraform<br/>network, IAM, EKS"] --> P["platform<br/>Helm<br/>quota, shared config"] --> A["shop<br/>Kubernetes<br/>ConfigMap, Deployment, Service"]
 ```
 
-All three documents are `kind: Infrastructure`, so they run in the order the
-file gives them: the cluster, then what every team's workloads share, then one
-application. Nothing here is deferred, and `meridian compile` writes all three.
+All three documents are `kind: Infrastructure`, so they run in file order: the
+cluster, then shared platform pieces, then one application. Nothing is
+deferred; `meridian compile` writes all three.
 
 - **`dependsOn` where the tool cannot see the order.** The cluster's IAM role
-  must be allowed to manage a cluster before the cluster is created. No param
-  of the cluster mentions the policy attachment, so the document says it.
+  needs its policy before the cluster is created. No cluster param mentions the
+  policy attachment, so the document states the order.
 - **A chart built from the document.** In `platform`, `values`, `chart` and
   `release` are settings, and `${values.cpuLimit}` becomes a read of
-  `.Values.cpuLimit` in the chart's templates, so the value can still be
-  overridden when the chart is installed.
+  `.Values.cpuLimit` in the chart's templates, so it can still be overridden at
+  install time.
 - **A notify the tool does not have.** Kubernetes does not roll a Deployment
-  when a ConfigMap it mounts changes. `notifies` on `shop_config` makes it, and
-  the compile says how:
+  when a mounted ConfigMap changes. `notifies` on `shop_config` adds that, and
+  the compile explains how:
 
   ```
   warning: kubernetes: shop_app: restarts by rolling its pods whenever the content of "shop_config" changes; ...
   ```
 
 The second and third documents reach the cluster through a kubeconfig context.
-An output of one Infrastructure document is not handed to another: outputs go
-from an Infrastructure document to a ResourceSet's `targetHost`.
+Outputs go from an Infrastructure document to a ResourceSet's `targetHost`, not
+to another Infrastructure document.
 
 ## Golden image
 
@@ -131,10 +118,8 @@ flowchart LR
     F -->|address| P["baseline<br/>Puppet<br/>site, service"]
 ```
 
-Four tools, each doing the part it is best at. Packer bakes what is slow to
-install into an image. CloudFormation launches from it. cloud-init does what
-must happen once, on the first boot. Puppet keeps the configuration converged
-on every run after that.
+Packer builds an image, CloudFormation launches it, cloud-init handles first boot, and
+Puppet keeps the machine converged.
 
 - **Two configuration tools, two jobs.** `first_boot` and `baseline` are both
   ResourceSets on the same machine, and both use the shared types. cloud-init
@@ -145,8 +130,8 @@ on every run after that.
   host key exists, so a plan does not show it as a change every time.
 - **What is not connected.** The image id Packer reports is an output, and the
   CloudFormation document's `ImageId` is written by hand. An output cannot yet
-  fill a param of another Infrastructure document; the example says so where
-  the id is written.
+  fill a param of another Infrastructure document; a comment in the example
+  marks this.
 
 ## Windows web server
 
@@ -158,14 +143,14 @@ flowchart LR
     V -->|address| D["iis<br/>DSC<br/>features, site, service"]
 ```
 
-- **Two documents for two scopes.** A template is deployed to one scope. The
-  resource groups are created at subscription scope by the ARM document; the
-  network inside one of them is a separate deployment, written in Bicep. Both
-  compile to what Azure Resource Manager deploys.
+- **Two documents for two scopes.** A template deploys to one scope. The ARM
+  document creates the resource groups at subscription scope; the network inside
+  one is a separate Bicep deployment. Both compile to what Azure Resource Manager
+  deploys.
 - **The tool's own expressions pass through.** `${resourceGroup().location}` and
   `${uniqueString(resourceGroup().id)}` are Bicep's functions, not Meridian's.
-  A `${...}` that is not a reference to a resource of the document is handed to
-  the tool as written.
+  A `${...}` that does not reference a resource in the document passes to the
+  tool unchanged.
 - **DSC resources are DSC's own.** `PSDscResources/WindowsFeature` is the
   module and the resource, and `Ensure: Present` is the resource's own
   property. `spec.settings` says how the configuration is run: which engine,
@@ -189,8 +174,8 @@ flowchart LR
   for one machine: `meridian apply examples/workflow/edge-fleet.yaml -l role=worker`
   runs OpenVox and then Podman, and leaves the gateway alone.
 - **A reload, not a restart.** The HAProxy configuration notifies its service
-  with `action: reload`. Chef can do that. Had this document targeted Puppet it
-  would have been refused, because Puppet refreshes a service by restarting it.
+  with `action: reload`. Chef supports that. Puppet would refuse it, because
+  Puppet refreshes a service by restarting it.
 - **Containers as systemd units.** The Podman document compiles to Quadlet
   files (`api.container`, `edge-net.network`, ...). `dependsOn` becomes the
   unit's own ordering, and `${collector.name}` is the name the container is
@@ -214,9 +199,9 @@ flowchart TD
     M --> O["compiled files with no condition in them"]
 ```
 
-One file describes development and production. What differs between them is
-decided by [`when`](../reference/dsl/conditions.md#when), from data given on the
-command line:
+One file describes development and production. The differences are decided by
+[`when`](../reference/dsl/conditions.md#when), from data given on the command
+line:
 
 ```
 meridian compile examples/workflow/environments.yaml \
@@ -227,8 +212,8 @@ meridian compile examples/workflow/environments.yaml \
     --data examples/workflow/environments.prod.data.yaml
 ```
 
-The first is development. The second layers production over it: a key in the
-later file replaces the same key in the earlier one, whole.
+The first is development. The second layers production on top: a key in the
+later file replaces the same key in the earlier one entirely.
 
 | Resource | Document | Condition | Development | Production |
 |---|---|---|---|---|
@@ -240,25 +225,22 @@ later file replaces the same key in the earlier one, whole.
 | `budget` | `jobs` (Kubernetes) | `data.replicas == 3 \|\| data.high_availability` | removed | kept |
 | `load_test` | `jobs` (Kubernetes) | `data.env != 'prod' && (data.load_test == true)` | kept | removed |
 
-What the example is there to show:
-
 - **A condition means the same on every target.** `data.env != 'prod'` is
-  written in a Terraform document, an Ansible one and a Kubernetes one. Meridian
-  decides it itself, before compiling, so no tool sees it and no tool can read it
-  differently. A removed resource is not in the compiled files at all.
+  used in Terraform, Ansible and Kubernetes documents. Meridian decides it before
+  compiling, so no tool sees it or can read it differently. A removed resource
+  is absent from the compiled files.
 - **`ifMissing: skip`.** `ready` depends on `bastion`, which production removes.
-  Without `ifMissing: skip` on that entry the production compile is refused,
-  because a resource depending on something that is not there is far more often
-  a mistake than an intention.
+  Without `ifMissing: skip` the production compile is refused: depending on
+  something missing is usually a mistake.
 - **Guarding an optional key.** `defined(data.audit) && data.audit.enabled`
   reads `audit.enabled` only when `audit` is set. Development's data has no
   `audit` key and still compiles.
-- **No data, no answer.** With no `--data`, the compile is refused:
+- **No data, no answer.** Without `--data`, the compile is refused:
   `data.env is not set (give it with --data, or test for it with defined(data.env))`.
-  A condition is never taken as false because its key is missing.
+  A missing key never makes a condition false.
 - **`runtimeWhen` is the other kind.** `apt_cache` in the Ansible document
-  carries `runtimeWhen`, which Meridian does not decide: it is copied into the
-  task's `when:` and Ansible checks it on the machine.
+  uses `runtimeWhen`, which Meridian does not decide: it becomes the task's
+  `when:` and Ansible checks it on the machine.
 
 ## Tenants
 
@@ -280,9 +262,9 @@ flowchart TD
     M --> O["the documents this customer's plan includes"]
 ```
 
-Nothing in the file names a customer. The tenant, the plan and the add-ons come
-from data, and the plan decides three things at once: which documents are part
-of the run, which resources each holds, and what the values in them are.
+No customer is named in the file. Tenant, plan and add-ons come from data, and
+the plan decides which documents run, which resources they hold, and their
+values.
 
 ```
 meridian compile examples/workflow/tenants.yaml \
@@ -293,8 +275,8 @@ meridian compile examples/workflow/tenants.yaml \
     --data examples/workflow/tenants.enterprise.data.yaml
 ```
 
-The first is a customer on the starter plan, and the command says what the plan
-left out:
+The first is a starter-plan customer; the command reports what the plan left
+out:
 
 ```
 network (Infrastructure, target terraform)
@@ -323,34 +305,32 @@ backup (ResourceSet, target chef)
 | `listen` in the site configuration | `join(var.ports, ' ')` | `8080` | `80 443` |
 | `RETAIN_DAYS` | `data.backup.retain_days ?? 30` | not compiled | `90` |
 
-What the example is there to show:
-
-- **A condition on a whole document.** `spec.when` takes the document out of
-  the run. Nothing is compiled for it, no plugin is started for it, and the
-  command says which condition decided it. A customer without the monitoring
-  add-on has no `dashboards` directory at all.
+- **A condition on a whole document.** `spec.when` removes the document from the
+  run: nothing is compiled, no plugin starts, and the command names the
+  condition. A customer without the monitoring add-on has no `dashboards`
+  directory.
 - **Named conditions, decided once.** `conditions:` gives a condition a name,
-  read as `cond.<name>`. `own_database` reads `enterprise`, so the rule "an
-  enterprise tenant, or anyone who bought the add-on" is written in one place
-  and used by a resource and an output.
-- **Variables and functions.** `variables:` are worked out once per document
-  and read as `var.<name>`. `cidrSubnet(data.cidr, 8, 1)` turns the tenant's
+  read as `cond.<name>`. `own_database` reads `enterprise`, so "an enterprise
+  tenant, or anyone with the add-on" is written once and used by a resource and
+  an output.
+- **Variables and functions.** `variables:` are evaluated once per document and
+  read as `var.<name>`. `cidrSubnet(data.cidr, 8, 1)` turns the tenant's
   `10.20.0.0/16` into `10.20.1.0/24`; `upper`, `title`, `join`, `merge` and
   `toString` shape the rest. Every one is in
   [the function reference](../reference/dsl/expressions.md#functions).
-- **Values keep their type.** A value that is one interpolation and nothing
-  else is placed as what it is: `multi_az` is a boolean, `allocated_storage` a
-  number, `tags` a whole mapping. Interpolated into longer text it is text.
+- **Values keep their type.** A value that is a single interpolation keeps its
+  type: `multi_az` is a boolean, `allocated_storage` a number, `tags` a mapping.
+  Inside longer text it becomes text.
 - **Interpolations beside references.** `vpc_id: ${main.id}` is a reference,
   left for Terraform to resolve. `cidr_block: ${{ var.app_cidr }}` is an
   interpolation, decided by Meridian. Both sit in the same resource.
 - **Text from data is never a reference.** The customer's message of the day
-  holds `${EDITOR}`. It is written to `/etc/motd` exactly as typed, on every
-  target, and is never mistaken for a reference to a resource called `EDITOR`.
+  holds `${EDITOR}`. Every target writes it to `/etc/motd` as typed, never as a
+  reference to a resource called `EDITOR`.
   [Interpolation](../reference/dsl/interpolation.md) has the rule.
 - **Optional data.** `data.addons.database ?? false` and
-  `data.backup.retain_days ?? 30` give a key that may be missing a value to
-  fall back on, so the starter data file does not have to mention either.
+  `data.backup.retain_days ?? 30` give fallbacks for keys that may be missing,
+  so the starter data file can omit them.
 - **One thing changed by hand.** `--set tenant=globex` compiles the same
   workflow for another customer without a file of their own.
 
@@ -368,16 +348,14 @@ flowchart LR
     T -- "output address<br/>the targetHost" --> A
 ```
 
-The smallest workflow that goes through three tools and hands something real
-between each pair. It is the one workflow CI applies with the tools themselves,
-on every push: the `vertical slice` job starts a [kind](https://kind.sigs.k8s.io/)
+The smallest workflow that passes a real value between each of three tools. CI
+applies it with the real tools on every push: the `vertical slice` job starts a [kind](https://kind.sigs.k8s.io/)
 cluster, installs Terraform and `ansible-core`, and runs
 [`crates/meridian-cli/tests/vertical_slice.rs`](../../crates/meridian-cli/tests/vertical_slice.rs),
 which drives the real `meridian` binary through `validate`, `compile`, `plan`,
 `apply`, `status`, `report`, `plan` again and `drift`, and checks what each
-tool left behind. Nothing in it needs an account: the cluster runs inside
-Docker, Terraform creates a local value and a file, and Ansible configures the
-machine it runs on.
+tool left behind. No account is needed: the cluster runs in Docker, Terraform
+creates a local value and a file, and Ansible configures the local machine.
 
 1. **`app`** (Kubernetes) applies a namespace, a ConfigMap and a Deployment
    that mounts it. Its outputs are read from the cluster after the apply:
@@ -394,17 +372,17 @@ machine it runs on.
 
 What the example is there to show:
 
-- **Two ways to hand a value on.** `edge` asks for a value with `imports` and
-  gets it as its tool's own variable, never spliced into the compiled file;
-  `site` asks for its machine with `targetHost`. Both are deferred by `plan`
-  until the stage they wait on has been applied, and `compile` compiles `edge`
-  all the same, because the value is not part of the artifact.
+- **Two ways to hand a value on.** `edge` uses `imports` and receives the value
+  as its tool's own variable, never spliced into the compiled file. `site` uses
+  `targetHost`. `plan` defers both until the stage they wait on is applied;
+  `compile` still compiles `edge`, because the value is not part of the
+  artifact.
 - **The second plan is the proof.** After the apply, `meridian plan` reports
   every stage in sync and `meridian drift` agrees: `kubectl diff`, `terraform
-  plan` and Ansible's check mode each see the world as the documents say.
-- **Data decides where.** `data.root` is where the second and third stages
-  write; the test gives a scratch directory with `--set root=...`, and the
-  data file beside the example gives a path for running it by hand.
+  plan` and Ansible's check mode all match the documents.
+- **Data decides where.** The second and third stages write under `data.root`.
+  The test sets a scratch directory with `--set root=...`; the example's data
+  file gives a path for running by hand.
 
 To run it yourself, with a cluster in your current kubeconfig context,
 `terraform` and `ansible-playbook` on your path:
@@ -415,8 +393,8 @@ meridian apply examples/workflow/vertical-slice.yaml \
     --data examples/workflow/vertical-slice.data.yaml
 ```
 
-The namespace `meridian-slice` is what it leaves on the cluster; `kubectl
-delete namespace meridian-slice` removes it.
+It leaves the namespace `meridian-slice` on the cluster; `kubectl delete
+namespace meridian-slice` removes it.
 
 ## Using these as a starting point
 
@@ -432,7 +410,6 @@ meridian plan     my-workflow.yaml          # what each tool would change
 `apply` need the tools themselves; [install](install.md) lists what each target
 uses.
 
-A workflow that takes data keeps it beside it: `site.yaml` with
-`site.data.yaml`, and one `site.<name>.data.yaml` for each variant. That is the
-convention the examples test follows, compiling the workflow once with the first
-file and once more for each variant layered over it.
+Keep a workflow's data beside it: `site.yaml` with `site.data.yaml`, and one
+`site.<name>.data.yaml` per variant. The examples test follows this, compiling
+once with the base file and once per variant layered over it.

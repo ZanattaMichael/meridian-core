@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules;
 use meridian_sdk::CompileError;
 
 use crate::{refuse_at, Manifests, NAME};
@@ -21,7 +22,8 @@ pub(crate) fn validate(manifests: &Manifests) -> Result<(), CompileError> {
     if manifests.objects.is_empty() {
         return Err(CompileError {
             target: NAME.to_owned(),
-            rule: "empty-manifests".to_owned(),
+            rule: rules::EMPTY_DOCUMENT.name.to_owned(),
+            hint: rules::EMPTY_DOCUMENT.hint.to_owned(),
             msg: "there is nothing to apply: the document declares no objects".to_owned(),
             ..CompileError::default()
         });
@@ -32,7 +34,7 @@ pub(crate) fn validate(manifests: &Manifests) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &object.id,
                 &object.pos,
-                "invalid-name",
+                &rules::INVALID_NAME,
                 format!(
                     "{:?} cannot be the name of a Kubernetes object: a name holds only \
                      lower-case letters, digits, hyphens and periods, and starts and ends with \
@@ -50,7 +52,7 @@ pub(crate) fn validate(manifests: &Manifests) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &object.id,
                 &object.pos,
-                "duplicate-object",
+                &rules::DUPLICATE_RESOURCE,
                 format!(
                     "this {} is named {:?}, which resource {previous:?} already is; the second \
                      would overwrite the first",
@@ -64,7 +66,8 @@ pub(crate) fn validate(manifests: &Manifests) -> Result<(), CompileError> {
         if outputs.insert(name, ()).is_some() {
             return Err(CompileError {
                 target: NAME.to_owned(),
-                rule: "duplicate-output".to_owned(),
+                rule: rules::DUPLICATE_OUTPUT.name.to_owned(),
+                hint: rules::DUPLICATE_OUTPUT.hint.to_owned(),
                 msg: format!("output {name:?} is declared twice"),
                 ..CompileError::default()
             });
@@ -109,17 +112,17 @@ mod tests {
     fn each_rule_refuses_the_one_mistake_it_is_for() {
         type Break = fn(&mut Manifests);
         let table: &[(&str, &str, Break)] = &[
-            ("empty-manifests", "", |m| m.objects.clear()),
+            ("empty-document", "", |m| m.objects.clear()),
             ("invalid-name", "app", |m| {
                 m.objects[0].name = "Web".to_owned()
             }),
             ("invalid-name", "svc", |m| m.objects[1].name.clear()),
-            ("duplicate-object", "again", |m| {
+            ("duplicate-resource", "again", |m| {
                 m.objects
                     .push(object("again", "apps/v1", "Deployment", "web", "web"));
             }),
             // The kind is compared without regard to case.
-            ("duplicate-object", "again", |m| {
+            ("duplicate-resource", "again", |m| {
                 m.objects
                     .push(object("again", "v1", "service", "web", "web"));
             }),

@@ -113,6 +113,7 @@ fn plugin_dirs() -> String {
 fn meridian(dir: &Path, root: &Path, args: &[&str]) -> Output {
     let data = repo_root().join("examples/workflow/vertical-slice.data.yaml");
     let mut command = Command::new(env!("CARGO_BIN_EXE_meridian"));
+    command.env("MERIDIAN_ANNOTATIONS", "off");
     command.args(args);
     if matches!(args[0], "compile" | "plan" | "apply" | "drift") {
         command

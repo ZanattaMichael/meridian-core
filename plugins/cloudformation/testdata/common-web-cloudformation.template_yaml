@@ -1,0 +1,133 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Compiled by Meridian from the document web-cloudformation. Do not edit.
+Resources:
+  Net:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: net
+  NetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: net
+  NetGatewayLink:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId:
+        Ref: NetGateway
+      VpcId:
+        Ref: Net
+  Web:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: web
+      VpcId:
+        Ref: Net
+  WebRoutes:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      Tags:
+        - Key: Name
+          Value: web
+      VpcId:
+        Ref: Net
+  WebRoutesInternet:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - NetGatewayLink
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: NetGateway
+      RouteTableId:
+        Ref: WebRoutes
+  WebRoutesLink:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: WebRoutes
+      SubnetId:
+        Ref: Web
+  WebFw:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: web_fw
+      GroupName: web_fw
+      SecurityGroupIngress:
+        - CidrIp: 203.0.113.0/24
+          FromPort: 22
+          IpProtocol: tcp
+          ToPort: 22
+        - CidrIp: 0.0.0.0/0
+          FromPort: 80
+          IpProtocol: tcp
+          ToPort: 80
+        - CidrIp: 0.0.0.0/0
+          FromPort: 443
+          IpProtocol: tcp
+          ToPort: 443
+      Tags:
+        - Key: Name
+          Value: web_fw
+      VpcId:
+        Ref: Net
+  WebIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: web_ip
+  VmKey:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName: vm
+      PublicKeyMaterial: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCy3ccG4bHhpvuPdv4+wFBzkP+U7qF4nTg+rghAkKjOLbSJa/yUPZ0EwpJaXm+rtItFerUJK41JH4bArOJJazkHMdWR6iXYQtu5BB/CZALQHiS0LYg5zUhKMxISCESlzNDWFBza28pPjfpj3gnmrPc8D1bAsnKSaHGOffZxtJ62q3Rq0ESwzN/9ahvaiBW707kT/9NC9GqMcSk1HS1Z7Wz6sJEiCC/qIfbS3TAjJ+SloXlTC8+FIdptsxJ3KgWczg4q6Z1aiv9agASdEXMJTo+sUNt7C6qNKY1W03VxFf0cj59Zh6YIo2/ZQ1NyyUOB3rO2U2pbVGLaTvEnF6GSc0TH admin@example.com
+  Vm:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: '{{resolve:ssm:/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id}}'
+      InstanceType: t3.medium
+      KeyName:
+        Ref: VmKey
+      SecurityGroupIds:
+        - Fn::GetAtt:
+            - WebFw
+            - GroupId
+      SubnetId:
+        Ref: Web
+      Tags:
+        - Key: Name
+          Value: vm
+  VmAddress:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+          - WebIp
+          - AllocationId
+      InstanceId:
+        Ref: Vm
+  Logs:
+    Type: AWS::S3::Bucket
+Outputs:
+  Address:
+    Value:
+      Fn::GetAtt:
+        - WebIp
+        - PublicIp
+  PrivateAddress:
+    Value:
+      Fn::GetAtt:
+        - Vm
+        - PrivateIp

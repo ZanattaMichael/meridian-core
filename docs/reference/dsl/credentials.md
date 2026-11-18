@@ -1,10 +1,7 @@
 # Credentials
 
-A [secret](secrets.md) is one hidden value. A **credential** is an identity: a
-typed bundle that says how to prove who you are to a machine, a cloud, a
-cluster or a registry. Declaring a credential by name keeps "who am I to this
-system" out of every document that only needs to say "reach the host as the
-deploy identity".
+A **credential** is a typed identity for a machine, cloud, cluster or registry. Its
+secret fields are [secrets](secrets.md).
 
 ```yaml
 spec:
@@ -25,18 +22,12 @@ spec:
     credential: deploy
 ```
 
-The user is plain text and goes where the tool reads it: here, into the
-inventory as `ansible_user=deploy`. The key is a secret: it is never written
-in the document, never in a compiled file, and reaches `ansible-playbook` in
-a file only the user can read, for the length of the run.
+The user is plain text (here `ansible_user=deploy` in the inventory). The key reaches
+`ansible-playbook` in a user-only file for the run.
 
-> **Where a credential can be used today.** A credential is used by
-> `targetHost.credential`, by a target that
-> [takes one](#what-each-target-does): today `ansible`, and the test target.
-> Every credential type is declared and checked, so a document can name the
-> identities it will use before every use of them is built: endpoints, a
-> target's settings, secret stores and notification sinks are in
-> [the plan](../../plans/language-expansion.md#12-credentials).
+> **Status.** Usable through `targetHost.credential` on `ansible`, `chef`, `openvox`,
+> `podman`, `puppet`, `salt` and the test target. Every type can be declared and
+> checked. Other uses are in [the plan](../../plans/language-expansion.md#12-credentials).
 
 ## Contents
 
@@ -63,22 +54,15 @@ a file only the user can read, for the length of the run.
 | `from` | no | `ambient`: the tool finds the credential for itself. See [`from: ambient`](#from-ambient) |
 | the type's fields | by type | text for a plain field, a secret for a secret field, `true` or `false` for a flag |
 
-A credential has no field for a value. Every field that holds secret material
-is a reference to a declared secret, and nothing else: see
-[secret fields](#secret-fields).
+Secret material is always a reference to a declared secret ([secret fields](#secret-fields)).
 
-A credential must be **complete**: one of the ways its type lists must be
-wholly there, unless the credential is `from: ambient`. An `ssh` credential
-needs a `privateKey`, or a `password`, or `agent: true`. An `aws` one needs
-`accessKeyId` and `secretAccessKey`, or a `profile`, or a `roleArn`.
-`validate` refuses one that is not complete, and says what would complete it.
+A credential must be **complete** unless `from: ambient`: an `ssh` credential needs a
+`privateKey`, a `password` or `agent: true`; an `aws` one needs `accessKeyId` and
+`secretAccessKey`, a `profile`, or a `roleArn`. `validate` says what is missing.
 
 ## The types
 
-Credential types are a fixed, checked list, so a misspelt field is an error
-when the document is validated and not an authentication failure an hour
-later. Every type is declared and checked today; where each can be used is in
-[what each target does](#what-each-target-does).
+A fixed list; a misspelt field is a validation error.
 
 | Type | Plain fields | Secret fields | Flags | Complete with | Used for |
 |---|---|---|---|---|---|
@@ -92,19 +76,14 @@ later. Every type is declared and checked today; where each can be used is in
 | `kubeconfig` | `server`, `context`, `ca` | `kubeconfig`, `token` | | `kubeconfig`, or `server` and `token` | cluster endpoints |
 | `registry` | `server`, `user` | `password` | | `password` | daemon endpoints, image pulls, module registries |
 
-A `certificate` field is plain in an `ssh` or a `certificate` credential (a
-path to, or the text of, a public certificate) and secret in an `azure` one
-(the certificate holds the key). The table says which.
+`certificate` is plain in `ssh` and `certificate` credentials and secret in `azure`.
 
-Three of the types, `registry`, `token` and `usernamePassword`, can also be
-declared outside a run, in a project's manifest, for a module registry: see
-[registry logins](../modules.md#registry-logins). The manifest's rules are the
-same.
+`registry`, `token` and `usernamePassword` can also be declared in a project manifest for
+a module registry ([registry logins](../modules.md#registry-logins)).
 
 ## Secret fields
 
-A field that holds secret material is **exactly one declared secret, read as
-it is**: `${{ secret.<name> }}` and nothing more.
+A secret field is exactly `${{ secret.<name> }}`.
 
 ```yaml
 secrets:
@@ -118,8 +97,7 @@ credentials:
     password: ${{ secret.win_admin }}
 ```
 
-Three things are refused when the document is validated, before anything is
-fetched:
+Refused at validation:
 
 - **A literal.** `spec.credentials[0].password: a password is written in the
   document; declare a secret and read it with ${{ secret.<name> }}`. The error
@@ -131,44 +109,32 @@ fetched:
 - **Anything but the one secret**: a secret joined with text, two secrets, a
   value from data or a variable. `password is one declared secret, read as it
   is: ${{ secret.<name> }} and nothing more, so that the whole of it is
-  protected`. A password that has to be made from parts is a secret of its
-  own: make it with `exec`, or store it whole.
+  protected`. Store a composed password whole, or build it with `exec`.
 
-Once the document is resolved, the field *is* the secret: the same
-[rules](secrets.md#where-a-secret-cannot-be-used) hold as for a secret
-anywhere else. It is never in a compiled file, a plan, a log, an event or the
-run record, and it is fetched only by `plan`, `apply` and `rollback`, at the
-stage's turn.
+The field then follows the [secret rules](secrets.md#where-a-secret-cannot-be-used) and is
+fetched only by `plan`, `apply` and `rollback`.
 
-An `optional` secret that no place has makes the credential incomplete at that
-moment: `spec.credentials[0].password: password reads a secret, and the
-expression gives null`, and the stage stops. A credential is an identity, and
-half of one is no use.
+An `optional` secret that is not found stops the stage: `spec.credentials[0].password:
+password reads a secret, and the expression gives null`.
 
 ## Plain fields and flags
 
-A plain field is text: a user name, a region, a server, a path to a
-certificate. It reaches the tool in the open, on its command line or in its
-inventory, so:
+A plain field (user, region, server, certificate path) reaches the tool in the open.
 
-- It may be [interpolated](interpolation.md) from data and variables, like
-  any other text: `user: ${{ data.deploy_user }}`.
-- A secret cannot be placed in it. `spec.credentials[0].user: a secret cannot
-  be used here`, when the document is checked; a value that only becomes a
-  secret once resolved is refused then, as `user is not secret: it reaches
-  the tool in the open, so a secret cannot be placed in it`.
-- It is not checked beyond being text. A target checks what it can write: the
-  Ansible plugin refuses a user name it cannot put on an inventory line.
+- It may be [interpolated](interpolation.md): `user: ${{ data.deploy_user }}`.
+- A secret cannot go in it: `spec.credentials[0].user: a secret cannot be used
+  here` at check time; a value that only becomes secret once resolved is
+  refused then, as `user is not secret: it reaches the tool in the open, so a
+  secret cannot be placed in it`.
+- Targets check what they can write; Ansible refuses a user name it cannot put on an
+  inventory line.
 
-A flag is `true` or `false`, and is `false` when left out. `agent: yes` is
-refused: `agent is true or false`.
+A flag is `true` or `false` (default `false`). `agent: yes` is refused.
 
 ## `from: ambient`
 
-`from: ambient` means "whatever the tool finds for itself": its environment,
-its profile, its agent, its default key. It is what happens today when a
-document names no credential, and it lets a credential be named and typed
-without Meridian ever holding a value of it.
+The tool finds the credential itself (environment, profile, agent, default key), as when
+no credential is named. Meridian holds no value.
 
 ```yaml
 credentials:
@@ -178,10 +144,12 @@ credentials:
     user: ops
 ```
 
-An ambient credential needs no secret field and need not be complete: the tool
-has the rest. Its plain fields still go where they go, so the inventory above
-says `ansible_user=ops` and the SSH agent supplies the key. `from` takes no
-other value: a credential's secrets say where they come from, one by one.
+[`meridian secret check`](../cli.md#secret-check) reports whether it would be found,
+without reading a value
+([in a pipeline](../../operations/running-in-a-pipeline.md#checking-the-jobs-identity-first)).
+
+An ambient credential needs no secret field. Its plain fields are still written
+(`ansible_user=ops` above). `from` takes no other value.
 
 ## Reaching a host as a credential
 
@@ -194,23 +162,19 @@ targetHost:
   credential: deploy
 ```
 
-- It is a name, written as it is: not interpolated, so that which identity
-  reaches which host can be read off the document.
+- It is a literal name, not interpolated.
 - The credential must be declared in the same document's `spec.credentials`.
 - A host takes an `ssh` or a `usernamePassword` credential. Any other type is
   refused: `spec.targetHost.credential: a host takes an ssh or
   usernamePassword credential; "cloud" is aws`.
-- Left out, the host is reached as the tool's own identity, as before.
+- Left out, the tool's own identity is used.
 
-A credential that is declared but not named by the host is checked like any
-other, and is fetched and handed to no one.
+A declared credential the host does not name is checked, not fetched.
 
 ## What each target does
 
-A target that reaches its host as a credential declares the `credentials`
-capability, published in the [capability matrix](../capability-matrix.md).
-The core refuses, before anything runs, a document that names a credential
-for a target that does not:
+Targets with the `credentials` capability ([capability matrix](../capability-matrix.md))
+take one. For any other target the document is refused:
 
 ```
 spec.targetHost names the credential "deploy", and target "dsc" does not take one: it has no way to reach its host as that identity, so the document would be applied as whoever the tool is configured to be. Leave the credential out to use the tool's own; targets that do: ansible, chef, openvox, podman, puppet, salt
@@ -227,44 +191,26 @@ spec.targetHost names the credential "deploy", and target "dsc" does not take on
 | `fake`, the test target | `credential.txt`: the name, type, user and the names of the secret fields | one JSON file only the user can read, and a record of the delivery that names the fields and never a value | nothing |
 | any other target (`cloud-init`, `dsc`, and the infrastructure and containers targets but `podman`) | the document is refused, as above | | |
 
-On every target but `ansible` the compiled artifact holds nothing of the
-credential, not even the user: the tool is handed the identity at run time,
-so the same artifact can be applied as another identity, and a file nobody
-expected to be sensitive names no account. Each target's page has a
-`Credentials` section with the details.
-
-A credential is delivered the way the tool takes it, so what the tool keeps
-is the tool's own: Ansible keeps nothing, and a tool that caches a login is
-documented on its page.
+Except on `ansible`, the compiled artifact holds nothing of the credential, not even the
+user. Each target page has a `Credentials` section, including any login the tool caches.
 
 ## Handing a credential to a tool
 
-A credential's secret fields follow the same route as any
-[secret handed to a tool](secrets.md#handing-a-secret-to-a-tool), with the
-same three promises:
+Secret fields follow the [secret route](secrets.md#handing-a-secret-to-a-tool):
 
-- **The value is in no file Meridian keeps.** Not in the compiled artifact,
-  not in the state directory, not in the plan, not in an event, not in the
-  run record. The record of a run names the credential, as `deploy`, and
-  nothing of it.
-- **Never on the command line, never in the environment.** The command line
-  names a private file's path and nothing more. A key for a host over SSH is
-  not even in a file: it goes into an SSH agent Meridian starts for the
-  stage, through `ssh-add`'s standard input, and the tool is told only the
-  agent's socket in `SSH_AUTH_SOCK`. See
-  [0028](../../decisions/0028-a-key-reaches-a-host-through-an-agent-meridian-starts.md).
-- **For the length of the stage.** The values are fetched at the stage's turn
-  and wiped when it ends. A rollback fetches them again at its own turn.
+- In no file Meridian keeps. The run record names the credential only.
+- Never on the command line or in the environment. An SSH key goes into an SSH agent
+  Meridian starts for the stage, through `ssh-add`'s stdin; the tool gets `SSH_AUTH_SOCK`
+  ([0028](../../decisions/0028-a-key-reaches-a-host-through-an-agent-meridian-starts.md)).
+- Fetched at the stage's turn and wiped when it ends.
 
-What a plan prints is the name, the type and the user, so that "which
-identity touches production" can be reviewed, and never a value:
+A plan prints the name, type and user:
 
 ```
 web (ansible) on web01.internal as deploy (ssh, user deploy)
 ```
 
-How the values are protected in memory, and what crosses to a plugin, is in
-[Secrets in memory](../../concepts/secrets-in-memory.md#a-credential-in-a-run).
+See [secrets in memory](../../concepts/secrets-in-memory.md#a-credential-in-a-run).
 
 ## What each command does
 

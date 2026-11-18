@@ -13,10 +13,12 @@ meridian-value = { path = "../meridian-value" }
 prost = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "sync", "signal", "macros"] }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tonic-prost = { workspace = true }
+ureq = { workspace = true }
 
 [build-dependencies]
 protox = { workspace = true }

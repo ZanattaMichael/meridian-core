@@ -54,6 +54,8 @@ fn context(test: &str) -> RunContext {
         inputs: Data::new(),
         secrets: Default::default(),
         credential: None,
+        save_plan: false,
+        saved_plan: None,
     }
 }
 
@@ -134,6 +136,7 @@ fn a_rust_plugin_describes_its_category_and_operations() {
             runtime_condition: false,
             secrets: true,
             credentials: true,
+            adopt: meridian_sdk::Adoption::Import,
         }
     );
     assert_eq!(info.category, Category::Containerization);
@@ -200,7 +203,8 @@ fn a_rust_plugin_compiles_warns_and_refuses() {
             assert_eq!(
                 e.to_string(),
                 "site.yaml:7:3: fake: resource \"fw\" [unsupported-resource-type]: \
-                 the fake target has no mapping for type \"firewall_rule\""
+                 the fake target has no mapping for type \"firewall_rule\" (hint: use a type \
+                 from the target's resource types; `meridian plugins` lists them)"
             );
         }
         other => panic!("expected a refusal, got {other:?}"),

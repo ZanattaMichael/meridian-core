@@ -131,6 +131,13 @@ fn every_example_is_a_template_real_tooling_reads() {
             ],
         ),
         (
+            "../common/web-arm",
+            vec![
+                "'Microsoft.Network/virtualNetworks/subnets@2023-09-01'",
+                "'Microsoft.Compute/virtualMachines@2024-03-01'",
+            ],
+        ),
+        (
             "landing-zone",
             vec![
                 "targetScope = 'subscription'",
@@ -140,7 +147,10 @@ fn every_example_is_a_template_real_tooling_reads() {
         ),
     ];
     for (name, expected) in examples {
-        let dir = scratch(TMP, &format!("real-read-{name}"));
+        let dir = scratch(
+            TMP,
+            &format!("real-read-{}", name.replace("../common/", "common-")),
+        );
         let artifact = compile(&graph_from_file(
             &format!("examples/arm/{name}.yaml"),
             "arm",
@@ -409,4 +419,51 @@ fn a_secret_is_a_securestring_parameter_the_reader_understands() {
         bicep.contains("@secure()\nparam meridian_secret_token string"),
         "{bicep}"
     );
+}
+
+/// The schema source against the published type definitions, read for a
+/// template: the API version is a param. Needs the network and nothing
+/// else.
+#[ignore = "needs the network; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn the_azure_type_definitions_are_exported_with_the_api_version_as_a_param() {
+    use meridian_sdk::{SchemaRequest, SchemaSource};
+    use meridian_target_bicep::{AzureSchemas, Dialect};
+    if std::env::var("MERIDIAN_TEST_REAL_ARM").ok().as_deref() != Some("1") {
+        eprintln!("skipped: set MERIDIAN_TEST_REAL_ARM=1 to fetch the real type definitions");
+        return;
+    }
+    let dir = scratch(TMP, "real-schemas");
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: site\nspec:\n  target: arm\n  resources:\n    - id: deployment\n      type: deployment\n      params:\n        name: site\n        resourceGroup: rg\n    - id: storage\n      type: Microsoft.Storage/storageAccounts\n      params:\n        apiVersion: 2023-01-01\n        name: site\n        location: westeurope\n";
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_text("site.yaml", text, "arm")],
+    );
+    let log = KeptLog::default();
+    let export = AzureSchemas::new(Dialect::Arm)
+        .export(&request, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    let storage = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "Microsoft.Storage/storageAccounts")
+        .unwrap_or_else(|| panic!("the storage account is described: {:?}", export.notes));
+    assert!(!storage.open);
+    let version = storage.find_param("apiVersion").expect("apiVersion");
+    assert!(version.required);
+    assert!(
+        version.values.iter().any(|v| v == "2023-01-01"),
+        "{:?}",
+        version.values
+    );
+    assert!(storage.find_param("sku").is_some());
+    // Every other type is listed by name, once, with its versions.
+    let network = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "Microsoft.Network/virtualNetworks")
+        .expect("listed by name");
+    assert!(network.open);
+    assert!(!network.find_param("apiVersion").unwrap().values.is_empty());
+    assert!(!export.schemas.iter().any(|s| s.r#type.contains('@')));
 }

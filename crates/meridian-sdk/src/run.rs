@@ -1,6 +1,7 @@
 //! What a plugin is, beyond a compiler: its category, the operations it
 //! offers, and the [`Runner`] half that hands an artifact to the real tool.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
@@ -104,6 +105,51 @@ pub struct RunContext {
     /// whose [`Capabilities::credentials`](crate::Capabilities::credentials)
     /// is true, and only for `plan` and `apply`.
     pub credential: Option<HeldCredential>,
+    /// Asks `plan` to hand back the tool's own saved plan in [`Plan::saved`],
+    /// for `meridian plan --out`. A runner that cannot, or whose saved plan
+    /// would carry a secret value, leaves it `None`; that is never an error.
+    pub save_plan: bool,
+    /// The plan `apply` must carry out exactly: what `plan` saved for this
+    /// very artifact in an earlier run. A runner handed one applies that
+    /// plan and nothing else, and fails when its tool finds the plan stale.
+    /// Sent only to a runner whose [`Runner::saves_plans`] is true.
+    pub saved_plan: Option<SavedPlan>,
+}
+
+/// A tool's own saved plan, as the plugin chose to keep it: a Terraform plan
+/// file, a Pulumi plan, the name of a CloudFormation change set.
+///
+/// The host never reads `data`. It keeps it in the plan file between the
+/// plan and the apply, so `data` must hold no secret value: a runner whose
+/// tool would write one into its saved plan saves nothing instead.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct SavedPlan {
+    pub data: Vec<u8>,
+    /// What the plan would do, as the plan reported it. Filled in by the
+    /// host when it hands the plan back to `apply`, so a runner whose tool
+    /// gives no second account of what it applied can still report it.
+    pub changes: Vec<Change>,
+}
+
+impl SavedPlan {
+    /// A saved plan holding `data`, as a runner returns it from `plan`.
+    pub fn new(data: impl Into<Vec<u8>>) -> SavedPlan {
+        SavedPlan {
+            data: data.into(),
+            changes: Vec::new(),
+        }
+    }
+}
+
+/// The bytes are the tool's, and can be long and binary, so only their
+/// length is shown.
+impl fmt::Debug for SavedPlan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SavedPlan")
+            .field("data", &format_args!("{} bytes", self.data.len()))
+            .field("changes", &self.changes)
+            .finish()
+    }
 }
 
 /// What the tool would do, or did, to one thing it manages.
@@ -115,6 +161,10 @@ pub enum ChangeAction {
     /// Destroyed and created again. It is kept apart from an update because it
     /// is the one that loses data.
     Replace,
+    /// Taken under management as it is, with nothing else changed: what a
+    /// resource's `adopt` does on its first plan. An adoption that also
+    /// changes the thing is reported as the change.
+    Adopt,
 }
 
 impl ChangeAction {
@@ -124,6 +174,7 @@ impl ChangeAction {
             ChangeAction::Update => "update",
             ChangeAction::Delete => "delete",
             ChangeAction::Replace => "replace",
+            ChangeAction::Adopt => "adopt",
         }
     }
 }
@@ -189,6 +240,10 @@ pub struct Plan {
     /// cannot say at all. An empty `changes` must not be read as "in sync"
     /// when this is set.
     pub unknown: bool,
+    /// The tool's own saved plan, when [`RunContext::save_plan`] asked for
+    /// one and the runner could save it. `None` otherwise; an apply from the
+    /// plan file then checks the artifact's hash and plans again.
+    pub saved: Option<SavedPlan>,
 }
 
 impl Plan {
@@ -333,6 +388,20 @@ pub trait Runner: Send + Sync {
         false
     }
 
+    /// Whether this runner hands back its tool's own saved plan from
+    /// [`Runner::plan`] when [`RunContext::save_plan`] asks for one, and
+    /// carries out exactly that plan in [`Runner::apply`] when handed it in
+    /// [`RunContext::saved_plan`].
+    ///
+    /// Say true only when both halves hold: a saved plan is what a reviewer
+    /// approved, and an apply handed one must do that and nothing else, or
+    /// fail. The default is false: `meridian apply --plan` then checks that
+    /// the document still compiles to the planned artifact and plans again,
+    /// and the plan file says so for the stage.
+    fn saves_plans(&self) -> bool {
+        false
+    }
+
     /// The settings an operator can configure this runner with: each one's
     /// name, environment variable, default and what it does. The host
     /// lists them with `meridian plugins --settings`, generates the
@@ -374,5 +443,20 @@ pub trait Runner: Send + Sync {
     fn outputs(&self, context: &RunContext) -> Result<Vec<Output>, RunError> {
         let _ = context;
         Err(RunError::new("this plugin does not report outputs"))
+    }
+
+    /// Whether [`Runner::identifiers`] is answered. Say true only when the
+    /// identifiers are what the tool's import takes back, so that `meridian
+    /// retarget` can write them as `adopt` for another target.
+    fn reads_identifiers(&self) -> bool {
+        false
+    }
+
+    /// The tool's own identifier of each thing it manages, by the id of the
+    /// resource it was declared as, read from the tool's state without
+    /// changing anything. A resource the tool has no record of is left out.
+    fn identifiers(&self, context: &RunContext) -> Result<BTreeMap<String, String>, RunError> {
+        let _ = context;
+        Err(RunError::new("this plugin does not read identifiers"))
     }
 }

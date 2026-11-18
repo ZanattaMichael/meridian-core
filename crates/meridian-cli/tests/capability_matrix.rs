@@ -5,7 +5,7 @@
 use std::fs;
 
 use meridian_plugin_testkit::repo_root;
-use meridian_sdk::{Emitter, Importer, Runner, SchemaSource};
+use meridian_sdk::{Adoption, Emitter, Importer, Runner, SchemaSource};
 
 const PATH: &str = "docs/reference/capability-matrix.md";
 
@@ -27,6 +27,10 @@ compiled, with the reason. Each target's own page says how it does what it can.
 - **runtimeWhen** is a condition the tool checks on the node at the moment it
   applies a resource.
 - **plan** asks the tool what an apply would change, without changing it.
+- **saved plan** says the tool saves its plan when `meridian plan --out` is
+  run, and applies exactly that plan on `meridian apply --plan`. Every target
+  is checked by its artifact hash; this column says which also hand the tool
+  its own plan back. See [a saved plan](../operations/pull-requests.md).
 - **outputs** are values a later stage of a workflow can read.
 - **inputs** says the target hands its tool the values a document's
   `spec.imports` brings from other documents, as the tool's own variables or
@@ -40,6 +44,12 @@ compiled, with the reason. Each target's own page says how it does what it can.
   fields, such as the user, and hands its secret fields to the tool by a
   private channel when it runs. See
   [Credentials](dsl/credentials.md).
+- **adopt** is what the target does with a resource's `adopt`: *import*
+  compiles it into the tool's own import, so the tool takes the existing
+  thing into its state; *converge* means the tool keeps no state and makes
+  the thing what the document says whether it existed or not, so `adopt`
+  changes nothing; *no* refuses it. See
+  [Adopting what exists](dsl/resources.md#adopting-what-exists).
 - **import** is what `meridian import` can read of the tool's existing
   configuration and turn into a document for the target. See
   [Importing existing configuration](../operations/importing.md).
@@ -79,8 +89,9 @@ fn row(
         None => "no".to_owned(),
     };
     format!(
-        "| [{name}](../targets/{name}.md) | {category} | {types} | {notifies} | {runtime} | {plan} | {apply} | {outputs} | {inputs} | {secrets} | {credentials} | {import} | {schemas} |\n",
+        "| [{name}](../targets/{name}.md) | {category} | {types} | {notifies} | {runtime} | {plan} | {saved} | {apply} | {outputs} | {inputs} | {secrets} | {credentials} | {adopt} | {import} | {schemas} |\n",
         schemas = yes(schemas.is_some()),
+        saved = yes(runner.saves_plans()),
         credentials = yes(capabilities.credentials),
         name = emitter.name(),
         category = emitter.category(),
@@ -91,6 +102,10 @@ fn row(
         outputs = yes(operations.outputs),
         inputs = yes(runner.accepts_inputs()),
         secrets = yes(capabilities.secrets),
+        adopt = match capabilities.adopt {
+            Adoption::None => "no",
+            other => other.as_str(),
+        },
     )
 }
 
@@ -110,7 +125,7 @@ fn matrix() -> String {
         .collect();
     rows.sort();
     format!(
-        "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | apply | outputs | inputs | secrets | credentials | import | schemas |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n{}",
+        "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | saved plan | apply | outputs | inputs | secrets | credentials | adopt | import | schemas |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n{}",
         rows.concat()
     )
 }

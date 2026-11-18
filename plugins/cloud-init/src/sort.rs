@@ -18,9 +18,10 @@
 
 use std::collections::{HashMap, HashSet};
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{CompileError, EdgeKind, ResourceGraph};
 
-use crate::{CloudConfig, Command, Item, Placed, NAME};
+use crate::{own, CloudConfig, Command, Item, Placed, NAME};
 
 /// The points of a first boot at which this target has work done, in order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -86,11 +87,15 @@ pub(crate) fn arrange(
     }
 
     // Resources arrive in apply order, so everything a file depends on has
-    // been placed by the time the file is reached.
+    // been placed by the time the file is reached. A module of cloud-init's
+    // own is applied at whatever point cloud-init gives it, which this
+    // target does not know, so it is placed nowhere: an edge at either end
+    // of one is refused below.
     let mut phases: HashMap<String, Phase> = HashMap::new();
     let mut deferred = Vec::new();
     for (index, unit) in units.iter().enumerate() {
         let phase = match &unit.item {
+            Item::Module(_) => continue,
             Item::Group(_) => Phase::Groups,
             Item::User(_) => Phase::Users,
             Item::Package(_) => Phase::Packages,
@@ -146,6 +151,7 @@ pub(crate) fn arrange(
             Item::User(item) => config.users.push(Placed { id, pos, item }),
             Item::Package(item) => config.packages.push(Placed { id, pos, item }),
             Item::Commands(commands) => config.commands.extend(commands),
+            Item::Module(item) => config.modules.push(Placed { id, pos, item }),
         }
     }
     // One list holds both kinds of file. The deferred ones go last so the
@@ -170,19 +176,38 @@ fn check_edges(
     for edge in graph.edges_of_kind(EdgeKind::HardOrder) {
         // A hard-order edge points from the dependency to the resource that
         // declared it, so `from` must be applied before `to`.
-        let (Some(first), Some(then)) = (phases.get(&edge.from), phases.get(&edge.to)) else {
-            continue;
-        };
-        let refuse = |rule: &str, msg: String| CompileError {
+        let refuse = |rule: &Rule, msg: String| CompileError {
             target: NAME.to_owned(),
             resource: edge.to.clone(),
-            rule: rule.to_owned(),
+            rule: rule.name.to_owned(),
+            hint: rule.hint.to_owned(),
             msg,
             pos: edge.pos.clone(),
         };
+        let (Some(first), Some(then)) = (phases.get(&edge.from), phases.get(&edge.to)) else {
+            let module = units
+                .iter()
+                .find(|u| {
+                    matches!(u.item, Item::Module(_)) && (u.id == edge.from || u.id == edge.to)
+                })
+                .map(|u| u.id.as_str())
+                .unwrap_or_default();
+            if module.is_empty() {
+                continue;
+            }
+            return Err(refuse(
+                &own::UNSATISFIABLE_ORDER,
+                format!(
+                    "depends on {:?}, but resource {module:?} is a cloud-config module, which \
+                     cloud-init applies at its own point of the first boot: a document cannot \
+                     order anything before or after it",
+                    edge.from
+                ),
+            ));
+        };
         if first > then {
             return Err(refuse(
-                "unsatisfiable-order",
+                &own::UNSATISFIABLE_ORDER,
                 format!(
                     "depends on {:?}, but cloud-init {} before it {}: \
                      the order of a first boot is cloud-init's own and a document cannot change it",
@@ -200,7 +225,7 @@ fn check_edges(
             && position[edge.from.as_str()] > position[edge.to.as_str()]
         {
             return Err(refuse(
-                "ordering-violated",
+                &rules::ORDERING_VIOLATED,
                 format!(
                     "resource {:?} is ordered before its dependency {:?}; \
                      the graph stage produced an order this target cannot keep",

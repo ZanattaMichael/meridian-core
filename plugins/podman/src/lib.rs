@@ -51,9 +51,10 @@ mod validate;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, SshTakes,
+    Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph, SshTakes,
 };
 
 /// What `ssh` can take of the credential a document reaches its host as:
@@ -72,7 +73,8 @@ fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
     meridian_sdk::check_ssh_credential(credential, &SSH_TAKES).map_err(|msg| CompileError {
         target: NAME.to_owned(),
         resource: String::new(),
-        rule: "unsupported-credential".to_owned(),
+        rule: rules::UNSUPPORTED_CREDENTIAL.name.to_owned(),
+        hint: rules::UNSUPPORTED_CREDENTIAL.hint.to_owned(),
         msg: format!("the credential {:?}: {msg}", credential.name),
         pos: Position::default(),
     })
@@ -240,7 +242,7 @@ impl Units {
 }
 
 /// A refusal of one resource, stamped with this target.
-pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         ..CompileError::for_resource(r, rule, msg)
@@ -248,11 +250,12 @@ pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
 }
 
 /// A refusal that is not about a resource still in hand.
-pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         resource: resource.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         pos: pos.clone(),
     }
@@ -285,6 +288,7 @@ impl Emitter for Podman {
             runtime_condition: false,
             secrets: true,
             credentials: true,
+            adopt: Adoption::None,
         }
     }
 

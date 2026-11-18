@@ -14,8 +14,9 @@ How to read a cell:
 - **ok, warns**: it compiled, with a warning the plan shows. Nothing is dropped
   silently; the warning says what the tool will do differently.
 - a name such as `unsupported-state`: the target refused the document, and that
-  is the rule the refusal carries. The message that goes with it names the
-  resource, the line, and what the target does accept.
+  is the rule the refusal carries, one of the [refusal rules](refusal-rules.md).
+  The message that goes with it names the resource, the line, and what the
+  target does accept.
 
 The **same** column says whether the targets are allowed to differ. A row
 marked *yes* is a part of the dialect that must come out the same everywhere,
@@ -62,7 +63,7 @@ where the tools themselves differ; the cells say how, and the
 | content, owner, group and mode | yes | ok | ok | ok | ok | ok | ok |
 | state `file` | yes | ok | ok | ok | ok | ok | ok |
 | state `directory` | yes | ok | ok | ok | ok | ok | ok |
-| state `directory` with `content` | no | `unsupported-state` | `invalid-param` | `unsupported-param` | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` |
+| state `directory` with `content` | yes | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` |
 | state `absent` | yes | ok | ok | ok | ok | ok | ok |
 | state `absent` with owner and mode | no | ok | ok | `unsupported-param` | ok | ok | ok, warns |
 | no `content` | no | ok | ok | `missing-param` | ok | ok | ok |
@@ -112,9 +113,28 @@ where the tools themselves differ; the cells say how, and the
 
 | Document | same | ansible | chef | cloud-init | openvox | puppet | salt |
 |---|---|---|---|---|---|---|---|
-| a type outside the dialect (`firewall_rule`) | yes | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
+| a type that is no shared type and no tool's own (`Firewall.Rule`) | yes | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
 | a type in the wrong case (`Package`) | yes | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
 | all six types in one document | yes | ok, warns | ok | ok, warns | ok | ok | ok |
+
+## `native types`
+
+| Document | same | ansible | chef | cloud-init | openvox | puppet | salt |
+|---|---|---|---|---|---|---|---|
+| an Ansible module in full (`ansible.builtin.lineinfile`) | no | ok | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
+| an Ansible module in full, with a state | no | ok | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
+| an Ansible module in full, notified with `run` | no | ok, warns | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` |
+| a bare word that is no shared type (`firewall_rule`) | no | `unsupported-resource-type` | ok | ok | ok | ok | `unsupported-resource-type` |
+| a bare module name (`lineinfile`) | no | `unsupported-resource-type` | ok | ok | ok | ok | `unsupported-resource-type` |
+| the tool's own `file` under the prefix (`native/file`) | no | `unsupported-resource-type` | ok | `unsupported-resource-type` | ok | ok | `unsupported-resource-type` |
+| a Puppet module type (`mysql::db`) | no | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | ok | ok | `unsupported-resource-type` |
+| a Salt state function (`pkgrepo.managed`) | no | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | ok |
+| a Chef resource (`template`), notified with `create` | no | `unsupported-resource-type` | ok | `unsupported-action` | `unsupported-action` | `unsupported-action` | `unsupported-resource-type` |
+| a cloud-config module (`ntp`) | no | `unsupported-resource-type` | ok | ok | ok | ok | `unsupported-resource-type` |
+| the tool's own `package` under the prefix, with a state (`native/package`) | no | `unsupported-resource-type` | ok | `unsupported-resource-type` | ok | ok | `unsupported-resource-type` |
+| a Puppet type notified with `refresh` | no | `unsupported-resource-type` | ok | `unsupported-action` | ok | ok | `unsupported-resource-type` |
+| a Salt state function notified with `watch` | no | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | ok |
+| a native type that depends on a shared one | no | `unsupported-resource-type` | ok | `unsupported-resource-type` | ok | ok | `unsupported-resource-type` |
 
 ## `dependsOn`
 

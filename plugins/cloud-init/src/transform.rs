@@ -6,10 +6,15 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use meridian_sdk::{CompileError, EdgeKind, Resource, ResourceGraph, Value, Warning};
+use meridian_sdk::rules;
+use meridian_sdk::{
+    CompileError, EdgeKind, Resource, ResourceGraph, ResourceSchema, TypeName, Value, Warning,
+};
 
 use crate::shell::{quote, split};
-use crate::{refuse, warning, Command, Group, Item, Package, Placed, User, WriteFile};
+use crate::{
+    refuse, warning, Command, Group, Item, Module, Package, Placed, User, WriteFile, NAME,
+};
 
 /// What the transform stage hands on.
 pub(crate) struct Transformed {
@@ -20,19 +25,45 @@ pub(crate) struct Transformed {
     pub warnings: Vec<Warning>,
 }
 
-/// Every IR resource type this target maps, sorted.
+/// The six shared types, sorted.
+const SHARED: &[&str] = &["exec", "file", "group", "package", "service", "user"];
+
+/// How an editor is told that any cloud-config module is a type: the key
+/// the module is written under.
+pub const NATIVE_PATTERN: &str = "<module>";
+
+/// The cloud-config keys the shared types write. A module of one of these
+/// names is reached through the shared type, so the two never write one key.
+const SHARED_KEYS: &[(&str, &str)] = &[
+    ("groups", "group"),
+    ("packages", "package"),
+    ("runcmd", "exec"),
+    ("users", "user"),
+    ("write_files", "file"),
+];
+
+/// Every IR resource type this target maps: the pattern every module fits,
+/// then the shared six, sorted.
 pub fn supported_resource_types() -> Vec<String> {
-    ["exec", "file", "group", "package", "service", "user"]
-        .map(str::to_owned)
-        .to_vec()
+    let mut types = vec![NATIVE_PATTERN.to_owned()];
+    types.extend(SHARED.iter().map(|t| (*t).to_owned()));
+    types
 }
 
 /// What each resource type takes, for editors. The lists repeat what each
 /// type's function accepts below; the tooling crate's schema conformance
 /// test fails if the two ever disagree.
-pub fn resource_schemas() -> Vec<meridian_sdk::ResourceSchema> {
+pub fn resource_schemas() -> Vec<ResourceSchema> {
     use meridian_sdk::schema::shared;
     vec![
+        ResourceSchema::open(
+            NATIVE_PATTERN,
+            "Any cloud-config module, by the key it is written under: ntp, apt, timezone, \
+             bootcmd. The params are the module's own keys, passed through as written; a \
+             module whose value is not a mapping takes the one param value. It runs at the \
+             point of the first boot cloud-init gives it, so nothing can depend on it or be \
+             ordered before it. The document then compiles for cloud-init only.",
+        ),
         shared(
             "exec",
             &["chdir", "command", "creates", "removes", "shell"],
@@ -105,15 +136,17 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Transformed, CompileErr
         // The shared types are checked the same way on every configuration
         // management target, so a document moves between tools without the
         // type rules changing under it.
-        meridian_sdk::schema::check_shared(resource)
-            .map_err(|e| refuse(resource, &e.rule, e.msg))?;
+        meridian_sdk::schema::check_shared(resource).map_err(|e| CompileError {
+            target: NAME.to_owned(),
+            ..e
+        })?;
         // cloud-init reads the whole document once and evaluates nothing per
         // entry. Compiling the condition away would apply the resource on
         // every machine the condition was meant to exclude.
         if !resource.runtime_when.is_empty() {
             return Err(refuse(
                 resource,
-                "unsupported-runtime-condition",
+                &rules::UNSUPPORTED_RUNTIME_CONDITION,
                 format!(
                     "resource carries runtimeWhen {:?}, which this target cannot express: \
                      cloud-init applies user-data as written and has no per-resource \
@@ -166,7 +199,133 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Transformed, CompileErr
     })
 }
 
+/// The cloud-config module a native type names, when the type is one: a
+/// key as cloud-init writes it, lower-case, with underscores or hyphens.
+/// None of the six has a module of its own name, so `native/<name>` reaches
+/// nothing here.
+pub(crate) fn native_module(r: &Resource) -> Result<Option<&str>, CompileError> {
+    match TypeName::read(&r.r#type) {
+        TypeName::Shared(_) => Ok(None),
+        TypeName::NativeNamedLikeShared(bare) => {
+            let key = SHARED_KEYS
+                .iter()
+                .find(|(_, shared)| *shared == bare)
+                .map_or("", |(key, _)| *key);
+            let hint = if key.is_empty() {
+                "a module is written by its key".to_owned()
+            } else {
+                format!("the shared type {bare} is what writes {key}, and a module is written by its key")
+            };
+            Err(refuse(
+                r,
+                &rules::UNSUPPORTED_RESOURCE_TYPE,
+                format!(
+                    "resource type {:?} names no cloud-config module: {hint}, such as ntp",
+                    r.r#type
+                ),
+            ))
+        }
+        TypeName::Native(name) if is_key(name) => {
+            if let Some((key, shared)) = SHARED_KEYS.iter().find(|(key, _)| *key == name) {
+                return Err(refuse(
+                    r,
+                    &rules::UNSUPPORTED_RESOURCE_TYPE,
+                    format!(
+                        "resource type {key:?} is the key the shared type {shared} writes; \
+                         write a {shared} resource, so that the two never write one key"
+                    ),
+                ));
+            }
+            Ok(Some(name))
+        }
+        TypeName::Native(_) => Err(unsupported_type(r)),
+    }
+}
+
+/// Whether `name` is one of the keys the six shared types write, which no
+/// module resource may write.
+pub(crate) fn is_shared_key(name: &str) -> bool {
+    SHARED_KEYS.iter().any(|(key, _)| *key == name)
+}
+
+/// Whether `name` is shaped like a cloud-config key.
+fn is_key(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_ascii_lowercase())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
+fn unsupported_type(r: &Resource) -> CompileError {
+    refuse(
+        r,
+        &rules::UNSUPPORTED_RESOURCE_TYPE,
+        format!(
+            "unsupported resource type {:?} on this target: it is not one of the shared types \
+             ({}), and a cloud-config module is written by its key, such as ntp or apt",
+            r.r#type,
+            SHARED.join(", ")
+        ),
+    )
+}
+
+/// A resource whose type is a cloud-config module: its params are the
+/// module's own keys as written, or, for a module whose value is not a
+/// mapping, the one param `value`. Nothing is checked against what the
+/// module takes; a key it does not have is cloud-init's to refuse when it
+/// validates the user-data, until the schema is synced and the editor
+/// reports it in place.
+fn module(r: &Resource, key: &str) -> Result<Item, CompileError> {
+    if !r.state.is_empty() {
+        return Err(refuse(
+            r,
+            &rules::UNSUPPORTED_STATE,
+            format!(
+                "resource type {key:?} accepts no state on this target: a module's own keys \
+                 say what it does, got {:?}",
+                r.state
+            ),
+        ));
+    }
+    for (name, value) in &r.params {
+        if *value == Value::Null {
+            return Err(refuse(r, &rules::EMPTY_PARAM, empty(name, r)));
+        }
+    }
+    let value = match r.params.get("value") {
+        Some(_) if r.params.len() > 1 => {
+            return Err(refuse(
+                r,
+                &rules::INVALID_PARAM,
+                format!(
+                    "param \"value\" is the whole value of module {key}, and stands alone; \
+                     write the module's keys as params instead, or only value"
+                ),
+            ));
+        }
+        Some(value) => value.clone(),
+        None if r.params.is_empty() => {
+            return Err(refuse(
+                r,
+                &rules::MISSING_PARAM,
+                format!(
+                    "module {key} was given nothing to write: its keys as params, or the one \
+                     param value"
+                ),
+            ));
+        }
+        None => Value::Map(r.params.clone()),
+    };
+    Ok(Item::Module(Module {
+        key: key.to_owned(),
+        value,
+    }))
+}
+
 fn item_for(r: &Resource) -> Result<Item, CompileError> {
+    if let Some(key) = native_module(r)? {
+        return module(r, key);
+    }
     match r.r#type.as_str() {
         "package" => package(r),
         "file" => file(r),
@@ -178,15 +337,7 @@ fn item_for(r: &Resource) -> Result<Item, CompileError> {
             no_state(r)?;
             Ok(Item::Commands(vec![exec_command(r)?]))
         }
-        _ => Err(refuse(
-            r,
-            "unsupported-resource-type",
-            format!(
-                "unsupported resource type {:?} on this target (supported: {})",
-                r.r#type,
-                supported_resource_types().join(", ")
-            ),
-        )),
+        _ => Err(unsupported_type(r)),
     }
 }
 
@@ -221,7 +372,7 @@ fn file(r: &Resource) -> Result<Item, CompileError> {
     if !path.starts_with('/') {
         return Err(refuse(
             r,
-            "relative-path",
+            &rules::INVALID_PATH,
             format!(
                 "path {path:?} is not absolute; a first boot has no working directory to \
                  resolve it against"
@@ -240,7 +391,7 @@ fn file(r: &Resource) -> Result<Item, CompileError> {
             if r.params.contains_key(name) {
                 return Err(refuse(
                     r,
-                    "unsupported-param",
+                    &rules::PARAM_CONFLICTS_WITH_STATE,
                     format!("param {name:?} does not apply to a file in state {state:?}"),
                 ));
             }
@@ -265,7 +416,7 @@ fn file(r: &Resource) -> Result<Item, CompileError> {
                 if r.params.contains_key(name) {
                     return Err(refuse(
                         r,
-                        "unsupported-param",
+                        &rules::UNSUPPORTED_PARAM,
                         format!("param {name:?} does not apply to a file in state \"absent\""),
                     ));
                 }
@@ -273,7 +424,7 @@ fn file(r: &Resource) -> Result<Item, CompileError> {
             if path.split('/').all(|part| part.is_empty() || part == ".") {
                 return Err(refuse(
                     r,
-                    "unsafe-path",
+                    &rules::INVALID_PATH,
                     format!("refusing to compile the removal of {path:?}"),
                 ));
             }
@@ -283,7 +434,7 @@ fn file(r: &Resource) -> Result<Item, CompileError> {
             let Some(content) = text(r, "content")? else {
                 return Err(refuse(
                     r,
-                    "missing-param",
+                    &rules::MISSING_PARAM,
                     format!(
                         "resource type \"file\" requires param \"content\" on this target: \
                          cloud-init writes whole files, and without content it would empty {path}"
@@ -468,7 +619,7 @@ fn exec_command(r: &Resource) -> Result<Command, CompileError> {
     let argv = split(command).map_err(|why| {
         refuse(
             r,
-            "invalid-command",
+            &rules::INVALID_PARAM,
             format!(
                 "command {command:?} cannot be split into words: {why}. \
                  Set shell: true if it is meant as a line of shell"
@@ -476,7 +627,7 @@ fn exec_command(r: &Resource) -> Result<Command, CompileError> {
         )
     })?;
     if argv.is_empty() {
-        return Err(refuse(r, "empty-param", empty("command", r)));
+        return Err(refuse(r, &rules::EMPTY_PARAM, empty("command", r)));
     }
     let mut body = line(&argv);
     if let Some(dir) = chdir {
@@ -506,7 +657,7 @@ fn handlers(graph: &ResourceGraph) -> Result<Vec<Command>, CompileError> {
             let from = graph.resource(&edge.from).cloned().unwrap_or_default();
             return Err(refuse(
                 &from,
-                "unknown-notify-target",
+                &rules::UNKNOWN_NOTIFY_TARGET,
                 format!("notifies an unknown resource {:?}", edge.to),
             ));
         };
@@ -524,7 +675,7 @@ fn handler_for(r: &Resource, action: &str) -> Result<Command, CompileError> {
     let unsupported = |supported: &[&str]| {
         refuse(
             r,
-            "unsupported-action",
+            &rules::UNSUPPORTED_ACTION,
             format!(
                 "resource type {:?} does not support notify action {:?} on this target (supported: {})",
                 r.r#type,
@@ -533,6 +684,18 @@ fn handler_for(r: &Resource, action: &str) -> Result<Command, CompileError> {
             ),
         )
     };
+    // A module is applied once, at its own point of the first boot, and
+    // there is no command that runs it again.
+    if let Some(key) = native_module(r)? {
+        return Err(refuse(
+            r,
+            &rules::UNSUPPORTED_ACTION,
+            format!(
+                "resource type {key:?} is a cloud-config module, which cloud-init applies \
+                 once and cannot be asked to run again, got action {action:?}"
+            ),
+        ));
+    }
     match r.r#type.as_str() {
         "service" => {
             if !SERVICE_ACTIONS.contains(&action) {
@@ -548,7 +711,7 @@ fn handler_for(r: &Resource, action: &str) -> Result<Command, CompileError> {
         }
         _ => Err(refuse(
             r,
-            "unsupported-action",
+            &rules::UNSUPPORTED_ACTION,
             format!(
                 "resource type {:?} cannot be notified on this target, got action {:?}",
                 r.r#type, action
@@ -563,7 +726,7 @@ fn accept(r: &Resource, accepted: &[&str]) -> Result<(), CompileError> {
         if !accepted.contains(&name.as_str()) {
             return Err(refuse(
                 r,
-                "unsupported-param",
+                &rules::UNSUPPORTED_PARAM,
                 format!(
                     "resource type {:?} does not accept param {:?} on this target (accepted: {})",
                     r.r#type,
@@ -573,7 +736,7 @@ fn accept(r: &Resource, accepted: &[&str]) -> Result<(), CompileError> {
             ));
         }
         if *value == Value::Null {
-            return Err(refuse(r, "empty-param", empty(name, r)));
+            return Err(refuse(r, &rules::EMPTY_PARAM, empty(name, r)));
         }
     }
     Ok(())
@@ -597,7 +760,7 @@ fn wrong_shape(r: &Resource, name: &str, wanted: &str, got: &Value) -> CompileEr
     };
     refuse(
         r,
-        "invalid-param",
+        &rules::INVALID_PARAM,
         format!(
             "param {:?} on resource type {:?} must be {wanted}, got {}{hint}",
             name,
@@ -611,7 +774,9 @@ fn wrong_shape(r: &Resource, name: &str, wanted: &str, got: &Value) -> CompileEr
 fn text<'a>(r: &'a Resource, name: &str) -> Result<Option<&'a str>, CompileError> {
     match r.params.get(name) {
         None => Ok(None),
-        Some(Value::String(s)) if s.is_empty() => Err(refuse(r, "empty-param", empty(name, r))),
+        Some(Value::String(s)) if s.is_empty() => {
+            Err(refuse(r, &rules::EMPTY_PARAM, empty(name, r)))
+        }
         Some(Value::String(s)) => Ok(Some(s)),
         Some(other) => Err(wrong_shape(r, name, "a string", other)),
     }
@@ -622,7 +787,7 @@ fn required<'a>(r: &'a Resource, name: &str) -> Result<&'a str, CompileError> {
     text(r, name)?.ok_or_else(|| {
         refuse(
             r,
-            "missing-param",
+            &rules::MISSING_PARAM,
             format!(
                 "resource type {:?} requires param {:?} on this target",
                 r.r#type, name
@@ -677,7 +842,7 @@ fn state<'a>(
     };
     Err(refuse(
         r,
-        "unsupported-state",
+        &rules::UNSUPPORTED_STATE,
         format!(
             "resource type {:?} does not accept state {:?} on this target (accepted: {}){why}",
             r.r#type,
@@ -695,7 +860,7 @@ fn no_state(r: &Resource) -> Result<(), CompileError> {
     }
     Err(refuse(
         r,
-        "unsupported-state",
+        &rules::UNSUPPORTED_STATE,
         format!(
             "resource type {:?} accepts no state on this target, got {:?}",
             r.r#type, r.state

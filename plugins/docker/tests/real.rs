@@ -491,3 +491,83 @@ fn a_secret_reaches_a_service_by_interpolation_and_as_a_compose_secret_and_no_fi
         .unwrap();
     assert!(plan.changes.is_empty(), "{:?}", plan.changes);
 }
+
+/// The schema source against the published Compose Specification, which
+/// needs the network; the installed Compose only names the version. The
+/// hand-kept attribute lists the compile checks against are held to the
+/// schema here, so a new Compose attribute is noticed.
+#[ignore = "needs the network; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn the_compose_schema_is_exported_and_agrees_with_the_checked_attributes() {
+    use meridian_plugin_testkit::graph_from_text;
+    use meridian_sdk::{SchemaRequest, SchemaSource};
+    use meridian_target_docker::{known_keys, ComposeSchemas, Section};
+    if std::env::var("MERIDIAN_TEST_REAL_DOCKER").ok().as_deref() != Some("1") {
+        eprintln!("skipped: set MERIDIAN_TEST_REAL_DOCKER=1 to fetch the real Compose schema");
+        return;
+    }
+    let dir = scratch(TMP, "real-schemas");
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: site\nspec:\n  target: docker\n  resources:\n    - id: web\n      type: service\n      params:\n        image: nginx:1.27\n";
+    let request = SchemaRequest::new(
+        dir.join("schemas"),
+        vec![graph_from_text("site.yaml", text, "docker")],
+    );
+    let log = KeptLog::default();
+    let export = ComposeSchemas::from_env()
+        .export(&request, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(export.tool, "compose");
+    assert!(
+        export.pins.contains_key("compose-spec"),
+        "{:?}",
+        export.pins
+    );
+    if quiet("docker", &["compose", "version"]) {
+        assert!(export.pins.contains_key("compose"), "{:?}", export.pins);
+    }
+    let service = export
+        .schemas
+        .iter()
+        .find(|s| s.r#type == "service")
+        .unwrap_or_else(|| panic!("the service is described: {:?}", export.notes));
+    assert!(service.open, "x- extension fields");
+    assert!(service.find_param("image").is_some());
+    assert!(service.find_param("depends_on").is_some());
+    assert!(
+        service.source.starts_with("compose-spec sha256:"),
+        "{}",
+        service.source
+    );
+    for section in Section::ALL {
+        let schema = export
+            .schemas
+            .iter()
+            .find(|s| s.r#type == section.type_name())
+            .unwrap_or_else(|| panic!("{} is described", section.type_name()));
+        // Every attribute the compile knows is in the schema. The reverse
+        // is not asserted: an attribute the schema gained is reported, so
+        // the list can be brought up to date on purpose.
+        let unknown: Vec<&str> = known_keys(section)
+            .iter()
+            .copied()
+            .filter(|key| schema.find_param(key).is_none())
+            .collect();
+        assert!(
+            unknown.is_empty(),
+            "{}: the compile checks for {unknown:?}, which the Compose schema no longer has",
+            section.type_name()
+        );
+        let new: Vec<&str> = schema
+            .params
+            .iter()
+            .map(|p| p.name.as_str())
+            .filter(|name| !known_keys(section).contains(name))
+            .collect();
+        if !new.is_empty() {
+            eprintln!(
+                "{}: the Compose schema has attributes the compile does not check: {new:?}",
+                section.type_name()
+            );
+        }
+    }
+}

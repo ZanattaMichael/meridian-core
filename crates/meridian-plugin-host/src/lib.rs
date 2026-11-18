@@ -66,6 +66,14 @@ pub struct Info {
     /// Whether the target hands a run's inputs to its tool, which a
     /// document's `spec.imports` needs.
     pub accepts_inputs: bool,
+    /// Whether the target hands back its tool's own saved plan from a plan
+    /// asked to save one, and applies exactly that plan when handed it. A
+    /// plugin built before the field says no.
+    pub saves_plans: bool,
+    /// Whether the target reads its tool's own identifier of each thing it
+    /// manages, which `meridian retarget` writes as `adopt`. A plugin built
+    /// before the field says no.
+    pub reads_identifiers: bool,
     /// The versions of its tool the target compiles for; empty when it does
     /// not say.
     pub target_versions: Vec<String>,
@@ -84,6 +92,10 @@ pub struct Info {
     /// The keys the target reads in a document's `spec.settings`; empty when
     /// it takes none, which is also what a plugin built before the field says.
     pub settings_keys: Vec<String>,
+    /// The refusal rules the target has of its own, beside the general ones
+    /// in `meridian_sdk::rules`; empty when every refusal it makes carries a
+    /// general rule, which is also what a plugin built before the field says.
+    pub rules: Vec<meridian_sdk::DescribedRule>,
     /// The binary the plugin was loaded from; empty for an in-process emitter.
     pub path: String,
     /// What checking the binary's signature found, before it was started.
@@ -367,6 +379,7 @@ pub fn to_sdk(graph: &meridian_ast::ResourceGraph) -> meridian_sdk::ResourceGrap
                 state: r.state.clone(),
                 params: r.params.clone(),
                 runtime_when: r.runtime_when.clone(),
+                adopt: r.adopt.clone(),
                 index: r.index,
                 pos: position(&r.pos),
             })

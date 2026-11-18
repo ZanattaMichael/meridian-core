@@ -186,6 +186,16 @@ impl OpenVoxRunner {
         self
     }
 
+    /// The schema source over the same program the runner uses: the
+    /// Puppet plugin's `puppet describe` reader, named `openvox`.
+    pub fn schemas(&self) -> meridian_target_puppet::PuppetSchemas {
+        meridian_target_puppet::PuppetSchemas::new(
+            &self.tool.puppet,
+            self.tool.extra_args.clone(),
+            "openvox",
+        )
+    }
+
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
         let path = std::env::var_os("PATH");

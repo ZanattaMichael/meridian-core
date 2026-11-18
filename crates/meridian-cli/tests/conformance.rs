@@ -220,7 +220,7 @@ const CASES: &[Case] = &[
     case(
         "file",
         "state `directory` with `content`",
-        Varies,
+        Same,
         "    - id: a\n      type: file\n      state: directory\n      params:\n        path: /srv/app\n        content: \"x\\n\"\n",
     ),
     case(
@@ -403,15 +403,100 @@ const CASES: &[Case] = &[
     // ---- types ---------------------------------------------------------
     case(
         "types",
-        "a type outside the dialect (`firewall_rule`)",
+        "a type that is no shared type and no tool's own (`Firewall.Rule`)",
         Same,
-        "    - id: a\n      type: firewall_rule\n      params:\n        port: 80\n",
+        "    - id: a\n      type: Firewall.Rule\n      params:\n        port: 80\n",
     ),
     case(
         "types",
         "a type in the wrong case (`Package`)",
         Same,
         "    - id: a\n      type: Package\n      params:\n        name: nginx\n",
+    ),
+    // ---- native types ---------------------------------------------------
+    case(
+        "native types",
+        "an Ansible module in full (`ansible.builtin.lineinfile`)",
+        Varies,
+        "    - id: a\n      type: ansible.builtin.lineinfile\n      params:\n        path: /etc/motd\n        line: hi\n",
+    ),
+    case(
+        "native types",
+        "an Ansible module in full, with a state",
+        Varies,
+        "    - id: a\n      type: ansible.builtin.lineinfile\n      state: absent\n      params:\n        path: /etc/motd\n        line: hi\n",
+    ),
+    case(
+        "native types",
+        "an Ansible module in full, notified with `run`",
+        Varies,
+        "    - id: conf\n      type: file\n      params:\n        path: /etc/app.conf\n        content: \"x\\n\"\n      notifies:\n        - resource: a\n          action: run\n    - id: a\n      type: ansible.builtin.command\n      params:\n        cmd: /bin/true\n",
+    ),
+    case(
+        "native types",
+        "a bare word that is no shared type (`firewall_rule`)",
+        Varies,
+        "    - id: a\n      type: firewall_rule\n      params:\n        port: 80\n",
+    ),
+    case(
+        "native types",
+        "a bare module name (`lineinfile`)",
+        Varies,
+        "    - id: a\n      type: lineinfile\n      params:\n        path: /etc/motd\n        line: hi\n",
+    ),
+    case(
+        "native types",
+        "the tool's own `file` under the prefix (`native/file`)",
+        Varies,
+        "    - id: a\n      type: native/file\n      params:\n        path: /etc/motd\n        source: puppet:///modules/motd/motd\n",
+    ),
+    case(
+        "native types",
+        "a Puppet module type (`mysql::db`)",
+        Varies,
+        "    - id: a\n      type: mysql::db\n      params:\n        user: app\n",
+    ),
+    case(
+        "native types",
+        "a Salt state function (`pkgrepo.managed`)",
+        Varies,
+        "    - id: a\n      type: pkgrepo.managed\n      params:\n        name: deb http://example.com stable main\n",
+    ),
+    case(
+        "native types",
+        "a Chef resource (`template`), notified with `create`",
+        Varies,
+        "    - id: conf\n      type: file\n      params:\n        path: /etc/app.conf\n        content: \"x\\n\"\n      notifies:\n        - resource: a\n          action: create\n    - id: a\n      type: template\n      params:\n        path: /etc/motd\n        source: motd.erb\n",
+    ),
+    case(
+        "native types",
+        "a cloud-config module (`ntp`)",
+        Varies,
+        "    - id: a\n      type: ntp\n      params:\n        enabled: true\n        servers: [0.pool.ntp.org]\n",
+    ),
+    case(
+        "native types",
+        "the tool's own `package` under the prefix, with a state (`native/package`)",
+        Varies,
+        "    - id: a\n      type: native/package\n      state: latest\n      params:\n        name: nginx\n",
+    ),
+    case(
+        "native types",
+        "a Puppet type notified with `refresh`",
+        Varies,
+        "    - id: conf\n      type: file\n      params:\n        path: /etc/app.conf\n        content: \"x\\n\"\n      notifies:\n        - resource: a\n          action: refresh\n    - id: a\n      type: cron\n      params:\n        command: /bin/true\n",
+    ),
+    case(
+        "native types",
+        "a Salt state function notified with `watch`",
+        Varies,
+        "    - id: conf\n      type: file\n      params:\n        path: /etc/app.conf\n        content: \"x\\n\"\n      notifies:\n        - resource: a\n          action: watch\n    - id: a\n      type: docker_container.running\n      params:\n        image: app\n",
+    ),
+    case(
+        "native types",
+        "a native type that depends on a shared one",
+        Varies,
+        "    - id: pkg\n      type: package\n      params:\n        name: nginx\n    - id: a\n      type: native/file\n      params:\n        path: /etc/motd\n        source: x\n      dependsOn:\n        - resource: pkg\n",
     ),
     case(
         "types",
@@ -656,8 +741,9 @@ How to read a cell:
 - **ok, warns**: it compiled, with a warning the plan shows. Nothing is dropped
   silently; the warning says what the tool will do differently.
 - a name such as `unsupported-state`: the target refused the document, and that
-  is the rule the refusal carries. The message that goes with it names the
-  resource, the line, and what the target does accept.
+  is the rule the refusal carries, one of the [refusal rules](refusal-rules.md).
+  The message that goes with it names the resource, the line, and what the
+  target does accept.
 
 The **same** column says whether the targets are allowed to differ. A row
 marked *yes* is a part of the dialect that must come out the same everywhere,
@@ -820,11 +906,19 @@ fn every_refusal_names_its_target_its_resource_and_a_line() {
             assert!(!refusal.rule.is_empty(), "{at}: no rule");
             assert!(!refusal.msg.is_empty(), "{at}: no message");
             assert!(
-                refusal
-                    .rule
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c == '-'),
+                meridian_sdk::rules::well_formed(&refusal.rule),
                 "{at}: rule {:?} is not lower-case words joined by hyphens",
+                refusal.rule
+            );
+            // The rule is one the reference page lists: general, or the
+            // target's own.
+            assert!(
+                meridian_sdk::rules::general(&refusal.rule).is_some()
+                    || emitter(target)
+                        .rules()
+                        .iter()
+                        .any(|r| r.name == refusal.rule),
+                "{at}: rule {:?} is neither a general rule nor one {target} declares",
                 refusal.rule
             );
             if !refusal.resource.is_empty() {
@@ -1000,8 +1094,11 @@ fn every_example_compiles_to_the_same_files_twice() {
 }
 
 /// A target's `category` is how the core pairs it with a kind of document, so
-/// every shipped target must declare one, and the shared dialect is exactly
-/// the six types on six configuration management targets.
+/// every shipped target must declare one, and the shared dialect is the six
+/// types on six configuration management targets. A target may also take
+/// its tool's own types beside them, as a pattern an editor can offer; a
+/// bare name beside the six would be a seventh shared type, which no target
+/// may add on its own.
 #[test]
 fn every_target_declares_its_segment_and_its_types() {
     for target in emitters() {
@@ -1030,11 +1127,24 @@ fn every_target_declares_its_segment_and_its_types() {
             Category::ConfigurationManagement,
             "{name}"
         );
+        let types = target.supported_resource_types();
+        let (own, shared): (Vec<&String>, Vec<&String>) = types
+            .iter()
+            .partition(|t| t.contains('<') || t.starts_with(meridian_sdk::NATIVE_PREFIX));
         assert_eq!(
-            target.supported_resource_types(),
+            shared,
             ["exec", "file", "group", "package", "service", "user"],
             "{name}"
         );
+        for pattern in own {
+            assert!(
+                target
+                    .resource_schemas()
+                    .iter()
+                    .any(|s| s.r#type == *pattern && s.open),
+                "{name}: {pattern} is declared as an open type for editors"
+            );
+        }
     }
 }
 

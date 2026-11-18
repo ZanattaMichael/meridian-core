@@ -48,11 +48,20 @@ fn the_plugin_describes_itself() {
             runtime_condition: true,
             secrets: true,
             credentials: true,
+            adopt: meridian_sdk::Adoption::Converge,
         }
     );
     assert_eq!(
         info.resource_types,
-        ["exec", "file", "group", "package", "service", "user"]
+        [
+            "<module>.<function>",
+            "exec",
+            "file",
+            "group",
+            "package",
+            "service",
+            "user"
+        ]
     );
     assert_eq!(info.protocol_version, PROTOCOL_VERSION);
     assert_eq!(info.sdk_version, VERSION);

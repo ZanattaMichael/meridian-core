@@ -362,7 +362,7 @@ fn state_can_only_be_read_where_arm_allows_reference() {
         "{VNET}{}",
         nic("        name: web-nic\n        tags: {space: \"${vnet.properties.addressSpace}\"}\n")
     ));
-    assert_eq!(err.rule, "unsupported-reference");
+    assert_eq!(err.rule, "invalid-reference");
     assert!(
         err.msg.starts_with(
             "param \"tags\": ${vnet.properties.addressSpace} reads the state of \"vnet\""
@@ -375,7 +375,7 @@ fn state_can_only_be_read_where_arm_allows_reference() {
         "{VNET}{}",
         nic("        name: ${vnet.properties.addressSpace}\n")
     ));
-    assert_eq!(err.rule, "unsupported-reference");
+    assert_eq!(err.rule, "invalid-reference");
 }
 
 #[test]
@@ -383,7 +383,7 @@ fn a_resource_cannot_read_its_own_state() {
     let err = refusal(&nic(
         "        name: web-nic\n        properties: {mac: \"${nic.properties.macAddress}\"}\n",
     ));
-    assert_eq!(err.rule, "self-reference");
+    assert_eq!(err.rule, "invalid-reference");
     // Its own name is known without asking Azure, so that is fine.
     let text = template(&nic(
         "        name: web-nic\n        properties: {label: \"${nic.name}\"}\n",
@@ -426,7 +426,7 @@ fn names_defined_by_each_other_are_refused() {
     let err = refusal(
         "    - id: a\n      type: Microsoft.Storage/storageAccounts\n      params: {apiVersion: \"2023-01-01\", name: \"${b.name}x\"}\n    - id: b\n      type: Microsoft.Storage/storageAccounts\n      params: {apiVersion: \"2023-01-01\", name: \"${a.name}y\"}\n",
     );
-    assert_eq!(err.rule, "reference-cycle");
+    assert_eq!(err.rule, "dependency-cycle");
     assert_eq!(
         err.msg,
         "param \"name\": the name of resource \"a\" is defined in terms of itself"
@@ -510,7 +510,7 @@ fn params_meridian_writes_itself_are_reserved() {
         let err = refusal(&format!(
             "    - id: logs\n      type: Microsoft.Storage/storageAccounts\n      params: {{apiVersion: \"2023-01-01\", {key}: x}}\n"
         ));
-        assert_eq!(err.rule, "reserved-param", "{key}");
+        assert_eq!(err.rule, "reserved-name", "{key}");
     }
 }
 
@@ -586,7 +586,7 @@ fn a_deployment_is_named_by_the_document_unless_told() {
     // The core refuses a name that is not a file name (issue 133), so what
     // is left for ARM is a name Azure cannot take: longer than 64 characters.
     let err = compile_named(&"a".repeat(65), &spec(VNET)).unwrap_err();
-    assert_eq!(err.rule, "invalid-deployment-name");
+    assert_eq!(err.rule, "invalid-name");
 }
 
 #[test]
@@ -624,10 +624,7 @@ fn deployment_settings_are_checked() {
             "{scope: subscription, location: westus, mode: Complete}",
             "invalid-param",
         ),
-        (
-            "{resourceGroup: rg, name: \"a/b\"}",
-            "invalid-deployment-name",
-        ),
+        ("{resourceGroup: rg, name: \"a/b\"}", "invalid-name"),
     ] {
         let err = with_settings(settings).expect_err(settings);
         assert_eq!(err.rule, rule, "{settings}: {}", err.msg);
@@ -650,13 +647,13 @@ fn deployment_settings_are_checked() {
 fn a_document_is_one_deployment() {
     let err =
         refusal("    - id: second\n      type: deployment\n      params: {resourceGroup: other}\n");
-    assert_eq!(err.rule, "duplicate-deployment");
+    assert_eq!(err.rule, "duplicate-resource");
 }
 
 #[test]
 fn a_template_needs_a_resource() {
     let err = refusal("    - id: size\n      type: parameter\n      params: {type: string}\n");
-    assert_eq!(err.rule, "empty-template");
+    assert_eq!(err.rule, "empty-document");
 }
 
 // ---- parameters and outputs ----
@@ -752,12 +749,22 @@ fn the_plugin_declares_what_it_is() {
         Arm.capabilities(),
         Capabilities {
             secrets: true,
+            adopt: meridian_sdk::Adoption::Converge,
             ..Capabilities::default()
         }
     );
     assert_eq!(
         Arm.supported_resource_types(),
-        ["<Namespace>/<type>", "deployment", "parameter"]
+        [
+            "<Namespace>/<type>",
+            "address",
+            "deployment",
+            "firewall",
+            "network",
+            "parameter",
+            "subnet",
+            "vm"
+        ]
     );
 }
 
@@ -820,4 +827,46 @@ fn a_secret_in_the_deployments_settings_or_a_parameters_declaration_is_refused()
             err.msg
         );
     }
+}
+
+// ---- the common infrastructure types ----
+
+#[test]
+fn the_common_types_compile_to_their_golden_template() {
+    let graph = graph_from_file("examples/common/web-arm.yaml", "arm");
+    let emitted = emit(&graph).unwrap();
+    let text = &emitted.artifact.files["template.json"];
+    assert_valid_template(text);
+    assert!(!text.contains("${"), "a reference was left in {text}");
+    assert_golden(&golden(), "common-web-arm", &emitted);
+}
+
+#[test]
+fn a_common_resource_is_written_with_its_api_version_at_the_groups_location() {
+    let text = template("    - id: ip\n      type: address\n    - id: ip2\n      type: address\n      params: {location: northeurope}\n");
+    assert!(
+        text.contains("\"type\": \"Microsoft.Network/publicIPAddresses\""),
+        "{text}"
+    );
+    assert!(text.contains("\"apiVersion\": \"2023-09-01\""), "{text}");
+    assert!(text.contains("[resourceGroup().location]"), "{text}");
+    assert!(text.contains("\"northeurope\""), "{text}");
+}
+
+#[test]
+fn a_common_subnet_is_named_under_its_network_and_deployed_after_it() {
+    let text = template("    - id: net\n      type: network\n      params: {cidr: 10.0.0.0/16}\n    - id: web\n      type: subnet\n      params: {network: \"${net}\", cidr: 10.0.1.0/24}\n");
+    assert!(
+        text.contains("\"type\": \"Microsoft.Network/virtualNetworks/subnets\""),
+        "{text}"
+    );
+    assert!(text.contains("format('{0}/web', 'net')"), "{text}");
+    assert!(text.contains("\"dependsOn\""), "{text}");
+}
+
+#[test]
+fn a_common_type_the_mapping_cannot_express_is_refused_by_the_arm_target() {
+    let err = refusal("    - id: net\n      type: network\n      params: {cidr: 10.0.0.0/16}\n    - id: web\n      type: subnet\n      params: {network: \"${net}\", cidr: 10.0.1.0/24, public: true}\n");
+    assert_eq!(err.target, "arm");
+    assert_eq!(err.rule, "unsupported-param");
 }

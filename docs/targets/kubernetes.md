@@ -13,20 +13,17 @@ with `kubectl`.
 | `dependsOn` | Orders the manifests in the file, and nothing more. `kubectl` applies them in that order without waiting for one to be ready. A warning says so |
 | `notifies` | Synthetic: the action `restart`, aimed at a Deployment, StatefulSet or DaemonSet. See [Notifications](#notifications) |
 | `runtimeWhen` | No. Refused |
+| `adopt` | Accepted, and changes nothing: `kubectl apply` takes over an object of the same kind, name and namespace. The compile warns |
 | `state: absent` | No. Applying manifests never deletes an object; delete it with `kubectl` and remove it from the document |
 | Plan | Yes: a server-side dry run |
 | Outputs | Yes: any path into a live object |
 
 ## What a document looks like
 
-A resource's `type` is the object's API version and kind and its `params` are
-the object's fields, exactly as Kubernetes documents them: `metadata`, `spec`,
-`data`. `apiVersion` and `kind` come from the type and cannot be set again.
+`type` is `apiVersion/kind`; `params` are the object's fields (`metadata`, `spec`, `data`),
+without `apiVersion` or `kind`. Without `metadata.name`, the id is used with `_` as `-`.
 
-An object with no `metadata.name` is named after the resource's id, with
-underscores turned into hyphens (`web_config` becomes `web-config`).
-
-One resource may have the type `cluster`. It is not a manifest:
+An optional `cluster` resource is not a manifest:
 
 | Param | Meaning |
 |---|---|
@@ -36,21 +33,19 @@ One resource may have the type `cluster`. It is not a manifest:
 
 ## References
 
-Kubernetes does not wire one object's state into another's spec, so inside
-`params` a reference can only be something known at compile time:
+In `params`, only compile-time values:
 
 | You write | You get |
 |---|---|
 | `${web_config}` or `${web_config.metadata.name}` | the object's name |
 | `${web_config.metadata.namespace}` | its namespace |
 
-Anything else, such as `${web_svc.status.loadBalancer.ingress[0].ip}`, is
-refused in a param with an explanation. It can be read in an output.
+Anything else, such as `${web_svc.status.loadBalancer.ingress[0].ip}`, is refused; read it
+in an output.
 
 ## Outputs
 
-An output is read from the cluster after the apply, so it can be any path into
-the live object:
+Outputs are read after apply, from any path in the live object:
 
 ```yaml
 outputs:
@@ -58,16 +53,14 @@ outputs:
     value: http://${web_svc.status.loadBalancer.ingress[0].ip}
 ```
 
-A load balancer's address takes a while to appear. After an apply Meridian waits
-for an output that has no value yet, two minutes by default
-(`MERIDIAN_KUBECTL_OUTPUT_WAIT`, in seconds). An output that never arrives is an
-error, not an empty value. Anything read from a Secret is reported as sensitive.
+Meridian waits for a missing value, 120 seconds by default
+(`MERIDIAN_KUBECTL_OUTPUT_WAIT`); one that never arrives is an error. Secret values are
+sensitive.
 
 ## Secrets
 
-A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in the document goes in
-one place: a value of a `v1/Secret`'s `stringData`. The cluster stores it as a Secret and a
-workload reads it from there, by name, the way Kubernetes means it to.
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) goes only in a
+`v1/Secret`'s `stringData` value.
 
 ```yaml
 spec:
@@ -99,9 +92,7 @@ spec:
                         secretKeyRef: {name: ${db_login}, key: password}
 ```
 
-**What the compile writes.** The value is a token, `"${meridian_secret_db_password}"`,
-inside the quotes of a string. The compiled `manifests.yaml` holds the token and never the
-value, so a review of it sees exactly where the secret goes.
+`manifests.yaml` holds a token, `"${meridian_secret_db_password}"`.
 
 ```yaml
 stringData:
@@ -109,57 +100,30 @@ stringData:
   username: app
 ```
 
-**How the value reaches the tool.** A document with no secret is applied from the file,
-`kubectl apply --filename manifests.yaml`, as before. One with a secret is applied from
-standard input, `kubectl apply --filename -`: the runner fills each token in with its
-value, escaped as a JSON string, on the way into `kubectl`, and the filled text is in
-protected memory only. The plan's server-side dry run reads the same input. The command
-line names no file and no value, and `kubectl`'s environment holds nothing of it.
+With a secret, the document is applied with `kubectl apply --filename -`; the runner fills
+in tokens on the way in, from protected memory. The dry-run plan reads the same input.
 
-**What the cluster keeps.** A Secret is stored in etcd base64-encoded, and encrypted at
-rest only when the cluster is configured for it. Anyone who may `get secrets` in the
-namespace reads it. An output that reads a Secret's `data` is marked sensitive and
-masked wherever Meridian shows it.
+etcd stores Secrets base64-encoded, encrypted only if the cluster is configured so. Outputs
+from a Secret's `data` are masked.
 
-**What the plan says.** A Secret written with `stringData` is planned as an update on
-every run after the first, whether or not its values changed. The cluster stores
-`stringData` as `data` and keeps no `stringData`, so the manifest's `stringData` is a
-patch every time `kubectl apply` compares the two. That is kubectl's behaviour for any
-Secret written this way, with or without Meridian; a document whose plan has to be in sync
-can write a Secret's other fields in `data`, base64-encoded, but a secret's value cannot go
-there, so a Secret that holds one is always reported as an update.
+A Secret with `stringData` plans as an update on every run; that is kubectl's behaviour.
 
-**What is refused.** A secret anywhere else is refused at compile, rule
-`unsupported-secret-place`: in the `cluster` resource it would be on `kubectl`'s command
-line; in any other object it would be written into the object for every reader to see;
-in a Secret's `data` the document would have to base64-encode it itself, which turns a
-secret into text; and inside a `stringData` value, such as `postgres://app:${{
-secret.db_password }}@db/app`, because a value is one string, so the secret has to be the
-whole value. Text that reads as a token, `${meridian_secret_`, is refused too, rule
-`reserved-text`, so a document cannot make the runner fill a value in where the document
-wrote the token itself.
+Refused (`unsupported-secret-place`): a secret in `cluster`, in any other object, in a
+Secret's `data`, or inside a longer `stringData` value. A literal `${meridian_secret_` is
+refused (`reserved-name`).
 
-The handover is tested against a stand-in `kubectl` that keeps what it reads
-(`plugins/kubernetes/tests/run.rs`) and against a real `kubectl` and a kind cluster in CI
-(`plugins/kubernetes/tests/real.rs`): the value is in the Secret the cluster holds, in no
-file the plugin wrote, and in nothing the plan or apply prints.
+Tested against a stand-in `kubectl` (`plugins/kubernetes/tests/run.rs`) and a kind cluster
+in CI (`plugins/kubernetes/tests/real.rs`).
 
 ## Notifications
 
-Kubernetes does not restart pods when a ConfigMap or Secret they use changes.
-For a notify with the action `restart`, Meridian writes a checksum of the
-notifier into an annotation on the workload's pod template,
-`meridian.dev/restart-on-<name>`. When the notifier's content changes, the
-template changes, and the workload's own controller rolls its pods. The compile
-warns that this is how it works, and the annotation is visible in the manifest
-and on the pods.
+A `restart` notify writes a checksum of the notifier to the pod template annotation
+`meridian.dev/restart-on-<name>`, so a change rolls the pods. The compile warns.
 
 ## Example
 
-[`examples/kubernetes/web.yaml`](../../examples/kubernetes/web.yaml) declares a
-ConfigMap, a Deployment and a Service, and compiles to
-[`web.manifests_yaml`](../../plugins/kubernetes/testdata/web.manifests_yaml). The
-ConfigMap and the part of the Deployment it touches:
+[`examples/kubernetes/web.yaml`](../../examples/kubernetes/web.yaml) compiles to
+[`web.manifests_yaml`](../../plugins/kubernetes/testdata/web.manifests_yaml):
 
 ```yaml
 - id: web_config
@@ -196,11 +160,8 @@ spec:
 
 ## Importing
 
-`meridian import --from kubernetes PATHS` reads manifests, in YAML or JSON, and writes
-one Infrastructure document holding every object in them. [Importing existing configuration](../operations/importing.md) is the guide.
-
-A manifest is what this target compiles to, so the mapping is the target's own, read
-backwards:
+`meridian import --from kubernetes PATHS` reads YAML or JSON manifests into one document
+([guide](../operations/importing.md)). The mapping is the compile's, reversed:
 
 | In the manifests | In the document |
 |---|---|
@@ -211,10 +172,7 @@ backwards:
 | Several documents in one file, and several files | every object, in the order `kubectl apply` would have sent them |
 | `${VAR}` in a string, as in a shell script held in a ConfigMap | written `$${VAR}`, so the document does not read it as a reference and the compiled manifest has `${VAR}` again |
 
-The files are read by YAML 1.1's rules, as Kubernetes reads them: `yes` and `on` are
-booleans, and `0644` is an octal number.
-
-What is reported:
+Files are read as YAML 1.1. Reported:
 
 | In the manifests | What happens | Level |
 |---|---|---|
@@ -223,22 +181,15 @@ What is reported:
 | A `Kustomization` | Left out. It is instructions for kustomize: build it with `kubectl kustomize` and import what that prints, or use the [helm](helm.md) target, which takes an overlay | not translated |
 | A YAML document that is not an object | Left out | not translated |
 
-A Helm template is refused outright, with the advice to render the chart with
-`helm template` and import what it prints. A manifest that merely holds `{{ }}` inside a
-string, as a Prometheus rule does, is not mistaken for one.
-
-The round-trip test imports
-[`web/web.yaml`](../../plugins/kubernetes/testdata/import/web/web.yaml), compiles the
-document, and compares the manifests it compiles to with the originals, object for
-object. The imported document is
+A Helm template is refused; import `helm template` output. `{{ }}` inside a string is
+fine. Round-trip test:
+[`web/web.yaml`](../../plugins/kubernetes/testdata/import/web/web.yaml) and
 [`web.meridian.yaml`](../../plugins/kubernetes/testdata/import/web.meridian.yaml).
 
 ## Editor schemas
 
-`meridian schema sync` asks the cluster for its OpenAPI document (`kubectl
-get --raw /openapi/v2`, against the `context` and `kubeconfig` the `cluster`
-resource names), so an editor completes and checks the fields of every kind
-the server knows, custom resources included
+`meridian schema sync` reads `kubectl get --raw /openapi/v2` with the `cluster` resource's
+`context` and `kubeconfig`, custom resources included
 ([Tool schemas](../tooling/schema-sync.md)).
 
 | | |
@@ -247,8 +198,7 @@ the server knows, custom resources included
 | Listed by name | every other kind the server describes, with its description; `*List` kinds are left out |
 | Pinned | the server's version, and the context |
 
-A kind that the server does not describe, because its API group is not
-installed, is reported in a note.
+Undescribed kinds are noted.
 
 ## Running
 
@@ -260,18 +210,11 @@ installed, is reported in a note.
 | `MERIDIAN_KUBECTL_ARGS` | arguments added to every call, split like a shell command line (quotes hold a word together): `--context prod` |
 | `MERIDIAN_KUBECTL_OUTPUT_WAIT` | seconds an apply waits for an output that has no value yet |
 
-Every setting can also be written in the project's `meridian.yaml` under
-`spec.settings.kubernetes`, by its short name; the environment variable still wins.
-The names, defaults and the splitting rule for argument lists are in the
-[plugin settings reference](../reference/plugin-settings.md#kubernetes).
+Settings can also go in `meridian.yaml` under `spec.settings.kubernetes`; the environment
+wins. See the [plugin settings reference](../reference/plugin-settings.md#kubernetes).
 
-One limit of the plan: nothing is stored in a dry run, so objects that go in a
-namespace the same document creates cannot be previewed until the namespace
-exists. Meridian reports that plan as unknown instead of failing it.
+Objects in a namespace the document creates cannot be dry-run first; that plan is unknown.
 
-The runner is tested against a real `kubectl` and a [kind](https://kind.sigs.k8s.io)
-cluster on every pull request that touches it: a plan against an empty cluster,
-an apply checked with `kubectl get`, a second plan that is in sync, a changed
-ConfigMap that restarts the Deployment it notifies, and a manifest the API
-server refuses. A managed cluster and admission webhooks have not been run this
-way. See [Real-tool tests](../contributing/real-tool-tests.md).
+CI tests a real `kubectl` and [kind](https://kind.sigs.k8s.io) cluster: plan, apply,
+in-sync, notify restart and a refused manifest. Managed clusters and admission webhooks are
+untested. See [Real-tool tests](../contributing/real-tool-tests.md).

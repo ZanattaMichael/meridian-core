@@ -10,8 +10,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use meridian_sdk::tool::{write_artifact, Finished, Tool};
 use meridian_sdk::{
-    decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
-    RunContext, RunError, Runner, SecretFile, Value,
+    canonical_map, decode_map, decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog,
+    Operations, Output, Plan, RunContext, RunError, Runner, SavedPlan, SecretFile, Value,
 };
 use meridian_sdk::{settings, Setting};
 
@@ -106,6 +106,37 @@ struct Preview {
     /// The stack did not exist before the change set was created.
     new_stack: bool,
     changes: Vec<Change>,
+}
+
+impl Preview {
+    /// The change set's name and kind, as a saved plan keeps them. The
+    /// changes are not kept here: the host hands them back with the plan.
+    fn to_json(&self) -> String {
+        let mut map: BTreeMap<String, Value> = BTreeMap::new();
+        map.insert(
+            "changeSet".to_owned(),
+            Value::from(self.change_set.as_str()),
+        );
+        map.insert("newStack".to_owned(), Value::Bool(self.new_stack));
+        canonical_map(&map)
+    }
+
+    fn from_saved(saved: &SavedPlan) -> Result<Preview, RunError> {
+        let map = decode_map(&saved.data).map_err(|e| {
+            RunError::new(format!("the saved plan is not one this plugin saved: {e}"))
+        })?;
+        let change_set = map
+            .get("changeSet")
+            .and_then(Value::as_str)
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| RunError::new("the saved plan names no change set"))?
+            .to_owned();
+        Ok(Preview {
+            change_set,
+            new_stack: matches!(map.get("newStack"), Some(Value::Bool(true))),
+            changes: saved.changes.clone(),
+        })
+    }
 }
 
 impl CloudFormationRunner {
@@ -390,6 +421,10 @@ impl Runner for CloudFormationRunner {
         Operations::ALL
     }
 
+    fn saves_plans(&self) -> bool {
+        true
+    }
+
     fn plan(
         &self,
         context: &RunContext,
@@ -397,10 +432,23 @@ impl Runner for CloudFormationRunner {
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
         let (stack, preview) = self.preview(context, artifact, log)?;
-        self.discard(context, &stack, &preview);
+        // The change set is CloudFormation's own saved plan: it stays, and
+        // its name is what `meridian plan --out` keeps. The values it holds
+        // stay with CloudFormation, so the name can be kept anywhere.
+        let saved = if context.save_plan {
+            log.out(&format!(
+                "stack {}: keeping the change set {} for `meridian apply --plan`",
+                stack.name, preview.change_set
+            ));
+            Some(SavedPlan::new(preview.to_json()))
+        } else {
+            self.discard(context, &stack, &preview);
+            None
+        };
         Ok(Plan {
             changes: preview.changes,
             unknown: false,
+            saved,
         })
     }
 
@@ -410,7 +458,26 @@ impl Runner for CloudFormationRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
-        let (stack, preview) = self.preview(context, artifact, log)?;
+        let (stack, preview) = match &context.saved_plan {
+            // The change set a plan kept is executed as it is. CloudFormation
+            // refuses one whose stack has been changed since.
+            Some(saved) => {
+                let Some(settings) = artifact.files.get(STACK_PATH) else {
+                    return Err(RunError::new(format!(
+                        "the artifact has no {STACK_PATH}; it was not compiled by this plugin"
+                    )));
+                };
+                let stack = Stack::read(settings)?;
+                write_artifact(&context.work_dir, artifact)?;
+                let preview = Preview::from_saved(saved)?;
+                log.out(&format!(
+                    "stack {}: executing the change set {} that `meridian plan --out` kept",
+                    stack.name, preview.change_set
+                ));
+                (stack, preview)
+            }
+            None => self.preview(context, artifact, log)?,
+        };
         if preview.changes.is_empty() {
             self.discard(context, &stack, &preview);
             log.out(&format!("stack {}: nothing to change", stack.name));

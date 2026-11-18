@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ZanattaMichael/meridian-core/schemas/output/module-push.schema.json",
+  "title": "module push",
+  "description": "What was published.",
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "const": "module push",
+      "description": "The subcommand as it is typed"
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "Whether the command did what was asked: false means it exited 1, or 130 when interrupted"
+    },
+    "name": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "repository": {
+      "type": "string"
+    },
+    "tag": {
+      "type": "string"
+    },
+    "digest": {
+      "type": "string"
+    },
+    "integrity": {
+      "type": "string"
+    },
+    "alreadyPublished": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "command",
+    "ok",
+    "name",
+    "version",
+    "repository",
+    "tag",
+    "digest",
+    "integrity",
+    "alreadyPublished"
+  ],
+  "additionalProperties": false
+}

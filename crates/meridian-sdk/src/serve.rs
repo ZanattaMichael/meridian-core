@@ -138,6 +138,11 @@ async fn serve_async(plugin: Plugin) -> Result<(), ServeError> {
         emitter: Arc::clone(&plugin.emitter),
         operations,
         accepts_inputs: plugin.runner.as_ref().is_some_and(|r| r.accepts_inputs()),
+        saves_plans: plugin.runner.as_ref().is_some_and(|r| r.saves_plans()),
+        reads_identifiers: plugin
+            .runner
+            .as_ref()
+            .is_some_and(|r| r.reads_identifiers()),
         settings: plugin
             .runner
             .as_ref()
@@ -211,6 +216,10 @@ struct EmitterHandler {
     emitter: Arc<dyn Emitter + Send + Sync>,
     operations: Operations,
     accepts_inputs: bool,
+    /// Whether the runner saves plans and applies exactly a saved one.
+    saves_plans: bool,
+    /// Whether the runner reads its tool's identifiers.
+    reads_identifiers: bool,
     /// What the runner can be configured with, for the host to list.
     settings: Vec<crate::Setting>,
     /// Kept only to describe it: importing is served by its own handler.
@@ -246,6 +255,8 @@ impl EmitterService for EmitterHandler {
                 .collect(),
             operations: Some(wire::operations_to_wire(self.operations)),
             accepts_inputs: self.accepts_inputs,
+            saves_plans: self.saves_plans,
+            reads_identifiers: self.reads_identifiers,
             import_formats: wire::import_formats_to_wire(
                 self.importer
                     .as_ref()
@@ -255,6 +266,7 @@ impl EmitterService for EmitterHandler {
             exports_schemas: self.exports_schemas,
             settings: wire::settings_to_wire(self.settings.clone()),
             settings_keys: self.emitter.settings_keys(),
+            rules: wire::rules_to_wire(&self.emitter.rules()),
         }))
     }
 
@@ -268,8 +280,7 @@ impl EmitterService for EmitterHandler {
         // An emitter is ordinary blocking code, and a panic in it must reach
         // the host as this call failing, not take the whole plugin down.
         let outcome = tokio::task::spawn_blocking(move || {
-            crate::check_settings(emitter.as_ref(), &graph)?;
-            emitter.emit(&graph, &data)
+            crate::emit_checked(emitter.as_ref(), &graph, &data)
         })
         .await
         .map_err(|e| Status::internal(format!("the emitter panicked: {e}")))?;
@@ -521,5 +532,23 @@ impl RunnerService for RunnerHandler {
             .await
             .map_err(|e| Status::internal(format!("the runner panicked: {e}")))?;
         Ok(Response::new(wire::outputs_response(outcome)))
+    }
+
+    async fn identifiers(
+        &self,
+        request: Request<pb::IdentifiersRequest>,
+    ) -> Result<Response<pb::IdentifiersResponse>, Status> {
+        if !self.runner.reads_identifiers() {
+            return Err(Status::unimplemented(
+                "this plugin does not read identifiers",
+            ));
+        }
+        let context = wire::context_from_wire(request.into_inner().context)
+            .map_err(Status::invalid_argument)?;
+        let runner = Arc::clone(&self.runner);
+        let outcome = tokio::task::spawn_blocking(move || runner.identifiers(&context))
+            .await
+            .map_err(|e| Status::internal(format!("the runner panicked: {e}")))?;
+        Ok(Response::new(wire::identifiers_response(outcome)))
     }
 }

@@ -52,6 +52,29 @@ pub struct LockedSchemas {
     pub pins: BTreeMap<String, String>,
     /// The hash of the cache file, `h1:` and SHA-256 in hex.
     pub integrity: String,
+    /// The schema bundles the cache was made from, when it was fetched
+    /// rather than synced from the tool. Empty for a cache the tool wrote.
+    pub bundles: Vec<LockedBundle>,
+}
+
+/// One schema bundle a target's cache was made from.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct LockedBundle {
+    /// Where it came from and what it is: `oci+REPOSITORY:TAG` or
+    /// `file+PATH`.
+    pub reference: String,
+    /// The digest it was fetched by: the OCI manifest's, or for a file the
+    /// archive's, as `sha256:` and 64 hex digits.
+    pub digest: String,
+}
+
+/// Whether `digest` is `sha256:` and 64 lower-case hex digits.
+pub fn valid_digest(digest: &str) -> bool {
+    digest.strip_prefix("sha256:").is_some_and(|h| {
+        h.len() == 64
+            && h.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
 }
 
 /// A parsed lockfile.
@@ -171,6 +194,15 @@ impl Lock {
             }
             if !s.integrity.is_empty() {
                 out.push_str(&format!("    integrity: {}\n", scalar(&s.integrity)));
+            }
+            if !s.bundles.is_empty() {
+                let mut bundles = s.bundles.clone();
+                bundles.sort();
+                out.push_str("    bundles:\n");
+                for b in &bundles {
+                    out.push_str(&format!("      - reference: {}\n", scalar(&b.reference)));
+                    out.push_str(&format!("        digest: {}\n", scalar(&b.digest)));
+                }
             }
         }
     }
@@ -330,12 +362,58 @@ impl Lock {
                 }
                 Some(_) => return Err(bad(format!("schemas[{i}].pins: expected a mapping"))),
             }
+            let mut bundles = Vec::new();
+            match map.get("bundles") {
+                None | Some(Value::Null) => {}
+                Some(Value::List(list)) => {
+                    for (j, b) in list.iter().enumerate() {
+                        let at = format!("schemas[{i}].bundles[{j}]");
+                        let Some(b) = b.as_map() else {
+                            return Err(bad(format!("{at}: expected a mapping")));
+                        };
+                        let field = |key: &str| match b.get(key) {
+                            Some(Value::String(s)) => Ok(s.clone()),
+                            _ => Err(bad(format!("{at}.{key}: expected text"))),
+                        };
+                        let bundle = LockedBundle {
+                            reference: field("reference")?,
+                            digest: field("digest")?,
+                        };
+                        // Input like the rest: a reference is never a flag
+                        // or more than one word, and a digest is a digest.
+                        if bundle.reference.is_empty()
+                            || bundle.reference.starts_with('-')
+                            || bundle
+                                .reference
+                                .contains(|c: char| c.is_control() || c.is_whitespace())
+                            || !(bundle.reference.starts_with("oci+")
+                                || bundle.reference.starts_with("file+"))
+                        {
+                            return Err(bad(format!(
+                                "{at}.reference: {:?} is not a bundle reference as `meridian \
+                                 schema` writes it",
+                                bundle.reference
+                            )));
+                        }
+                        if !valid_digest(&bundle.digest) {
+                            return Err(bad(format!(
+                                "{at}.digest: {:?} is not a sha256 digest",
+                                bundle.digest
+                            )));
+                        }
+                        bundles.push(bundle);
+                    }
+                }
+                Some(_) => return Err(bad(format!("schemas[{i}].bundles: expected a list"))),
+            }
+            bundles.sort();
             let entry = LockedSchemas {
                 target: text("target")?,
                 tool: text("tool")?,
                 tool_version: text("toolVersion")?,
                 pins,
                 integrity: text("integrity")?,
+                bundles,
             };
             if entry.target.is_empty() {
                 return Err(bad(format!("schemas[{i}]: needs a target")));
@@ -363,6 +441,7 @@ mod tests {
                 "5.60.0".into(),
             )]),
             integrity: "h1:ab12".into(),
+            bundles: Vec::new(),
         });
         lock.set_schemas(LockedSchemas {
             target: "kubernetes".into(),
@@ -370,6 +449,7 @@ mod tests {
             tool_version: "1.31".into(),
             pins: BTreeMap::new(),
             integrity: "h1:cd34".into(),
+            bundles: Vec::new(),
         });
         assert!(!lock.is_empty());
         let text = lock.render();
@@ -387,6 +467,51 @@ mod tests {
             read.schemas_for("terraform").unwrap().tool_version,
             "1.13.1"
         );
+        // A cache fetched from bundles records them, and reads them back.
+        let digest = format!("sha256:{}", "ab".repeat(32));
+        lock.set_schemas(LockedSchemas {
+            target: "pulumi".into(),
+            tool: "pulumi".into(),
+            integrity: "h1:ef56".into(),
+            bundles: vec![LockedBundle {
+                reference: "oci+ghcr.io/acme/schemas/pulumi/aws:6.45.0".into(),
+                digest: digest.clone(),
+            }],
+            ..LockedSchemas::default()
+        });
+        let text = lock.render();
+        assert!(
+            text.contains(&format!(
+                "    bundles:\n      - reference: oci+ghcr.io/acme/schemas/pulumi/aws:6.45.0\n        \
+                 digest: \"{digest}\"\n"
+            )) || text.contains(&format!(
+                "    bundles:\n      - reference: oci+ghcr.io/acme/schemas/pulumi/aws:6.45.0\n        \
+                 digest: {digest}\n"
+            )),
+            "{text}"
+        );
+        assert_eq!(Lock::parse("meridian.lock", text.as_bytes()).unwrap(), lock);
+        for (bad, why) in [
+            (
+                "reference: \"-x\"\n        digest: sha256:00",
+                "not a bundle reference",
+            ),
+            (
+                "reference: \"oci+a b\"\n        digest: sha256:00",
+                "not a bundle reference",
+            ),
+            (
+                "reference: oci+a/b:1\n        digest: sha256:00",
+                "not a sha256 digest",
+            ),
+        ] {
+            let text = format!(
+                "lockVersion: 1\nmodules: []\nschemas:\n  - target: t\n    bundles:\n      - {bad}\n"
+            );
+            let err = Lock::parse("meridian.lock", text.as_bytes()).unwrap_err();
+            assert!(err.to_string().contains(why), "{err}");
+        }
+        lock.remove_schemas("pulumi");
         // A record is replaced, not repeated, and can be forgotten.
         lock.set_schemas(LockedSchemas {
             target: "kubernetes".into(),

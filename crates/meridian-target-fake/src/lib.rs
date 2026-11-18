@@ -40,7 +40,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 use meridian_sdk::{
-    canonical_map, decode_map, serve, Applied, Artifact, Capabilities, Category, Change,
+    canonical_map, decode_map, serve, Adoption, Applied, Artifact, Capabilities, Category, Change,
     ChangeAction, CompileError, Data, DocumentKind, Emitted, Emitter, ImportError, ImportFormat,
     ImportNote, ImportSource, Imported, ImportedDocument, ImportedResource, Importer, Log,
     NoteLevel, Operations, Output, ParamKind, ParamSchema, Plan, Plugin, ResourceGraph,
@@ -51,9 +51,24 @@ use meridian_sdk::{
 /// The compiling half: each `file` resource becomes one artifact file.
 pub struct Fake;
 
+/// `fake`, or for a copy of the plugin installed as
+/// `meridian-target-fake-<more>`, `fake-<more>`: a second target, for a test
+/// that moves a document from one tool to another.
+fn name() -> &'static str {
+    static NAME: OnceLock<String> = OnceLock::new();
+    NAME.get_or_init(|| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|path| path.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            .and_then(|stem| stem.strip_prefix("meridian-target-").map(str::to_owned))
+            .filter(|name| name.starts_with("fake"))
+            .unwrap_or_else(|| "fake".to_owned())
+    })
+}
+
 impl Emitter for Fake {
     fn name(&self) -> &str {
-        "fake"
+        name()
     }
 
     fn supported_resource_types(&self) -> Vec<String> {
@@ -67,6 +82,15 @@ impl Emitter for Fake {
             runtime_condition: false,
             secrets: std::env::var("FAKE_SECRETS").as_deref() != Ok("none"),
             credentials: std::env::var("FAKE_SECRETS").as_deref() != Ok("none"),
+            // Adopts as a stateful tool does: the identifier is written
+            // beside the file, and the first plan reports an adoption.
+            // FAKE_ADOPT stands it in for a target that adopts by
+            // converging, or for one that cannot adopt.
+            adopt: match std::env::var("FAKE_ADOPT").as_deref() {
+                Ok("none") => Adoption::None,
+                Ok("converge") => Adoption::Converge,
+                _ => Adoption::Import,
+            },
         }
     }
 
@@ -96,7 +120,7 @@ impl Emitter for Fake {
             if resource.r#type != "file" {
                 return Err(CompileError::for_resource(
                     resource,
-                    "unsupported-resource-type",
+                    &meridian_sdk::rules::UNSUPPORTED_RESOURCE_TYPE,
                     format!(
                         "the fake target has no mapping for type {:?}",
                         resource.r#type
@@ -120,6 +144,12 @@ impl Emitter for Fake {
                 .artifact
                 .files
                 .insert(format!("files/{}", resource.id), content);
+            if !resource.adopt.is_empty() && self.capabilities().adopt == Adoption::Import {
+                emitted.artifact.files.insert(
+                    format!("{ADOPT_DIR}{}", resource.id),
+                    resource.adopt.clone(),
+                );
+            }
         }
         // The credential the host is reached with: what a compile knows of
         // it, which is never a value.
@@ -164,6 +194,9 @@ pub struct FakeRunner {
     pub operations: Operations,
     /// Whether the tool takes inputs, which it then echoes when it applies.
     pub accepts_inputs: bool,
+    /// Whether the tool saves a plan when asked and applies exactly a saved
+    /// one; `FAKE_SAVES_PLANS=none` makes it a plugin that does not.
+    pub saves_plans: bool,
 }
 
 /// The one setting the fake runner declares: a greeting the tool writes to
@@ -311,6 +344,18 @@ fn hand_over_credential(
 }
 
 /// What the last apply wrote, by artifact path.
+/// The artifact's files as one value, which is what the fake's saved plan
+/// is made of.
+fn files_of(artifact: &Artifact) -> Value {
+    Value::Map(
+        artifact
+            .files
+            .iter()
+            .map(|(path, content)| (path.clone(), Value::from(content.as_str())))
+            .collect(),
+    )
+}
+
 fn read_state(work_dir: &Path) -> Result<BTreeMap<String, Value>, RunError> {
     match fs::read(work_dir.join("state.json")) {
         Ok(bytes) => decode_map(&bytes).map_err(RunError::new),
@@ -319,10 +364,21 @@ fn read_state(work_dir: &Path) -> Result<BTreeMap<String, Value>, RunError> {
     }
 }
 
+/// Where a compile writes the identifier a resource adopts. It is the
+/// tool's import, not a file it manages, so a plan never reports it.
+const ADOPT_DIR: &str = "adopt/";
+
 fn diff(state: &BTreeMap<String, Value>, artifact: &Artifact) -> Vec<Change> {
     let mut changes = Vec::new();
     for (path, content) in &artifact.files {
+        if path.starts_with(ADOPT_DIR) {
+            continue;
+        }
+        let adopted = path
+            .strip_prefix("files/")
+            .is_some_and(|id| artifact.files.contains_key(&format!("{ADOPT_DIR}{id}")));
         let action = match state.get(path) {
+            None if adopted => ChangeAction::Adopt,
             None => ChangeAction::Create,
             Some(Value::String(old)) if old == content => continue,
             Some(_) => ChangeAction::Update,
@@ -334,7 +390,7 @@ fn diff(state: &BTreeMap<String, Value>, artifact: &Artifact) -> Vec<Change> {
         });
     }
     for path in state.keys() {
-        if !artifact.files.contains_key(path) {
+        if !path.starts_with(ADOPT_DIR) && !artifact.files.contains_key(path) {
             changes.push(Change {
                 resource: path.clone(),
                 action: ChangeAction::Delete,
@@ -403,6 +459,10 @@ impl Runner for FakeRunner {
         self.accepts_inputs
     }
 
+    fn saves_plans(&self) -> bool {
+        self.saves_plans
+    }
+
     fn plan(
         &self,
         context: &RunContext,
@@ -423,9 +483,23 @@ impl Runner for FakeRunner {
         }
         let changes = diff(&state, artifact);
         log.err(&format!("{} to change", changes.len()));
+        // The saved plan is the files the plan was taken for, so that an
+        // apply handed it can tell a stale one. As Terraform's would, it
+        // holds every value, so it is not saved when the run handed over a
+        // secret: that is the host's fallback being exercised, not a fault.
+        let saved = if context.save_plan && self.saves_plans && context.secrets.is_empty() {
+            let mut plan: BTreeMap<String, Value> = BTreeMap::new();
+            plan.insert("files".to_owned(), files_of(artifact));
+            plan.insert("planned".to_owned(), Value::Int(changes.len() as i64));
+            log.err("plan saved");
+            Some(meridian_sdk::SavedPlan::new(canonical_map(&plan)))
+        } else {
+            None
+        };
         Ok(Plan {
             changes,
             unknown: artifact.files.values().any(|c| c.contains("UNKNOWN")),
+            saved,
         })
     }
 
@@ -438,6 +512,42 @@ impl Runner for FakeRunner {
         let mut state = read_state(&context.work_dir)?;
         let _secrets = hand_over_secrets(context, log)?;
         let _credential = hand_over_credential(context, log)?;
+        // A saved plan is applied as the tool would apply its own: for the
+        // files it was taken for and no others, and what was handed over is
+        // recorded where a host test can read it. The record holds no value.
+        let from_plan = context.work_dir.join("applied-from-plan.json");
+        match &context.saved_plan {
+            None => {
+                let _ = fs::remove_file(&from_plan);
+            }
+            Some(saved) => {
+                let plan = decode_map(&saved.data)
+                    .map_err(|e| RunError::new(format!("the saved plan is unreadable: {e}")))?;
+                if plan.get("files") != Some(&files_of(artifact)) {
+                    return Err(RunError::new(
+                        "the saved plan is stale: it was taken for other files than these",
+                    ));
+                }
+                let mut record: BTreeMap<String, Value> = BTreeMap::new();
+                record.insert("bytes".to_owned(), Value::Int(saved.data.len() as i64));
+                record.insert(
+                    "changes".to_owned(),
+                    Value::List(
+                        saved
+                            .changes
+                            .iter()
+                            .map(|c| Value::from(c.to_string().as_str()))
+                            .collect(),
+                    ),
+                );
+                fs::write(&from_plan, canonical_map(&record))
+                    .map_err(|e| RunError::new(format!("recording the saved plan: {e}")))?;
+                log.err(&format!(
+                    "applying the saved plan of {} changes",
+                    saved.changes.len()
+                ));
+            }
+        }
         // The one setting, written where a host test can read which value
         // reached the tool.
         fs::write(context.work_dir.join("greeting.txt"), greeting())
@@ -518,6 +628,26 @@ impl Runner for FakeRunner {
             return Err(RunError::new("nothing has been applied yet"));
         }
         Ok(outputs_of(&state, context))
+    }
+
+    /// `FAKE_IDENTIFIERS=off` stands it in for a plugin that cannot report
+    /// what it manages.
+    fn reads_identifiers(&self) -> bool {
+        std::env::var("FAKE_IDENTIFIERS").as_deref() != Ok("off")
+    }
+
+    /// Each file the state holds, by its resource id; its identifier is
+    /// `fake-<id>`, as a cloud's would be some id of its own.
+    fn identifiers(&self, context: &RunContext) -> Result<BTreeMap<String, String>, RunError> {
+        let state = read_state(&context.work_dir)?;
+        if state.is_empty() {
+            return Err(RunError::new("nothing has been applied yet"));
+        }
+        Ok(state
+            .keys()
+            .filter_map(|path| path.strip_prefix("files/"))
+            .map(|id| (id.to_owned(), format!("fake-{id}")))
+            .collect())
     }
 }
 
@@ -623,7 +753,8 @@ impl Importer for FakeImporter {
 /// Serves the fake plugin, offering the operations `FAKE_OPERATIONS` names
 /// (`none`, `plan`, or anything else for all of them), so a host can be
 /// checked against a plugin that offers only some. `FAKE_INPUTS=none` makes
-/// it a plugin that does not take inputs.
+/// it a plugin that does not take inputs, and `FAKE_SAVES_PLANS=none` one
+/// that does not save plans.
 pub fn serve_from_env() -> Result<(), ServeError> {
     let operations = match std::env::var("FAKE_OPERATIONS").as_deref() {
         Ok("none") => None,
@@ -647,6 +778,7 @@ pub fn serve_from_env() -> Result<(), ServeError> {
         Some(operations) => serve(plugin.with_runner(FakeRunner {
             operations,
             accepts_inputs: std::env::var("FAKE_INPUTS").as_deref() != Ok("none"),
+            saves_plans: std::env::var("FAKE_SAVES_PLANS").as_deref() != Ok("none"),
         })),
         None => serve(plugin),
     }

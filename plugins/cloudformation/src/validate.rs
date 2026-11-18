@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::CompileError;
 
 use crate::{refuse_at, Template, NAME};
@@ -14,9 +15,10 @@ const CAPABILITIES: &[&str] = &[
 ];
 
 pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
-    let document = |rule: &str, msg: String| CompileError {
+    let document = |rule: &Rule, msg: String| CompileError {
         target: NAME.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         ..CompileError::default()
     };
@@ -27,7 +29,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
     if !valid {
         return Err(document(
-            "invalid-stack-name",
+            &rules::INVALID_NAME,
             format!(
                 "{name:?} cannot be a stack name: one starts with a letter and holds only \
                  letters, digits and hyphens. Name the stack with a resource of type \"stack\""
@@ -37,7 +39,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
     for capability in &template.settings.capabilities {
         if !CAPABILITIES.contains(&capability.as_str()) {
             return Err(document(
-                "invalid-param",
+                &rules::INVALID_PARAM,
                 format!(
                     "{capability:?} is not a capability a stack can acknowledge (accepted: {})",
                     CAPABILITIES.join(", ")
@@ -47,7 +49,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
     }
     if template.entries.is_empty() {
         return Err(document(
-            "empty-template",
+            &rules::EMPTY_DOCUMENT,
             "a template needs at least one resource".to_owned(),
         ));
     }
@@ -60,7 +62,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
             return Err(refuse_at(
                 &entry.id,
                 &entry.pos,
-                "duplicate-logical-id",
+                &rules::DUPLICATE_RESOURCE,
                 format!(
                     "resource ids {previous:?} and {:?} both become the logical id {:?}; \
                      CloudFormation's logical ids hold only letters and digits",
@@ -75,7 +77,7 @@ pub(crate) fn validate(template: &Template) -> Result<(), CompileError> {
             return Err(refuse_at(
                 "",
                 pos,
-                "duplicate-output",
+                &rules::DUPLICATE_OUTPUT,
                 format!("outputs {previous:?} and {name:?} both become the logical id {logical:?}"),
             ));
         }
@@ -138,8 +140,8 @@ mod tests {
             ("invalid-param", "", |t| {
                 t.settings.capabilities = vec!["capability_iam".to_owned()];
             }),
-            ("empty-template", "", |t| t.entries.clear()),
-            ("duplicate-logical-id", "web-vm", |t| {
+            ("empty-document", "", |t| t.entries.clear()),
+            ("duplicate-resource", "web-vm", |t| {
                 t.entries.push(entry("web-vm", "WebVm"));
             }),
             ("duplicate-output", "", |t| {
@@ -186,7 +188,7 @@ mod tests {
             &too_long,
         ] {
             let err = named(bad).expect_err(bad);
-            assert_eq!(err.rule, "invalid-stack-name", "{bad:?}");
+            assert_eq!(err.rule, "invalid-name", "{bad:?}");
         }
     }
 

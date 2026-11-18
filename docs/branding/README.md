@@ -28,7 +28,7 @@ project's own: one DSL for everything.
 ## The system
 
 - **The white point** at the top of the globe is the single DSL. It appears in every mark.
-- **The core mark** is a globe drawn from four meridians, one per plugin category, all
+- **The core mark** is a globe drawn from five meridians, one per plugin category, all
   meeting at that point.
 - **Plugin marks** keep the same tile, globe and point. Only the glyph changes, drawn in
   its category's colour.
@@ -45,6 +45,7 @@ project's own: one DSL for everything.
 | Configuration management | `#FF8A4C` |
 | Containers | `#35D0C2` |
 | Orchestration | `#B48CFF` |
+| Pipelines | `#FFC857` (`#B7791F` on light backgrounds) |
 
 ## Files
 
@@ -58,8 +59,8 @@ The core mark also has an animated copy, `meridian-core-animated.svg`:
 
 <img src="logos/meridian-core-animated.svg" width="96" alt="The Meridian core mark, with light travelling along its meridians">
 
-A point of light leaves the white point and travels down each of the four meridians in
-turn. It is the still file with four overlays added by
+A point of light leaves the white point and travels down each of the five meridians in
+turn. It is the still file with five overlays added by
 [`tools/wiki/graphics.py`](../../tools/wiki/graphics.py), which writes it; it is not
 edited by hand. The motion is CSS inside the file, so it plays wherever the file is
 shown as an image, and it is turned off for a reader whose system asks for less motion
@@ -74,7 +75,7 @@ plugin's own page, the plugin map.
   <img src="banner/meridian-banner-light.svg" alt="Meridian: one DSL for everything" width="100%">
 </picture>
 
-The banner opens the core mark out across a 1280 by 320 canvas: the four category
+The banner opens the core mark out across a 1280 by 320 canvas: the five category
 meridians all leave the single point that stands for the DSL. It sits at the top of the
 repository README and the documentation home page.
 

@@ -13,6 +13,7 @@ mod migrate;
 mod node;
 mod parse;
 mod resolve;
+mod retarget;
 pub mod schema;
 mod types;
 mod validate;
@@ -26,6 +27,7 @@ pub use parse::{parse, parse_file, parse_stream, parse_value};
 pub use resolve::{
     resolve, resolve_for, resolve_with, resolved_labels, Removed, Resolution, Secrets,
 };
+pub use retarget::{retarget, Moved, Retarget, Retargeted};
 pub use types::{
     Credential, Dependency, Document, IfMissing, Import, Infrastructure, InfrastructureSpec, Kind,
     Metadata, Notification, Output, Resource, ResourceSet, ResourceSetSpec, Secret, TargetHost,

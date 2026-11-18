@@ -2,54 +2,37 @@
 
 <img src="../branding/logos/meridian-puppet.svg" width="72" alt="Meridian Puppet plugin logo">
 
-Compiles a ResourceSet into a Puppet class and the node statement that assigns
-it, and applies it with `puppet apply` on the node itself, or with Bolt for
-another machine. Puppet still does the work: Meridian writes the manifest a
-person would have written and runs Puppet on it.
+Compiles a ResourceSet into a Puppet class and node statement, applied with
+`puppet apply` locally or Bolt for another machine.
 
 ## What it does and does not support
 
 | | |
 |---|---|
 | Category | Configuration management |
-| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)) |
+| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)), and any Puppet type beside them: `cron`, `mysql::db`, `native/file` ([Puppet types beside the six](#puppet-types-beside-the-six)) |
 | `dependsOn` | Yes, as `require`. Puppet orders by declared relationships, so the dependency graph survives into the manifest intact |
-| `notifies` | Native: `notify`. A service can be restarted (`restart` or `refresh`); an exec can be `run` |
+| `notifies` | Native: `notify`. A service can be restarted (`restart` or `refresh`); an exec can be `run`; a Puppet type of its own can be refreshed (`refresh`) |
 | `runtimeWhen` | No. A catalog is compiled before it reaches the node, so there is nothing left to evaluate at apply time. Refused |
+| `adopt` | Accepted, and changes nothing: Puppet keeps no state and makes each thing what the document says whether it exists or not. The compile warns |
 | Secrets | Yes: by Hiera. The manifest looks each up as a `Sensitive` value, and the run is given a data file and a `hiera.yaml` only the user can read. See [Secrets](#secrets) |
 | References | `${id.param}` is settled from the document when it is compiled; anything else in `${...}` is refused, and `$${` is a literal `${` ([rules](../reference/resource-types.md#references)) |
 | Plan | Yes: `--noop`, with `--detailed-exitcodes`. Every resource reports whether it would change |
 | Apply | Yes |
 | Outputs | No. A manifest produces no values for a later stage to read |
+| Editor schemas | Yes: `meridian schema sync` asks `puppet describe` what each type takes. See [Editor schemas](#editor-schemas) |
 | Compiles to | `manifests/init.pp` and `site.pp` |
 | Runs with | `puppet apply` on the node itself, `bolt apply` for another host |
 
-What it does not do:
+Not supported:
 
-- **`action: reload`, `start` or `stop` on a service are refused.** Puppet's
-  refresh restarts a service and takes no argument. The compile says why; it
-  does not turn a reload into a restart. See
-  [Ordering and notifications](#ordering-and-notifications).
-- **No Puppet master, no PuppetDB.** Plan and apply are masterless, and Hiera
-  is used for one thing, [handing over the document's secrets](#secrets). The
-  compiled class works on a master, but you copy it there yourself.
-- **No resource types beyond the six.** There is no passthrough to arbitrary
-  Puppet types. Anything else is refused at compile time.
-- **`package.version` and `exec.removes` are refused**, though Puppet could
-  express them; see [What is refused](#what-is-refused).
-- **It creates no infrastructure.** It configures a node that already exists.
-
-Contents: [Requirements](#requirements) ·
-[A first document](#a-first-document) ·
-[Resource types](#resource-types) ·
-[Ordering and notifications](#ordering-and-notifications) ·
-[What a compile writes](#what-a-compile-writes) ·
-[Running](#running) ·
-[Settings](#settings) ·
-[Secrets](#secrets) ·
-[What is refused](#what-is-refused) ·
-[Troubleshooting](#troubleshooting) ·
-[How it is tested](#how-it-is-tested)
+- **`reload`, `start` and `stop` notifies** ([why](#ordering-and-notifications)).
+- **A master or PuppetDB.** Runs are masterless; Hiera is used only for
+  [secrets](#secrets). Copy the class to a master yourself.
+- **Checking Puppet types' attributes**; Puppet checks them
+  ([Puppet types](#puppet-types-beside-the-six)).
+- **`package.version` and `exec.removes`** ([refused](#what-is-refused)).
+- **Creating infrastructure.**
 
 ## Requirements
 
@@ -59,13 +42,11 @@ Contents: [Requirements](#requirements) ·
 | A host reached with Bolt | Whatever Bolt needs: SSH or WinRM, and Bolt's own inventory or `--targets` settings through [`MERIDIAN_PUPPET_ARGS`](#settings) |
 | To compile only | Nothing. `meridian compile` never runs Puppet |
 
-Tested with Puppet 8 (the `puppet` gem) and with OpenVox, which the
-[`openvox`](openvox.md) target drives through this plugin's compiler.
+Tested with Puppet 8 (the gem) and OpenVox ([`openvox`](openvox.md) shares this compiler).
 
 ## A first document
 
-[`examples/puppet/web-server.yaml`](../../examples/puppet/web-server.yaml)
-installs nginx, writes its configuration and keeps it running:
+[`examples/puppet/web-server.yaml`](../../examples/puppet/web-server.yaml):
 
 ```yaml
 apiVersion: meridian/v1
@@ -136,14 +117,12 @@ class meridian_web {
 }
 ```
 
-The same document compiles for Ansible, Chef, Salt, OpenVox or cloud-init by
-changing `target`; the [conformance matrix](../reference/conformance-matrix.md)
-says where those targets differ.
+It also compiles for the other CM targets; see the
+[conformance matrix](../reference/conformance-matrix.md).
 
 ## Resource types
 
-The six shared types, as this target takes them. A param not listed is refused
-(`unsupported-param`); a state not listed is refused (`unsupported-state`).
+Unlisted params (`unsupported-param`) and states (`unsupported-state`) are refused.
 
 | Type | Puppet type | States (`ensure`) | Params | Required |
 |---|---|---|---|---|
@@ -154,45 +133,104 @@ The six shared types, as this target takes them. A param not listed is refused
 | `group` | `group` | `present` (default), `absent` | `name`, `gid`, `system` | `name` |
 | `exec` | `exec` | none; an exec has no state | `command`, `chdir` (`cwd`), `creates`, `shell` | `command` |
 
-Notes on how they map:
+- The **id is the Puppet title**; the managed name comes from `name` or `path`. Two
+  resources managing the same thing are refused (`duplicate-resource`).
+- `file` with `state: directory` and `content` is refused (`param-conflicts-with-state`).
+- `exec` with `shell: true` uses the shell provider; without it, pipes are arguments.
+- `exec` runs every time unless `creates` is set. `unless`, `onlyif` and `runtimeWhen` are
+  not available.
+- Quote `mode` (`"0644"`).
 
-- A resource's **id is the Puppet title**; the Puppet name or path comes from
-  `name` or `path`. Puppet identifies a managed thing by that name, not by the
-  title, so two resources that manage the same package, file, service, user
-  or group are refused at compile time (`duplicate-namevar`), where Puppet
-  would only have refused them on the node.
-- `file` with `state: directory` and `content` is refused
-  (`param-conflicts-with-state`): a directory has no content.
-- `exec` with `shell: true` runs through the shell provider, so a pipe or a
-  redirection works. Without it the command is run as written, so a pipe
-  reaches the program as an argument.
-- `exec` runs every time Puppet does unless `creates` says when it is already
-  done. Puppet's `unless` and `onlyif` are not exposed: Meridian has
-  `runtimeWhen` for that, and this target refuses it.
-- A `mode` is written as Puppet reads it: quote it in the document
-  (`"0644"`), or the YAML reads it as a number and the compile refuses it.
+## Puppet types beside the six
+
+Any Puppet type is a resource type: `cron`, `mount`, `mysql::db`, `apache::vhost`. Its
+`params` are its attributes, written as given; Puppet checks them when it compiles the
+catalog.
+
+The six shared names always mean the shared types. Puppet's own are `native/file`,
+`native/package` and so on. `native/cron` is refused.
+
+```yaml
+resources:
+  - id: html
+    type: native/file
+    state: directory
+    params:
+      path: /var/www/html
+      source: puppet:///modules/web/html
+      recurse: true
+  - id: logrotate
+    type: cron
+    params:
+      command: /usr/sbin/logrotate /etc/logrotate.conf
+      user: root
+      hour: 2
+      minute: 0
+    notifies:
+      - resource: app_db
+        action: refresh
+  - id: app_db
+    type: mysql::db
+    params:
+      user: app
+      password: placeholder
+```
+
+compiles to
+
+```puppet
+  file { 'html':
+    ensure  => directory,
+    path    => '/var/www/html',
+    recurse => true,
+    source  => 'puppet:///modules/web/html',
+  }
+
+  cron { 'logrotate':
+    command => '/usr/sbin/logrotate /etc/logrotate.conf',
+    hour    => 2,
+    minute  => 0,
+    user    => 'root',
+    notify  => Mysql::Db['app_db'],
+  }
+
+  mysql::db { 'app_db':
+    password => 'placeholder',
+    user     => 'app',
+  }
+```
+
+| | |
+|---|---|
+| `type` | a Puppet type name: lower-case words of letters, digits and underscores, joined by `::`. `native/<name>` for the six colliding names. A wrong case (`Cron`), a dotted name, or `native/` on any other name is refused |
+| `params` | the type's attributes, as written. A type that takes none is declared by its title alone |
+| `state` | written as the type's `ensure`, whatever values the type gives it: a word is written bare (`present`, `running`), anything else quoted (a version). Writing both `state:` and `params.ensure` is refused (`param-conflicts-with-state`) |
+| `notifies` to a Puppet type | action `refresh`: Puppet refreshes the declaration when a notifier changed, and whether the type does anything on refresh is the type's own business. Any other action is refused (`unsupported-action`) |
+| `notifies` from a Puppet type | as from any resource |
+| `runtimeWhen` | refused, as for the six |
+| Secrets | as for the six: a `Sensitive` lookup the runner answers through Hiera |
+| References | `${id.param}` is settled from the document, as for the six |
+| `native/file` and a shared `file` on one path | refused (`duplicate-resource`), as two shared files would be: they are one Puppet type |
+
+[`examples/puppet/native-types.yaml`](../../examples/puppet/native-types.yaml)
+uses both. Such a document compiles for Puppet and [OpenVox](openvox.md) only; the
+[`native-type`](../reference/lint.md#native-type) lint marks it. See
+[decision 0032](../decisions/0032-native-types-beside-the-six-and-a-prefix-for-colliding-names.md).
 
 ## Ordering and notifications
 
-`dependsOn` becomes `require`. The resources are also written in apply order,
-so a reader of the manifest sees the same order Meridian decided; nothing is
-flattened into "top to bottom".
-
-`notifies` becomes `notify`, and Puppet refreshes the notified resource at the
-end of the run if the notifier changed:
+`dependsOn` becomes `require`; resources are written in apply order. `notifies` becomes
+`notify`:
 
 | Notified type | Actions | What Puppet does |
 |---|---|---|
 | `service` | `restart`, `refresh` | restarts the service |
 | `exec` | `run` | runs the command again, even if `creates` says it already ran |
+| a Puppet type of its own | `refresh` | refreshes the declaration; what that does is the type's |
 | anything else | none | refused: `unsupported-action` |
 
-`reload`, `start` and `stop` on a service are refused with the reason: Puppet's
-refresh restarts and takes no argument, a service that should be running is
-already declared `state: running`, and Puppet has no way to stop a service in
-response to a change. To reload instead of restart, give the service a
-`restart` attribute in a Puppet module of your own; Meridian will not emit a
-restart where a reload was asked for.
+`reload`, `start` and `stop` are refused: Puppet's refresh only restarts. For a reload,
+set the service's `restart` attribute in your own module.
 
 ## What a compile writes
 
@@ -201,41 +239,26 @@ manifests/init.pp
 site.pp
 ```
 
-`manifests/init.pp` holds a class named `meridian_<document name>` with one
-resource declaration per resource, titled by its id. `site.pp` holds the node
-statement that includes the class on the document's host. They are separate
-so a site that classifies nodes some other way can use the class alone.
+`manifests/init.pp` holds class `meridian_<document name>`, one declaration per resource
+titled by its id. `site.pp` holds the node statement. The document name must be lower-case
+letters, digits and underscores.
 
-Because the class name comes from the document name, the name may hold only
-lower-case letters, digits and underscores. A name that cannot be a class
-name is refused, not rewritten.
-
-Strings are written as Puppet strings: single-quoted where the text has no
-escape in it, double-quoted with `\n`, `\"` and `\$` where it has. A value
-Meridian placed from `--data`, `--set` or a data layer is written so Puppet
-reads it as text and never as an interpolation
-([values from data are literal](../reference/dsl/interpolation.md#a-tools-own-expressions)).
+Strings are single-quoted, or double-quoted with `\n`, `\"` and `\$` escapes. Values from
+data are always literal
+([see](../reference/dsl/interpolation.md#a-tools-own-expressions)).
 
 ## Running
 
-Puppet has no way to push a catalog to a node, so there are two ways to apply
-one, chosen by the document's host:
+The host decides how:
 
 | Host | Tool | Plan | Apply |
 |---|---|---|---|
 | this machine (`localhost`, `127.0.0.1`, `::1`) | `puppet` | `puppet apply --detailed-exitcodes --color=false --noop apply.pp` | the same without `--noop` |
 | anything else | `bolt` | `bolt apply apply.pp --targets <host> --format json --noop` | the same without `--noop` |
 
-`apply.pp` is the class and the node statement joined, written into the
-stage's work directory. Changes are read from Puppet's own report, resource
-by resource: a plan lists every resource that would change and touches none
-of them; an apply lists what changed. With `--detailed-exitcodes`, status `2`
-means changes were made and is a success; `4` and `6` mean a resource failed,
-and the stage fails with the end of Puppet's output and the changes it made
-before failing.
-
-When Bolt's report cannot be read, the plan is reported as **unknown**, not as
-empty, so a run never says "nothing to do" on no evidence.
+`apply.pp` joins the class and node statement. Changes are read from Puppet's report.
+Exit `2` is success with changes; `4` and `6` fail the stage, with what had changed. An
+unreadable Bolt report makes the plan **unknown**.
 
 ## Settings
 
@@ -248,15 +271,12 @@ empty, so a run never says "nothing to do" on no evidence.
 | `MERIDIAN_SSH_AGENT` | the `ssh-agent` program, when it is not on `PATH`; started for a credential's key, see [Credentials](#credentials) |
 | `MERIDIAN_SSH_ADD` | the `ssh-add` program, when it is not on `PATH` |
 
-Every setting can also be written in the project's `meridian.yaml` under
-`spec.settings.puppet`, by its short name; the environment variable still wins.
-The names, defaults and the splitting rule for argument lists are in the
-[plugin settings reference](../reference/plugin-settings.md#puppet).
+Settings can also go in `meridian.yaml` under `spec.settings.puppet`; the environment wins.
+See the [plugin settings reference](../reference/plugin-settings.md#puppet).
 
 ## Secrets
 
-A [secret](../reference/dsl/secrets.md) in a resource's params reaches Puppet
-through Hiera, and through nothing else.
+A [secret](../reference/dsl/secrets.md) reaches Puppet only through Hiera.
 
 ```yaml
 spec:
@@ -274,10 +294,7 @@ spec:
         content: ${{ secret.db_password }}
 ```
 
-**What the compile writes.** The param becomes a lookup of the secret's key,
-wrapped in `Sensitive`, so that Puppet redacts the value wherever it would
-print it: in its report, in a `--noop` run's `current_value`/`should be` line,
-and in a file's diff.
+The param becomes a lookup in `Sensitive`, redacted in reports, `--noop` output and diffs.
 
 ```puppet
   file { 'db_conf':
@@ -288,39 +305,23 @@ and in a file's diff.
   }
 ```
 
-The compiled manifest holds the key, never the value, so it can be reviewed
-and kept. `meridian compile` writes exactly this.
+When a stage runs:
 
-**How the value reaches the tool.** When a stage runs, the runner writes a
-Hiera data file, `common.yaml`, with each secret under its key, into a
-directory only the user can enter (mode `0700`, the file `0600`, on a memory
-filesystem where the system has one), and a `hiera.yaml` beside it that names
-that directory as its data directory. The run is given the configuration and
-nothing more: `puppet apply ... --hiera_config <dir>/hiera.yaml` on this
-machine, `bolt apply ... --hiera-config <dir>/hiera.yaml` for another host.
-Over Bolt the catalog is compiled on this machine, so the lookup is answered
-here and the value travels to the node inside the catalog, the way Bolt sends
-every catalog. Both files are overwritten and removed when the run ends.
-Neither the command line nor the tool's environment ever holds the value, and
-nothing in the stage's work directory does.
+1. The runner writes `common.yaml` (mode `0600`, in a `0700` directory, in memory where
+   possible) and a `hiera.yaml`.
+2. The run gets `--hiera_config <dir>/hiera.yaml` (Bolt: `--hiera-config`). Bolt carries the
+   value to the node in the catalog.
+3. Both files are overwritten and removed after the run.
 
-**What is refused.** A secret is a whole param. One inside a list or a map
-(`groups: [..., "${{ secret.x }}"]`) is refused at compile, rule
-`unsupported-secret-place`, because a lookup is one value and the plugin does
-not build a list around it. A document's own Hiera is not read: the
-configuration the run is given names Meridian's data file alone, so a
-`hiera.yaml` of your own is not consulted during a Meridian run.
+A secret inside a list or map is refused (`unsupported-secret-place`). Your own
+`hiera.yaml` is not read during a run.
 
-The handover is tested against a stand-in `puppet` that keeps a copy of the
-data file, its mode, its arguments and its environment, and against the real
-`puppet` in CI (`MERIDIAN_TEST_REAL_PUPPET=1`), which applies a file whose
-content is a secret and whose value then appears in the file and in nothing
-Puppet printed or the plugin wrote.
+Tested against a stand-in `puppet` and real `puppet` in CI (`MERIDIAN_TEST_REAL_PUPPET=1`).
 
 ## Credentials
 
-`targetHost.credential` names the [credential](../reference/dsl/credentials.md) the host is
-reached as. Another machine is reached with `bolt`, which reads how to sign in from an inventory, so the plugin writes one for the run:
+`targetHost.credential` names the [credential](../reference/dsl/credentials.md). `bolt`
+reads it from an inventory written for the run:
 
 ```yaml
 spec:
@@ -340,9 +341,8 @@ spec:
       privateKey: ${{ secret.deploy_key }}
 ```
 
-- **The user and a password** (an `ssh` credential with a `password`, or a
-  `usernamePassword` one) go into a Bolt inventory written for the run, in a directory only
-  you can enter and removed when the run ends, and `--inventoryfile` names it:
+- **A user and password** (`ssh` with `password`, or `usernamePassword`) go into a private
+  inventory, removed after the run, passed by `--inventoryfile`:
 
   ```yaml
   targets:
@@ -354,52 +354,55 @@ spec:
           password: "..."
   ```
 
-- Bolt's own `--inventoryfile` in `MERIDIAN_PUPPET_ARGS` is then a second inventory; leave
-  it out when the document names a credential.
-- **A key is never on disk.** It goes into an SSH agent Meridian starts for the stage:
-  `ssh-agent -D -a <socket>`, its socket in a directory only you can enter, loaded with
-  `ssh-add -` from standard input. `bolt` is told the socket in `SSH_AUTH_SOCK` and
-  nothing else. A `passphrase` is answered to `ssh-add` from a file only you can read. The
-  agent is stopped and its directory removed when the stage ends. Nothing of the key is on
-  the command line, in the environment, in the compiled files or in a file Meridian keeps.
-- **`agent: true`** names a key in your own agent: `bolt` reads `SSH_AUTH_SOCK` as it is,
-  and Meridian starts nothing. **`from: ambient`** leaves signing in to the tool's own
-  configuration, as with no credential at all.
-- **Refused at compile**, rule `unsupported-credential`: a `certificate` (put it
-  beside the key in an agent of your own and set `agent: true`); a `domain` (for WinRM
-  hosts, which this plugin does not reach); a user name with a space or a line break.
+- Leave `--inventoryfile` out of `MERIDIAN_PUPPET_ARGS` when a credential is named.
+- **A key** goes into an SSH agent Meridian starts for the stage, loaded through `ssh-add`'s
+  stdin; `bolt` gets only `SSH_AUTH_SOCK`. A `passphrase` is answered from a private file.
+  See [0028](../decisions/0028-a-key-reaches-a-host-through-an-agent-meridian-starts.md).
+- **`agent: true`** uses your own agent. **`from: ambient`** leaves signing in to the tool.
+- **Refused at compile** (`unsupported-credential`): a `certificate` (load it in your own
+  agent, `agent: true`), a `domain`, a user name with a space or line break.
 - **Refused at run time:** a credential for this machine (`localhost`, `127.0.0.1`, `::1`
-  or no host). `puppet apply` configures this machine as the user running Meridian, whoever the document names. Leave the credential out, or name another host.
+  or no host). Leave the credential out, or name another host.
 
-The plan line names the identity, `web (puppet) on web01.example.com as deploy (ssh,
-user deploy)`, and never a value. `ssh-agent` and `ssh-add` are run from `PATH`, or from
-`MERIDIAN_SSH_AGENT` and `MERIDIAN_SSH_ADD`.
+The plan names the identity (`web (puppet) on web01.example.com as deploy (ssh, user
+deploy)`), never a value. `ssh-agent` and `ssh-add` come from `PATH` or `MERIDIAN_SSH_AGENT`
+and `MERIDIAN_SSH_ADD`. Tested against stand-ins; real `bolt` is not run in CI.
 
-The handover is tested against stand-ins for `bolt`, `ssh-agent` and `ssh-add` that keep what they are given (the inventory and its mode, the environment, the key and the passphrase). The real `bolt` is not driven in CI.
+## Editor schemas
+
+`meridian schema sync` asks `puppet describe` for the Puppet types documents use
+([Tool schemas](../tooling/schema-sync.md)).
+
+| | |
+|---|---|
+| Described in full | each Puppet type the documents use, under the name the document writes (`cron`, or `native/file` for one of the six names): every parameter and property with its description, the values it lists (`Valid values are ...`) as the param's values. The `Providers` and `Features` sections end the attributes: a provider's own attributes are not listed, and Puppet refuses one the type lacks at apply time. Read from `puppet describe <type>`, one run a type, with the target's own settings (`MERIDIAN_PUPPET`, `MERIDIAN_PUPPET_ARGS`). A defined type from a module (`mysql::db`) has no description `describe` can read, so it is a note and not the end of the sync |
+| Listed by name | every other type `puppet describe --list` knows, with its short description; the six shared names under `native/`, since the bare words are the shared types |
+| Pinned | Puppet's version, from `puppet --version` |
+
+Params are text unless `describe` lists values. Every type takes `refresh`.
 
 ## What is refused
 
-Every refusal names the resource, the line and the rule. The rules this
-target can raise, and what to do:
+Each names the resource, line and rule:
 
 | Rule | Meaning | What to do |
 |---|---|---|
-| `unsupported-resource-type` | a type outside the six, or in the wrong case (`Package`) | use one of the six; there is no passthrough |
+| `unsupported-resource-type` | a type in the wrong case (`Package`, `Cron`), a dotted name, or `native/` on a name that is not one of the six | use one of the six, or a Puppet type as a declaration names it ([beside the six](#puppet-types-beside-the-six)) |
 | `unsupported-param` | a param this type does not take on Puppet, including `package.version` and `exec.removes` | drop it, or put it in a Puppet module |
 | `missing-param` | no `name`, `path` or `command` | add it |
 | `empty-param` | a required param that is empty text | give it a value |
 | `invalid-param` | a param of the wrong kind: a list for `name`, a number for `mode` | quote the mode; give a single name |
 | `unsupported-state` | a state this type does not have, or any state on an `exec` | see the table under [Resource types](#resource-types) |
-| `param-conflicts-with-state` | `content` on a `directory` | drop one |
+| `param-conflicts-with-state` | `content` on a `directory`; `state` and `params.ensure` on a Puppet type of its own | drop one |
 | `unsupported-runtime-condition` | `runtimeWhen` on any resource | decide with a compile-time `when` instead |
-| `unsupported-action` | a notify action the type does not take: `reload`, `start`, `stop` on a service, anything on a package | use `restart`, or declare the state you want |
+| `unsupported-action` | a notify action the type does not take: `reload`, `start`, `stop` on a service, anything on a package, anything but `refresh` on a Puppet type of its own | use `restart` or `refresh`, or declare the state you want |
 | `unknown-notify-target`, `unknown-dependency` | an edge names a resource the document does not declare | fix the id |
 | `ordering-violated` | the order the core handed over puts a resource before its dependency | a core bug; report it |
-| `duplicate-resource`, `duplicate-title` | two resources with the same id | rename one |
-| `duplicate-namevar` | two resources that manage the same package, file, service, user or group | merge them |
-| `empty-title`, `multiline-title`, `quoted-title` | an id that cannot be a Puppet title | use letters, digits and underscores |
-| `empty-resource` | a resource with nothing to declare | give it params |
-| `dangling-reference` | `${id.param}` names a resource or a param that is not there | fix the reference |
+| `duplicate-resource` | two resources with the same id | rename one |
+| `duplicate-resource` | two resources that manage the same package, file, service, user or group | merge them |
+| `invalid-name` | an id that cannot be a Puppet title | use letters, digits and underscores |
+| `missing-param` | a shared resource with nothing to declare | give it params |
+| `invalid-reference` | `${id.param}` names a resource or a param that is not there | fix the reference |
 | `invalid-host` | a host that is not a name, so it cannot be written into a node statement | the core refuses one first ([`targetHost`](../reference/dsl/outputs-and-hand-offs.md#rules)) |
 | `missing-host` | a ResourceSet with no host to write the node statement for | give it a `targetHost` |
 
@@ -416,20 +419,10 @@ target can raise, and what to do:
 
 ## How it is tested
 
-- **Golden files** under `plugins/puppet/testdata/` record what every fixture
-  and the example compile to, byte for byte, and what each refusal says.
-- **The conformance tests** compile the same documents for every shared-type
-  target and generate the [conformance matrix](../reference/conformance-matrix.md),
-  which fails when this target starts accepting or refusing something new.
-- **Run tests** (`plugins/puppet/tests/run.rs`) drive the runner against
-  stand-ins for `puppet` and `bolt`: the exact commands, the exit statuses,
-  and a Bolt report that cannot be read.
-- **Real-tool tests** (`plugins/puppet/tests/real.rs`, workflow `puppet.yml`)
-  run the real `puppet` from the gem: every fixture is parsed with
-  `puppet parser validate`, a plan creates nothing, an apply converges files
-  under a scratch directory, a second plan is in sync, drift is put right,
-  and a failed resource fails the run and keeps what came before it. They
-  are marked `#[ignore]` and run with
+- **Golden files** in `plugins/puppet/testdata/`, refusals included.
+- **Conformance tests** generate the [conformance matrix](../reference/conformance-matrix.md).
+- **Run tests** (`plugins/puppet/tests/run.rs`) against stand-ins for `puppet` and `bolt`.
+- **Real-tool tests** (`plugins/puppet/tests/real.rs`, `puppet.yml`): validate, plan, apply,
+  drift and failure, run with
   `MERIDIAN_TEST_REAL_PUPPET=1 cargo test -p meridian-target-puppet --test real -- --ignored`.
-  Reaching another machine with Bolt has only met a stand-in. See
-  [Real-tool tests](../contributing/real-tool-tests.md).
+  Bolt has only met a stand-in. See [Real-tool tests](../contributing/real-tool-tests.md).

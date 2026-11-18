@@ -28,7 +28,10 @@ mod args;
 mod commands;
 mod import;
 mod interrupt;
+mod output;
+mod pipeline;
 mod print;
+mod schema_bundles;
 mod tools;
 
 use std::collections::BTreeMap;
@@ -43,9 +46,10 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use meridian_ir::Bundle;
 use meridian_orchestrator::{
-    describe_duration, lock, record, run_selected, selected, Backend, Drift, Event, ExecBackend,
-    LocalBackend, Mode, Observer, OnFailure, Options, Outcome, Policy, Reason, Resume,
-    RollbackOutcome, RollbackReport, RunRecord, Selector, StageId, StageReport, Stop, MASK,
+    describe_duration, file_hash, lock, record, run_selected, selected, Asked, Backend, Decisions,
+    Drift, Event, ExecBackend, LocalBackend, LockInfo, Mode, Observer, OnFailure, Options, Outcome,
+    PlanFile, Policy, Reason, Refusal, Resume, RollbackOutcome, RollbackReport, RunRecord,
+    RunReport, RunState, Selector, StageId, StageReport, Stop, MASK,
 };
 use meridian_plugin_host::{
     signature::signature_path, Policy as SignaturePolicy, PublicKey, Registry, SecretKey,
@@ -57,6 +61,8 @@ use meridian_sdk::{ChangeAction, Data, LogLine, LogStream, Output};
 
 use args::*;
 use commands::*;
+use output::*;
+use pipeline::*;
 use print::*;
 pub(crate) use print::{count, Stdout};
 
@@ -71,17 +77,74 @@ struct Cli {
     command: Command,
     #[command(flatten)]
     trust: Trust,
+    /// How the result is printed: text for a person, or json, one JSON
+    /// object per command, for a pipeline or a wrapping tool. The report
+    /// for people then moves to standard error
+    #[arg(
+        long,
+        global = true,
+        value_name = "FORMAT",
+        env = "MERIDIAN_OUTPUT",
+        default_value = "text"
+    )]
+    output: OutputFormat,
+    /// Inside a pipeline engine (GitHub Actions, Azure Pipelines, GitLab CI,
+    /// Buildkite, Jenkins, Argo Workflows, Tekton), also write each problem
+    /// in the engine's own annotation syntax and the run's report as the
+    /// job's summary: auto does so when standard output is not a terminal,
+    /// on does so regardless, off never does
+    #[arg(
+        long,
+        global = true,
+        value_name = "MODE",
+        env = "MERIDIAN_ANNOTATIONS",
+        default_value = "auto"
+    )]
+    annotations: AnnotationMode,
 }
 
+/// The stack the command runs on. Windows gives the main thread 1 MiB, which
+/// an unoptimised build of `run`, holding every command's locals in one
+/// frame, outgrew; the stack is set here rather than by each platform.
+const STACK: usize = 16 * 1024 * 1024;
+
 fn main() -> ExitCode {
+    match std::thread::Builder::new()
+        .name("meridian".to_owned())
+        .stack_size(STACK)
+        .spawn(run)
+    {
+        Ok(command) => command
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+        Err(e) => {
+            eprintln!("error: starting the command: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> ExitCode {
     // Before anything is read: no core dump of this process, and no other
     // process of the same user reading its memory, so a secret fetched later
     // cannot leave that way.
     let _ = meridian_secret::harden_process();
     let cli = Cli::parse();
+    settle_output(cli.output, &cli.command.name());
+    settle_pipeline(cli.annotations);
     let outcome = settle(cli.trust).and_then(|()| match cli.command {
         Command::Validate { files, state_dir } => load(&files, &state_dir).map(|bundle| {
-            outln!("{} valid", count(bundle.documents.len(), "document"));
+            if json_output() {
+                emit(
+                    true,
+                    body([
+                        ("documents", bundle.documents.len().into()),
+                        ("diagnostics", serde_json::json!([])),
+                    ]),
+                );
+            } else {
+                outln!("{} valid", count(bundle.documents.len(), "document"));
+            }
         }),
         Command::Module { command, state_dir } => module(command, &state_dir),
         Command::Secret {
@@ -103,17 +166,31 @@ fn main() -> ExitCode {
                 ..How::default()
             },
         ),
-        Command::Plan { workflow } => orchestrate(&workflow, Mode::Plan, &How::default()),
+        Command::Plan {
+            workflow,
+            detailed_exitcode,
+            out,
+        } => orchestrate(
+            &workflow,
+            Mode::Plan,
+            &How {
+                detailed_exitcode,
+                plan_out: out.as_deref(),
+                ..How::default()
+            },
+        ),
         Command::Apply {
             workflow,
             resume,
             on_failure,
+            plan,
         } => orchestrate(
             &workflow,
             Mode::Apply,
             &How {
                 resume: resume.as_deref(),
                 rollback_on_failure: on_failure == FailureAction::Rollback,
+                from_plan: plan.as_deref(),
                 ..How::default()
             },
         ),
@@ -164,7 +241,11 @@ fn main() -> ExitCode {
                 strict,
             },
         ),
-        Command::Plugins { settings, plugins } => list_plugins(&plugins, settings),
+        Command::Plugins {
+            settings,
+            rules,
+            plugins,
+        } => list_plugins(&plugins, settings, rules),
         Command::Rules {
             command:
                 RulesCommand::Check {
@@ -186,30 +267,71 @@ fn main() -> ExitCode {
             &state_dir,
         ),
         Command::Migrate { files, to, check } => migrate(&files, to.as_deref(), check),
+        Command::Retarget {
+            file,
+            to,
+            out,
+            no_adopt,
+            state_dir,
+            plugins,
+        } => retarget(&file, &to, out.as_deref(), no_adopt, &state_dir, &plugins),
         Command::Version => {
-            out!("{}", versions());
+            version();
             Ok(())
         }
+        Command::Test {
+            files,
+            case,
+            junit,
+            plugins,
+            state_dir,
+        } => test(
+            &files,
+            case.as_deref(),
+            junit.as_deref(),
+            &plugins,
+            &state_dir,
+        ),
         Command::Fmt(args) => tools::format(&args),
         Command::Lint(args) => tools::lint(&args),
         Command::Schema(args) => tools::schema(&args),
         Command::Lsp(args) => tools::lsp(&args),
+        Command::Mcp(args) => tools::mcp(&args),
         Command::Signing { command } => signing(command),
     });
     // What stdout holds is the command's result, so a result that could not
     // be written (other than to a reader that went away) is a failure.
-    let _ = Stdout.flush();
-    match outcome {
-        Ok(()) if Stdout::failed() => ExitCode::FAILURE,
-        Ok(()) => ExitCode::SUCCESS,
-        Err(Failure::Reported) => ExitCode::FAILURE,
-        Err(Failure::Drifted) => ExitCode::from(2),
+    let code: u8 = match outcome {
+        Ok(()) => 0,
+        Err(Failure::Reported) => 1,
+        Err(Failure::Drifted) | Err(Failure::Changes) => 2,
         // The status a shell gives a command ended by Ctrl-C.
-        Err(Failure::Interrupted) => ExitCode::from(130),
+        Err(Failure::Interrupted) => 130,
+        Err(Failure::Usage(msg)) => {
+            eprintln!("error: {msg}");
+            if json_output() {
+                emit_error(&msg);
+            }
+            2
+        }
         Err(Failure::Message(msg)) => {
             eprintln!("error: {msg}");
-            ExitCode::FAILURE
+            // The machine reading stdout is told as well: an empty stdout
+            // and a status would make it read stderr after all.
+            if json_output() {
+                emit_error(&msg);
+            }
+            // And the pipeline engine, where there is one, so the problem
+            // shows on the job and not only in its log.
+            report_refusal(&msg);
+            1
         }
+    };
+    let _ = Stdout.flush();
+    if code == 0 && Stdout::failed() {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::from(code)
     }
 }
 
@@ -222,4 +344,10 @@ pub(crate) enum Failure {
     Drifted,
     /// The operator stopped the run. Already printed.
     Interrupted,
+    /// `plan --detailed-exitcode` found something an apply would do. Already
+    /// printed.
+    Changes,
+    /// The command line does not make sense, as `clap` would have said:
+    /// exit 2, so that a script tells a wrong command from a failed one.
+    Usage(String),
 }

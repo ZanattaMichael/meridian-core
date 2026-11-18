@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::expr::{self, Part};
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, Position, Resource, ResourceGraph, Value};
 use meridian_yaml::Yaml;
 
@@ -49,7 +50,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
             if settings_seen {
                 return Err(refuse(
                     r,
-                    "duplicate-stack",
+                    &rules::DUPLICATE_RESOURCE,
                     "a document deploys one stack; this one has two resources of type \"stack\""
                         .to_owned(),
                 ));
@@ -61,7 +62,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
         if !is_resource_type(&r.r#type) {
             return Err(refuse(
                 r,
-                "unsupported-resource-type",
+                &rules::UNSUPPORTED_RESOURCE_TYPE,
                 format!(
                     "{:?} is not a CloudFormation resource type. Use AWS's own type, such as \
                      AWS::EC2::Instance, or \"stack\" for the deployment's settings",
@@ -72,7 +73,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
         let Some(id) = logical_id(&r.id) else {
             return Err(refuse(
                 r,
-                "invalid-name",
+                &rules::INVALID_NAME,
                 format!(
                     "resource id {:?} has no letters or digits to make a logical id from",
                     r.id
@@ -92,7 +93,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
             return Err(refuse_at(
                 "",
                 &Position::default(),
-                "invalid-name",
+                &rules::INVALID_NAME,
                 format!(
                     "secret {:?} has no letters or digits to make a parameter name from",
                     secret.name
@@ -103,7 +104,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
             return Err(refuse_at(
                 "",
                 &Position::default(),
-                "invalid-name",
+                &rules::INVALID_NAME,
                 format!(
                     "secret {:?} would be the parameter {parameter}, which is also what {id:?} \
                      is called in the template; rename one of them",
@@ -121,8 +122,13 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
         let mut properties = Vec::new();
         let mut attributes = Vec::new();
         for (name, value) in &r.params {
-            let rewritten = rewrite(value, &logical, &mut refs)
-                .map_err(|msg| refuse(r, "invalid-reference", format!("param {name:?}: {msg}")))?;
+            let rewritten = rewrite(value, &logical, &mut refs).map_err(|msg| {
+                refuse(
+                    r,
+                    &rules::INVALID_REFERENCE,
+                    format!("param {name:?}: {msg}"),
+                )
+            })?;
             if ATTRIBUTES.contains(&name.as_str()) {
                 attributes.push((name.clone(), rewritten));
             } else {
@@ -151,7 +157,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
                 refuse_at(
                     "",
                     &output.pos,
-                    "invalid-reference",
+                    &rules::INVALID_REFERENCE,
                     format!("output {:?}: {msg}", output.name),
                 )
             })?;
@@ -159,7 +165,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
             return Err(refuse_at(
                 "",
                 &output.pos,
-                "invalid-name",
+                &rules::INVALID_NAME,
                 format!(
                     "output name {:?} has no letters or digits to make a logical id from",
                     output.name
@@ -177,7 +183,7 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
     if !r.runtime_when.is_empty() {
         return Err(refuse(
             r,
-            "unsupported-runtime-condition",
+            &rules::UNSUPPORTED_RUNTIME_CONDITION,
             format!(
                 "resource carries runtimeWhen {:?}, which this target cannot express: a \
                  CloudFormation condition is decided from the template's parameters before \
@@ -190,14 +196,14 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
         "" | "present" => Ok(()),
         "absent" => Err(refuse(
             r,
-            "unsupported-state",
+            &rules::UNSUPPORTED_STATE,
             "state \"absent\" has no meaning on this target: CloudFormation deletes whatever \
              its template no longer declares, so remove the resource from the document"
                 .to_owned(),
         )),
         other => Err(refuse(
             r,
-            "unsupported-state",
+            &rules::UNSUPPORTED_STATE,
             format!(
                 "resource type {:?} does not accept state {other:?} on this target (accepted: present)",
                 r.r#type
@@ -216,7 +222,7 @@ fn read_settings(r: &Resource, settings: &mut Settings) -> Result<(), CompileErr
                     let Value::String(capability) = item else {
                         return Err(refuse(
                             r,
-                            "invalid-param",
+                            &rules::INVALID_PARAM,
                             "every capability must be a string, such as CAPABILITY_NAMED_IAM"
                                 .to_owned(),
                         ));
@@ -227,21 +233,21 @@ fn read_settings(r: &Resource, settings: &mut Settings) -> Result<(), CompileErr
             ("name" | "region", _) => {
                 return Err(refuse(
                     r,
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     format!("param {name:?} of the stack must be a string"),
                 ))
             }
             ("capabilities", _) => {
                 return Err(refuse(
                     r,
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     "param \"capabilities\" of the stack must be a list".to_owned(),
                 ))
             }
             _ => {
                 return Err(refuse(
                     r,
-                    "unsupported-param",
+                    &rules::UNSUPPORTED_PARAM,
                     format!(
                         "resource type \"stack\" does not accept param {name:?} on this target \
                          (accepted: capabilities, name, region)"

@@ -1,0 +1,39 @@
+---
+- name: web
+  hosts: web01.example.com
+  tasks:
+    - name: nginx_pkg
+      ansible.builtin.package:
+        name: nginx
+        state: present
+    - name: facts
+      ansible.builtin.setup: {}
+    - name: worker_count
+      ansible.builtin.lineinfile:
+        line: worker_processes 4;
+        path: /etc/nginx/nginx.conf
+        regexp: ^worker_processes
+        state: present
+      notify:
+        - reload nginx_svc
+        - run reindex
+    - name: nginx_svc
+      ansible.builtin.service:
+        name: nginx
+        state: started
+    - name: reindex
+      community.general.ufw:
+        port: "80"
+        proto: tcp
+        rule: allow
+      when: ansible_facts['os_family'] == 'Debian'
+  handlers:
+    - name: reload nginx_svc
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+    - name: run reindex
+      community.general.ufw:
+        port: "80"
+        proto: tcp
+        rule: allow

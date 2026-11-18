@@ -1,14 +1,13 @@
 # The infrastructure as code flavour
 
-Infrastructure as code tools create things through an API, keep track of what
-they created, and can report facts about the result. This page is how the
-[Meridian language](index.md) is written for them.
+How the [Meridian language](index.md) is written for tools that create things through an
+API.
 
 | | |
 |---|---|
 | Category, as `meridian plugins` prints it | `infrastructure-as-code` |
 | Kind of document | `Infrastructure`. A `ResourceSet` is refused: these tools create things, and are not pointed at one machine |
-| `type` and `params` | the tool's own, passed through |
+| `type` and `params` | the tool's own, passed through; or one of the [common infrastructure types](common-infrastructure-types.md) on `terraform`, `opentofu`, `cloudformation`, `bicep` and `arm` |
 | Outputs | yes |
 
 ## Targets
@@ -25,17 +24,9 @@ they created, and can report facts about the result. This page is how the
 
 ## Native passthrough
 
-A Terraform provider has thousands of resource types and Azure has every
-service. Meridian does not put a smaller vocabulary in front of them. A
-resource's `type` is the tool's own type, and its `params` are that type's
-arguments exactly as the tool's documentation gives them, in the tool's own
-spelling (`instance_type` for Terraform, `InstanceType` for CloudFormation).
-
-So a document in this flavour is written for one tool and does not move to
-another by changing `spec.target`. What it shares with every other Meridian
-document is everything around the resource: the document format, ids,
-`dependsOn`, references checked at compile time, outputs, and one way to plan
-and apply.
+`type` is the tool's own type; `params` are its arguments in the tool's spelling
+(`instance_type` for Terraform, `InstanceType` for CloudFormation). A document is written
+for one tool, except with the [common types](#common-types-beside-the-native-ones).
 
 ```yaml
 apiVersion: meridian/v1
@@ -67,33 +58,57 @@ spec:
       value: ${web.public_ip}
 ```
 
-This document is
 [`examples/flavours/infrastructure-as-code.yaml`](../../../examples/flavours/infrastructure-as-code.yaml).
-A longer one for each tool:
+Longer ones:
 [`examples/terraform/web-vm.yaml`](../../../examples/terraform/web-vm.yaml),
 [`examples/cloudformation/web-vm.yaml`](../../../examples/cloudformation/web-vm.yaml),
 [`examples/bicep/web-vm.yaml`](../../../examples/bicep/web-vm.yaml).
 
+## Common types beside the native ones
+
+Five resource types are Meridian's own and mean the same on every cloud:
+`network`, `subnet`, `firewall`, `address` and `vm`. On `terraform` and
+`opentofu` (for AWS and Azure) and `bicep`, each becomes the cloud's own resources, and the same
+document compiles for each. They are used beside the tool's own types, so a
+document mixes `vm` with an `aws_s3_bucket` where the common type falls short.
+
+```yaml
+    - id: net
+      type: network
+      params: {cidr: 10.0.0.0/16}
+    - id: web
+      type: subnet
+      params: {network: "${net}", cidr: 10.0.1.0/24}
+    - id: vm
+      type: vm
+      params:
+        subnet: ${web}
+        size: {cpus: 2, memoryGb: 4}
+        image: {family: ubuntu, version: "24.04"}
+        sshKey: ssh-ed25519 AAAA...
+```
+
+Every param, what each type becomes on each cloud, the size and image tables,
+and what each cloud refuses are on
+[the common infrastructure types page](common-infrastructure-types.md). The
+[conformance matrix for them](../infra-conformance-matrix.md) shows what each
+target and cloud does with about forty small documents.
+
 ## The settings resource
 
-Most targets in this segment take a resource that is not something to create.
-It says where and how the rest is deployed: a Terraform `provider` and
-`backend`, a CloudFormation `stack` (name, region, capabilities), a Bicep
-`deployment` (resource group, subscription). It is written as a resource so that
-a document stays one list, and it has a fixed type name. The target's page lists
-its params and says whether it is required.
+A resource with a fixed type name that says where and how the rest is deployed: a
+Terraform `provider` and `backend`, a CloudFormation `stack`, a Bicep `deployment`. See
+the target's page.
 
 ## `state`
 
-Left out. These tools have one idea of state: what the document declares exists,
-and what it no longer declares is removed (or, on a Bicep resource group
-or ARM deployment, left alone; on Packer, nothing is ever removed, because a
-build only creates images). `state: absent` is refused on every target in the
-segment, with the instruction to remove the resource from the document.
+Left out. What the document declares exists. What it no longer declares is
+removed, except that a Bicep resource group or ARM deployment leaves it alone
+and Packer never removes anything (a build only creates images). `state:
+absent` is refused on every target in the segment; remove the resource from
+the document instead.
 
 ## References
-
-This is the flavour where `${...}` does the most.
 
 | You write | Terraform | CloudFormation | Bicep |
 |---|---|---|---|
@@ -102,7 +117,7 @@ This is the flavour where `${...}` does the most.
 | a reference inside longer text | interpolation | `Fn::Sub` | interpolation |
 | something that is not a path | Terraform's expression language | pseudo parameters such as `${AWS::Region}` | Bicep's expression language, such as `${resourceGroup().location}` |
 
-The other targets of the segment follow the same idea in their tool's spelling:
+Other targets, in their tool's spelling:
 
 | Target | A reference becomes |
 |---|---|
@@ -111,16 +126,13 @@ The other targets of the segment follow the same idea in their tool's spelling:
 | `arm` | `resourceId(...)` for the resource, `reference(...)` for its state, and `format(...)` inside longer text. ARM's own expressions are written in square brackets |
 | `packer` | a read of a `variable`, a `local` or a `data.<type>`. A source's results are read only by an output |
 
-The first name of a path must be a resource of the document, or the document
-does not compile. What can be read after it is whatever the tool exposes for
-that type.
+The first name must be a resource of the document. What follows is whatever the tool
+exposes.
 
 ## Order
 
-`dependsOn` becomes the tool's own keyword (`depends_on`, `DependsOn`,
-`dependsOn`). These tools also derive order from references, so where a
-reference already puts one resource after another, the dependency is not written
-a second time. Two targets differ:
+`dependsOn` becomes the tool's keyword (`depends_on`, `DependsOn`, `dependsOn`), except
+where a reference already implies the order. Two targets differ:
 
 | Target | Difference |
 |---|---|
@@ -129,7 +141,7 @@ a second time. Two targets differ:
 
 ## `notifies`
 
-These tools have no handlers. What each can be made to do instead:
+No handlers. Instead:
 
 | Target | Notify |
 |---|---|
@@ -140,12 +152,24 @@ These tools have no handlers. What each can be made to do instead:
 
 ## `runtimeWhen`
 
-Refused on every target in the segment. There is no node, and no moment on it,
-to check a condition.
+Refused.
+
+## `adopt`
+
+The tool's own identifier of a thing that already exists, so the tool takes it
+into its state instead of creating it. See
+[adopting what exists](resources.md#adopting-what-exists).
+
+| Target | `adopt` is |
+|---|---|
+| `terraform`, `opentofu` | an `import` block. Only on a managed resource |
+| `pulumi` | the resource's `import` option |
+| `bicep`, `arm` | accepted with a warning, and changes nothing: Resource Manager updates a resource of the same name in place |
+| `cloudformation`, `packer` | refused |
 
 ## Outputs
 
-An output names a value the tool reports once the document is applied:
+A value the tool reports after apply:
 
 ```yaml
 outputs:
@@ -153,8 +177,7 @@ outputs:
     value: ${web.public_ip}
 ```
 
-It becomes the tool's own output (`output`, `Outputs`, `output`), is read back
-after the apply, and is kept for the stages that ask for it. Today that is a
+It becomes the tool's own output and is handed to stages that use it, such as a
 ResourceSet's `targetHost`:
 
 ```yaml
@@ -164,14 +187,11 @@ targetHost:
   output: address
 ```
 
-A value the tool marks sensitive is reported as `(sensitive)` and never printed.
-Bicep and ARM report every output as text. Pulumi keeps each output's type and
-marks a secret as sensitive. A Packer output reads what the build's manifest
-records for a source, such as `${image.id}`.
+Sensitive values show as `(sensitive)`. Bicep and ARM report outputs as text. Pulumi keeps
+types. A Packer output reads the build manifest, such as `${image.id}`.
 
 ## Plan and apply
 
-`meridian plan` is the tool's own preview: a Terraform plan, a CloudFormation
-change set that is then discarded, an Azure `what-if`. Where the tool cannot
-analyse a resource, the plan is reported as unknown. Each tool keeps its own
-state and uses its own credentials; Meridian stores neither.
+`meridian plan` is the tool's preview: a Terraform plan, a discarded CloudFormation change
+set, an Azure `what-if`. If the tool cannot analyse a resource, the plan is unknown.
+Meridian stores no tool state or credentials.

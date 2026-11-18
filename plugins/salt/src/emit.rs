@@ -142,7 +142,7 @@ impl Text<'_> {
 
     fn reference(&self, reference: &Reference) -> Yaml {
         Yaml::Map(vec![(
-            reference.module.to_owned(),
+            reference.module.clone(),
             Yaml::Str(self.escape(&reference.id)),
         )])
     }

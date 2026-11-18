@@ -1,5 +1,6 @@
 //! Stage two: Bicep's ordering semantics.
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, EdgeKind, ResourceGraph};
 
 use crate::{refuse_at, Template};
@@ -19,7 +20,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.from,
                 &edge.pos,
-                "unsupported-action",
+                &rules::UNSUPPORTED_ACTION,
                 format!(
                     "notifies resource {:?} with action {:?}, which this target cannot express: \
                      a deployment has no way to act on one resource because another changed",
@@ -32,7 +33,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.to,
                 &edge.pos,
-                "unsupported-dependency",
+                &rules::UNSUPPORTED_DEPENDENCY,
                 "a dependency must be between two resources of the file; the deployment's own \
                  settings are not one"
                     .to_owned(),

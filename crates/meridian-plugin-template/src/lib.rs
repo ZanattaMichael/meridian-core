@@ -42,9 +42,10 @@ mod sort;
 mod transform;
 mod validate;
 
+use meridian_sdk::rules::Rule;
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph,
+    Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph,
 };
 
 pub use emit::MANIFEST_PATH;
@@ -69,7 +70,7 @@ pub(crate) struct Entry {
 }
 
 /// A refusal of one resource, stamped with this target.
-pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         ..CompileError::for_resource(r, rule, msg)
@@ -78,11 +79,12 @@ pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
 
 /// A refusal of something that is not a resource, or of a resource that has
 /// already been transformed.
-pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         resource: resource.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         pos: pos.clone(),
     }
@@ -127,7 +129,10 @@ impl Emitter for Template {
     /// when the tool has its own way to react to a change, `synthetic_notify`
     /// when you build that reaction out of something else, and
     /// `runtime_condition` when the tool can check a condition on the node at
-    /// the moment it applies a resource.
+    /// the moment it applies a resource. `adopt` is `Adoption::Import` when
+    /// the tool keeps a state and your emitter compiles `Resource::adopt`
+    /// into the tool's import, `Adoption::Converge` when the tool keeps no
+    /// state and simply makes each thing what the document says.
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             native_notify: false,
@@ -135,6 +140,7 @@ impl Emitter for Template {
             runtime_condition: false,
             secrets: false,
             credentials: false,
+            adopt: Adoption::None,
         }
     }
 

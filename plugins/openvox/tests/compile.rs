@@ -59,11 +59,21 @@ fn the_plugin_describes_itself_as_openvox() {
             runtime_condition: false,
             secrets: true,
             credentials: true,
+            adopt: meridian_sdk::Adoption::Converge,
         }
     );
     assert_eq!(
         OpenVox.supported_resource_types(),
-        ["exec", "file", "group", "package", "service", "user"]
+        [
+            "<module>::<type>",
+            "<type>",
+            "exec",
+            "file",
+            "group",
+            "package",
+            "service",
+            "user"
+        ]
     );
 }
 
@@ -177,7 +187,7 @@ fn what_the_language_cannot_say_is_refused_not_dropped() {
             "    - id: conf\n      type: file\n      params: {path: /a, content: a}\n      notifies:\n        - resource: pkg\n          action: restart\n    - id: pkg\n      type: package\n      params: {name: app}\n",
         ),
         (
-            "duplicate-namevar",
+            "duplicate-resource",
             "    - id: a\n      type: package\n      params: {name: nginx}\n    - id: b\n      type: package\n      state: latest\n      params: {name: nginx}\n",
         ),
     ];

@@ -290,7 +290,7 @@ fn param_schema(param: &meridian_sdk::ParamSchema) -> Value {
             ParamKind::List => {
                 out.insert(
                     "items".into(),
-                    json!({ "anyOf": [object, scalar_as_text()] }),
+                    json!({ "anyOf": [object, { "type": scalar_as_text() }] }),
                 );
             }
             _ => {

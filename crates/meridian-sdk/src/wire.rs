@@ -14,6 +14,7 @@ use meridian_value::{
 use crate::credential::{Credential, HeldCredential};
 use crate::import::*;
 use crate::pb;
+use crate::rules::{DescribedRule, Rule};
 use crate::run::*;
 use crate::schema::{ParamKind, ParamSchema, ResourceSchema};
 use crate::schemas::{SchemaExport, SchemaRequest};
@@ -72,6 +73,7 @@ pub fn graph_to_wire(g: &ResourceGraph) -> pb::ResourceGraph {
                 index: to_i32(r.index),
                 pos: Some(position_to_wire(&r.pos)),
                 secret_params: secret_params_of(&r.params),
+                adopt: r.adopt.clone(),
             })
             .collect(),
         secrets: g
@@ -156,6 +158,7 @@ pub fn graph_from_wire(g: pb::ResourceGraph) -> Result<ResourceGraph, String> {
             state: r.state,
             params,
             runtime_when: r.runtime_when,
+            adopt: r.adopt,
             index: from_i32(r.index),
             pos: position_from_wire(r.pos),
         });
@@ -277,6 +280,25 @@ pub fn capabilities_to_wire(c: Capabilities) -> pb::Capabilities {
         runtime_condition: c.runtime_condition,
         secrets: c.secrets,
         credentials: c.credentials,
+        adopt: adoption_to_wire(c.adopt) as i32,
+    }
+}
+
+fn adoption_to_wire(a: Adoption) -> pb::Adoption {
+    match a {
+        Adoption::None => pb::Adoption::None,
+        Adoption::Import => pb::Adoption::Import,
+        Adoption::Converge => pb::Adoption::Converge,
+    }
+}
+
+/// A value this protocol version does not define is read as
+/// [`Adoption::None`], so the host refuses rather than guesses.
+fn adoption_from_wire(a: i32) -> Adoption {
+    match pb::Adoption::try_from(a) {
+        Ok(pb::Adoption::Import) => Adoption::Import,
+        Ok(pb::Adoption::Converge) => Adoption::Converge,
+        _ => Adoption::None,
     }
 }
 
@@ -334,6 +356,7 @@ pub fn capabilities_from_wire(c: Option<pb::Capabilities>) -> Capabilities {
         runtime_condition: c.runtime_condition,
         secrets: c.secrets,
         credentials: c.credentials,
+        adopt: adoption_from_wire(c.adopt),
     })
     .unwrap_or_default()
 }
@@ -380,6 +403,7 @@ pub fn emit_response(outcome: Result<Emitted, CompileError>) -> pb::EmitResponse
                 rule: e.rule,
                 msg: e.msg,
                 pos: Some(position_to_wire(&e.pos)),
+                hint: e.hint,
             }),
         },
     }
@@ -399,6 +423,7 @@ pub fn emit_response_from_wire(
             rule: e.rule,
             msg: e.msg,
             pos: position_from_wire(e.pos),
+            hint: e.hint,
         });
     }
     Ok(Emitted {
@@ -636,7 +661,23 @@ pub fn context_to_wire(c: &RunContext) -> pb::RunContext {
                 })
                 .collect(),
         }),
+        save_plan: c.save_plan,
+        saved_plan: c.saved_plan.as_ref().map(saved_plan_to_wire),
     }
+}
+
+pub fn saved_plan_to_wire(saved: &SavedPlan) -> pb::SavedPlan {
+    pb::SavedPlan {
+        data: saved.data.clone(),
+        changes: saved.changes.iter().cloned().map(change_to_wire).collect(),
+    }
+}
+
+pub fn saved_plan_from_wire(saved: pb::SavedPlan) -> Result<SavedPlan, String> {
+    Ok(SavedPlan {
+        data: saved.data,
+        changes: changes_from_wire(saved.changes)?,
+    })
 }
 
 /// Converts a run context without its secrets, for a call that needs none:
@@ -649,6 +690,8 @@ pub fn context_to_wire_without_secrets(c: &RunContext) -> pb::RunContext {
         inputs_json: canonical_map(&c.inputs).into_bytes(),
         secrets: Vec::new(),
         credential: None,
+        save_plan: c.save_plan,
+        saved_plan: c.saved_plan.as_ref().map(saved_plan_to_wire),
     }
 }
 
@@ -697,6 +740,11 @@ pub fn context_from_wire(c: Option<pb::RunContext>) -> Result<RunContext, String
         inputs: decode_map(&c.inputs_json).map_err(|e| format!("reading the inputs: {e}"))?,
         secrets: Secrets::from_values(secrets),
         credential,
+        save_plan: c.save_plan,
+        saved_plan: match c.saved_plan {
+            None => None,
+            Some(saved) => Some(saved_plan_from_wire(saved)?),
+        },
     })
 }
 
@@ -706,6 +754,7 @@ fn change_to_wire(c: Change) -> pb::Change {
         ChangeAction::Update => pb::ChangeAction::Update,
         ChangeAction::Delete => pb::ChangeAction::Delete,
         ChangeAction::Replace => pb::ChangeAction::Replace,
+        ChangeAction::Adopt => pb::ChangeAction::Adopt,
     };
     pb::Change {
         resource: c.resource,
@@ -723,6 +772,7 @@ fn changes_from_wire(changes: Vec<pb::Change>) -> Result<Vec<Change>, String> {
                 Ok(pb::ChangeAction::Update) => ChangeAction::Update,
                 Ok(pb::ChangeAction::Delete) => ChangeAction::Delete,
                 Ok(pb::ChangeAction::Replace) => ChangeAction::Replace,
+                Ok(pb::ChangeAction::Adopt) => ChangeAction::Adopt,
                 // Guessing here could turn a delete into something milder.
                 _ => {
                     return Err(format!(
@@ -815,11 +865,13 @@ pub fn plan_result(outcome: Result<Plan, RunError>) -> pb::PlanResult {
             changes: plan.changes.into_iter().map(change_to_wire).collect(),
             unknown: plan.unknown,
             error: None,
+            saved: plan.saved.as_ref().map(saved_plan_to_wire),
         },
         Err(e) => pb::PlanResult {
             changes: Vec::new(),
             unknown: false,
             error: Some(run_error_to_wire(e)),
+            saved: None,
         },
     }
 }
@@ -832,6 +884,10 @@ pub fn plan_result_from_wire(r: pb::PlanResult) -> Result<Result<Plan, RunError>
     Ok(Ok(Plan {
         changes: changes_from_wire(r.changes)?,
         unknown: r.unknown,
+        saved: match r.saved {
+            None => None,
+            Some(saved) => Some(saved_plan_from_wire(saved)?),
+        },
     }))
 }
 
@@ -888,6 +944,31 @@ pub fn outputs_response_from_wire(
     Ok(Ok(outputs_from_wire(r.outputs)?))
 }
 
+pub fn identifiers_response(
+    outcome: Result<BTreeMap<String, String>, RunError>,
+) -> pb::IdentifiersResponse {
+    match outcome {
+        Ok(identifiers) => pb::IdentifiersResponse {
+            identifiers: identifiers.into_iter().collect(),
+            error: None,
+        },
+        Err(e) => pb::IdentifiersResponse {
+            identifiers: Default::default(),
+            error: Some(run_error_to_wire(e)),
+        },
+    }
+}
+
+/// The outer error is a malformed message; the inner one is the tool failing.
+pub fn identifiers_response_from_wire(
+    r: pb::IdentifiersResponse,
+) -> Result<Result<BTreeMap<String, String>, RunError>, String> {
+    if let Some(e) = r.error {
+        return Ok(Err(run_error_from_wire(e, Vec::new())));
+    }
+    Ok(Ok(r.identifiers.into_iter().collect()))
+}
+
 pub fn settings_to_wire(settings: Vec<Setting>) -> Vec<pb::Setting> {
     settings
         .into_iter()
@@ -908,6 +989,28 @@ pub fn settings_from_wire(settings: Vec<pb::Setting>) -> Vec<Setting> {
             variable: s.variable,
             default: s.default_value,
             description: s.description,
+        })
+        .collect()
+}
+
+pub fn rules_to_wire(rules: &[Rule]) -> Vec<pb::Rule> {
+    rules
+        .iter()
+        .map(|r| pb::Rule {
+            name: r.name.to_owned(),
+            meaning: r.meaning.to_owned(),
+            hint: r.hint.to_owned(),
+        })
+        .collect()
+}
+
+pub fn rules_from_wire(rules: Vec<pb::Rule>) -> Vec<DescribedRule> {
+    rules
+        .into_iter()
+        .map(|r| DescribedRule {
+            name: r.name,
+            meaning: r.meaning,
+            hint: r.hint,
         })
         .collect()
 }
@@ -1249,6 +1352,7 @@ mod tests {
             runtime_condition: true,
             secrets: true,
             credentials: false,
+            adopt: Adoption::Import,
         };
         assert_eq!(capabilities_from_wire(Some(capabilities_to_wire(all))), all);
         assert!(!capabilities_from_wire(None).secrets);
@@ -1261,6 +1365,46 @@ mod tests {
             with_credentials
         );
         assert!(!capabilities_from_wire(None).credentials);
+    }
+
+    #[test]
+    fn adoption_crosses_the_wire_and_an_unknown_value_is_none() {
+        for adopt in [Adoption::None, Adoption::Import, Adoption::Converge] {
+            let c = Capabilities {
+                adopt,
+                ..Capabilities::default()
+            };
+            assert_eq!(capabilities_from_wire(Some(capabilities_to_wire(c))), c);
+        }
+        assert_eq!(capabilities_from_wire(None).adopt, Adoption::None);
+        let unknown = pb::Capabilities {
+            adopt: 99,
+            ..pb::Capabilities::default()
+        };
+        assert_eq!(capabilities_from_wire(Some(unknown)).adopt, Adoption::None);
+    }
+
+    #[test]
+    fn a_resource_keeps_its_adopt_across_the_wire_and_an_adopt_change_too() {
+        let graph = ResourceGraph {
+            name: "web".to_owned(),
+            resources: vec![Resource {
+                id: "vm".to_owned(),
+                r#type: "aws_instance".to_owned(),
+                adopt: "i-0abc123".to_owned(),
+                ..Resource::default()
+            }],
+            ..ResourceGraph::default()
+        };
+        let back = graph_from_wire(graph_to_wire(&graph)).unwrap();
+        assert_eq!(back.resources[0].adopt, "i-0abc123");
+        let change = Change {
+            resource: "vm".to_owned(),
+            action: ChangeAction::Adopt,
+            summary: String::new(),
+        };
+        let back = changes_from_wire(vec![change_to_wire(change.clone())]).unwrap();
+        assert_eq!(back, [change]);
     }
 
     #[test]

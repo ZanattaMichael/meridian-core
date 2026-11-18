@@ -582,6 +582,7 @@ impl Decoder<'_> {
                 notifies,
                 when: self.string(f.get("when"), &join(&path, "when")),
                 runtime_when: self.string(f.get("runtimeWhen"), &join(&path, "runtimeWhen")),
+                adopt: self.string(f.get("adopt"), &join(&path, "adopt")),
                 index,
                 pos,
             });

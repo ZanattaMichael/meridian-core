@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 meridian-sdk = { path = "../../crates/meridian-sdk" }
+meridian-target-kubernetes = { path = "../kubernetes" }
 meridian-yaml = { path = "../../crates/meridian-yaml" }
 
 [dev-dependencies]

@@ -36,7 +36,7 @@ FONT = "'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif"
 MONO = "ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace"
 
 # The palette from docs/branding/README.md.
-IAC, CM, CON, ORC = "#6F9BFF", "#FF8A4C", "#35D0C2", "#B48CFF"
+IAC, CM, CON, ORC, PIPE = "#6F9BFF", "#FF8A4C", "#35D0C2", "#B48CFF", "#FFC857"
 WHITE, TEXT_SOFT, LINE = "#FFFFFF", "#C9D4FF", "#8FA3E8"
 TILE, TILE_EDGE, WELL = "#16224F", "#2B3A78", "#101A3F"
 RED, GREEN = "#FF7A90", "#7EE2A8"
@@ -165,6 +165,8 @@ CATEGORIES = [
      ["ansible-playbook", "puppet apply", "chef-client", "salt-call", "Invoke-DscRunner"]),
     ("Containers", CON, ["docker", "podman"], ["docker compose", "podman", "systemctl"]),
     ("Orchestration", ORC, ["kubernetes", "helm"], ["kubectl apply", "helm upgrade --install"]),
+    ("Pipelines", PIPE, ["github-actions", "azure-pipelines", "gitlab-ci", "buildkite", "argo-workflows", "octopus"],
+     ["a workflow file", "the engine runs meridian"]),
 ]
 
 
@@ -196,17 +198,17 @@ def chip_row(x: float, y: float, labels: list[str], colour: str = LINE, size: fl
 
 
 def architecture() -> str:
-    W, H = 1200, 760
+    W, H = 1200, 780
     L, R = 90, 1160  # the drawing, right of the gutter
     p: list[str] = []
     # What you write.
     top, card_h = 48, 92
     p.append(gutter(top, card_h, "You write", WHITE))
     cards = [
-        ("Documents", ["kind: Infrastructure or ResourceSet", "YAML or JSON, one tool each"], 268),
+        ("Documents", ["kind: Infrastructure, ResourceSet or Workflow", "YAML or JSON, one tool each"], 268),
         ("Data and rules", ["--data layers decide every when", "compile rules say what a layer may set"], 268),
         ("Modules", ["meridian.yaml names what you need", "meridian.lock pins what was fetched"], 268),
-        ("Editor tools", ["lsp, fmt, lint, schema:", "the same compiler"], 206),
+        ("Editor tools", ["lsp, mcp, fmt, lint, schema:", "the same compiler"], 206),
     ]
     x = L
     centres = []
@@ -226,8 +228,8 @@ def architecture() -> str:
         "order by dependsOn", "stages and outputs", "lock, record, resume",
     ]))
     p.append(chip_row(L + 28, core_y + 96, [
-        "secrets in locked memory", "policy checks", "reports and sinks", "plugin signatures",
-        "rollback and drift", "import", "schema sync",
+        "locked-memory secrets", "policy checks", "reports, sinks", "plugin signatures",
+        "rollback, drift", "import", "adopt", "retarget", "schema sync",
     ], TEXT_SOFT))
     for i, cx in enumerate(centres):
         p.append(flow(f"M{cx:g} {top + card_h}L{cx:g} {core_y}", WHITE if i < 3 else TEXT_SOFT, delay=i * 0.9, seconds=3 if i < 3 else 4))
@@ -237,7 +239,7 @@ def architecture() -> str:
     p.append(rect(L, proto_y, R - L, proto_h, TILE, LINE, 29))
     mid = (L + R) / 2
     p.append(text(mid, proto_y + 25, "one plugin program per target, spoken to over a private socket", 15, 600, WHITE))
-    p.append(text(mid, proto_y + 45, "Describe · Emit · Plan · Apply · Outputs · Import · ExportSchemas", 13, 400, TEXT_SOFT, mono=True))
+    p.append(text(mid, proto_y + 45, "Describe · Emit · Plan · Apply · Outputs · Identifiers · Import · ExportSchemas", 13, 400, TEXT_SOFT, mono=True))
     p.append(flow(f"M{mid - 40:g} {core_y + core_h}L{mid - 40:g} {proto_y}", WHITE, delay=0.4))
     p.append(flow(f"M{mid + 40:g} {proto_y}L{mid + 40:g} {core_y + core_h}", LINE, delay=1.6))
     p.append(text(mid - 56, core_y + core_h + 22, "ordered resources, data, secrets", 12.5, 400, TEXT_SOFT, "end"))
@@ -248,19 +250,19 @@ def architecture() -> str:
     cat_y, cat_h = 500, 112
     p.append(gutter(cat_y, cat_h, "Plugins"))
     gap = 20
-    col_w = (R - L - 3 * gap) / 4
-    tool_y, tool_h = 650, 66
+    col_w = (R - L - (len(CATEGORIES) - 1) * gap) / len(CATEGORIES)
+    tool_y, tool_h = 650, 84
     p.append(gutter(tool_y, tool_h, "Tools"))
     for i, (label, colour, targets, tools) in enumerate(CATEGORIES):
         x = L + i * (col_w + gap)
         cx = x + col_w / 2
         p.append(rect(x, cat_y, col_w, cat_h, TILE, colour))
         p.append(f'<rect x="{x:g}" y="{cat_y}" width="{col_w:g}" height="5" rx="2.5" fill="{colour}"/>')
-        p.append(text(cx, cat_y + 30, label, 15.5, 700, colour))
-        p.append(lines(cx, cat_y + 54, wrap(targets, 30), 12.5, WHITE, mono=True, gap=1.3))
+        p.append(text(cx, cat_y + 30, label, 14, 700, colour))
+        p.append(lines(cx, cat_y + 54, wrap(targets, 24), 12, WHITE, mono=True, gap=1.3))
         p.append(flow(f"M{cx:g} {proto_y + proto_h}L{cx:g} {cat_y}", colour, delay=i * 0.7))
         p.append(rect(x, tool_y, col_w, tool_h, WELL, TILE_EDGE, 12, 1.2, "4 4"))
-        p.append(lines(cx, tool_y + 24, wrap(tools, 33), 12, TEXT_SOFT, mono=True))
+        p.append(lines(cx, tool_y + 24, wrap(tools, 26), 11.5, TEXT_SOFT, mono=True))
         p.append(flow(f"M{cx:g} {cat_y + cat_h}L{cx:g} {tool_y}", colour, delay=i * 0.7 + 1.5))
     p.append(caption(W, H, "A plugin compiles the document into its tool's own files, then drives that tool, as you would by hand. Nothing in the core knows how."))
     return doc(W, H, "Meridian architecture: documents into the core, the core to a plugin, the plugin to its tool", "".join(p))
@@ -494,31 +496,141 @@ def run_safety() -> str:
 
 
 def plugin_categories() -> str:
-    W, H = 1200, 420
+    W, H = 1200, 470
     p: list[str] = []
-    p.append(heading(40, 40, "Two kinds of document"))
-    p.append(card(40, 52, 320, 120, "kind: Infrastructure", ["what should exist?", "creates things through an API,", "keeps track of them, promises outputs"], IAC, 18, 13.5))
-    p.append(card(40, 212, 320, 120, "kind: ResourceSet", ["how should this machine be set up?", "logs in to a machine that exists,", "converges packages, files, services"], CM, 18, 13.5))
-    p.append(heading(560, 40, "Four categories a plugin can declare"))
+    p.append(heading(40, 40, "Three kinds of document"))
+    p.append(card(40, 52, 320, 100, "kind: Infrastructure", ["what should exist?", "creates things through an API,", "keeps track of them, promises outputs"], IAC, 18, 13.5))
+    p.append(card(40, 182, 320, 100, "kind: ResourceSet", ["how should this machine be set up?", "logs in to a machine that exists,", "converges packages, files, services"], CM, 18, 13.5))
+    p.append(card(40, 312, 320, 100, "kind: Workflow", ["in what order, on what, with what gates?", "steps over the other documents;", "an engine's job runs each step"], PIPE, 18, 13.5))
+    p.append(heading(560, 40, "Five categories a plugin can declare"))
     cats = [
         ("Infrastructure as code", IAC, "terraform, opentofu, cloudformation, bicep, arm, pulumi, packer", 52),
-        ("Containers", CON, "docker takes either kind; podman", 132),
-        ("Orchestration", ORC, "kubernetes, helm", 212),
-        ("Configuration management", CM, "ansible, puppet, openvox, chef, salt, dsc, cloud-init", 292),
+        ("Containers", CON, "docker takes either kind; podman", 122),
+        ("Orchestration", ORC, "kubernetes, helm", 192),
+        ("Configuration management", CM, "ansible, puppet, openvox, chef, salt, dsc, cloud-init", 262),
+        ("Pipelines", PIPE, "github-actions, azure-pipelines, gitlab-ci, buildkite, argo, octopus", 332),
     ]
     for label, colour, members, y in cats:
-        p.append(rect(560, y, 600, 60, TILE, colour))
-        p.append(f'<rect x="560" y="{y}" width="5" height="60" rx="2.5" fill="{colour}"/>')
-        p.append(text(590, y + 26, label, 16, 700, colour, "start"))
-        p.append(text(590, y + 47, members, 13, 400, TEXT_SOFT, "start", mono=True))
-    # Infrastructure reaches three categories; ResourceSet one, plus docker.
-    p.append(flow("M360 112C460 112 460 82 560 82", IAC, delay=0, seconds=2.4))
-    p.append(flow("M360 112C460 112 460 162 560 162", IAC, delay=0.6, seconds=2.4))
-    p.append(flow("M360 112C460 112 460 242 560 242", IAC, delay=1.2, seconds=2.4))
-    p.append(flow("M360 272C460 272 460 322 560 322", CM, delay=0.3, seconds=2.4))
-    p.append(flow("M360 272C460 272 460 162 560 162", CM, delay=1.5, seconds=2.4))
+        p.append(rect(560, y, 600, 56, TILE, colour))
+        p.append(f'<rect x="560" y="{y}" width="5" height="56" rx="2.5" fill="{colour}"/>')
+        p.append(text(590, y + 24, label, 16, 700, colour, "start"))
+        p.append(text(590, y + 45, members, 13, 400, TEXT_SOFT, "start", mono=True))
+    # Infrastructure reaches three categories; ResourceSet one, plus docker; Workflow the pipelines.
+    p.append(flow("M360 102C460 102 460 80 560 80", IAC, delay=0, seconds=2.4))
+    p.append(flow("M360 102C460 102 460 150 560 150", IAC, delay=0.6, seconds=2.4))
+    p.append(flow("M360 102C460 102 460 220 560 220", IAC, delay=1.2, seconds=2.4))
+    p.append(flow("M360 232C460 232 460 290 560 290", CM, delay=0.3, seconds=2.4))
+    p.append(flow("M360 232C460 232 460 150 560 150", CM, delay=1.5, seconds=2.4))
+    p.append(flow("M360 362C460 362 460 360 560 360", PIPE, delay=0.9, seconds=2.4))
     p.append(caption(W, H, "A document aimed at a category that does not take its kind is refused at compile, with the reason. Each plugin declares which it is."))
-    return doc(W, H, "Which kind of document each plugin category takes: Infrastructure for infrastructure as code, containers and orchestration; ResourceSet for configuration management; docker takes both", "".join(p))
+    return doc(W, H, "Which kind of document each plugin category takes: Infrastructure for infrastructure as code, containers and orchestration; ResourceSet for configuration management; Workflow for pipelines; docker takes both of the first two", "".join(p))
+
+
+def in_a_pipeline() -> str:
+    """What a pipeline engine keeps, what Meridian owns, and the three things that join them."""
+    W, H = 1200, 640
+    p: list[str] = []
+    # The engine's band.
+    ey, eh = 48, 118
+    p.append(gutter(ey, eh, "The engine keeps", PIPE))
+    p.append(rect(90, ey - 12, 1070, eh + 24, WELL, PIPE, 18, 1.2, "6 6"))
+    engine = [
+        ("trigger", ["push, tag, schedule,", "pull request"]),
+        ("runner + identity", ["a machine, and the OIDC", "token only it can mint"]),
+        ("secret release", ["the store, released to", "a job after its rules pass"]),
+        ("approval", ["reviewers, wait timers,", "the audit trail"]),
+        ("logs + artifacts", ["every job's output,", "kept and linked"]),
+    ]
+    ex, ew, egap = 110, 198, 15
+    ecx = []
+    for i, (title, body) in enumerate(engine):
+        x = ex + i * (ew + egap)
+        p.append(card(x, ey, ew, eh - 10, title, body, PIPE, 16, 12.5))
+        ecx.append(x + ew / 2)
+        if i:
+            p.append(flow(f"M{x - egap:g} {ey + 54}L{x:g} {ey + 54}", PIPE, delay=i * 0.4, seconds=1.4, width=1.5))
+    # Meridian's band.
+    my, mh = 330, 150
+    p.append(gutter(my, mh, "Meridian owns", WHITE))
+    p.append(rect(90, my - 12, 1070, mh + 24, TILE, LINE, 18))
+    p.append(card(110, my, 220, mh - 10, "Workflow", ["steps, order from needs,", "fan-out, gates, retry,", "finally, with: values"], WHITE, 17, 12.5))
+    p.append(card(350, my, 290, mh - 10, "orchestrator", ["lock, run record, events,", "--resume, rollback, drift,", "policy, a shared backend", "across every job"], WHITE, 17, 12.5))
+    p.append(card(660, my, 300, mh - 10, "target plugins", ["terraform, ansible, kubernetes, ...", "each compiles its tool's own files", "and drives the tool"], LINE, 17, 12.5))
+    p.append(card(980, my, 180, mh - 10, "secret delivery", ["each tool's own", "channel; a value", "is never printed"], ORC, 17, 12.5))
+    p.append(flow(f"M330 {my + 70}L350 {my + 70}", WHITE, delay=0.2, seconds=1.2, width=1.5))
+    p.append(flow(f"M640 {my + 70}L660 {my + 70}", WHITE, delay=0.6, seconds=1.2, width=1.5))
+    p.append(flow(f"M960 {my + 70}L980 {my + 70}", WHITE, delay=1.0, seconds=1.2, width=1.5))
+    # The joins run in lanes between the bands, so each can be read on its own.
+    top, bottom = ey + eh - 10, my
+    runner, secret, approval, logs, trigger = ecx[1], ecx[2], ecx[3], ecx[4], ecx[0]
+    p.append(flow(f"M{runner:g} {top}L{runner:g} {bottom}", WHITE, delay=0.3))
+    p.append(text(runner - 12, 236, "runs meridian apply", 13, 600, WHITE, "end", mono=True))
+    p.append(text(runner - 12, 254, "one job, or one job per step", 12, 400, TEXT_SOFT, "end"))
+    p.append(flow(f"M{secret:g} {top}L{secret:g} 222L1120 222L1120 {bottom}", ORC, delay=0.9, seconds=3.4))
+    p.append(text(1108, 214, "env and OIDC: a secret provider", 12.5, 400, TEXT_SOFT, "end"))
+    p.append(flow(f"M{approval:g} {top}L{approval:g} 262L560 262L560 {bottom}", PIPE, delay=1.4, seconds=3.4))
+    p.append(text(574, 254, "gate satisfied by the engine's approval", 12.5, 400, TEXT_SOFT, "start"))
+    p.append(flow(f"M600 {bottom}L600 298L{logs:g} 298L{logs:g} {top}", CON, delay=0.6, seconds=3.4))
+    p.append(text(614, 316, "--events json: annotations, summaries, the record", 12.5, 400, TEXT_SOFT, "start"))
+    p.append(f'<path d="M{trigger + 6:g} {bottom}L{trigger + 6:g} {top}" fill="none" stroke="{PIPE}" stroke-width="1.5" stroke-dasharray="5 6" marker-end="url(#g-arrow)" opacity=".8"/>')
+    p.append(text(trigger + 18, 290, "an emitter plugin writes the job", 12, 400, TEXT_SOFT, "start"))
+    p.append(text(trigger + 18, 306, "skeleton from the Workflow;", 12, 400, TEXT_SOFT, "start"))
+    p.append(text(trigger + 18, 322, "every job still runs meridian", 12, 400, TEXT_SOFT, "start"))
+    # Below: what this is not.
+    p.append(rect(90, 510, 1070, 74, TILE, LINE, 14, 1.2, "5 5"))
+    p.append(text(120, 536, "What stays where it is", 15, 700, WHITE, "start"))
+    p.append(lines(120, 558, [
+        "Meridian never becomes the engine: no triggers, runners, reviewer lists or log hosting. The engine never does the work itself: no terraform apply in a job, only meridian.",
+    ], 12.5, TEXT_SOFT, "start"))
+    p.append(caption(W, H, "The engine is a thin shell: it starts the job, holds the secrets and the approval, and keeps the logs. Everything the job does is Meridian's."))
+    return doc(W, H, "Meridian inside a pipeline engine: the engine keeps the trigger, the runner and its identity, the secret release, the approval and the logs; Meridian owns the workflow, the orchestrator, the target plugins and secret delivery", "".join(p))
+
+
+def saved_plan() -> str:
+    """A saved plan: what plan --out writes, what the reviewer sees, what apply --plan checks and hands on."""
+    W, H = 1200, 560
+    p: list[str] = []
+    # The plan, on the left.
+    p.append(heading(40, 40, "meridian plan --out plan.mplan", WHITE))
+    p.append(card(40, 56, 300, 150, "plan", ["compiles every document,", "asks each tool what would change,", "asks the policy, and writes the file"], LINE, 17, 12.5))
+    p.append(flow("M340 131L400 131", WHITE, delay=0.2, seconds=1.6))
+    # The file, in the middle.
+    p.append(rect(400, 56, 380, 290, WELL, PIPE, 18, 1.4))
+    p.append(f'<rect x="400" y="56" width="380" height="5" rx="2.5" fill="{PIPE}"/>')
+    p.append(text(590, 88, "plan.mplan", 18, 700, WHITE, mono=True))
+    p.append(lines(422, 118, [
+        "files, data, set, selector, run",
+        "stages:",
+        "  network  (terraform)",
+        "    artifactHash: sha256:9f2c…",
+        "    changes: create web_vm, …",
+        "    appliedBefore: sha256:40b1…",
+        "    saved: <the tool's own plan>",
+        "    policy: allowed",
+        "  web  (ansible)   status: deferred",
+    ], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(chip(422, 300, 336, "names, hashes and summaries: never a value", GREEN, 28, 12))
+    # The reviewer, above right.
+    p.append(card(840, 56, 320, 110, "the pull request", ["one comment, updated in place:", "the report of the plan", "and the policy's decision"], PIPE, 17, 12.5))
+    p.append(flow("M780 111L840 111", PIPE, delay=0.8, seconds=1.6))
+    # The apply, below right.
+    p.append(heading(840, 212, "meridian apply --plan plan.mplan", WHITE))
+    p.append(card(840, 228, 320, 118, "apply", ["the same stages, none applied since;", "each document compiles to the", "planned hash, or plan-differs;", "each tool is handed its saved plan"], LINE, 17, 12.5))
+    p.append(flow("M780 287L840 287", WHITE, delay=1.4, seconds=1.6))
+    # The checks, as a row along the bottom.
+    cy = 410
+    p.append(heading(40, cy - 12, "What is refused, and when"))
+    checks = [
+        ("before anything runs", ["a stage the plan does not have,", "or one the run does not;", "a stage applied since the plan"], RED),
+        ("at each stage's turn", ["the document no longer compiles", "to the planned artifact:", "plan-differs, and the run stops"], RED),
+        ("by the tool itself", ["Terraform and OpenTofu refuse a", "stale plan file; Pulumi a changed", "plan; CloudFormation an obsolete", "change set"], IAC),
+        ("never checked", ["a stage the plan deferred, which", "waited on an output: applied as", "any apply would, with a warning"], TEXT_SOFT),
+    ]
+    for i, (title, body, colour) in enumerate(checks):
+        x = 40 + i * 285
+        p.append(card(x, cy, 265, 118, title, body, colour, 15, 12.5))
+    p.append(caption(W, H, "What a reviewer approved is what is applied: a plan file ties the two, and anything that moved in between is a refusal, not a surprise."))
+    return doc(W, H, "A saved plan: meridian plan --out writes a file of artifact hashes, changes and each tool's own saved plan; the pull request shows it as one comment; meridian apply --plan refuses a stale plan and hands each tool the plan it saved", "".join(p))
 
 
 def modules_flow() -> str:
@@ -547,6 +659,170 @@ def modules_flow() -> str:
     return doc(W, H, "Modules: a manifest names what a project needs, install fetches and pins it in the lockfile, and every run verifies the pin without fetching", "".join(p))
 
 
+def test_flow() -> str:
+    W, H = 1200, 470
+    p: list[str] = []
+    p.append(card(40, 60, 300, 150, "tests/site.test.yaml", ["kind: Test", "documents: [../site.yaml]", "cases:", "  - name: prod", "    set: {env: prod}", "    expect: …  assert: …"], WHITE, 17, 12.5, True))
+    p.append(heading(400, 48, "For each case, in a scratch directory of its own"))
+    steps = [("data", "the case's files and set", IAC), ("compile", "every document, by its plugin", CM), ("plan", "only when run: plan; from nothing applied", ORC)]
+    for i, (name, note, colour) in enumerate(steps):
+        x = 400 + i * 270
+        p.append(card(x, 60, 240, 76, name, [note], colour, 16, 12.5, i == 0))
+        if i > 0:
+            p.append(flow(f"M{x - 30} 98L{x} 98", colour, delay=i * 0.4, seconds=1.6))
+    p.append(flow("M340 135C370 135 370 98 400 98", WHITE, delay=0.0, seconds=1.6))
+    # What comes out.
+    oy = 200
+    p.append(card(400, oy, 780, 70, "stages.<document>", ["outcome · files · warnings · refusal {rule, resource, message} · changes · condition"], LINE, 16, 12.5))
+    p.append(flow(f"M1060 136L1060 {oy}", ORC, delay=1.2, seconds=1.6))
+    p.append(flow(f"M790 136L790 {oy}", CM, delay=0.8, seconds=1.6))
+    # The checks.
+    cy = 320
+    p.append(heading(40, cy - 12, "Checks, all of them reported"))
+    p.append(card(40, cy, 360, 96, "expect", ["outcome: refused   rule: unsupported-action", "files: {playbook.yml: {contains: …}}", "changes: [{action: create}]  changeCount: 2"], GREEN, 16, 12.5, True))
+    p.append(card(440, cy, 360, 96, "assert", ["stages.web.outcome == 'compiled'", "contains(stages.web.files['playbook.yml'], 'x')", "the one expression language, no script"], GREEN, 16, 12.5, True))
+    p.append(card(840, cy, 320, 96, "report", ["ok / FAIL per case, with each failure;", "--output json: one object;", "--junit FILE: for the pipeline engine"], WHITE, 16, 12.5))
+    p.append(flow(f"M790 270L790 {cy}", GREEN, delay=1.6, seconds=1.6))
+    p.append(flow(f"M400 {cy + 48}L440 {cy + 48}", GREEN, delay=2.0, seconds=1.6))
+    p.append(flow(f"M800 {cy + 48}L840 {cy + 48}", WHITE, delay=2.4, seconds=1.6))
+    p.append(caption(W, H, "Nothing is applied and no record is kept: a test compiles and plans, then checks. A module carries its tests under tests/."))
+    return doc(W, H, "meridian test: a Test document names documents and cases; each case compiles or plans them with its data in a scratch directory and checks the outcome, the files, the refusal and the changes", "".join(p))
+
+
+def common_types() -> str:
+    """One document of common infrastructure types, and what each target and cloud makes of it."""
+    W, H = 1200, 520
+    p: list[str] = []
+    p.append(heading(40, 40, "Written once"))
+    rows = [("network", "cidr"), ("subnet", "network, cidr, public"), ("firewall", "network, rules"), ("address", ""), ("vm", "subnet, size, image, sshKey")]
+    for i, (name, params) in enumerate(rows):
+        y = 60 + i * 80
+        p.append(card(40, y, 250, 64, f"type: {name}", [params] if params else ["a fixed public IP"], IAC, 16, 12.5, True))
+    cols = [
+        ("terraform · aws", ["aws_vpc", "aws_subnet + routes", "aws_security_group + rules", "aws_eip", "aws_instance + key, ami"]),
+        ("cloudformation", ["AWS::EC2::VPC", "AWS::EC2::Subnet + routes", "AWS::EC2::SecurityGroup", "AWS::EC2::EIP", "AWS::EC2::Instance + key"]),
+        ("terraform · azure", ["azurerm_virtual_network", "azurerm_subnet", "azurerm_network_security_group", "azurerm_public_ip", "azurerm_linux_virtual_machine"]),
+        ("bicep · arm", ["virtualNetworks", "virtualNetworks/subnets", "networkSecurityGroups", "publicIPAddresses", "virtualMachines + nic"]),
+    ]
+    for c, (title, natives) in enumerate(cols):
+        x = 340 + c * 215
+        p.append(heading(x, 40, title, IAC))
+        for i, native in enumerate(natives):
+            y = 60 + i * 80
+            p.append(rect(x, y + 10, 205, 44, TILE, TILE_EDGE))
+            p.append(text(x + 12, y + 37, native, 10, 400, TEXT_SOFT, "start", mono=True))
+    for i in range(5):
+        y = 92 + i * 80
+        p.append(flow(f"M290 {y}C315 {y} 315 {y} 340 {y}", IAC, delay=i * 0.35, seconds=2.4))
+    p.append(caption(W, H, "The same outputs on every cloud: id, privateAddress, publicAddress. What a cloud cannot express is refused, never dropped."))
+    return doc(W, H, "The common infrastructure types: network, subnet, firewall, address and vm written once, and the native resources Terraform for AWS, CloudFormation, Terraform for Azure, and Bicep and ARM compile each of them to", "".join(p))
+
+
+def schema_bundles() -> str:
+    """Schema bundles: published once from the tools, then synced by every project without them."""
+    W, H = 1200, 560
+    p: list[str] = []
+    # Publishing, along the top.
+    p.append(heading(40, 40, "Published once, where the tools are"))
+    top = [
+        ("catalogue.yaml", ["each upstream at one", "exact version, moved", "by a reviewed PR"], WHITE, False),
+        ("build", ["no secrets:", "sync --all-types", "and pack each bundle"], IAC, False),
+        ("publish", ["a reviewer approves;", "sign, push, update", "the index, attest"], PIPE, False),
+    ]
+    for i, (title, body, colour, mono) in enumerate(top):
+        x = 40 + i * 250
+        p.append(card(x, 56, 220, 118, title, body, colour, 16, 12.5, mono))
+        if i > 0:
+            p.append(flow(f"M{x - 30} 115L{x} 115", colour, delay=i * 0.5, seconds=1.6))
+    # The registry, top right.
+    p.append(rect(800, 56, 360, 118, WELL, CON, 18, 1.4))
+    p.append(f'<rect x="800" y="56" width="360" height="5" rx="2.5" fill="{CON}"/>')
+    p.append(text(980, 86, "an OCI registry, or a directory", 16, 700, WHITE))
+    p.append(lines(822, 112, [
+        "terraform/hashicorp-aws:5.60.0",
+        "kubernetes/core:1.31.0",
+        "index:latest   every bundle, its types",
+    ], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(flow("M770 115L800 115", CON, delay=1.5, seconds=1.6))
+    # Using, along the bottom.
+    by = 280
+    p.append(heading(40, by - 16, "Used everywhere else, with no tool"))
+    p.append(card(40, by, 250, 130, "meridian.yaml", ["spec:", "  schemas:", "    registry: ghcr.io/…", "    signatures: require"], WHITE, 16, 12.5, True))
+    p.append(card(330, by, 300, 130, "meridian schema sync", ["the types the documents use", "→ the newest bundle that", "describes each, from the index", "→ its signature checked"], LINE, 16, 12.5))
+    p.append(flow(f"M290 {by + 65}L330 {by + 65}", WHITE, delay=0.2, seconds=1.6))
+    p.append(flow(f"M980 174L980 222L480 222L480 {by}", CON, delay=0.6, seconds=3.0))
+    p.append(card(670, by, 230, 130, "the cache", ["types used: in full", "the rest: by name", "the same bytes on", "every machine"], ORC, 16, 12.5))
+    p.append(flow(f"M630 {by + 65}L670 {by + 65}", ORC, delay=1.0, seconds=1.6))
+    p.append(card(940, by, 220, 130, "meridian.lock", ["each bundle by", "reference and digest;", "sync --locked takes", "exactly those"], GREEN, 16, 12.5))
+    p.append(flow(f"M900 {by + 65}L940 {by + 65}", GREEN, delay=1.4, seconds=1.6))
+    # The fallback, and the editor.
+    fy = 448
+    p.append(chip(330, fy, 300, "no bundle describes a type: ask the tool", CM, 30, 12.5))
+    p.append(flow(f"M480 {by + 130}L480 {fy}", CM, delay=1.8, seconds=1.6))
+    p.append(chip(670, fy, 490, "the editor, lint and the JSON Schema read the cache as before", LINE, 30, 12.5))
+    p.append(flow(f"M785 {by + 130}L785 {fy}", ORC, delay=2.2, seconds=1.6))
+    p.append(caption(W, H, "A bundle is data, signed and pinned by digest: it can make completion wrong, never a deployment."))
+    return doc(W, H, "Schema bundles: a catalogue is built into signed bundles and pushed with an index to an OCI registry; a project's schema sync picks the newest bundle for each type its documents use, checks the signature, writes the cache and pins each bundle in meridian.lock, and asks the tool only for what no bundle describes", "".join(p))
+
+
+def adopt_flow() -> str:
+    """adopt: one field on a resource, and what each kind of target makes of it."""
+    W, H = 1200, 470
+    p: list[str] = []
+    p.append(card(40, 60, 300, 150, "a resource", None, WHITE, 17))
+    p.append(lines(80, 112, ["- id: logs", "  type: aws_s3_bucket", "  adopt: example-logs", "  params:", "    bucket: example-logs"], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(heading(400, 48, "What the target says it does with adopt"))
+    kinds = [
+        ("import", ["compiled into the tool's own import:", "an import block, Pulumi's import", "option. The first plan says adopt,", "the apply puts it in the state"], IAC, "Terraform · OpenTofu · Pulumi"),
+        ("converge", ["accepted with a warning, and", "changes nothing: the tool keeps", "no state and makes the thing what", "the document says either way"], CM, "Ansible · Puppet · Chef · Salt · DSC · Kubernetes · Bicep · ARM"),
+        ("none", ["refused by the core before the", "plugin is asked, so no tool", "creates a second thing beside", "the one that exists"], RED, "every other target, and any plugin built before adopt"),
+    ]
+    for i, (name, body, colour, who) in enumerate(kinds):
+        x = 400 + i * 265
+        p.append(card(x, 60, 245, 150, name, body, colour, 16, 12.5))
+    p.append(flow("M340 135L400 135", WHITE, delay=0.2, seconds=1.6))
+    # Who is which, below.
+    y = 250
+    p.append(heading(40, y - 12, "Which targets"))
+    for i, (name, _, colour, who) in enumerate(kinds):
+        p.append(chip(40, y + i * 40, 110, name, colour, 28, 13, True))
+        p.append(text(165, y + i * 40 + 19, who, 13, 400, TEXT_SOFT, "start"))
+    p.append(card(760, 250, 400, 108, "meridian plan", None, GREEN, 16))
+    p.append(lines(790, 302, ["= adopt logs: aws_s3_bucket", "~ update app: aws_subnet, adopted"], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(text(960, 346, "an import that also changes the thing is reported as the change", 11.5, 400, TEXT_SOFT))
+    p.append(caption(W, H, "One field moves between tools: a stateful tool imports the thing, a converging tool already takes it as it finds it."))
+    return doc(W, H, "adopt: a resource names the tool's identifier of a thing that exists; a stateful target compiles it into the tool's import and the plan reports adopt, a converging target accepts it and changes nothing, and any other target is refused before its plugin is asked", "".join(p))
+
+
+def retarget_flow() -> str:
+    """meridian retarget: the old tool reports what it manages, the new file adopts it."""
+    W, H = 1200, 480
+    p: list[str] = []
+    p.append(heading(40, 48, "One document, from one tool to another"))
+    p.append(card(40, 60, 330, 170, "site.yaml", None, IAC, 17))
+    p.append(lines(70, 112, ["spec:", "  target: terraform", "  resources:", "    - id: logs", "      type: aws_s3_bucket"], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(card(435, 60, 330, 170, "the old tool's state", None, WHITE, 17))
+    p.append(lines(465, 112, ["terraform show -json", "", "logs  ->  example-logs", "web   ->  i-0abc123"], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(card(830, 60, 330, 170, "site.opentofu.yaml", None, GREEN, 17))
+    p.append(lines(860, 112, ["spec:", "  target: opentofu", "  resources:", "    - id: logs", "      adopt: \"example-logs\""], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(flow("M370 145L435 145", WHITE, delay=0.2, seconds=1.6))
+    p.append(flow("M765 145L830 145", WHITE, delay=0.9, seconds=1.6))
+    p.append(text(602, 255, "meridian retarget site.yaml --to opentofu", 13, 600, WHITE, mono=True))
+    p.append(heading(40, 300, "What the new target decides"))
+    kinds = [
+        ("import", "an adopt line per resource the old tool manages", IAC),
+        ("converge", "only the target: the tool takes what it finds", CM),
+        ("none", "only the target, and a warning: it creates again", RED),
+    ]
+    for i, (name, body, colour) in enumerate(kinds):
+        p.append(chip(40, 312 + i * 38, 110, name, colour, 28, 13, True))
+        p.append(text(165, 312 + i * 38 + 19, body, 13, 400, TEXT_SOFT, "start"))
+    p.append(card(760, 300, 400, 96, "meridian plan site.opentofu.yaml", None, GREEN, 15))
+    p.append(lines(790, 350, ["= adopt logs: aws_s3_bucket", "= adopt web: aws_instance"], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(caption(W, H, "The old file is left as it was, and no tool changes anything until you plan and apply the new one."))
+    return doc(W, H, "retarget: the old tool reports the identifier of each resource it manages, meridian retarget writes a new file with the new target and an adopt line per resource, and the new tool's first plan adopts each one instead of creating it", "".join(p))
+
+
 GRAPHIC_FILES = {
     "meridian-architecture.svg": architecture,
     "meridian-compile-pipeline.svg": compile_pipeline,
@@ -554,7 +830,14 @@ GRAPHIC_FILES = {
     "meridian-secrets-flow.svg": secrets_flow,
     "meridian-run-safety.svg": run_safety,
     "meridian-plugin-categories.svg": plugin_categories,
+    "meridian-in-a-pipeline.svg": in_a_pipeline,
     "meridian-modules-flow.svg": modules_flow,
+    "meridian-saved-plan.svg": saved_plan,
+    "meridian-test-flow.svg": test_flow,
+    "meridian-common-types.svg": common_types,
+    "meridian-schema-bundles.svg": schema_bundles,
+    "meridian-adopt.svg": adopt_flow,
+    "meridian-retarget.svg": retarget_flow,
 }
 
 # ---------------------------------------------------------------------------
@@ -578,14 +861,14 @@ def with_light(still: str, label: str, point_colour: str, light: str, width: flo
 
     Each coloured meridian gets two overlays with `pathLength="100"`: a soft
     one in its own colour and a sharp one in the light's colour, offset so the
-    four lights leave the point one after another.
+    five lights leave the point one after another.
     """
     found = MERIDIAN_PATH.findall(still)
-    if len(found) != 4:
-        raise SystemExit(f"{label}: expected the four meridians, found {len(found)}")
+    if len(found) != 5:
+        raise SystemExit(f"{label}: expected the five meridians, found {len(found)}")
     overlays = []
     for i, (d, colour, _) in enumerate(found):
-        delay = f"animation-delay:{-i * 0.65:g}s"
+        delay = f"animation-delay:{-i * 0.52:g}s"
         overlays.append(
             f'<path d="{d}" stroke="{colour}" stroke-width="{width * 2:g}" pathLength="100" class="m-glow" style="{delay}"/>'
             f'<path d="{d}" stroke="{light}" stroke-width="{width:g}" pathLength="100" class="m-light" style="{delay}"/>'

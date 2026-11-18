@@ -63,9 +63,10 @@ mod validate;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use meridian_sdk::rules::Rule;
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, Value,
+    Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph, Value,
 };
 
 pub use emit::CONFIG_PATH;
@@ -201,6 +202,9 @@ pub(crate) struct Config {
     pub blocks: Vec<Block>,
     /// `required_providers`, by local name.
     pub required_providers: BTreeMap<String, Value>,
+    /// The `import` blocks a resource's `adopt` compiles to: the address it
+    /// is taken under and the tool's own identifier, in declaration order.
+    pub imports: Vec<(String, String)>,
     pub outputs: Vec<OutputBlock>,
 }
 
@@ -211,7 +215,7 @@ impl Config {
 }
 
 /// A refusal of one resource, stamped with this target.
-pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         ..CompileError::for_resource(r, rule, msg)
@@ -219,11 +223,12 @@ pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
 }
 
 /// A refusal that is about the document and not one resource.
-pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         resource: resource.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         pos: pos.clone(),
     }
@@ -240,14 +245,19 @@ impl Emitter for OpenTofu {
     fn supported_resource_types(&self) -> Vec<String> {
         [
             "<provider>_<type>",
+            "address",
             "backend",
             "data.<type>",
             "encryption",
             "ephemeral.<type>",
+            "firewall",
             "local",
             "module",
+            "network",
             "provider",
+            "subnet",
             "variable",
+            "vm",
         ]
         .map(str::to_owned)
         .to_vec()
@@ -267,6 +277,7 @@ impl Emitter for OpenTofu {
             runtime_condition: false,
             secrets: true,
             credentials: false,
+            adopt: Adoption::Import,
         }
     }
 
@@ -274,7 +285,24 @@ impl Emitter for OpenTofu {
         Category::InfrastructureAsCode
     }
 
+    /// `cloud`, `location` and `resourceGroup`: where the common
+    /// infrastructure types are mapped to, read as the Terraform target
+    /// reads them.
+    fn settings_keys(&self) -> Vec<String> {
+        meridian_target_terraform::COMMON_SETTINGS_KEYS
+            .map(str::to_owned)
+            .to_vec()
+    }
+
+    /// The common infrastructure types, described for editors.
+    fn resource_schemas(&self) -> Vec<meridian_sdk::ResourceSchema> {
+        meridian_target_terraform::common_schemas()
+    }
+
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        // The common types become the provider's own resources, mapped as
+        // the Terraform target maps them, since both read the same providers.
+        let graph = &meridian_target_terraform::lower_common(graph, NAME)?;
         // A secret in a param is written as a reference to a sensitive input
         // variable, which the runner gives its value from a private file.
         let graph = &graph.secrets_written_as(secret_reference);

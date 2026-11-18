@@ -1,1 +1,1 @@
-plugins/opentofu/tests/documents/refused-encryption.yaml:14:7: opentofu: resource "sealed" [unknown-reference]: state.method names the method "aes_gcm.primary", which the block does not declare (declared: aes_gcm.main)
+plugins/opentofu/tests/documents/refused-encryption.yaml:14:7: opentofu: resource "sealed" [invalid-reference]: state.method names the method "aes_gcm.primary", which the block does not declare (declared: aes_gcm.main) (hint: reference a resource of this document and a value it declares; see the references page)

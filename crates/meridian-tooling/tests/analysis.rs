@@ -85,7 +85,14 @@ fn an_empty_file_offers_whole_documents_and_the_top_level_fields() {
 fn fields_come_from_the_language_and_leave_out_what_is_already_there() {
     assert_eq!(
         labels(&format!("{HEAD}      |")),
-        ["state", "when", "runtimeWhen", "dependsOn", "notifies"]
+        [
+            "state",
+            "when",
+            "runtimeWhen",
+            "adopt",
+            "dependsOn",
+            "notifies"
+        ]
     );
     assert_eq!(
         labels("kind: ResourceSet\nspec:\n  |"),
@@ -209,7 +216,15 @@ fn targets_come_from_the_loaded_plugins_and_fit_the_kind() {
 fn types_states_and_params_come_from_the_target_plugin() {
     assert_eq!(
         labels(&format!("{HEAD}    - id: x\n      type: |")),
-        ["exec", "file", "group", "package", "service", "user"]
+        [
+            "<namespace>.<collection>.<module>",
+            "exec",
+            "file",
+            "group",
+            "package",
+            "service",
+            "user"
+        ]
     );
     assert_eq!(
         labels(&format!("{HEAD}      state: |")),

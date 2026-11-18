@@ -18,6 +18,7 @@ meridian-expr = { path = "../meridian-expr" }
 meridian-import = { path = "../meridian-import" }
 meridian-ir = { path = "../meridian-ir" }
 meridian-lsp = { path = "../meridian-lsp" }
+meridian-mcp = { path = "../meridian-mcp" }
 meridian-module = { path = "../meridian-module" }
 meridian-orchestrator = { path = "../meridian-orchestrator" }
 meridian-plugin-host = { path = "../meridian-plugin-host" }
@@ -25,6 +26,7 @@ meridian-report = { path = "../meridian-report" }
 meridian-resolve = { path = "../meridian-resolve" }
 meridian-rules = { path = "../meridian-rules" }
 meridian-sdk = { path = "../meridian-sdk" }
+meridian-test = { path = "../meridian-test" }
 meridian-tooling = { path = "../meridian-tooling" }
 serde_json = { workspace = true }
 meridian-secret = { path = "../meridian-secret" }

@@ -4,6 +4,7 @@ use std::fmt::{self, Write as _};
 use meridian_value::{canonical_map, PlacedEscape, SecretRef, Value};
 
 use crate::credential::Credential;
+use crate::rules::{self, Rule};
 use crate::run::Category;
 use crate::schema::ResourceSchema;
 use crate::secrets::SecretName;
@@ -78,6 +79,11 @@ pub struct Resource {
     /// whose [`Capabilities::runtime_condition`] is true may accept one; plain
     /// `when` is evaluated and pruned long before a plugin sees the tree.
     pub runtime_when: String,
+    /// The tool's own identifier of a thing that already exists, for the
+    /// tool to take under management instead of creating. Empty for a
+    /// resource created as usual. Only a target whose
+    /// [`Capabilities::adopt`] is not [`Adoption::None`] is sent one.
+    pub adopt: String,
     /// The resource's declaration order in the source document, kept so a
     /// target that reorders resources still has the original tiebreak.
     pub index: usize,
@@ -234,13 +240,14 @@ impl ResourceGraph {
         for r in &self.resources {
             let _ = writeln!(
                 out,
-                "resource {} type={} state={} runtimeWhen={} index={} params={}",
+                "resource {} type={} state={} runtimeWhen={} index={} params={}{}",
                 r.id,
                 r.r#type,
                 r.state,
                 r.runtime_when,
                 r.index,
-                canonical_map(&r.params)
+                canonical_map(&r.params),
+                adopt_suffix(&r.adopt)
             );
         }
         for e in &self.edges {
@@ -285,6 +292,39 @@ pub struct Capabilities {
     /// A document that names a credential for a target without this is
     /// refused.
     pub credentials: bool,
+    /// What the target does with a resource's `adopt`. A target that says
+    /// [`Adoption::None`], which is every plugin built before the field
+    /// existed, is never sent one: the host refuses the document first.
+    pub adopt: Adoption,
+}
+
+/// How a target takes a thing that already exists under management, which
+/// is what a resource's `adopt` asks for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Adoption {
+    /// It cannot: a document that adopts anything is refused.
+    #[default]
+    None,
+    /// The tool keeps its own record of what it manages, and the emitter
+    /// compiles the identifier into the tool's own import, such as a
+    /// Terraform `import` block. The first plan reports the resource as
+    /// [`ChangeAction::Adopt`](crate::ChangeAction::Adopt).
+    Import,
+    /// The tool keeps no record of what it manages and makes each thing
+    /// what the document says whether it existed or not, so there is
+    /// nothing to import. The identifier is accepted and not used, and the
+    /// compile warns that it changes nothing.
+    Converge,
+}
+
+impl Adoption {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Adoption::None => "none",
+            Adoption::Import => "import",
+            Adoption::Converge => "converge",
+        }
+    }
 }
 
 /// The complete output of a compile: relative path to file content. It is
@@ -335,22 +375,47 @@ pub struct CompileError {
     /// The offending resource id.
     pub resource: String,
     /// A stable, machine-readable name for what was violated, for example
-    /// `unsupported-resource-type`.
+    /// `unsupported-resource-type`: the name of a [`rules::Rule`], general
+    /// or the target's own.
     pub rule: String,
     pub msg: String,
     pub pos: Position,
+    /// What to write instead, as data: the rule's own hint unless the
+    /// refusal gave a more specific one with [`CompileError::with_hint`].
+    /// Empty when there is nothing general to say.
+    pub hint: String,
 }
 
 impl CompileError {
     /// A refusal of one resource.
-    pub fn for_resource(r: &Resource, rule: &str, msg: impl Into<String>) -> Self {
+    pub fn for_resource(r: &Resource, rule: &Rule, msg: impl Into<String>) -> Self {
         CompileError {
             target: String::new(),
             resource: r.id.clone(),
-            rule: rule.to_owned(),
+            rule: rule.name.to_owned(),
             msg: msg.into(),
             pos: r.pos.clone(),
+            hint: rule.hint.to_owned(),
         }
+    }
+
+    /// A refusal of something that is not a resource, or of a resource that
+    /// has already been transformed: a notify edge, an output, the document.
+    pub fn at(resource: &str, pos: &Position, rule: &Rule, msg: impl Into<String>) -> Self {
+        CompileError {
+            target: String::new(),
+            resource: resource.to_owned(),
+            rule: rule.name.to_owned(),
+            msg: msg.into(),
+            pos: pos.clone(),
+            hint: rule.hint.to_owned(),
+        }
+    }
+
+    /// The same refusal with a hint of its own in place of the rule's.
+    pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = hint.into();
+        self
     }
 }
 
@@ -366,7 +431,11 @@ impl fmt::Display for CompileError {
         if !self.rule.is_empty() {
             write!(f, " [{}]", self.rule)?;
         }
-        write!(f, ": {}", self.msg)
+        write!(f, ": {}", self.msg)?;
+        if !self.hint.is_empty() {
+            write!(f, " (hint: {})", self.hint)?;
+        }
+        Ok(())
     }
 }
 
@@ -379,6 +448,62 @@ impl std::error::Error for CompileError {}
 pub struct Emitted {
     pub artifact: Artifact,
     pub warnings: Vec<Warning>,
+}
+
+/// Refuses a document that adopts anything for an emitter whose
+/// [`Capabilities::adopt`] is [`Adoption::None`], and, for one whose tool
+/// keeps no record of what it manages, returns the warnings that say an
+/// `adopt` changes nothing there. The SDK calls it before every `emit`, in
+/// process or over the wire; the host makes the same refusal before it asks
+/// the plugin, so a plugin built before `adopt` existed is never sent one.
+pub fn check_adopt(
+    emitter: &(impl Emitter + ?Sized),
+    graph: &ResourceGraph,
+) -> Result<Vec<Warning>, CompileError> {
+    let mut warnings = Vec::new();
+    for r in graph.resources.iter().filter(|r| !r.adopt.is_empty()) {
+        match emitter.capabilities().adopt {
+            Adoption::None => {
+                return Err(CompileError::for_resource(
+                    r,
+                    &crate::rules::UNSUPPORTED_ADOPT,
+                    format!(
+                        "adopt {:?}: target {:?} cannot take a thing that already exists \
+                         under management. Remove adopt; the capability matrix lists the \
+                         targets that adopt",
+                        r.adopt, graph.target
+                    ),
+                ));
+            }
+            Adoption::Converge => warnings.push(Warning {
+                target: emitter.name().to_owned(),
+                resource: r.id.clone(),
+                msg: format!(
+                    "adopt {:?} changes nothing: {} keeps no record of what it manages and \
+                     makes the resource what the document says whether it exists or not",
+                    r.adopt,
+                    emitter.name()
+                ),
+            }),
+            Adoption::Import => {}
+        }
+    }
+    Ok(warnings)
+}
+
+/// Every check the SDK makes before an emitter is called, then the emit,
+/// with the checks' warnings ahead of the emitter's own.
+pub fn emit_checked(
+    emitter: &(impl Emitter + ?Sized),
+    graph: &ResourceGraph,
+    data: &Data,
+) -> Result<Emitted, CompileError> {
+    check_settings(emitter, graph)?;
+    let mut warnings = check_adopt(emitter, graph)?;
+    let mut emitted = emitter.emit(graph, data)?;
+    warnings.append(&mut emitted.warnings);
+    emitted.warnings = warnings;
+    Ok(emitted)
 }
 
 /// Refuses a document whose `spec.settings` names a key the emitter does not
@@ -408,9 +533,7 @@ pub fn check_settings(
     };
     Err(CompileError {
         target: graph.target.clone(),
-        rule: "unsupported-setting".to_owned(),
-        msg,
-        ..CompileError::default()
+        ..CompileError::at("", &Position::default(), &rules::UNSUPPORTED_SETTING, msg)
     })
 }
 
@@ -469,6 +592,16 @@ pub trait Emitter {
     fn settings_keys(&self) -> Vec<String> {
         Vec::new()
     }
+    /// The refusal rules only this target has, beside the general ones in
+    /// [`rules`]: a mistake that exists on one tool, such as a command that
+    /// needs a shell. Each is listed on the refusal rules reference page
+    /// under the target, and `meridian plugins` prints their names.
+    ///
+    /// The default, an empty list, means every refusal the target makes
+    /// carries a general rule, which is right for most targets.
+    fn rules(&self) -> Vec<Rule> {
+        Vec::new()
+    }
     /// What each resource type takes, for editors: its params, states and
     /// notify actions. See [`crate::schema`].
     ///
@@ -480,4 +613,14 @@ pub trait Emitter {
     }
     /// Compiles the tree, or refuses it.
     fn emit(&self, graph: &ResourceGraph, data: &Data) -> Result<Emitted, CompileError>;
+}
+
+/// How [`ResourceGraph::canonical`] shows an `adopt`: nothing when there is
+/// none, so the canonical form of every tree without one is unchanged.
+fn adopt_suffix(adopt: &str) -> String {
+    if adopt.is_empty() {
+        String::new()
+    } else {
+        format!(" adopt={adopt}")
+    }
 }

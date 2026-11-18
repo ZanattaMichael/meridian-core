@@ -66,6 +66,7 @@ fn the_plugin_describes_itself_over_the_protocol() {
             runtime_condition: false,
             secrets: true,
             credentials: false,
+            adopt: meridian_sdk::Adoption::None,
         }
     );
     assert_eq!(
@@ -111,7 +112,8 @@ fn a_refusal_crosses_the_boundary_with_its_position() {
             e.to_string(),
             "plugins/docker/testdata/documents/unknown-volume.yaml:11:7: docker: resource \"db\" \
              [invalid-reference]: uses the volume \"dbdata\", which the document does not \
-             declare. Add a resource of type \"volume\" with that id"
+             declare. Add a resource of type \"volume\" with that id (hint: reference a \
+             resource of this document and a value it declares; see the references page)"
         ),
         other => panic!("expected a refusal, got {other:?}"),
     }

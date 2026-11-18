@@ -1,8 +1,6 @@
-# Resources: `id`, `type`, `state`, `params`
+# Resources: `id`, `type`, `state`, `params`, `adopt`
 
-A resource is one thing a document wants to be true: a package installed, a
-machine existing, an object in a cluster. `spec.resources` is a list of them,
-and it must hold at least one.
+`spec.resources` is a list of at least one resource.
 
 ```yaml
 - id: nginx_conf
@@ -13,15 +11,13 @@ and it must hold at least one.
     content: "worker_processes 4;\n"
 ```
 
-This page covers the four fields that say what the resource is. The fields that
-tie it to other resources have their own pages: [`dependsOn`](dependson.md),
-[`notifies`](notifies.md), [`when` and `runtimeWhen`](conditions.md).
+Covers the four fields that say what a resource is, and [`adopt`](#adopting-what-exists).
+Related fields: [`dependsOn`](dependson.md), [`notifies`](notifies.md),
+[`when` and `runtimeWhen`](conditions.md).
 
 ## `id`
 
-The resource's name inside its document. Required.
-
-It is used in four places, which is why it has to be unique in the document:
+Required, unique in the document. Used by:
 
 - `dependsOn` and `notifies` name a resource by its id
 - `${id}` and `${id.path}` refer to it
@@ -34,10 +30,8 @@ It is used in four places, which is why it has to be unique in the document:
 dup.yaml:11:7: spec.resources[1].id: duplicate resource id "a" (first declared at dup.yaml:8:7)
 ```
 
-**What it may hold.** The core accepts any text. The tools are stricter,
-because the id ends up in their files. Letters, digits and underscores, starting
-with a letter, work on every target. Where a tool needs another spelling, the
-target derives it and keeps reporting the id you wrote:
+Letters, digits and underscores, starting with a letter, work on every target. Where a
+tool needs another spelling, the target derives it and reports your id:
 
 | Target | What the id becomes |
 |---|---|
@@ -45,56 +39,43 @@ target derives it and keeps reporting the id you wrote:
 | `kubernetes` | the object's name when `metadata.name` is not given, with underscores as hyphens: `web_config` is `web-config` |
 | `terraform`, `opentofu`, `pulumi`, `bicep`, `arm`, `docker` | used as written |
 
-An id is local to its document. Two documents may both have a resource called
-`web`; nothing connects them.
+An id is local to its document.
 
 ## `type`
 
-What kind of thing the resource is. Required. Its meaning belongs to the
-target's segment:
+Required. Its meaning depends on the target's segment:
 
 | Segment | `type` is | Reference |
 |---|---|---|
-| Configuration management, shared dialect (`ansible`, `puppet`, `openvox`, `chef`, `salt`, `cloud-init`) | one of six words: `package`, `file`, `service`, `user`, `group`, `exec` | [flavour](configuration-management.md), [types](../resource-types.md) |
+| Configuration management, shared dialect (`ansible`, `puppet`, `openvox`, `chef`, `salt`, `cloud-init`) | one of six words: `package`, `file`, `service`, `user`, `group`, `exec`; or the tool's own type beside them, such as `ansible.builtin.lineinfile` | [flavour](configuration-management.md), [types](../resource-types.md), [native types](configuration-management.md#native-types-beside-the-six) |
 | Configuration management, DSC | `Module/Resource` | [flavour](configuration-management.md#the-native-dialect-dsc) |
 | Infrastructure as code | the tool's own type: `aws_instance`, `AWS::EC2::Instance`, `Microsoft.Network/publicIPAddresses@2023-09-01` | [flavour](infrastructure-as-code.md) |
 | Containerization | an element of the project: `service`, `network`, `volume`, `config`, `secret` | [flavour](containerization.md) |
 | Container orchestration | API version and kind: `apps/v1/Deployment` | [flavour](container-orchestration.md) |
 
-The same word can mean different things in different segments. `service` is an
-operating system service to Ansible and a container to Docker. The target
-decides, and nothing is shared between them.
-
-A type the target does not have is refused, and the message lists the ones it
-has:
+`service` is an OS service to Ansible and a container to Docker. An unknown type is
+refused with the list of known ones:
 
 ```
 type.yaml:8:7: ansible: resource "a" [unsupported-resource-type]: unsupported resource type "cron" on this target (supported: exec, file, group, package, service, user)
 ```
 
-Targets that pass a tool's own types through (most of them) cannot know every
-type the tool has, so they check the type's *shape* and leave its existence to
-the tool: a Bicep type without its API version is refused at compile; a
-Terraform type that no provider has is refused by Terraform when it plans.
+Most targets pass the tool's own types through. They check a type's *shape*
+and leave its existence to the tool. A Bicep type without its API version is
+refused at compile. A Terraform type that no provider has is refused by
+Terraform when it plans.
 
-**Settings resources.** Most passthrough targets reserve one or two type names
-for a resource that is not a thing to create but says where and how the rest is
-deployed: `provider` and `backend` (Terraform), `stack` (CloudFormation), `provider`, `backend` and `encryption` (OpenTofu),
+**Settings resources** say where and how the rest is deployed: `provider` and `backend` (Terraform), `stack` (CloudFormation), `provider`, `backend` and `encryption` (OpenTofu),
 `stack` and `config` (Pulumi), `deployment` and `parameter` (ARM), `variable`,
 `local` and `plugin` (Packer),
 `deployment` (Bicep), `project` (Docker), `cluster` (Kubernetes), `values`,
-`chart`, `release` and `kustomization` (Helm). It is written in the same list so that a document stays one list. Each
-target's page gives its params and whether it is required. The `dsc` target has
-none any more: how a DSC configuration is run is said under
-[`spec.settings`](index.md#settings), and its old `runner` resource compiles with
-a warning. Other targets' settings resources will move the same way.
+`chart`, `release` and `kustomization` (Helm). Each target page gives their params. `dsc`
+uses [`spec.settings`](index.md#settings); its old `runner` resource compiles with a
+warning. Other targets will move the same way.
 
 ## `state`
 
-What "as it should be" means for this resource. Optional text.
-
-Only the shared configuration management types use it, because only they
-describe a thing that can be in several conditions on a machine:
+Optional. Only the shared configuration management types use it:
 
 | Type | States |
 |---|---|
@@ -104,15 +85,13 @@ describe a thing that can be in several conditions on a machine:
 | `user`, `group` | `present` (default), `absent` |
 | `exec` | none |
 
-Left out, the type's default applies. A state the type does not have on the
-chosen target is refused:
+Left out, the type's default applies. An unsupported state is refused:
 
 ```
 st.yaml:8:7: ansible: resource "a" [unsupported-state]: resource type "package" does not accept state "purged" on this target (accepted: absent, latest, present)
 ```
 
-Every other flavour refuses `state`, each for its tool's own reason, and the
-message says what to do instead:
+Every other flavour refuses `state`:
 
 | Target | Why there is no `state` |
 |---|---|
@@ -123,14 +102,9 @@ message says what to do instead:
 
 ## `params`
 
-The type's settings. An optional mapping, and the one place in a document where
-the core does not check field names: `params` is free-form to the language and
-belongs entirely to the target.
+Optional mapping. The core does not check its field names; the target does.
 
-**Values keep their type.** A param can be text, a number, a boolean, null, a
-list or a mapping, nested as deep as the tool's own format goes. The value
-reaches the tool as the type you wrote, so [how YAML types a plain
-value](index.md#files) matters here:
+Values keep their type ([YAML typing](index.md#files)):
 
 ```yaml
 params:
@@ -145,24 +119,54 @@ params:
 | Flavour | How strictly params are checked at compile |
 |---|---|
 | The six shared types | completely. Every param is known; one the type does not take on that target is refused, never dropped |
+| A tool's own type on a shared-dialect target | lightly, as on a passthrough target: the params are the tool's, and the tool is the judge |
 | Passthrough targets | lightly. The names and values are the tool's own, so the tool is the judge. The target checks what it must understand to write the file: references, the settings resource, and the few params it treats specially |
 
 ```
 param.yaml:8:7: ansible: resource "a" [unsupported-param]: resource type "package" does not accept param "version" on this target (accepted: name)
 ```
 
-**Spelling follows the tool.** On a passthrough target a param is written the
-way the tool documents it: `instance_type` for Terraform, `InstanceType` for
-CloudFormation, `spec.replicas` for Kubernetes. Meridian does not translate
-names.
+On passthrough targets, names are the tool's: `instance_type` for Terraform,
+`InstanceType` for CloudFormation. Text may hold [references](references.md).
 
-**Text values may hold references.** On targets that read them, `${id.path}`
-inside a text param is replaced by a value from another resource. See
-[references](references.md).
+## Adopting what exists
+
+<p align="center"><img src="../../graphics/meridian-adopt.svg" alt="adopt: a resource names the tool's identifier of a thing that exists; a stateful target compiles it into the tool's import and the plan reports adopt, a converging target accepts it and changes nothing, and any other target is refused before its plugin is asked" width="100%"></p>
+
+`adopt` says the resource already exists, and gives the tool's own identifier
+for it. The tool takes it under management instead of creating a second one:
+
+```yaml
+- id: logs
+  type: aws_s3_bucket
+  adopt: example-logs        # the identifier `terraform import` takes
+  params:
+    bucket: example-logs
+```
+
+What it does depends on the target, and the
+[capability matrix](../capability-matrix.md) has the column `adopt`:
+
+| Target says | What happens | Targets |
+|---|---|---|
+| `import` | The identifier is compiled into the tool's own import. The first `meridian plan` reports the resource as `adopt`, and the apply records it in the tool's state | Terraform, OpenTofu, Pulumi |
+| `converge` | Accepted, and changes nothing: the tool keeps no state and makes the thing what the document says whether it exists or not. The compile warns | Ansible, Puppet, OpenVox, Chef, Salt, DSC, Kubernetes, Bicep, ARM |
+| no | Refused before the plugin is asked, so the tool never creates a second thing beside the one that exists | the rest |
+
+- `adopt` is text, and may be placed from data: `adopt: "${{ data.vpc_id }}"`.
+  It cannot hold a secret.
+- `adopt` with `state: absent` is refused: one takes the thing under
+  management, the other deletes it.
+- A target refuses `adopt` on something its tool cannot import, such as a
+  Terraform data source, with `invalid-adopt`.
+- Once the thing is adopted, `adopt` can stay: the tool's import does nothing
+  for a thing already in its state.
+- [`meridian retarget`](../../operations/retargeting.md) writes the `adopt`
+  lines for you when a document moves from one tool to another.
 
 ## A resource in each flavour
 
-The same four fields, four meanings:
+
 
 ```yaml
 # configuration management: an abstract type, a state, a few known params
@@ -196,5 +200,5 @@ The same four fields, four meanings:
       ports: [{port: 80}]
 ```
 
-Each is part of a complete document under
+Complete documents:
 [`examples/flavours/`](../../../examples/flavours).

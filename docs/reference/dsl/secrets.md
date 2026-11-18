@@ -1,9 +1,7 @@
 # Secrets
 
-A secret is a value a document needs and must not contain: a password, a
-token, a private key. A document says **where a secret comes from**, by name,
-and reads it by that name. The value is fetched when a run needs it, held in
-protected memory, and never written anywhere Meridian writes.
+A document declares **where a secret comes from** and reads it by name. The value is
+fetched when a run needs it, held in protected memory, and never written by Meridian.
 
 ```yaml
 apiVersion: meridian/v1
@@ -32,18 +30,11 @@ spec:
         content: "yes\n"
 ```
 
-How the value is held in memory, and what is and is not promised about it, is
-on [its own page](../../concepts/secrets-in-memory.md).
+See also [how a secret is held in memory](../../concepts/secrets-in-memory.md).
 
-> **Where this stands.** A secret can be declared, fetched, read by a `when`,
-> and placed in a resource's `params` for a target that
-> [takes one](#handing-a-secret-to-a-tool): today `ansible`, `puppet`,
-> `openvox`, `salt`, `chef`, `terraform`, `opentofu`, `packer`,
-> `cloudformation`, `bicep`, `arm` and `pulumi`. For any other target a secret
-> in `params` is checked and `compile` writes its name in its place, but
-> `plan` and `apply` stop at it, because that target has no channel that is
-> not the compiled files. A run never writes a secret into a compiled file to
-> get past this.
+> **Status.** Every target except `cloud-init` and `dsc`
+> [takes a secret in `params`](#handing-a-secret-to-a-tool). On those two, `compile`
+> writes the secret's name and `plan` and `apply` stop.
 
 ## Contents
 
@@ -80,16 +71,12 @@ on [its own page](../../concepts/secrets-in-memory.md).
 | `keepTrailingNewline` | no, `file` and `systemd-creds` only | `true`: the value's last line ending is part of the secret |
 | `fallback` | no | the places to look next, in order, as a list of `{from: ..., ...}`: see [several places](#several-places-for-one-secret) |
 
-There is no field for a value, and one written under any other name is refused
-as an unknown field without being repeated in the error.
+There is no value field; any unknown field is refused without repeating it.
 
-Where a secret comes from is written out. `key`, `path`, `command`,
-`service`, `account` and `attributes` cannot hold an
-[interpolation](interpolation.md), in a `fallback` entry either, so that
-`validate` can read every declaration without any data.
+`key`, `path`, `command`, `service`, `account` and `attributes` cannot hold an
+[interpolation](interpolation.md), in a `fallback` entry either.
 
-A field that means nothing to the provider is refused (`path` on `from: env`,
-for example), so a declaration never silently ignores part of what was written.
+A field the provider does not use (`path` on `from: env`) is refused.
 
 ## The providers
 
@@ -101,10 +88,7 @@ for example), so a declaration never silently ignores part of what was written.
 
 ### The operating system's stores
 
-A long-lived credential on a workstation is best kept in the store the
-operating system already protects, and on a server in what the service
-manager hands the unit. Each is a provider like the three above, reads
-straight into protected memory, and puts nothing it read into an error.
+Each reads into protected memory and puts nothing it read into an error.
 
 | `from` | Reads | Refuses | Says it is unavailable when | Notes |
 |---|---|---|---|---|
@@ -113,18 +97,15 @@ straight into protected memory, and puts nothing it read into an error.
 | `secret-service` | the item of the freedesktop Secret Service (GNOME Keyring, KWallet) stored with `attributes`, through `secret-tool lookup` | an item the service holds nothing for is missing; a tool that fails otherwise | `DBUS_SESSION_BUS_ADDRESS` is not set (a server or a pipeline has no session bus, and the tool would wait for one); `secret-tool` is not installed (package `libsecret-tools`) | the attributes find the item and are not secret: the service stores them unencrypted itself. Meridian writes this store: `secret set` hands the value to `secret-tool store` on its standard input |
 | `keychain` | the generic password for `service` and `account` from the macOS keychain, through `/usr/bin/security find-generic-password` | a locked keychain, or a read the keychain did not allow | on any system but macOS | the keychain asks the user the first time a program reads an item it did not make; add the item with `security add-generic-password -A` to allow every program, or answer "Always Allow". Meridian does not write the keychain |
 
-Only `plan` and `apply` ask the Secret Service and the keychain, since asking
-can open a prompt to unlock them; `secret check` says `not checked` for both.
+Only `plan` and `apply` ask the Secret Service and the keychain; `secret check` says
+`not checked` for both.
 
-The Windows Credential Manager and remote stores such as Vault are still to
-come as providers; until then, `exec` with the store's own command line tool
-reaches them.
+The Windows Credential Manager and Vault are not providers yet; use `exec` with their
+command line tools.
 
 ## Several places for one secret
 
-A secret may name the places it could be in, in order, so that one document
-works on a laptop, as a service and in a pipeline. `from` and its fields are
-the first place; `fallback` is a list of the rest, each written as a place is:
+`from` and its fields are the first place; `fallback` lists the rest, in order:
 
 ```yaml
   secrets:
@@ -141,22 +122,13 @@ the first place; `fallback` is a list of the rest, each written as a place is:
           key: DEPLOY_TOKEN
 ```
 
-The first place that has the secret answers, and the places after it are not
-asked. A place that has nothing, or that this machine does not have at all
-(no session bus, no unit credentials, another operating system), is passed
-over for the next. A place that is there and refuses, such as a file others
-can read or a command that fails, stops the run: that is a mistake to fix, not
-one to hide behind the next place.
-
-When no place has it, the error gives every place's reason, in order, and the
-secret is missing if at least one place could have held it, or unavailable if
-none can be used on this machine. An `optional` secret that no place has is
-`null`.
-
-A `fallback` entry is a place: it has `from` and the fields its provider
-needs, and no `name`, `optional` or `fallback` of its own. Each is checked by
-the same rules as the first, and an error names it by where it is, as
-`spec.secrets[0].fallback[1].key`.
+- The first place with the secret answers.
+- A place that is empty or absent on this machine is skipped.
+- A place that refuses (a world-readable file, a failing command) stops the run.
+- When none has it, the error lists every reason. An `optional` secret found nowhere is
+  `null`.
+- A `fallback` entry has `from` and its provider's fields, no `name`, `optional` or
+  `fallback`. Errors name it as `spec.secrets[0].fallback[1].key`.
 
 ## Reading a secret
 
@@ -188,10 +160,8 @@ A name that is not declared is refused by `validate`, with the names that are:
 site.yaml:14:7: spec.resources[0].when: secret.db_pasword is not declared (spec.secrets declares: db_password)
 ```
 
-What an expression holds when it reads a secret is not the secret. It is a
-reference to it: which secret of the run is meant. The value stays in protected
-memory, and everything made from the expression's result (a plan, a log line,
-an error, the run's state) can only ever show `(sensitive)`.
+An expression holds a reference to the secret, not its value, so anything made from it
+shows `(sensitive)`.
 
 ## What an expression can do with one
 
@@ -211,20 +181,13 @@ Everything else refuses a secret, and says what would have worked:
 upper(...) cannot be given a secret; the functions that can are base64Decode, base64Encode, trim, urlEncode, and a secret can be joined to text with + or placed inside text
 ```
 
-That covers every other function (`length`, `sha256`, `toString`, `toJson`,
-`replace`, `split`, `contains`, `regexMatch` and the rest) and every other
-operator (`<`, `matches`, `in`, arithmetic). The list is short on purpose: each
-entry does its work on protected memory, and a function that would have to
-copy the value out to work on it is not on the list. The length of a secret
-and a hash of it are refused because both say something about the value.
-
-A secret mark never comes off. There is no function that turns a secret back
-into plain text.
+That includes `length`, `sha256`, `toString`, `toJson`, `replace`, `split`, `contains`,
+`regexMatch`, `<`, `matches`, `in` and arithmetic. Nothing turns a secret back into plain
+text.
 
 ## Where a secret cannot be used
 
-A secret is refused anywhere a value is shown, stored, or decides the shape of
-the document:
+A secret is refused anywhere a value is shown, stored, or shapes the document:
 
 | Place | Why |
 |---|---|
@@ -239,18 +202,13 @@ the document:
 site.yaml:1:1: metadata.labels.owner: a secret cannot be used here: this field is shown, stored or shapes the document. A secret can be read by a when, and placed in a resource's params
 ```
 
-`validate` finds a secret written directly in one of these places. One that
-gets there through a variable is found when the document is resolved, with the
-same message.
+`validate` finds a direct use; one through a variable is found when the document is
+resolved.
 
 ## Handing a secret to a tool
 
-A secret in a resource's `params` is meant for the tool: a password in a
-database resource, a key in a file. It never reaches the tool through the
-compiled files. The target compiles a **reference** to the secret, by name, and
-hands the tool the **value** by a private channel when the stage runs. The
-whole path, from the provider to the tool, is drawn in
-[how a secret is held in memory](../../concepts/secrets-in-memory.md).
+The target compiles a **reference** to the secret, and hands the tool the **value** by a
+private channel when the stage runs. The compiled files never hold it.
 
 ```yaml
 spec:
@@ -286,106 +244,77 @@ spec:
 | `podman` | `Secret=meridian_secret_db_password,type=env,target=PASSWORD` in the container's unit, in place of the `Environment` variable that held it; a secret anywhere else in a unit is refused, since the unit file is written onto the host | an apply creates the secret in Podman on the host, `podman secret create <name> -`, reading the value from the apply script's own standard input before any unit is written, and replaces one that exists; a plan creates nothing |
 | any other target (`cloud-init`, `dsc`) | the stage stops, and says which targets take a secret | |
 
-Only a bare secret is handed over under its own name. A value made from a
-secret and anything else is a secret of its own, since the whole of it is
-protected: `"password=${{ secret.db_password }}\n"` is one secret, named
-`derived_1`, `derived_2` and so on in the order the document's resources use
-them. The tool receives the whole text under that name.
+A value built from a secret and other text, such as
+`"password=${{ secret.db_password }}\n"`, is a new secret named `derived_1`, `derived_2`,
+... in order of use.
 
-Three things hold wherever a secret is handed over:
+Everywhere:
 
-- **The value is in no file Meridian keeps.** Not in the compiled artifact,
-  not in the state directory, not in the plan, not in an event. The one file
-  that holds it is the tool's private file, which exists for the length of the
-  run.
-- **Never on the command line, never in the environment.** The command line
-  names the file's path and nothing more, or nothing at all when the tool
-  reads standard input, and the tool's environment holds nothing of the
-  value.
-- **The tool's own state is the tool's own.** A tool that keeps what it was
-  given keeps it the way it always has: Terraform writes a resource's
-  arguments into its state file, whichever variable they came from; Pulumi
-  encrypts them with the stack's secrets provider, which with no passphrase
-  chosen protects nothing; CloudFormation keeps a `NoEcho` parameter masked;
-  Azure keeps a secure parameter out of the deployment's record; a cluster
-  stores a Secret base64-encoded for anyone who may read Secrets in its
-  namespace, and Helm keeps a release's values the same way; Podman's default
-  driver keeps a secret base64-encoded in the user's own directory. A document
-  that hands Terraform a secret should declare a `backend` that protects its
-  state, and one that hands Pulumi a secret should name a `secretsProvider`.
-- **A setting is not a param.** The resource that holds a tool's own settings
-  (`stack`, `deployment`, `project`, `cluster`, `release`, a `variable` or
-  `config` declaration) is compiled into the command line or written as it
-  stands, so a secret there is refused at compile (`unsupported-secret-place`).
-- **A token is Meridian's.** Where a target writes a secret's place as text
-  the runner fills in (`${meridian_secret_<name>}` on `kubernetes` and
-  `helm`), a document that writes that text itself is refused at compile
-  (`reserved-text`), so nothing can make the runner put a value where the
-  document asked for it.
+- **The value is in no file Meridian keeps**, only the tool's private file, for the run.
+- **Never on the command line or in the environment.**
+- **The tool's own state keeps what it is given:**
+  - Terraform writes resource arguments into its state file, whatever variable
+    they came from. Declare a `backend` that protects the state.
+  - Pulumi encrypts them with the stack's secrets provider, which protects
+    nothing without a passphrase. Name a `secretsProvider`.
+  - CloudFormation masks a `NoEcho` parameter.
+  - Azure keeps a secure parameter out of the deployment record.
+  - A cluster stores a Secret base64-encoded, readable by anyone allowed to read
+    Secrets in its namespace; Helm keeps release values the same way.
+  - Podman's default driver keeps a secret base64-encoded in the user's
+    directory.
+- **A setting is not a param.** A tool-settings resource (`stack`,
+  `deployment`, `project`, `cluster`, `release`, a `variable` or `config`
+  declaration) is compiled into the command line or written verbatim, so a
+  secret there is refused at compile (`unsupported-secret-place`).
+- **Tokens are reserved.** A document that writes `${meridian_secret_<name>}` itself is
+  refused (`reserved-name`).
 
-`compile` writes the same reference, so what it produces is what `plan` and
-`apply` hand the tool, and a review of the compiled files sees exactly where
-each secret goes. For a target that takes no secret, `compile` writes the
-secret's name instead, as `password=(secret db_password)`, and `plan` and
-`apply` stop at the stage:
+`compile` writes the same reference the tool runs with. For a target that takes no
+secret, it writes `password=(secret db_password)`, and `plan` and `apply` stop:
 
 ```
 resource "app_env": params.content holds a secret, and target "cloud-init" does not take one: it has no private channel to hand a secret to its tool, so the value would be written into a file or dropped. A secret can still decide a when for it; targets that do: ansible, arm, bicep, chef, cloudformation, docker, helm, kubernetes, openvox, opentofu, packer, podman, pulumi, puppet, salt, terraform
 ```
 
-A rollback hands the tool the document's secrets again, fetched at the
-stage's turn: the artifact being put back refers to them by name.
+A rollback fetches the secrets again at the stage's turn.
 
 ## A secret in a credential
 
-A [credential](credentials.md) is an identity: a user and a key, a user and
-a password, a token. Its secret fields are declared secrets, each read as
-exactly `${{ secret.<name> }}`, and they follow the same route to the tool
-as a secret in a param, by the tool's own channel for an identity: Ansible
-takes a key as `--private-key <private file>` and a password in the
-extra-vars file. A literal in a secret field is refused when the document is
-validated. See [Credentials](credentials.md).
+A [credential](credentials.md)'s secret fields are each exactly `${{ secret.<name> }}`
+and reach the tool through its identity channel (for Ansible, `--private-key <private
+file>` and the extra-vars file). A literal is refused.
 
 ## When a secret is fetched
 
-- **Only `plan` and `apply` fetch.** `validate` and `compile` never read a
-  provider, so they can run on a machine that has no access to the secrets.
-- **Just before the stage that declares it.** A workflow of several documents
-  fetches each document's secrets as its stage starts, not all of them up
-  front.
-- **Wiped when the stage ends.** The memory is overwritten as soon as the
-  stage that declared the secret has finished, whether it succeeded or failed,
-  not at the end of the run.
-- **Not for a document that is left out.** A document whose `spec.when` is
-  false fetches nothing, as long as that `when` does not itself read a secret.
-  Neither does a stage that is not run because an earlier one failed.
-- **Once, even with a policy.** `apply --policy` looks at every stage before
-  it applies the first, and that first pass fetches nothing. A document that
-  reads secrets is put to the [policy](../policy.md#when-a-policy-is-asked)
-  at its own turn instead.
-- **Not for a document that is only imported from.** A document compiled
-  because another [imports](outputs-and-hand-offs.md#imports) a file from it is read
-  as `compile` reads it: nothing is fetched, and a secret in its params is
-  written as its name.
+- **Only `plan` and `apply` fetch.**
+- **Just before the declaring stage.** A multi-document workflow fetches each
+  document's secrets when its stage starts, not all up front.
+- **Wiped when the stage ends**, success or failure, not at the end of the run.
+- **Not for an excluded document.** A document whose `spec.when` is false
+  fetches nothing (unless that `when` reads a secret). Nor does a stage skipped
+  after an earlier failure.
+- **Once, even with a policy.** The first `apply --policy` pass fetches
+  nothing; a document that reads secrets is put to the
+  [policy](../policy.md#when-a-policy-is-asked) at its own turn.
+- **Not for a document only imported from.** A document compiled because
+  another [imports](outputs-and-hand-offs.md#imports) a file from it is read as
+  `compile` reads it: nothing is fetched, and secrets in its params are written
+  as names.
 - **`drift` fetches as `plan` does**, because it plans each stage. `rollback`
   fetches nothing: it puts back artifacts that were kept.
 - **Never cached.** Nothing is written to save a second fetch. The next run
   fetches again.
-- **Locked in memory, or the run says so.** A secret is kept out of swap.
-  Where the machine's limit on locked memory does not allow it, the run warns
-  once, naming the secrets; with
-  [`--strict-secrets`](../cli.md#secrets) the stage stops instead.
+- **Locked in memory.** If the locked-memory limit prevents it, the run warns once, or
+  stops with [`--strict-secrets`](../cli.md#secrets).
 
 ## Storing a secret
 
-[`meridian secret set <name> <files>...`](../cli.md#secret-set) puts a value
-in the first place the secret names that Meridian can write and that this
-machine has: the kernel keyring (`from: keyring`) or the Secret Service
-(`from: secret-service`). The value is typed at a prompt that does not show
-it, or piped in; it is never an argument, since arguments are in the process
-list for every user to read. A place written with its own tool (`env`,
-`file`, `exec`, `systemd-creds`, `keychain`) is passed over, and a secret
-that names no writable place is refused with every place it does name.
+[`meridian secret set <name> <files>...`](../cli.md#secret-set) stores a value in
+the first of the secret's places that Meridian can write and this machine has:
+the kernel keyring (`from: keyring`) or the Secret Service
+(`from: secret-service`). The value is typed at a hidden prompt or piped in, never an argument. Other places are
+skipped; a secret with no writable place is refused.
 
 ```
 $ meridian secret set deploy_token site.yaml
@@ -395,10 +324,8 @@ stored deploy_token in the kernel keyring, key meridian:deploy-token
 
 ## Checking before a run
 
-[`meridian secret check`](../cli.md#secret-check) lists every secret the
-documents declare, where each comes from, and whether that place would answer.
-It reads no value and runs no command, so it is safe in a pipeline step that
-only wants to know the run is set up:
+[`meridian secret check`](../cli.md#secret-check) lists each declared secret, its place,
+and whether it would answer. It reads no value and runs no command:
 
 ```
 $ meridian secret check site.yaml
@@ -407,9 +334,11 @@ site (site.yaml)
   deploy_token  file   absent, optional: the file /run/secrets/deploy-token does not exist
 ```
 
-A secret with several places is reported by the first place that would
-answer, or, when none would, with every place's reason. A store this machine
-does not have is `UNAVAILABLE`.
+A store this machine lacks is `UNAVAILABLE`.
+
+**In a pipeline**, read the engine's secrets with `from: env`, and its OIDC identity as a
+credential [`from: ambient`](credentials.md#from-ambient). See
+[running in a pipeline](../../operations/running-in-a-pipeline.md).
 
 ## What each command does
 
@@ -420,18 +349,14 @@ does not have is `UNAVAILABLE`.
 | `secret check` | not read | not read: only where each declared secret comes from is looked at |
 | `plan`, `apply` | decided. The report shows the condition as the document wrote it, never the value | [handed to the tool](#handing-a-secret-to-a-tool) by a private channel, for a target that takes one; for any other, the stage stops: `resource "conf": params.content holds a secret, and target "cloud-init" does not take one: ...` |
 
-What `compile --out` writes for a secret depends on the target. For one that
-takes secrets it is the reference the tool will resolve, `{{
-meridian_secret_db_password }}` for Ansible, so the compiled files are what
-the tool is run with. For any other target it is a placeholder for reading,
-not something a tool can run: `password=(secret db_password)`. A secret that
-went through a function is written with the function around it:
-`postgres://app:urlEncode((secret db_password))@db/app`.
+`compile --out` writes the tool's reference on targets that take secrets
+(`{{ meridian_secret_db_password }}` for Ansible), and a placeholder otherwise
+(`password=(secret db_password)`, or
+`postgres://app:urlEncode((secret db_password))@db/app` through a function).
 
 ## Errors
 
-No error holds any part of a secret's value, or of what a command printed, or
-a command's arguments.
+No error holds a secret's value, a command's output or its arguments.
 
 | What is wrong | Caught by | Message |
 |---|---|---|
@@ -548,12 +473,13 @@ deploys (examples/language/secret-from-a-store.yaml)
   deploy_token  systemd-creds  ok: this unit was given the credential deploy-token
 ```
 
-All of them are held in place by tests: the first is planned and applied for
-each row of the table above and everything the runs print and leave behind is
-searched for the secrets; the second is compiled with a password in the
-environment that must not appear anywhere; the third is run on four machines
-that keep the token in different places, or nowhere, and the token is found
-in nothing they print or write; the fourth is compiled with the real Ansible
-plugin, and the handover itself is proved against a real `ansible-playbook`
-and against the test target, whose tool keeps a copy of what it was handed so
-the test can read it back.
+Tests cover all of them:
+
+1. Planned and applied for each row of the table above; all output and leftover
+   files are searched for the secrets.
+2. Compiled with a password in the environment that must appear nowhere.
+3. Run on four machines keeping the token in different places (or none); the
+   token appears in nothing they print or write.
+4. Compiled with the real Ansible plugin; the handover is proved against a real
+   `ansible-playbook` and the test target, whose tool keeps a copy for the test
+   to read back.

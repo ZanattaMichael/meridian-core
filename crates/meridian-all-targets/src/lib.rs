@@ -67,35 +67,67 @@ macro_rules! target {
 
 /// Every shipped target, sorted by name.
 pub const ALL: &[Target] = &[
-    target!(
-        "ansible",
-        meridian_target_ansible,
-        Ansible,
-        AnsibleRunner,
-        AnsibleImporter
-    ),
-    target!("arm", meridian_target_arm, Arm, ArmRunner),
-    target!("bicep", meridian_target_bicep, Bicep, BicepRunner),
-    target!("chef", meridian_target_chef, Chef, ChefRunner),
-    target!(
-        "cloud-init",
-        meridian_target_cloud_init,
-        CloudInit,
-        CloudInitRunner
-    ),
-    target!(
-        "cloudformation",
-        meridian_target_cloudformation,
-        CloudFormation,
-        CloudFormationRunner
-    ),
-    target!(
-        "docker",
-        meridian_target_docker,
-        Docker,
-        DockerRunner,
-        DockerImporter
-    ),
+    Target {
+        name: "ansible",
+        emitter: || Box::new(meridian_target_ansible::Ansible),
+        runner: || Box::new(meridian_target_ansible::AnsibleRunner::from_env()),
+        importer: Some(|| Box::new(meridian_target_ansible::AnsibleImporter)),
+        schemas: Some(|| Box::new(meridian_target_ansible::AnsibleSchemas::from_env())),
+    },
+    Target {
+        name: "arm",
+        emitter: || Box::new(meridian_target_arm::Arm),
+        runner: || Box::new(meridian_target_arm::ArmRunner::from_env()),
+        importer: None,
+        // ARM reads the same Azure type definitions as Bicep, with the API
+        // version as a param.
+        schemas: Some(|| {
+            Box::new(meridian_target_bicep::AzureSchemas::new(
+                meridian_target_bicep::Dialect::Arm,
+            ))
+        }),
+    },
+    Target {
+        name: "bicep",
+        emitter: || Box::new(meridian_target_bicep::Bicep),
+        runner: || Box::new(meridian_target_bicep::BicepRunner::from_env()),
+        importer: None,
+        schemas: Some(|| {
+            Box::new(meridian_target_bicep::AzureSchemas::new(
+                meridian_target_bicep::Dialect::Bicep,
+            ))
+        }),
+    },
+    Target {
+        name: "chef",
+        emitter: || Box::new(meridian_target_chef::Chef),
+        runner: || Box::new(meridian_target_chef::ChefRunner::from_env()),
+        importer: None,
+        schemas: Some(|| Box::new(meridian_target_chef::ChefSchemas::from_env())),
+    },
+    Target {
+        name: "cloud-init",
+        emitter: || Box::new(meridian_target_cloud_init::CloudInit),
+        runner: || Box::new(meridian_target_cloud_init::CloudInitRunner::from_env()),
+        importer: None,
+        schemas: Some(|| Box::new(meridian_target_cloud_init::CloudInitSchemas::from_env())),
+    },
+    Target {
+        name: "cloudformation",
+        emitter: || Box::new(meridian_target_cloudformation::CloudFormation),
+        runner: || Box::new(meridian_target_cloudformation::CloudFormationRunner::from_env()),
+        importer: None,
+        schemas: Some(|| {
+            Box::new(meridian_target_cloudformation::CloudFormationSchemas::from_env())
+        }),
+    },
+    Target {
+        name: "docker",
+        emitter: || Box::new(meridian_target_docker::Docker),
+        runner: || Box::new(meridian_target_docker::DockerRunner::from_env()),
+        importer: Some(|| Box::new(meridian_target_docker::DockerImporter)),
+        schemas: Some(|| Box::new(meridian_target_docker::ComposeSchemas::from_env())),
+    },
     Target {
         name: "dsc",
         emitter: || Box::new(meridian_target_dsc::Dsc),
@@ -103,7 +135,15 @@ pub const ALL: &[Target] = &[
         importer: Some(|| Box::new(meridian_target_dsc::DscImporter)),
         schemas: Some(|| Box::new(meridian_target_dsc::DscSchemas::from_env())),
     },
-    target!("helm", meridian_target_helm, Helm, HelmRunner),
+    Target {
+        name: "helm",
+        emitter: || Box::new(meridian_target_helm::Helm),
+        runner: || Box::new(meridian_target_helm::HelmRunner::from_env()),
+        importer: None,
+        // A chart's objects are described by the cluster, as for
+        // kubernetes, through this target's kubectl settings.
+        schemas: Some(|| Box::new(meridian_target_helm::HelmSchemas::from_env())),
+    },
     Target {
         name: "kubernetes",
         emitter: || Box::new(meridian_target_kubernetes::Kubernetes),
@@ -124,7 +164,13 @@ pub const ALL: &[Target] = &[
             ))
         }),
     },
-    target!("openvox", meridian_target_openvox, OpenVox, OpenVoxRunner),
+    Target {
+        name: "openvox",
+        emitter: || Box::new(meridian_target_openvox::OpenVox),
+        runner: || Box::new(meridian_target_openvox::OpenVoxRunner::from_env()),
+        importer: None,
+        schemas: Some(|| Box::new(meridian_target_openvox::OpenVoxRunner::from_env().schemas())),
+    },
     target!("packer", meridian_target_packer, Packer, PackerRunner),
     target!("podman", meridian_target_podman, Podman, PodmanRunner),
     Target {
@@ -134,8 +180,20 @@ pub const ALL: &[Target] = &[
         importer: None,
         schemas: Some(|| Box::new(meridian_target_pulumi::PulumiSchemas::from_env())),
     },
-    target!("puppet", meridian_target_puppet, Puppet, PuppetRunner),
-    target!("salt", meridian_target_salt, Salt, SaltRunner),
+    Target {
+        name: "puppet",
+        emitter: || Box::new(meridian_target_puppet::Puppet),
+        runner: || Box::new(meridian_target_puppet::PuppetRunner::from_env()),
+        importer: None,
+        schemas: Some(|| Box::new(meridian_target_puppet::PuppetSchemas::from_env())),
+    },
+    Target {
+        name: "salt",
+        emitter: || Box::new(meridian_target_salt::Salt),
+        runner: || Box::new(meridian_target_salt::SaltRunner::from_env()),
+        importer: None,
+        schemas: Some(|| Box::new(meridian_target_salt::SaltSchemas::from_env())),
+    },
     Target {
         name: "terraform",
         emitter: || Box::new(meridian_target_terraform::Terraform),

@@ -39,15 +39,17 @@ mod manifest;
 mod order;
 mod path;
 mod runner;
+mod schemas;
 mod template;
 mod transform;
 mod validate;
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
-    holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
-    Resource, ResourceGraph, SecretName, Value,
+    holds_secret, Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter,
+    Position, Resource, ResourceGraph, SecretName, Value,
 };
 use meridian_yaml::Yaml;
 
@@ -89,7 +91,7 @@ fn refuse_secrets_outside_values(graph: &ResourceGraph) -> Result<(), CompileErr
                 r.r#type
             ),
         };
-        return Err(refuse(r, "unsupported-secret-place", msg));
+        return Err(refuse(r, &rules::UNSUPPORTED_SECRET_PLACE, msg));
     }
     Ok(())
 }
@@ -112,7 +114,7 @@ fn refuse_token_text(graph: &ResourceGraph) -> Result<(), CompileError> {
         if let Some((key, _)) = r.params.iter().find(|(_, v)| has_token(v)) {
             return Err(refuse(
                 r,
-                "reserved-text",
+                &rules::RESERVED_NAME,
                 format!(
                     "value {key:?} holds the text \"${{meridian_secret_\", which is how this \
                      target writes a secret's place in the values; write the secret as \
@@ -146,6 +148,7 @@ pub use runner::{
     HelmRunner, HELM_ARGS_VARIABLE, HELM_VARIABLE, KUBECTL_ARGS_VARIABLE, KUBECTL_VARIABLE,
     KUSTOMIZE_VARIABLE,
 };
+pub use schemas::HelmSchemas;
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "helm";
@@ -252,18 +255,19 @@ impl Chart {
 }
 
 /// A refusal of one resource, stamped with this target.
-pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         ..CompileError::for_resource(r, rule, msg)
     }
 }
 
-pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse_at(resource: &str, pos: &Position, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         resource: resource.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         msg,
         pos: pos.clone(),
     }
@@ -317,6 +321,7 @@ impl Emitter for Helm {
             runtime_condition: false,
             secrets: true,
             credentials: false,
+            adopt: Adoption::None,
         }
     }
 

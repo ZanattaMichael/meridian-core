@@ -747,6 +747,9 @@ pub(crate) fn check(doc: &Document, errs: &mut ErrorList) {
         if let Err(why) = check_shown(&r.state) {
             fail(&r.pos, format!("{path}.state"), why);
         }
+        if let Err(why) = check_shown(&r.adopt) {
+            fail(&r.pos, format!("{path}.adopt"), why);
+        }
         let mut problems = Vec::new();
         for (name, value) in &r.params {
             let at = format!("{path}.params.{name}");
@@ -1024,6 +1027,10 @@ pub fn resolve_for(
             Error::new(r.pos.clone(), at, format!("resource {:?}: {why}", r.id))
         };
         place_text(&mut r.state, &scope, None).map_err(|why| fail(format!("{path}.state"), why))?;
+        // The identifier is written into the tool's own file, so what is
+        // placed in it is made literal for that tool, as a param is.
+        place_text(&mut r.adopt, &scope, Some(&escapes))
+            .map_err(|why| fail(format!("{path}.adopt"), why))?;
         let mut params = BTreeMap::new();
         for (name, value) in &r.params {
             let at = format!("{path}.params.{name}");

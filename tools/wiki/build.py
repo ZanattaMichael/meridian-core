@@ -76,7 +76,7 @@ PAGE_ORDER = {
     "quickstart": ["install", "first-resourceset", "first-two-stage", "workflows"],
     "concepts": ["ir-overview", "dependencies", "capability-model", "two-stage-architecture"],
     "tooling": ["language-server", "vscode", "other-editors", "formatter", "linter", "json-schema"],
-    "reference": ["cli", "resource-types", "capability-matrix", "conformance-matrix", "lint"],
+    "reference": ["cli", "resource-types", "capability-matrix", "conformance-matrix", "infra-conformance-matrix", "refusal-rules", "lint"],
     "plans": ["design-plan", "testing-plan", "documentation-plan"],
 }
 INDEX_NAMES = ("index.md", "README.md")
@@ -87,6 +87,7 @@ CATEGORIES = {
     "configuration-management": ("Configuration management", "#FF8A4C"),
     "containerization": ("Containers", "#35D0C2"),
     "container-orchestration": ("Orchestration", "#B48CFF"),
+    "pipeline": ("Pipelines", "#FFC857"),
 }
 OTHER_COLOUR = "#9AA4C7"
 

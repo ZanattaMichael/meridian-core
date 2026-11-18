@@ -1,16 +1,14 @@
 # How it fits together
 
-The other pages of this reference take the language one item at a time. This
-page follows a document from the file you wrote to a tool that has run, and says
-which item matters at which step. Read it once and the rest falls into place.
+One document from file to a tool that has run, and which language item matters at each
+step.
 
 <p align="center"><img src="../../graphics/meridian-compile-pipeline.svg" alt="The path of a document: nine steps from a file to a tool that has run, and how far validate, compile, plan and apply each go" width="100%"></p>
 
 ## The same thing as an architecture
 
-The core knows the language and nothing about any tool; each plugin knows one tool
-and nothing about the others. Between them is the plugin protocol: one plugin
-program per target, spoken to over a private socket.
+The core knows the language; each plugin knows one tool. They talk over the plugin
+protocol, on a private socket.
 
 <p align="center"><img src="../../graphics/meridian-architecture.svg" alt="Meridian architecture: documents go into the core, the core speaks to one plugin per target over the plugin protocol, and each plugin drives its own tool" width="100%"></p>
 
@@ -28,16 +26,14 @@ program per target, spoken to over a private socket.
 
 ## The pieces
 
-**A document** is one thing for one tool: an Infrastructure document or a
-ResourceSet. **A resource** is one thing the document wants to be true. **A
-target** is the plugin for one tool, and belongs to a **segment**
-(configuration management, infrastructure as code, containerization, container
-orchestration), which decides the **flavour**: what a resource's `type`,
-`state` and `params` mean. **A workflow** is the documents given to one command.
-**A stage** is one document being run.
+- **Document**: an Infrastructure document or a ResourceSet, for one tool.
+- **Resource**: one thing the document wants to be true.
+- **Target**: the plugin for one tool. Its **segment** decides the **flavour**: what
+  `type`, `state` and `params` mean.
+- **Workflow**: the documents given to one command.
+- **Stage**: one document being run.
 
-Inside a document, resources are tied together three ways, and they are
-different on purpose:
+Resources in a document are tied three ways:
 
 | Tie | Says | Decided |
 |---|---|---|
@@ -45,8 +41,8 @@ different on purpose:
 | [`notifies`](notifies.md) | reaction: when this changes, do that | by the tool, during the run |
 | [a reference, `${...}`](references.md) | data: this value comes from that resource | by the tool, during the run; checked by the plugin at compile |
 
-Between documents there is exactly one tie: an Infrastructure document's
-[output](outputs-and-hand-offs.md) becomes a ResourceSet's `targetHost`.
+Documents are tied by [outputs and imports](outputs-and-hand-offs.md): an output can
+become a ResourceSet's `targetHost`, or an import of another document.
 
 ## Steps 1 to 3: reading and validating
 
@@ -55,13 +51,15 @@ $ meridian validate examples/workflow/vm-then-web.yaml
 2 documents valid
 ```
 
-Validation is about the language only. No plugin is loaded, so nothing here
-knows what Terraform or Ansible can do. It answers: is this a well-formed
-Meridian document, do its internal links point somewhere, can its resources be
-put in an order at all, and do the documents given together fit together?
+Validation checks the language only. No plugin is loaded, so nothing here
+knows what Terraform or Ansible can do. It asks:
 
-Every problem in every file is reported in one pass, each with the file, line,
-column and field:
+- Is this a well-formed Meridian document?
+- Do its internal links point somewhere?
+- Can its resources be put in an order?
+- Do the documents given together fit together?
+
+Every problem is reported in one pass, with file, line, column and field:
 
 ```
 error: 2 errors:
@@ -69,31 +67,24 @@ error: 2 errors:
   dup.yaml:14:19: spec.resources[1].dependsOn[0].resource: resource "a" cannot depend on itself
 ```
 
-The exact list of what is checked here and what is left to `compile` is in
-[which check happens when](index.md#which-check-happens-when).
+See [which check happens when](index.md#which-check-happens-when).
 
 ## Step 4: documents become stages
 
-Each document is one stage. The order of stages is fixed by kind:
+Each document is one stage:
 
 1. every Infrastructure document, in the order given
 2. every ResourceSet, in the order given
 
-The reason is the one tie between documents: a ResourceSet may need a value that
-only exists after an Infrastructure document has been applied. Putting all
-Infrastructure first satisfies every such need.
+An [import](outputs-and-hand-offs.md#imports) can move a document after the one it needs.
+A document waiting on an output that does not exist yet is **deferred**.
 
-A ResourceSet whose `targetHost` names an output that does not exist yet is
-**deferred**: set aside, not failed, and not compiled against a guess.
-
-With `-l` only the documents whose labels match become stages. The others stay
-loaded, so a selected ResourceSet can still name one as the source of its host.
-See [labels and selectors](index.md#labels-and-selectors).
+With `-l`, only matching documents become stages; the others stay loaded
+([labels and selectors](index.md#labels-and-selectors)).
 
 ## Step 5: the target is checked
 
-The plugin named by `spec.target` is found, and two things it declares about
-itself are checked before it is handed anything:
+The plugin named by `spec.target` is found and checked:
 
 - **its category against the document's kind.** A ResourceSet aimed at an
   infrastructure as code or container orchestration tool, or an Infrastructure
@@ -104,21 +95,11 @@ itself are checked before it is handed anything:
 
 ## Step 6: conditions are decided and resources are ordered
 
-Every [`when`](conditions.md) is decided from the values given with `--data`. A
-resource whose condition is false is taken out, and an entry of another
-resource that named it follows its `ifMissing`: refused by default, dropped with
-`skip`. What is left is unconditional.
+Every [`when`](conditions.md) is decided from `--data`. A false resource is removed, and
+entries naming it follow `ifMissing` (refused by default, dropped with `skip`). Layered
+data and node facts are not wired in yet.
 
-One part of the design is still not wired into the command: **layered data**,
-where values are merged from layers (per environment, per node), and **facts**
-gathered from the node. The engine for the layers exists in the core. Until
-they are connected, a `when` can read what is in the `--data` files and nothing
-about the node.
-
-The resources of one document are sorted so that every `dependsOn` is
-satisfied. A resource is placed as early as its dependencies allow, and among
-resources that are ready at the same moment, the one written first goes first.
-So the result depends only on what you wrote.
+Resources are sorted by `dependsOn`, each as early as possible; ties keep written order.
 
 Written in this order, with `svc` depending on `conf` and `conf` on `pkg`:
 
@@ -132,28 +113,24 @@ the order handed to the plugin is:
 motd, pkg, conf, svc
 ```
 
-A cycle never gets this far. It is refused at step 3, by `validate` and by
-every other command, with the resources named:
+A cycle is refused at step 3:
 
 ```
 cycle.yaml:8:7: spec.resources[0].dependsOn: dependency cycle among 2 resources: a -> b -> a
 ```
 
-`notifies` plays no part in this sort. It is a reaction, not an order, so two
-resources may notify each other.
+`notifies` takes no part in the sort.
 
 ## Step 7: the plugin compiles
 
-`spec.target` names a plugin, a separate program called
-`meridian-target-<name>`. If none is installed the stage fails there:
+The plugin is a program called `meridian-target-<name>`. If none is installed:
 
 ```
 no plugin provides target "nosuch" (loaded targets: ansible, bicep, chef, ...)
 ```
 
-The plugin receives the document already decided: its resources in order, its
-dependency and notify edges, its outputs, and the host as a literal. It does not
-evaluate anything. Its job is to map and to write, in four passes:
+The plugin receives the decided document: ordered resources, edges, outputs and a literal
+host. It runs four passes:
 
 | Pass | Does | Typical refusal |
 |---|---|---|
@@ -162,23 +139,20 @@ evaluate anything. Its job is to map and to write, in four passes:
 | validate | checks the result as a whole | `invalid-reference`, `missing-param` |
 | emit | writes the files | |
 
-This is where the flavour applies, and where a document meets what its tool can
-really do. Anything the tool cannot do is refused, with the rule in brackets:
+Anything the tool cannot do is refused, with the rule in brackets:
 
 ```
 param.yaml:8:7: ansible: resource "a" [unsupported-param]: resource type "package" does not accept param "version" on this target (accepted: name)
 ```
 
-A warning is different: the output does what the document says, and there is
-something about how that you should know.
+A warning means the output is correct but something about it is worth knowing.
 
 ```
 warning: ansible: resources "motd", "pkg" are independent but will run in sequence; this target flattens the dependency graph and cannot express parallelism
 ```
 
-The rule behind both is [the capability model](../../concepts/capability-model.md).
-
-With `--out`, the files are written where you can read them:
+See [the capability model](../../concepts/capability-model.md). With `--out`, the files are
+written out:
 
 ```
 $ meridian compile examples/workflow/vm-then-web.yaml --out build
@@ -190,19 +164,10 @@ site (ResourceSet, target ansible)
 
 ## Step 8: the tool runs
 
-For `plan` and `apply` the plugin runs the tool, exactly as you would by hand,
-with the credentials and configuration the tool already has. Each document gets
-its own working directory under the state directory (`.meridian` by default),
-one per document and target, so two tools never share files.
-
-`plan` asks the tool for its own preview and reports the changes by the ids the
-document uses. `apply` makes the changes. Each tool keeps its own state in its
-own way; Meridian records only what it did itself (which document was applied,
-and whether it worked), and that record is never the source of truth about the
-infrastructure.
-
-The first stage that fails stops the run. Stages after it are reported as not
-run:
+The plugin runs the tool with the tool's own credentials, in a working directory per
+document and target under `.meridian`. `plan` reports the tool's preview by resource id;
+`apply` makes the changes. Meridian records only what it did. The first failed stage stops
+the run:
 
 ```
 machine (Infrastructure, target terraform)
@@ -213,11 +178,8 @@ site (ResourceSet, target ansible)
 
 ## Step 9: outputs are handed on
 
-After an Infrastructure document is applied, its tool reports the outputs the
-document declared. A ResourceSet that was waiting for one now has its host, so
-it is compiled for the real value and applied. On a later run, `plan` asks the
-tool what its last apply produced, so stages that depend on existing
-infrastructure are no longer deferred.
+After apply, the tool reports the declared outputs, and waiting stages are compiled and
+applied. A later `plan` reads outputs from the tool's last apply.
 
 ## A worked example, start to finish
 
@@ -301,14 +263,12 @@ What each step does with it:
    }
    ```
 
-6. **`site` is deferred.** Its host is not known, so with `compile` or `plan`
-   the run ends here, honestly.
+6. **`site` is deferred.** With `compile` or `plan` the run ends here.
 7. **With `apply`:** Terraform runs, creates the instance and reports
    `address`. `site` is compiled into a playbook and an inventory naming that
    address, and Ansible runs them.
 
-The same walk through, with more about running it, is in
-[a two-stage workflow](../../quickstart/first-two-stage.md).
+See also [a two-stage workflow](../../quickstart/first-two-stage.md).
 
 ## Where each segment sits in a workflow
 
@@ -332,10 +292,4 @@ flowchart LR
 | Container orchestration | `Infrastructure` | first | yes | no |
 | Configuration management | `ResourceSet` | after every Infrastructure document | no | yes |
 
-The pairing is enforced: a document of a kind its target's segment does not
-take is refused at step 5. [The table](index.md#the-document).
-
-So the workflows the language can express today are: any number of
-Infrastructure documents, then any number of ResourceSets, where a ResourceSet
-may take its host from one Infrastructure document. One Infrastructure document
-cannot yet read another's output.
+A document of the wrong kind is refused at step 5 ([the table](index.md#the-document)).

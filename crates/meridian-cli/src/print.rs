@@ -130,6 +130,9 @@ pub(crate) struct Printer<'a> {
     /// Whether standard output carries the events, which moves the report
     /// for people to standard error.
     pub(crate) events: bool,
+    /// Whether standard output carries the one JSON result, which moves the
+    /// report for people to standard error too.
+    pub(crate) json: bool,
     /// Every event so far, which is what the run's reports are made from.
     pub(crate) seen: Vec<Event>,
     /// Where the events are sent as they happen.
@@ -148,7 +151,7 @@ impl Observer for Printer<'_> {
     }
 
     fn stage_finished(&mut self, report: &StageReport) {
-        if self.events {
+        if self.events || self.json {
             let _ = self.print(&mut std::io::stderr().lock(), report);
         } else {
             let _ = self.print(&mut Stdout, report);
@@ -164,7 +167,7 @@ impl Observer for Printer<'_> {
     }
 
     fn rollback_finished(&mut self, report: &RollbackReport) {
-        if self.events {
+        if self.events || self.json {
             let _ = print_rollback(&mut std::io::stderr().lock(), report);
         } else {
             let _ = print_rollback(&mut Stdout, report);
@@ -414,6 +417,7 @@ pub(crate) fn change_line(change: &meridian_sdk::Change) -> String {
         ChangeAction::Update => '~',
         ChangeAction::Delete => '-',
         ChangeAction::Replace => '!',
+        ChangeAction::Adopt => '=',
     };
     format!("{sign} {change}")
 }

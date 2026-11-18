@@ -58,6 +58,11 @@ fn an_unknown_field_is_marked_at_the_field() {
 }
 
 #[test]
+// Puppet is the target here because it refuses a state and a param the
+// others take. A type it does not know cannot be marked by the check:
+// since decision 0032 any lower-case word names one of its types, and only
+// the compiler can tell a real one from a typo. The Ansible documents in
+// the other tests cover `unsupported-resource-type`.
 fn every_resource_the_target_refuses_is_marked_not_only_the_first() {
     let text = "\
 apiVersion: meridian/v1
@@ -84,8 +89,6 @@ spec:
       type: file
       params:
         mode: \"0644\"
-    - id: d
-      type: cron
 ";
     let found = check(text);
     let seen: Vec<(&str, &str)> = found
@@ -98,7 +101,6 @@ spec:
             ("unsupported-param", "flavour"),
             ("unsupported-state", "restarted"),
             ("missing-param", "params"),
-            ("unsupported-resource-type", "cron"),
         ],
         "{found:#?}"
     );

@@ -50,6 +50,7 @@ fn the_plugin_says_what_it_is() {
         Pulumi.capabilities(),
         Capabilities {
             secrets: true,
+            adopt: meridian_sdk::Adoption::Import,
             ..Capabilities::default()
         }
     );
@@ -326,7 +327,7 @@ fn the_stacks_settings_are_checked() {
     let err = refusal(
         "  resources:\n    - id: one\n      type: stack\n      params: {name: a}\n    - id: two\n      type: stack\n      params: {name: b}\n",
     );
-    assert_eq!(err.rule, "duplicate-stack");
+    assert_eq!(err.rule, "duplicate-resource");
     assert_eq!(err.resource, "two");
 
     let err = refusal(
@@ -383,7 +384,7 @@ fn names_that_pulumi_would_not_accept_are_refused() {
     let err = refusal(
         "  resources:\n    - id: size\n      type: config\n      params: {name: vm, type: string}\n    - id: vm\n      type: aws:ec2:Instance\n      params: {ami: ami-1}\n",
     );
-    assert_eq!(err.rule, "duplicate-name");
+    assert_eq!(err.rule, "duplicate-resource");
     assert_eq!(err.resource, "vm");
 
     let err = refusal(
@@ -535,5 +536,41 @@ fn a_secret_in_the_stacks_settings_or_a_configuration_declaration_is_refused() {
             "{}",
             err.msg
         );
+    }
+}
+
+#[test]
+fn adopt_becomes_the_import_option() {
+    let text = program(
+        "  resources:\n    - id: logs\n      type: aws:s3/bucket:Bucket\n      adopt: example-logs\n      params:\n        bucket: example-logs\n        resourceOptions: {protect: true}\n",
+    );
+    assert!(
+        text.contains("    options:\n      import: example-logs\n      protect: true\n"),
+        "{text}"
+    );
+}
+
+#[test]
+fn adopt_that_contradicts_the_import_option_is_refused() {
+    let e = refusal(
+        "  resources:\n    - id: logs\n      type: aws:s3/bucket:Bucket\n      adopt: example-logs\n      params:\n        resourceOptions: {import: other-logs}\n",
+    );
+    assert_eq!(e.rule, "invalid-adopt", "{e}");
+    // Saying the same thing twice is not a contradiction.
+    program(
+        "  resources:\n    - id: logs\n      type: aws:s3/bucket:Bucket\n      adopt: example-logs\n      params:\n        resourceOptions: {import: example-logs}\n",
+    );
+}
+
+#[test]
+fn adopt_on_a_configuration_value_or_a_provider_is_refused() {
+    for (r#type, params) in [
+        ("config", "{type: string}"),
+        ("pulumi:providers:aws", "{region: us-east-1}"),
+    ] {
+        let e = refusal(&format!(
+            "  resources:\n    - id: x\n      type: {type}\n      adopt: whatever\n      params: {params}\n"
+        ));
+        assert_eq!(e.rule, "invalid-adopt", "{e}");
     }
 }

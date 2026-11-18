@@ -271,6 +271,7 @@ impl Runner for SaltRunner {
         Ok(Plan {
             changes: report.changes,
             unknown: false,
+            saved: None,
         })
     }
 

@@ -75,20 +75,26 @@ fn the_plugin_describes_itself_as_infrastructure_as_code() {
             runtime_condition: false,
             secrets: true,
             credentials: false,
+            adopt: meridian_sdk::Adoption::Import,
         }
     );
     assert_eq!(
         OpenTofu.supported_resource_types(),
         [
             "<provider>_<type>",
+            "address",
             "backend",
             "data.<type>",
             "encryption",
             "ephemeral.<type>",
+            "firewall",
             "local",
             "module",
+            "network",
             "provider",
+            "subnet",
             "variable",
+            "vm",
         ]
     );
 }
@@ -479,7 +485,7 @@ fn two_configurations_of_one_provider_need_aliases() {
     let err = refusal(
         "  resources:\n    - id: east\n      type: provider\n      params: {name: aws, region: us-east-1}\n    - id: west\n      type: provider\n      params: {name: aws, region: us-west-2}\n",
     );
-    assert_eq!(err.rule, "duplicate-provider");
+    assert_eq!(err.rule, "duplicate-resource");
     assert_eq!(
         err.msg,
         "provider \"aws\" is configured twice; give all but one an alias"
@@ -518,7 +524,7 @@ fn a_backend_and_a_module_are_written_where_opentofu_expects_them() {
     let err = refusal(
         "  resources:\n    - id: s3\n      type: backend\n      params: {bucket: a}\n    - id: gcs\n      type: backend\n      params: {bucket: b}\n",
     );
-    assert_eq!(err.rule, "duplicate-backend");
+    assert_eq!(err.rule, "duplicate-resource");
 }
 
 #[test]
@@ -611,7 +617,7 @@ fn an_encryption_block_is_checked_before_opentofu_ever_runs() {
         "  resources:\n{ENCRYPTION}        state:\n          method: ${{method.aes_gcm.primary}}\n"
     ));
     assert_eq!(err.target, "opentofu");
-    assert_eq!(err.rule, "unknown-reference");
+    assert_eq!(err.rule, "invalid-reference");
     assert_eq!(err.resource, "sealed");
     assert_eq!(err.pos.file, "infra.yaml");
     assert!(err.pos.line > 0);
@@ -647,7 +653,7 @@ fn a_configuration_has_one_encryption_block() {
     let err = refusal(&format!(
         "  resources:\n{ENCRYPTION}        state:\n          method: ${{method.aes_gcm.main}}\n    - id: again\n      type: encryption\n      params:\n        state:\n          method: ${{method.aes_gcm.main}}\n"
     ));
-    assert_eq!(err.rule, "duplicate-encryption");
+    assert_eq!(err.rule, "duplicate-resource");
     assert_eq!(err.resource, "again");
 }
 
@@ -719,4 +725,24 @@ fn a_secret_in_a_param_is_a_sensitive_variable_the_runner_hands_over() {
         "{config}"
     );
     assert!(!config.contains("(sensitive)"), "{config}");
+}
+
+#[test]
+fn adopt_becomes_an_import_block_for_a_managed_resource() {
+    let config = parsed(
+        "  resources:\n    - id: logs\n      type: aws_s3_bucket\n      adopt: example-logs\n      params: {bucket: example-logs}\n",
+    );
+    let imports = config.as_map().unwrap()["import"].as_list().unwrap();
+    assert_eq!(imports.len(), 1);
+    assert_eq!(at(&imports[0], "to"), &Value::from("aws_s3_bucket.logs"));
+    assert_eq!(at(&imports[0], "id"), &Value::from("example-logs"));
+}
+
+#[test]
+fn adopt_on_anything_but_a_managed_resource_is_refused() {
+    let e = compile(
+        "  resources:\n    - id: ubuntu\n      type: data.aws_ami\n      adopt: whatever\n      params: {owners: [self]}\n",
+    )
+    .expect_err("a data source cannot be adopted");
+    assert_eq!(e.rule, "invalid-adopt", "{e}");
 }

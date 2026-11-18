@@ -1226,6 +1226,7 @@ dependencies = [
  "meridian-import",
  "meridian-ir",
  "meridian-lsp",
+ "meridian-mcp",
  "meridian-module",
  "meridian-orchestrator",
  "meridian-plugin-host",
@@ -1236,6 +1237,7 @@ dependencies = [
  "meridian-sdk",
  "meridian-secret",
  "meridian-target-fake",
+ "meridian-test",
  "meridian-tooling",
  "meridian-value",
  "meridian-yaml",
@@ -1299,6 +1301,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "meridian-mcp"
+version = "0.1.0"
+dependencies = [
+ "meridian-ast",
+ "meridian-expr",
+ "meridian-import",
+ "meridian-ir",
+ "meridian-plugin-host",
+ "meridian-sdk",
+ "meridian-target-ansible",
+ "meridian-target-fake",
+ "meridian-target-terraform",
+ "meridian-tooling",
+ "serde_json",
+]
+
+[[package]]
 name = "meridian-module"
 version = "0.1.0"
 dependencies = [
@@ -1318,6 +1337,7 @@ dependencies = [
 name = "meridian-orchestrator"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "meridian-ast",
  "meridian-ir",
  "meridian-plugin-host",
@@ -1419,11 +1439,13 @@ dependencies = [
  "protox",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-stream",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+ "ureq",
 ]
 
 [[package]]
@@ -1462,6 +1484,7 @@ dependencies = [
  "meridian-plugin-host",
  "meridian-plugin-testkit",
  "meridian-sdk",
+ "meridian-target-bicep",
 ]
 
 [[package]]
@@ -1497,6 +1520,7 @@ dependencies = [
 name = "meridian-target-cloudformation"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "meridian-plugin-testkit",
  "meridian-sdk",
  "meridian-yaml",
@@ -1536,6 +1560,7 @@ version = "0.1.0"
 dependencies = [
  "meridian-plugin-testkit",
  "meridian-sdk",
+ "meridian-target-kubernetes",
  "meridian-yaml",
 ]
 
@@ -1629,6 +1654,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "meridian-test"
+version = "0.1.0"
+dependencies = [
+ "meridian-expr",
+ "meridian-ir",
+ "meridian-orchestrator",
+ "meridian-plugin-host",
+ "meridian-sdk",
+ "meridian-value",
+]
+
+[[package]]
 name = "meridian-tooling"
 version = "0.1.0"
 dependencies = [
@@ -1640,6 +1677,8 @@ dependencies = [
  "meridian-orchestrator",
  "meridian-plugin-host",
  "meridian-sdk",
+ "meridian-signing",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

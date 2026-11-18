@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use meridian_sdk::rules;
 use meridian_sdk::CompileError;
 
 use crate::{CloudConfig, NAME};
@@ -26,7 +27,8 @@ pub(crate) fn validate(config: &CloudConfig) -> Result<(), CompileError> {
     if config.host.is_empty() {
         return Err(CompileError {
             target: NAME.to_owned(),
-            rule: "missing-host".to_owned(),
+            rule: rules::MISSING_HOST.name.to_owned(),
+            hint: rules::MISSING_HOST.hint.to_owned(),
             msg: "the document has no target host".to_owned(),
             ..CompileError::default()
         });
@@ -40,7 +42,7 @@ pub(crate) fn validate(config: &CloudConfig) -> Result<(), CompileError> {
         if let Some(previous) = paths.insert(&entry.path, &file.id) {
             if !entry.append {
                 return Err(file.refuse(
-                    "duplicate-file-path",
+                    &rules::DUPLICATE_RESOURCE,
                     format!(
                         "path {:?} is already written by resource {:?}; \
                          set append: true if this one adds to it",
@@ -51,7 +53,7 @@ pub(crate) fn validate(config: &CloudConfig) -> Result<(), CompileError> {
         }
         if !entry.permissions.is_empty() && !is_mode(&entry.permissions) {
             return Err(file.refuse(
-                "invalid-mode",
+                &rules::INVALID_PARAM,
                 format!(
                     "mode {:?} is not an octal file mode such as \"0644\"",
                     entry.permissions
@@ -60,7 +62,7 @@ pub(crate) fn validate(config: &CloudConfig) -> Result<(), CompileError> {
         }
         if !entry.encoding.is_empty() && !ENCODINGS.contains(&entry.encoding.as_str()) {
             return Err(file.refuse(
-                "invalid-encoding",
+                &rules::INVALID_PARAM,
                 format!(
                     "encoding {:?} is not one cloud-init reads (accepted: {})",
                     entry.encoding,
@@ -72,7 +74,7 @@ pub(crate) fn validate(config: &CloudConfig) -> Result<(), CompileError> {
         for (what, value) in [("owner", &entry.owner), ("group", &entry.group)] {
             if value.contains(':') {
                 return Err(file.refuse(
-                    "invalid-owner",
+                    &rules::INVALID_PARAM,
                     format!("{what} {value:?} holds a colon; give the owner and the group as separate params"),
                 ));
             }
@@ -84,7 +86,7 @@ pub(crate) fn validate(config: &CloudConfig) -> Result<(), CompileError> {
         check_name(user, "user", &user.item.name)?;
         if let Some(previous) = names.insert(&user.item.name, &user.id) {
             return Err(user.refuse(
-                "duplicate-user",
+                &rules::DUPLICATE_RESOURCE,
                 format!(
                     "user {:?} is already created by resource {:?}",
                     user.item.name, previous
@@ -97,10 +99,25 @@ pub(crate) fn validate(config: &CloudConfig) -> Result<(), CompileError> {
         check_name(group, "group", &group.item.name)?;
         if let Some(previous) = names.insert(&group.item.name, &group.id) {
             return Err(group.refuse(
-                "duplicate-group",
+                &rules::DUPLICATE_RESOURCE,
                 format!(
                     "group {:?} is already created by resource {:?}",
                     group.item.name, previous
+                ),
+            ));
+        }
+    }
+    // cloud-init reads one mapping, so a key written twice would keep one
+    // value and lose the other without a word.
+    names.clear();
+    for module in &config.modules {
+        if let Some(previous) = names.insert(&module.item.key, &module.id) {
+            return Err(module.refuse(
+                &rules::DUPLICATE_RESOURCE,
+                format!(
+                    "module {:?} is already written by resource {:?}; one resource writes a \
+                     module's whole value",
+                    module.item.key, previous
                 ),
             ));
         }
@@ -110,13 +127,13 @@ pub(crate) fn validate(config: &CloudConfig) -> Result<(), CompileError> {
         // A colon is part of a package name on a multi-architecture system.
         if package.item.name.chars().any(char::is_whitespace) {
             return Err(package.refuse(
-                "invalid-name",
+                &rules::INVALID_NAME,
                 format!("package name {:?} holds a space", package.item.name),
             ));
         }
         if let Some(previous) = names.insert(&package.item.name, &package.id) {
             return Err(package.refuse(
-                "duplicate-package",
+                &rules::DUPLICATE_RESOURCE,
                 format!(
                     "package {:?} is already installed by resource {:?}",
                     package.item.name, previous
@@ -135,7 +152,7 @@ fn is_mode(mode: &str) -> bool {
 fn check_name<T>(placed: &crate::Placed<T>, what: &str, name: &str) -> Result<(), CompileError> {
     if name.chars().any(|c| c.is_whitespace() || c == ':') {
         return Err(placed.refuse(
-            "invalid-name",
+            &rules::INVALID_NAME,
             format!("{what} name {name:?} holds a space or a colon"),
         ));
     }
@@ -210,6 +227,7 @@ mod tests {
             users: vec![user("deploy", "deploy")],
             packages: vec![package("pkg", "nginx")],
             commands: Vec::new(),
+            modules: Vec::new(),
         }
     }
 
@@ -218,25 +236,25 @@ mod tests {
         type Break = fn(&mut CloudConfig);
         let table: &[(&str, &str, Break)] = &[
             ("missing-host", "", |c| c.host.clear()),
-            ("duplicate-file-path", "again", |c| {
+            ("duplicate-resource", "again", |c| {
                 c.files.push(file("again", "/etc/app.conf"));
             }),
-            ("invalid-mode", "conf", |c| {
+            ("invalid-param", "conf", |c| {
                 c.files[0].item.permissions = "rw-r--r--".to_owned();
             }),
-            ("invalid-mode", "conf", |c| {
+            ("invalid-param", "conf", |c| {
                 c.files[0].item.permissions = "0o644".to_owned()
             }),
-            ("invalid-encoding", "conf", |c| {
+            ("invalid-param", "conf", |c| {
                 c.files[0].item.encoding = "utf-8".to_owned()
             }),
-            ("invalid-encoding", "conf", |c| {
+            ("invalid-param", "conf", |c| {
                 c.files[0].item.encoding = "B64".to_owned()
             }),
-            ("invalid-owner", "conf", |c| {
+            ("invalid-param", "conf", |c| {
                 c.files[0].item.owner = "root:root".to_owned()
             }),
-            ("invalid-owner", "conf", |c| {
+            ("invalid-param", "conf", |c| {
                 c.files[0].item.group = "root:".to_owned()
             }),
             ("invalid-name", "deploy", |c| {
@@ -245,7 +263,7 @@ mod tests {
             ("invalid-name", "deploy", |c| {
                 c.users[0].item.name = "deploy:x".to_owned()
             }),
-            ("duplicate-user", "again", |c| {
+            ("duplicate-resource", "again", |c| {
                 c.users.push(user("again", "deploy"))
             }),
             ("invalid-name", "ops", |c| {
@@ -254,13 +272,13 @@ mod tests {
             ("invalid-name", "ops", |c| {
                 c.groups[0].item.name = "ops:1".to_owned()
             }),
-            ("duplicate-group", "again", |c| {
+            ("duplicate-resource", "again", |c| {
                 c.groups.push(group("again", "ops"))
             }),
             ("invalid-name", "pkg", |c| {
                 c.packages[0].item.name = "ng inx".to_owned()
             }),
-            ("duplicate-package", "again", |c| {
+            ("duplicate-resource", "again", |c| {
                 c.packages.push(package("again", "nginx"));
             }),
         ];

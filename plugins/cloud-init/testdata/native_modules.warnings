@@ -1,0 +1,2 @@
+cloud-init: cloud-init has no module for services, so resource "nginx_svc" compiled to systemctl commands that run at the end of the first boot; the image must use systemd
+cloud-init: cloud-init applies user-data once and never sees a later change, so notify is emulated: every notified action runs once, after all other first-boot commands, whether or not the notifying resource changed anything
