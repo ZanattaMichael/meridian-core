@@ -466,8 +466,13 @@ All of them are environment variables read by the plugin, and all are optional.
 | `MERIDIAN_OPENVOX` | The OpenVox `puppet` program | `puppet` on `PATH`, then `/opt/puppetlabs/bin/puppet` |
 | `MERIDIAN_OPENBOLT` | The OpenBolt `bolt` program | `bolt` on `PATH`, then `/opt/puppetlabs/bin/bolt`, then `/opt/puppetlabs/bolt/bin/bolt` |
 | `MERIDIAN_OPENVOX_TRANSPORT` | `local` or `bolt`, to override the choice made from the host | chosen from the host |
-| `MERIDIAN_OPENVOX_ARGS` | Extra arguments for every run, split on spaces | none |
+| `MERIDIAN_OPENVOX_ARGS` | Extra arguments for every run, split like a shell command line (quotes hold a word together) | none |
 | `MERIDIAN_OPENVOX_VERIFY` | `warn`, `strict` or `off`, see below | `warn` |
+
+Every setting can also be written in the project's `meridian.yaml` under
+`spec.settings.openvox`, by its short name; the environment variable still wins.
+The names, defaults and the splitting rule for argument lists are in the
+[plugin settings reference](../reference/plugin-settings.md#openvox).
 
 For example, to apply as root on the node and against a particular environment:
 

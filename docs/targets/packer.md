@@ -411,7 +411,10 @@ builder expects, for example `AWS_PROFILE` or `ARM_CLIENT_ID`. A value a step ne
 must not be written into the template is a [secret](#secrets).
 
 **A different `packer`.** Set `MERIDIAN_PACKER` to the program to run when it is not
-`packer` on `PATH`.
+`packer` on `PATH`. `MERIDIAN_PACKER_ARGS` adds arguments to `packer validate` and
+`packer build`, split like a shell command line (quotes hold a word together): `-only=amazon-ebs.web`, `-parallel-builds=1`.
+Both can also be written in the project's `meridian.yaml` under `spec.settings.packer`
+as `program` and `args`; see the [plugin settings reference](../reference/plugin-settings.md#packer).
 
 When Packer fails, Meridian reports which step failed, the command that was run, the exit
 status and the end of what Packer printed.

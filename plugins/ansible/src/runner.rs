@@ -2,6 +2,7 @@
 //! compile chain: nothing here is reached by a compile.
 
 use meridian_sdk::tool::{write_artifact, Tool};
+use meridian_sdk::{settings, Setting};
 use meridian_sdk::{
     Applied, Artifact, Change, ChangeAction, Log, LogLine, Operations, Part, Plan, RunContext,
     RunError, Runner, SecretFile, Value,
@@ -11,9 +12,29 @@ use crate::{INVENTORY_PATH, PLAYBOOK_PATH};
 
 /// Names the `ansible-playbook` program to run, when it is not on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_ANSIBLE_PLAYBOOK";
-/// Extra arguments for every run, split on whitespace: how to connect, which
-/// user, which key. For example `--user deploy --private-key ~/.ssh/deploy`.
+/// Extra arguments for every run, split like a shell command line: how to
+/// connect, which user, which key. For example `--user deploy --private-key
+/// ~/.ssh/deploy`.
 pub const ARGS_VARIABLE: &str = "MERIDIAN_ANSIBLE_ARGS";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "program",
+            PROGRAM_VARIABLE,
+            "ansible-playbook",
+            "The `ansible-playbook` program to run, when it is not on `PATH`.",
+        ),
+        Setting::new(
+            "args",
+            ARGS_VARIABLE,
+            "",
+            "Extra arguments for every run, split like a shell command line: how to connect, which user, which key. For example `--user deploy --private-key ~/.ssh/deploy`.",
+        ),
+    ]
+}
 
 /// Runs a compiled playbook.
 ///
@@ -29,14 +50,11 @@ pub struct AnsibleRunner {
 impl AnsibleRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         AnsibleRunner {
-            program: std::env::var(PROGRAM_VARIABLE)
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or_else(|| "ansible-playbook".to_owned()),
-            extra_args: std::env::var(ARGS_VARIABLE)
-                .map(|v| v.split_whitespace().map(str::to_owned).collect())
-                .unwrap_or_default(),
+            program: settings::text(setting("program")),
+            extra_args: settings::args(setting("args")),
         }
     }
 
@@ -179,6 +197,10 @@ fn private_key_file(context: &RunContext) -> Result<Option<SecretFile>, RunError
 }
 
 impl Runner for AnsibleRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations {
             plan: true,

@@ -12,17 +12,44 @@ use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
     RunContext, RunError, Runner, SecretFile, Value,
 };
+use meridian_sdk::{settings, Setting};
 
 use crate::validate::is_secure;
 use crate::{DEPLOYMENT_PATH, TEMPLATE_PATH};
 
 /// Names the program to run, when it is not `az` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_AZ";
-/// Extra arguments for every call, split on whitespace: `--only-show-errors`.
+/// Extra arguments for every call, split like a shell command line:
+/// `--only-show-errors`.
 pub const ARGS_VARIABLE: &str = "MERIDIAN_AZ_ARGS";
-/// Values for the template's parameters, split on whitespace. Each is given
-/// to `--parameters`: `@prod.parameters.json adminUser=ops`.
+/// Values for the template's parameters, split like a shell command line.
+/// Each is given to `--parameters`: `@prod.parameters.json adminUser=ops`.
 pub const PARAMETERS_VARIABLE: &str = "MERIDIAN_AZ_PARAMETERS";
+
+/// What an operator can configure about this runner, in the order the
+/// settings are documented.
+pub fn settings() -> Vec<Setting> {
+    vec![
+        Setting::new(
+            "program",
+            PROGRAM_VARIABLE,
+            "az",
+            "The Azure CLI program to run, when it is not `az` on `PATH`. Shared with the bicep target.",
+        ),
+        Setting::new(
+            "args",
+            ARGS_VARIABLE,
+            "",
+            "Extra arguments for every `az` call, split like a shell command line: `--only-show-errors`. Shared with the bicep target.",
+        ),
+        Setting::new(
+            "parameters",
+            PARAMETERS_VARIABLE,
+            "",
+            "Values for the template's parameters, split like a shell command line. Each is given to `--parameters`: `@prod.parameters.json adminUser=ops`.",
+        ),
+    ]
+}
 
 /// Deploys a compiled template.
 pub struct ArmRunner {
@@ -97,18 +124,12 @@ impl Deployment {
 impl ArmRunner {
     /// The runner as the environment configures it.
     pub fn from_env() -> Self {
-        let words = |variable: &str| {
-            std::env::var(variable)
-                .map(|v| v.split_whitespace().map(str::to_owned).collect())
-                .unwrap_or_default()
-        };
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
         ArmRunner {
-            program: std::env::var(PROGRAM_VARIABLE)
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or_else(|| "az".to_owned()),
-            extra_args: words(ARGS_VARIABLE),
-            parameters: words(PARAMETERS_VARIABLE),
+            program: settings::text(setting("program")),
+            extra_args: settings::args(setting("args")),
+            parameters: settings::args(setting("parameters")),
         }
     }
 
@@ -404,6 +425,10 @@ fn read_outputs(record: &Value) -> Vec<Output> {
 }
 
 impl Runner for ArmRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     fn operations(&self) -> Operations {
         Operations::ALL
     }

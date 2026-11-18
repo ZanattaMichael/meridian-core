@@ -42,6 +42,7 @@ page it affects. The pull request template asks for it.
 | [Plugin signatures default to `require` in a release and `off` from source](0015-plugin-signatures-require-in-a-release.md) | Releases | accepted 2026-11-18 |
 | [The Windows named pipe can be opened for reading by any local account](0016-windows-pipe-readable-by-local-accounts.md) | Releases | accepted 2026-11-18 |
 | [A dispatch of the release workflow at a `v*` tag is a release](0021-a-dispatch-at-a-tag-is-a-release.md) | Releases | accepted 2026-11-18 |
+| [Project settings are keyed by the plugin's short names, and the environment wins](0023-project-settings-named-by-the-plugin-and-the-environment-wins.md) | Plugins | proposed |
 | [cloud-init's `apply` does not touch a machine](0017-cloud-init-apply-touches-no-machine.md) | Targets | accepted 2026-11-18 |
 | [Helm's plan does not detect live drift](0018-helm-plan-does-not-detect-live-drift.md) | Targets | accepted 2026-11-18 |
 | [Podman output is Quadlet units only](0019-podman-output-is-quadlet-units-only.md) | Targets | accepted 2026-11-18 |

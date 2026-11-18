@@ -302,6 +302,28 @@ message DescribeResponse {
   // plugin built before this field existed reports false, so the protocol
   // version did not change.
   bool exports_schemas = 22;
+  // settings lists what an operator can configure about the plugin's runner:
+  // each setting's name, the environment variable it is read from, its
+  // default and what it does. The host lists them, generates documentation
+  // from them, and refuses a project that names one the plugin does not
+  // declare. A plugin built before this field existed lists none, so the
+  // protocol version did not change.
+  repeated Setting settings = 23;
+}
+
+// Setting is one thing an operator can configure about a runner.
+message Setting {
+  // name is the short name a project's meridian.yaml uses under
+  // spec.settings.<target>: lower-case words joined by "-", such as "args".
+  string name = 1;
+  // variable is the environment variable the setting is read from, such as
+  // "MERIDIAN_ANSIBLE_ARGS". The variable always wins over the project.
+  string variable = 2;
+  // default_value is what the setting is when nothing sets it; empty when
+  // there is none.
+  string default_value = 3;
+  // description says what the setting does and what values it takes.
+  string description = 4;
 }
 
 // PlacedEscape is one opening of a tool's expression syntax, and what the

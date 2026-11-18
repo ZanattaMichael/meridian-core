@@ -2,6 +2,7 @@
 //! compile chain: nothing here is reached by a compile.
 
 use meridian_sdk::tool::{write_artifact, Tool};
+use meridian_sdk::{settings, Setting};
 use meridian_sdk::{
     Applied, Artifact, Change, ChangeAction, Log, Operations, Plan, RunContext, RunError, Runner,
 };
@@ -13,6 +14,23 @@ use crate::MANIFEST_PATH;
 /// stand-in in the tool's place.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_TEMPLATE";
 
+/// What an operator can configure about this runner. Each setting is read
+/// through `meridian_sdk::settings`, so the environment, the project's
+/// `meridian.yaml` and the default are honoured in that order, and
+/// `meridian plugins --settings` can list them.
+///
+/// TODO(plugin): declare every setting the runner reads, and nothing it does
+/// not. An argument-list setting is read with `settings::args`, which splits
+/// it like a shell command line.
+pub fn settings() -> Vec<Setting> {
+    vec![Setting::new(
+        "program",
+        PROGRAM_VARIABLE,
+        "filesync",
+        "The `filesync` program to run, when it is not on `PATH`.",
+    )]
+}
+
 /// Runs a compiled manifest with `filesync`.
 ///
 /// A plan is `filesync plan manifest.tsv` and an apply is
@@ -23,11 +41,11 @@ pub struct TemplateRunner {
 
 impl TemplateRunner {
     pub fn from_env() -> Self {
-        let program = match std::env::var(PROGRAM_VARIABLE) {
-            Ok(value) if !value.trim().is_empty() => value,
-            _ => "filesync".to_owned(),
-        };
-        TemplateRunner { program }
+        let declared = settings();
+        let setting = |name: &str| settings::find(&declared, name);
+        TemplateRunner {
+            program: settings::text(setting("program")),
+        }
     }
 
     /// Writes the artifact where the tool will read it and runs one command.
@@ -84,6 +102,10 @@ fn changes(report: &str) -> Result<Vec<Change>, RunError> {
 }
 
 impl Runner for TemplateRunner {
+    fn settings(&self) -> Vec<Setting> {
+        settings()
+    }
+
     /// TODO(plugin): declare only the operations you implement. The host
     /// never calls the others.
     fn operations(&self) -> Operations {

@@ -265,6 +265,11 @@ enum Command {
     },
     /// List the plugins Meridian can find and what each can do
     Plugins {
+        /// Also list each plugin's settings: the name to use under
+        /// spec.settings in meridian.yaml, the environment variable, the
+        /// default and what it does
+        #[arg(long)]
+        settings: bool,
         #[command(flatten)]
         plugins: PluginDirs,
     },
@@ -781,7 +786,7 @@ fn main() -> ExitCode {
                 strict,
             },
         ),
-        Command::Plugins { plugins } => list_plugins(&plugins),
+        Command::Plugins { settings, plugins } => list_plugins(&plugins, settings),
         Command::Rules {
             command:
                 RulesCommand::Check {
@@ -1469,10 +1474,25 @@ fn backend(state: &State) -> Result<Arc<dyn Backend>, Failure> {
         .map_err(Failure::Message)
 }
 
+/// The project's settings for its targets, from `spec.settings` in the
+/// `meridian.yaml` of the current directory. A directory with no manifest
+/// has none; a manifest that does not read stops the command, because a
+/// project whose settings are ignored would run its tools wrongly.
+fn project_settings() -> Result<BTreeMap<String, BTreeMap<String, String>>, Failure> {
+    let dir = Path::new(".");
+    if !dir.join(meridian_module::MANIFEST_FILE).is_file() {
+        return Ok(BTreeMap::new());
+    }
+    meridian_module::Manifest::load(dir)
+        .map(|manifest| manifest.settings)
+        .map_err(module_failure)
+}
+
 pub(crate) fn registry(plugins: &PluginDirs) -> Result<Registry, Failure> {
     let dirs = plugin_dirs(plugins);
     let options = StartOptions {
         verification: plugins.verification()?,
+        settings: project_settings()?,
         ..StartOptions::default()
     };
     let mut registry = Registry::new();
@@ -1581,7 +1601,7 @@ fn import_configuration(plugins: &PluginDirs, request: &import::Request) -> Resu
     outcome
 }
 
-fn list_plugins(plugins: &PluginDirs) -> Result<(), Failure> {
+fn list_plugins(plugins: &PluginDirs, with_settings: bool) -> Result<(), Failure> {
     let registry = registry(plugins)?;
     let names = registry.names();
     if names.is_empty() {
@@ -1633,6 +1653,26 @@ fn list_plugins(plugins: &PluginDirs) -> Result<(), Failure> {
         );
         outln!("  binary:    {}", info.path);
         outln!("  signature: {}", info.signature);
+        if with_settings {
+            if info.settings.is_empty() {
+                outln!("  settings:  none declared");
+            } else {
+                outln!("  settings:");
+                for setting in &info.settings {
+                    outln!(
+                        "    {} ({}, default {})",
+                        setting.name,
+                        setting.variable,
+                        if setting.default.is_empty() {
+                            "none".to_owned()
+                        } else {
+                            format!("{:?}", setting.default)
+                        }
+                    );
+                    outln!("      {}", setting.description);
+                }
+            }
+        }
     }
     registry
         .close()
