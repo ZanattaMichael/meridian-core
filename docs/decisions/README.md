@@ -43,6 +43,7 @@ page it affects. The pull request template asks for it.
 | [The Windows named pipe can be opened for reading by any local account](0016-windows-pipe-readable-by-local-accounts.md) | Releases | proposed |
 | [A dispatch of the release workflow at a `v*` tag is a release](0021-a-dispatch-at-a-tag-is-a-release.md) | Releases | proposed |
 | [cloud-init's `apply` does not touch a machine](0017-cloud-init-apply-touches-no-machine.md) | Targets | proposed |
+| [Shared param kinds are checked once, strictly, for all six configuration management targets](0024-shared-param-kinds-are-checked-once-strictly.md) | Targets | proposed |
 | [Helm's plan does not detect live drift](0018-helm-plan-does-not-detect-live-drift.md) | Targets | proposed |
 | [Podman output is Quadlet units only](0019-podman-output-is-quadlet-units-only.md) | Targets | proposed |
 | [Terraform import renames colliding names](0020-terraform-import-renames-colliding-names.md) | Targets | proposed |

@@ -17,6 +17,7 @@
 //! A schema is also data: it is written to the cache as JSON, and read back
 //! by an editor that never started the plugin.
 
+use crate::types::{CompileError, Resource};
 use std::collections::BTreeMap;
 
 use meridian_value::Value;
@@ -650,6 +651,83 @@ const SHARED_PARAMS: &[(&str, &str, ParamKind, &str)] = &[
     ("user", "uid", ParamKind::Integer, "The user's numeric id."),
 ];
 
+/// Checks a resource of one of the shared configuration management types
+/// against [`SHARED_PARAMS`]: every param the table knows must hold a value
+/// of the table's kind. A resource of any other type, and a param the table
+/// does not list, pass untouched; whether a target accepts the param at all
+/// is the target's own rule.
+///
+/// Every target that takes the shared types calls this first in its
+/// transform stage, so the same document is accepted or refused the same way
+/// whichever tool it is moved to. The refusal is the standard one: rule
+/// `invalid-param`, with the plugin filling in its own target name.
+///
+/// The reading is the strict one: text where a name is wanted, true or
+/// false where a flag is wanted, a list where several are wanted. A secret
+/// stands for text the tool resolves, so it passes wherever text would.
+pub fn check_shared(resource: &Resource) -> Result<(), CompileError> {
+    let r#type = resource.r#type.as_str();
+    if !SHARED_TYPES.iter().any(|(t, _)| *t == r#type) {
+        return Ok(());
+    }
+    for (name, value) in &resource.params {
+        let Some((_, _, kind, _)) = SHARED_PARAMS
+            .iter()
+            .find(|(t, p, _, _)| *t == r#type && p == name)
+        else {
+            continue;
+        };
+        let fits = match kind {
+            ParamKind::Any => true,
+            ParamKind::String => matches!(value, Value::String(_) | Value::Secret(_)),
+            ParamKind::Bool => matches!(value, Value::Bool(_)),
+            ParamKind::Integer => matches!(value, Value::Int(_) | Value::Uint(_)),
+            ParamKind::Number => matches!(value, Value::Int(_) | Value::Uint(_) | Value::Float(_)),
+            ParamKind::List => matches!(value, Value::List(_)),
+            ParamKind::Map => matches!(value, Value::Map(_)),
+        };
+        if fits {
+            continue;
+        }
+        let wanted = match kind {
+            ParamKind::String => "text",
+            ParamKind::Bool => "true or false",
+            ParamKind::Integer => "a whole number",
+            ParamKind::Number => "a number",
+            ParamKind::List => "a list",
+            ParamKind::Map => "a mapping",
+            ParamKind::Any => "anything",
+        };
+        let mut msg = format!(
+            "param {name:?} of a {type} must be {wanted}, not {}",
+            value.describe()
+        );
+        match (r#type, name.as_str(), value) {
+            ("file", "mode", Value::Int(_) | Value::Uint(_)) => {
+                msg.push_str(&format!(
+                    "; write it quoted, so it is not read as a number: \"{}\"",
+                    value.canonical()
+                ));
+            }
+            (_, _, Value::List(items)) if *kind == ParamKind::String => {
+                msg.push_str(&format!(
+                    "; declare one resource per item ({} here)",
+                    items.len()
+                ));
+            }
+            (_, _, Value::String(_)) if *kind == ParamKind::List => {
+                msg.push_str("; write it as a list: [value]");
+            }
+            (_, _, Value::String(_)) if *kind == ParamKind::Bool => {
+                msg.push_str("; write true or false without quotes");
+            }
+            _ => {}
+        }
+        return Err(CompileError::for_resource(resource, "invalid-param", msg));
+    }
+    Ok(())
+}
+
 /// Describes one of the shared configuration management types (`package`,
 /// `service`, `file`, `user`, `group`, `exec`) as one target takes it.
 ///
@@ -696,6 +774,87 @@ pub fn shared(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn resource(r#type: &str, params: &[(&str, Value)]) -> Resource {
+        Resource {
+            id: "a".to_owned(),
+            r#type: r#type.to_owned(),
+            params: params
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), v.clone()))
+                .collect(),
+            ..Resource::default()
+        }
+    }
+
+    #[test]
+    fn shared_params_are_held_to_their_kind() {
+        let text = |s: &str| Value::String(s.to_owned());
+        for (r#type, params) in [
+            ("package", vec![("name", text("nginx"))]),
+            (
+                "service",
+                vec![("name", text("nginx")), ("enabled", Value::Bool(true))],
+            ),
+            (
+                "file",
+                vec![("path", text("/etc/x")), ("mode", text("0644"))],
+            ),
+            (
+                "user",
+                vec![
+                    ("name", text("deploy")),
+                    ("uid", Value::Int(1500)),
+                    ("groups", Value::List(vec![text("adm")])),
+                ],
+            ),
+            ("user", vec![("sudo", Value::List(Vec::new()))]),
+            ("group", vec![("gid", Value::Uint(7))]),
+            // A secret stands for text.
+            (
+                "file",
+                vec![("content", Value::Secret(meridian_value::SecretRef::new(1)))],
+            ),
+            // A type and a param the table does not know are not this check's.
+            ("firewall", vec![("name", Value::Int(1))]),
+            ("package", vec![("provider", Value::Int(1))]),
+        ] {
+            assert!(
+                check_shared(&resource(r#type, &params)).is_ok(),
+                "{type} {params:?}"
+            );
+        }
+        let refused = |r#type: &str, params: &[(&str, Value)]| {
+            let e = check_shared(&resource(r#type, params)).expect_err("refused");
+            assert_eq!(e.rule, "invalid-param");
+            assert_eq!(e.resource, "a");
+            e.msg
+        };
+        assert_eq!(
+            refused("package", &[("name", Value::Int(42))]),
+            "param \"name\" of a package must be text, not a number"
+        );
+        assert_eq!(
+            refused("package", &[("name", Value::List(vec![text("a"), text("b")]))]),
+            "param \"name\" of a package must be text, not a list; declare one resource per item (2 here)"
+        );
+        assert_eq!(
+            refused("service", &[("enabled", text("yes"))]),
+            "param \"enabled\" of a service must be true or false, not a string; write true or false without quotes"
+        );
+        assert_eq!(
+            refused("file", &[("mode", Value::Int(420))]),
+            "param \"mode\" of a file must be text, not a number; write it quoted, so it is not read as a number: \"420\""
+        );
+        assert_eq!(
+            refused("user", &[("groups", text("adm"))]),
+            "param \"groups\" of a user must be a list, not a string; write it as a list: [value]"
+        );
+        assert_eq!(
+            refused("user", &[("uid", text("1500"))]),
+            "param \"uid\" of a user must be a whole number, not a string"
+        );
+    }
 
     #[test]
     fn a_shared_type_is_described_from_the_one_table() {

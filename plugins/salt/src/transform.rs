@@ -348,6 +348,11 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<(Sls, Vec<Warning>), Co
     let mut warnings = Vec::new();
     let mut states = Vec::with_capacity(graph.resources.len());
     for resource in &graph.resources {
+        // The shared types are checked the same way on every configuration
+        // management target, so a document moves between tools without the
+        // type rules changing under it.
+        meridian_sdk::schema::check_shared(resource)
+            .map_err(|e| refuse(resource, &e.rule, e.msg))?;
         states.push(state_for(resource, &resource.state, Some(&mut warnings))?);
     }
     let reactions = notifications(graph, &mut states)?;

@@ -465,9 +465,10 @@ and no tool is run.
 
 ```console
 $ meridian lint stacks/
+stacks/web.yaml:16:9: error: param "mode" of a file must be text, not a number; write it quoted, so it is not read as a number: "420" [invalid-param]
 stacks/web.yaml:16:15: warning: mode 0644 is read as a number, not as permissions; write it as a quoted string [unquoted-mode]
 stacks/web.yaml:35:21: error: spec.resources[3].dependsOn[0].resource: resource "warm" depends on unknown resource "wbe" [invalid-document]
-1 error, 1 warning, 0 notes
+2 errors, 1 warning, 0 notes
 ```
 
 `--fix` applies the fixes that are safe. `--strict` fails on warnings as well

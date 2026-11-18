@@ -162,6 +162,11 @@ fn lookup(pairs: &[(&'static str, &'static str)], key: &str) -> Option<&'static 
 pub(crate) fn transform(graph: &ResourceGraph) -> Result<Cookbook, CompileError> {
     let mut blocks = Vec::with_capacity(graph.resources.len());
     for resource in &graph.resources {
+        // The shared types are checked the same way on every configuration
+        // management target, so a document moves between tools without the
+        // type rules changing under it.
+        meridian_sdk::schema::check_shared(resource)
+            .map_err(|e| refuse(resource, &e.rule, e.msg))?;
         blocks.extend(blocks_for(resource)?);
     }
     Ok(Cookbook {

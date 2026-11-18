@@ -20,12 +20,13 @@ A path may be a file or a directory. A directory is searched for `.yaml`,
 
 ```console
 $ meridian lint web.yaml
+web.yaml:16:9: error: param "mode" of a file must be text, not a number; write it quoted, so it is not read as a number: "420" [invalid-param]
 web.yaml:16:15: warning: mode 0644 is read as a number, not as permissions; write it as a quoted string [unquoted-mode]
 web.yaml:28:21: info: "nginx" already comes first, because "site" depends on it [redundant-dependency]
 web.yaml:29:11: info: exec "warm" has no `creates` or `removes` and nothing notifies it, so it runs on every apply [unguarded-exec]
 web.yaml:33:9: error: resource type "exec" does not take param "colour" on target "ansible" (it takes: chdir, command, creates, removes, shell) [unsupported-param]
 web.yaml:35:21: error: spec.resources[3].dependsOn[0].resource: resource "warm" depends on unknown resource "wbe" [invalid-document]
-2 errors, 1 warning, 2 notes
+3 errors, 1 warning, 2 notes
 ```
 
 Each line is `file:line:column: severity: message [code]`, which editors and CI
@@ -53,7 +54,8 @@ fixed 1 finding
 ```
 
 At present one rule has a fix: [`unquoted-mode`](../reference/lint.md#unquoted-mode)
-adds the quotes.
+adds the quotes. That one also clears the `invalid-param` error the plugin
+reports on the same line, since the two describe one mistake.
 
 ## Silencing a rule
 
