@@ -138,6 +138,7 @@ async fn serve_async(plugin: Plugin) -> Result<(), ServeError> {
         emitter: Arc::clone(&plugin.emitter),
         operations,
         accepts_inputs: plugin.runner.as_ref().is_some_and(|r| r.accepts_inputs()),
+        saves_plans: plugin.runner.as_ref().is_some_and(|r| r.saves_plans()),
         settings: plugin
             .runner
             .as_ref()
@@ -211,6 +212,8 @@ struct EmitterHandler {
     emitter: Arc<dyn Emitter + Send + Sync>,
     operations: Operations,
     accepts_inputs: bool,
+    /// Whether the runner saves plans and applies exactly a saved one.
+    saves_plans: bool,
     /// What the runner can be configured with, for the host to list.
     settings: Vec<crate::Setting>,
     /// Kept only to describe it: importing is served by its own handler.
@@ -246,6 +249,7 @@ impl EmitterService for EmitterHandler {
                 .collect(),
             operations: Some(wire::operations_to_wire(self.operations)),
             accepts_inputs: self.accepts_inputs,
+            saves_plans: self.saves_plans,
             import_formats: wire::import_formats_to_wire(
                 self.importer
                     .as_ref()

@@ -116,6 +116,19 @@ flowchart LR
 Resuming saves time; it does not change the result. A plain `meridian apply` of
 the same documents ends in the same place by asking every tool again.
 
+### Applying a saved plan
+
+The same comparison, an artifact by its hash, ties a plan to the apply that
+follows it. `meridian plan --out plan.mplan` writes what was planned, and
+`meridian apply --plan plan.mplan` applies that plan or nothing: it refuses
+before it runs anything if a stage has been applied since the plan was
+taken, by any run, or if the plan names other stages; and it fails a stage
+with `plan-differs` if its document no longer compiles to the artifact the
+plan recorded. Where the tool saves a plan of its own, it is handed that
+plan back. [A saved plan, and applying it from a pull
+request](../operations/pull-requests.md) has the file, the checks and the
+pull request automation built on it.
+
 ## Stopping a run
 
 A run can be stopped before its tool finishes, and the record shows it.

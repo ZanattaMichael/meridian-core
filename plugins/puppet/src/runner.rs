@@ -377,6 +377,7 @@ impl Runner for PuppetRunner {
         Ok(Plan {
             changes: report.changes,
             unknown: report.unreadable,
+            saved: None,
         })
     }
 

@@ -360,8 +360,14 @@ beside it (`create web_vm: aws:ec2/instance:Instance`). A replacement is reporte
 stack resource and the providers it loads by itself are not reported: neither is
 something the document declares.
 
-Pulumi has no saved plan to apply, so `apply` previews and then updates. If something
-changes between the two, the update follows the infrastructure, not the preview.
+A plain `apply` previews and then updates, and if something changes between the two,
+the update follows the infrastructure, not the preview. With a
+[saved plan](../operations/pull-requests.md), the plan is taken with
+`preview --save-plan` and the apply runs `up --plan` on it, so the update is constrained
+to what was reviewed (Pulumi's update plans are experimental, and the plugin sets
+`PULUMI_EXPERIMENTAL` for those two calls). The plan is not saved when the run handed
+Pulumi a secret, because an update plan holds every input; the apply then previews
+again for that stage, with the artifact hash as the check.
 
 When a preview fails, what Pulumi said is returned with the failure, together with the
 command that was run.

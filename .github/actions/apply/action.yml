@@ -1,0 +1,85 @@
+name: Meridian apply from a saved plan
+description: >-
+  Takes the plan the plan action saved and runs `meridian apply --plan` on
+  it, so what is applied is exactly what was reviewed; the apply is refused
+  if a document, the state or the selection has changed since the plan.
+
+# Used as `uses: ZanattaMichael/meridian-core/.github/actions/apply@v0.1.0`
+# in a job behind the engine's approval (`environment: production`), after
+# the plan action's job. Documented in docs/operations/pull-requests.md and
+# run for real by .github/workflows/saved-plan.yml.
+
+inputs:
+  working-directory:
+    description: Where the documents are; the plan's record is restored here
+    required: false
+    default: '.'
+  plan-file:
+    description: The plan file, relative to the working directory, as the plan action named it
+    required: false
+    default: meridian.mplan
+  artifact:
+    description: The name of the artifact the plan action kept the plan under
+    required: false
+    default: meridian-plan
+  args:
+    description: More arguments for `meridian apply`, such as `--policy policies/`; the documents, data, values and selector come from the plan
+    required: false
+    default: ''
+  install:
+    description: A release version to install `meridian` from, checking the release's signature; empty leaves the PATH alone
+    required: false
+    default: ''
+
+outputs:
+  run:
+    description: The id of the apply's run
+    value: ${{ steps.apply.outputs.run }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install a pinned Meridian, checking the release's signature
+      if: inputs.install != ''
+      shell: bash
+      run: |
+        curl -fsSL "https://github.com/ZanattaMichael/meridian-core/releases/download/v${{ inputs.install }}/install.sh" | sh
+        echo "$HOME/.meridian/bin" >> "$GITHUB_PATH"
+
+    - name: Take the plan and the record from the plan job
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact }}
+        path: ${{ inputs.working-directory }}
+
+    - name: Apply the plan, and nothing else
+      id: apply
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        test -f "${{ inputs.plan-file }}" || { echo "::error::the artifact ${{ inputs.artifact }} holds no ${{ inputs.plan-file }}"; exit 1; }
+        mkdir -p .meridian-pr
+        status=0
+        meridian --output json apply --plan "${{ inputs.plan-file }}" ${{ inputs.args }} \
+          --report markdown=.meridian-pr/apply.md \
+          > .meridian-pr/apply.json || status=$?
+        python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+        import json
+        try:
+            result = json.load(open(".meridian-pr/apply.json"))
+        except Exception:
+            result = {}
+        print("run=" + (result.get("run") or ""))
+        EOF
+        exit $status
+
+    - name: Keep the report and the record
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact }}-applied
+        path: |
+          ${{ inputs.working-directory }}/.meridian-pr/
+          ${{ inputs.working-directory }}/.meridian/
+        include-hidden-files: true
+        if-no-files-found: ignore

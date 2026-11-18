@@ -99,6 +99,7 @@ One object, the run, for the five commands that run a workflow. Schema:
   "mode": "apply",
   "run": "2026-11-18T09-14-03Z-0cc7",
   "refused": null,
+  "plan": null,
   "stages": [
     {
       "name": "network",
@@ -151,7 +152,8 @@ One object, the run, for the five commands that run a workflow. Schema:
 |---|---|
 | `mode` | `compile`, `plan`, `apply`, `drift` or `rollback` |
 | `run` | the run's id, under which `plan`, `apply`, `drift` and `rollback` keep their [record](state.md). A `compile` has an id too, and records nothing |
-| `refused` | `null`, or why the run did not start at all: `kind` is `locked` (with the `lock`, as [`status`](#status) shows it), `state`, `resume` or `rollback`, and `message` is the text. No stage was attempted |
+| `refused` | `null`, or why the run did not start at all: `kind` is `locked` (with the `lock`, as [`status`](#status) shows it), `state`, `resume`, `rollback` or `plan` (an `apply --plan` whose saved plan names other stages, or a stage applied since it was taken), and `message` is the text. No stage was attempted |
+| `plan` | `null`, or the [saved plan](../operations/pull-requests.md) the command wrote or applied: `file`, its path; `run`, the id of the run that took it (on an `apply --plan`; `null` on the `plan` that wrote it); `hasChanges`, whether an apply of it would do something |
 | `stages` | one object per stage, in the order they ran; below |
 | `rollbacks` | what an `apply --on-failure rollback` or a `rollback` put back, last stage first; below |
 | `warnings` | things that went wrong beside the stages, such as the record not being written. They do not fail the run |

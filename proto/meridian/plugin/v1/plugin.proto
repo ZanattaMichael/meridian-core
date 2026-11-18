@@ -339,6 +339,12 @@ message DescribeResponse {
   // general ones. A plugin built before this field lists none, which the
   // host reads as "only general rules".
   repeated Rule rules = 25;
+  // saves_plans is true when the plugin's Runner hands back a SavedPlan from
+  // Plan when asked (RunContext.save_plan) and applies exactly that plan when
+  // handed one (RunContext.saved_plan). A plugin built before this field
+  // saves none: an apply from a saved plan then checks the artifact's hash
+  // and plans again, which the plan file says.
+  bool saves_plans = 26;
 }
 
 // Setting is one thing an operator can configure about a runner.
@@ -504,6 +510,26 @@ message RunContext {
   // each of its secret fields, sent as secrets are: only to a target whose
   // capabilities include credentials, and only for Plan and Apply.
   CredentialValues credential = 6;
+  // save_plan asks Plan to hand back the tool's own saved plan in its result,
+  // for `meridian plan --out`. A plugin that cannot, or whose saved plan would
+  // carry a secret value, leaves PlanResult.saved unset; it is never an error.
+  bool save_plan = 7;
+  // saved_plan is the plan Apply must carry out exactly: what Plan saved for
+  // this very artifact, in an earlier run. A plugin given one applies that
+  // plan and nothing else, and fails when the tool finds it stale. The host
+  // sends it only to a plugin whose Describe says saves_plans.
+  SavedPlan saved_plan = 8;
+}
+
+// SavedPlan is a tool's own saved plan, as the plugin chose to keep it: a
+// Terraform plan file, a Pulumi plan, the name of a CloudFormation change set.
+// The host never reads data; it keeps it in the plan file between the plan
+// and the apply, so data must hold no secret value. changes is what the plan
+// would do, as the plan reported it, so that an apply which the tool gives no
+// second account of can still report what it did.
+message SavedPlan {
+  bytes data = 1;
+  repeated Change changes = 2;
 }
 
 // CredentialValues is a credential with the value of each of its secret
@@ -608,6 +634,10 @@ message PlanResult {
   // list as "in sync" when it is set.
   bool unknown = 2;
   RunError error = 3;
+  // saved is the tool's own saved plan, when RunContext.save_plan asked for
+  // one and the plugin could save it. Its changes are left empty: they are
+  // the ones above.
+  SavedPlan saved = 4;
 }
 
 message ApplyRequest {

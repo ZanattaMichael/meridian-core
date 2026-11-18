@@ -586,6 +586,7 @@ impl Runner for HelmRunner {
         Ok(Plan {
             changes: preview.changes,
             unknown,
+            saved: None,
         })
     }
 

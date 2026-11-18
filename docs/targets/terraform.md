@@ -225,7 +225,10 @@ variables file only the user can read, held in memory where the system
 allows, and passed to `terraform plan` as `-var-file=<path>`; the file is
 removed once the plan is saved. The saved plan holds every variable's value,
 as every Terraform plan file does, so it is overwritten and removed as soon as
-it has been applied or shown. The value is never on the command line and never
+it has been applied or shown. For the same reason a
+[saved plan](../operations/pull-requests.md) (`meridian plan --out`) keeps no
+Terraform plan file for a stage that was handed a secret, and the apply plans
+again for it. The value is never on the command line and never
 in Terraform's environment. Terraform writes a resource's arguments into its
 state whichever variable they came from, so a document that hands it a secret
 should declare a `backend` that protects its state.

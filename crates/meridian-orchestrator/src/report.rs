@@ -170,13 +170,18 @@ pub enum Refusal {
     Resume(String),
     /// There is nothing to roll back.
     Rollback(String),
+    /// The saved plan does not fit this run.
+    Plan(String),
 }
 
 impl fmt::Display for Refusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Refusal::Locked(holder) => LockError::Held(holder.clone()).fmt(f),
-            Refusal::State(why) | Refusal::Resume(why) | Refusal::Rollback(why) => f.write_str(why),
+            Refusal::State(why)
+            | Refusal::Resume(why)
+            | Refusal::Rollback(why)
+            | Refusal::Plan(why) => f.write_str(why),
         }
     }
 }

@@ -54,6 +54,8 @@ fn context(test: &str) -> RunContext {
         inputs: Data::new(),
         secrets: Default::default(),
         credential: None,
+        save_plan: false,
+        saved_plan: None,
     }
 }
 

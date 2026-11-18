@@ -31,6 +31,10 @@ If one is wrong for your engine, please open an issue with the fix.
 - [Sharing the record between jobs](#sharing-the-record-between-jobs)
 - [Approvals](#approvals)
 
+[A saved plan, and applying it from a pull request](pull-requests.md) builds
+on these jobs: a plan on every push, posted as one comment, and applied
+after the approval by a job that can apply nothing else.
+
 ## Who owns what
 
 The engine decides *when and as whom* a run happens and keeps what it produced.
@@ -748,3 +752,7 @@ document name the gate it expects is
 and generating the pipeline file from the workflow is
 [issue 186](https://github.com/ZanattaMichael/meridian-core/issues/186).
 Neither is needed today.
+
+A [saved plan](pull-requests.md) ties what reviewers approved to what the job
+applies: the plan job writes `plan --out`, and the job behind the gate runs
+`apply --plan`, which refuses if anything changed since.

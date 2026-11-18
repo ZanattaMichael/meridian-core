@@ -639,7 +639,23 @@ pub fn context_to_wire(c: &RunContext) -> pb::RunContext {
                 })
                 .collect(),
         }),
+        save_plan: c.save_plan,
+        saved_plan: c.saved_plan.as_ref().map(saved_plan_to_wire),
     }
+}
+
+pub fn saved_plan_to_wire(saved: &SavedPlan) -> pb::SavedPlan {
+    pb::SavedPlan {
+        data: saved.data.clone(),
+        changes: saved.changes.iter().cloned().map(change_to_wire).collect(),
+    }
+}
+
+pub fn saved_plan_from_wire(saved: pb::SavedPlan) -> Result<SavedPlan, String> {
+    Ok(SavedPlan {
+        data: saved.data,
+        changes: changes_from_wire(saved.changes)?,
+    })
 }
 
 /// Converts a run context without its secrets, for a call that needs none:
@@ -652,6 +668,8 @@ pub fn context_to_wire_without_secrets(c: &RunContext) -> pb::RunContext {
         inputs_json: canonical_map(&c.inputs).into_bytes(),
         secrets: Vec::new(),
         credential: None,
+        save_plan: c.save_plan,
+        saved_plan: c.saved_plan.as_ref().map(saved_plan_to_wire),
     }
 }
 
@@ -700,6 +718,11 @@ pub fn context_from_wire(c: Option<pb::RunContext>) -> Result<RunContext, String
         inputs: decode_map(&c.inputs_json).map_err(|e| format!("reading the inputs: {e}"))?,
         secrets: Secrets::from_values(secrets),
         credential,
+        save_plan: c.save_plan,
+        saved_plan: match c.saved_plan {
+            None => None,
+            Some(saved) => Some(saved_plan_from_wire(saved)?),
+        },
     })
 }
 
@@ -818,11 +841,13 @@ pub fn plan_result(outcome: Result<Plan, RunError>) -> pb::PlanResult {
             changes: plan.changes.into_iter().map(change_to_wire).collect(),
             unknown: plan.unknown,
             error: None,
+            saved: plan.saved.as_ref().map(saved_plan_to_wire),
         },
         Err(e) => pb::PlanResult {
             changes: Vec::new(),
             unknown: false,
             error: Some(run_error_to_wire(e)),
+            saved: None,
         },
     }
 }
@@ -835,6 +860,10 @@ pub fn plan_result_from_wire(r: pb::PlanResult) -> Result<Result<Plan, RunError>
     Ok(Ok(Plan {
         changes: changes_from_wire(r.changes)?,
         unknown: r.unknown,
+        saved: match r.saved {
+            None => None,
+            Some(saved) => Some(saved_plan_from_wire(saved)?),
+        },
     }))
 }
 
