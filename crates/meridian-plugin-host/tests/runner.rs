@@ -9,7 +9,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_host::{Client, EmitError, RunFailure, StartOptions};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use meridian_plugin_host::{Client, EmitError, RunFailure, StartOptions, Stop, StopCause};
 use meridian_sdk::{
     Artifact, Capabilities, Category, ChangeAction, Data, LogLine, LogStream, Operations, Position,
     Resource, ResourceGraph, RunContext, SecretName, SecretRef, SecretValue, Secrets, Value,
@@ -101,12 +105,14 @@ fn tool_error(failure: RunFailure) -> meridian_sdk::RunError {
     match failure {
         RunFailure::Tool(e) => e,
         RunFailure::Plugin(e) => panic!("the plugin failed instead of the tool: {e}"),
+        RunFailure::Stopped(e) => panic!("the run was stopped instead of the tool failing: {e}"),
     }
 }
 
 fn plugin_error(failure: RunFailure) -> meridian_plugin_host::Error {
     match failure {
         RunFailure::Plugin(e) => e,
+        RunFailure::Stopped(e) => panic!("the run was stopped instead of the plugin failing: {e}"),
         RunFailure::Tool(e) => panic!("the tool failed instead of the plugin: {e}"),
     }
 }
@@ -361,6 +367,131 @@ fn a_failing_tool_is_an_answer_that_says_what_was_already_done() {
             (ChangeAction::Create, "files/c")
         ]
     );
+}
+
+/// The run that was stopped, or a panic saying what happened instead.
+fn stopped(failure: Result<meridian_sdk::Applied, RunFailure>) -> meridian_plugin_host::Stopped {
+    match failure {
+        Err(RunFailure::Stopped(stopped)) => stopped,
+        Err(other) => panic!("the run failed instead of being stopped: {other}"),
+        Ok(applied) => panic!("the run finished instead of being stopped: {applied:?}"),
+    }
+}
+
+#[test]
+fn a_run_past_its_time_limit_is_stopped_and_says_what_was_done() {
+    let client = start();
+    let context = context("timeout");
+    // `a` is written before `b` hangs, so the stop reports one change.
+    let artifact = artifact(&[("a", "first"), ("b", "HANG here")]);
+    let started = Instant::now();
+    let stopped = stopped(client.apply_with(
+        &context,
+        &artifact,
+        &mut no_log(),
+        &Stop::after(Duration::from_millis(300)),
+    ));
+    assert!(
+        started.elapsed() < Duration::from_secs(30),
+        "the run was not stopped: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(
+        stopped.cause,
+        StopCause::TimedOut(Duration::from_millis(300))
+    );
+    assert!(stopped.answered);
+    assert_eq!(
+        changes(&stopped.changes),
+        vec![(meridian_sdk::ChangeAction::Create, "a")]
+    );
+    assert_eq!(stopped.command, "fake-tool apply --password=***");
+    assert_eq!(stopped.output, "stopped while waiting\n");
+    let shown = stopped.to_string();
+    assert!(
+        shown.starts_with("timed out after 300ms (was running `fake-tool apply"),
+        "{shown}"
+    );
+
+    // The plugin itself is fine: it goes on answering.
+    let outputs = client.outputs(&context).unwrap();
+    assert!(!outputs.is_empty());
+}
+
+#[test]
+fn a_run_is_stopped_when_asked_and_a_limit_that_is_not_reached_does_nothing() {
+    let client = start();
+    let context = context("interrupt");
+    let flag = Arc::new(AtomicBool::new(false));
+    let asked = Arc::clone(&flag);
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(300));
+        asked.store(true, Ordering::SeqCst);
+    });
+    let stop = Stop {
+        when: Some(flag),
+        after: Some(Duration::from_secs(600)),
+        ..Stop::default()
+    };
+    let stopped =
+        stopped(client.apply_with(&context, &artifact(&[("a", "HANG")]), &mut no_log(), &stop));
+    assert_eq!(stopped.cause, StopCause::Interrupted);
+    assert!(stopped.changes.is_empty());
+    assert!(
+        stopped
+            .to_string()
+            .starts_with("interrupted: the run was stopped"),
+        "{stopped}"
+    );
+
+    // A run that finishes within its limit is not touched.
+    let applied = client
+        .apply_with(
+            &context,
+            &artifact(&[("a", "fine")]),
+            &mut no_log(),
+            &Stop::after(Duration::from_secs(600)),
+        )
+        .unwrap();
+    assert_eq!(
+        changes(&applied.changes),
+        vec![(meridian_sdk::ChangeAction::Create, "a")]
+    );
+}
+
+/// The fake plugin runs a real child process that is stopped the way the SDK
+/// stops every tool: the whole process group, politely and then by force.
+#[cfg(unix)]
+#[test]
+fn a_stopped_run_stops_the_tools_process() {
+    let mut env: Vec<(String, String)> = std::env::vars().collect();
+    env.push(("FAKE_HANG_TOOL".to_owned(), "1".to_owned()));
+    let client = Client::start(
+        &fake(),
+        &StartOptions {
+            env: Some(env),
+            ..StartOptions::default()
+        },
+    )
+    .expect("the fake plugin starts");
+    let started = Instant::now();
+    let stopped = stopped(client.apply_with(
+        &context("hang-tool"),
+        &artifact(&[("a", "HANG")]),
+        &mut no_log(),
+        &Stop::after(Duration::from_millis(200)),
+    ));
+    assert!(
+        started.elapsed() < Duration::from_secs(60),
+        "the tool was not stopped: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(
+        stopped.cause,
+        StopCause::TimedOut(Duration::from_millis(200))
+    );
+    assert!(stopped.answered);
+    assert_eq!(stopped.command, "sh -c 'sleep 600'");
 }
 
 #[test]

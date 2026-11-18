@@ -30,7 +30,9 @@ use meridian_plugin_testkit::{
     secrets, KeptLog,
 };
 use meridian_sdk::tool::write_artifact;
-use meridian_sdk::{Artifact, ChangeAction, Data, Emitter, Plan, RunContext, Runner, SecretRef};
+use meridian_sdk::{
+    AgentPrograms, Artifact, ChangeAction, Data, Emitter, Plan, RunContext, Runner, SecretRef,
+};
 use meridian_target_puppet::{Puppet, PuppetRunner, Transport, MANIFEST_PATH, SITE_PATH};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -64,6 +66,7 @@ fn runner(puppet: &str, dir: &Path) -> PuppetRunner {
         bolt: "bolt".to_owned(),
         transport: Some(Transport::Local),
         extra_args: isolated(dir),
+        agent: AgentPrograms::default(),
     }
 }
 

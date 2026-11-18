@@ -5,7 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use meridian_plugin_testkit::{
-    artifact, graph_from_text, scratch, secret_at, secrets, stand_in, KeptLog,
+    agent_stand_ins, artifact, credential, graph_from_text, scratch, secret_at, secrets, stand_in,
+    KeptLog,
 };
 use meridian_sdk::{Artifact, Data, Emitter, RunContext, Runner, SecretRef, Value};
 use meridian_target_podman::{Podman, PodmanRunner, Scope, META_PATH};
@@ -770,4 +771,153 @@ fn a_plan_creates_no_secret() {
         "{:?}",
         lines(dir.join("podman.calls"))
     );
+}
+
+const KEY: &str =
+    "-----BEGIN OPENSSH PRIVATE KEY-----\nnot-a-real-key-9fXw\n-----END OPENSSH PRIVATE KEY-----";
+
+#[test]
+fn a_credentials_key_reaches_ssh_through_an_agent_and_its_user_as_an_option() {
+    let dir = scratch(TMP, "credential-agent");
+    let ssh = stand_in(
+        &dir,
+        "ssh",
+        &format!(
+            r#"echo "$@" >> "{d}/ssh.calls"
+env >> "{d}/ssh.env"
+[ -e "$SSH_AUTH_SOCK" ] && echo "socket present" >> "{d}/ssh.sockets"
+for last in "$@"; do :; done
+exec sh -c "$last""#,
+            d = dir.display()
+        ),
+    );
+    let runner = PodmanRunner {
+        ssh: ssh.to_str().unwrap().to_owned(),
+        agent: agent_stand_ins(&dir),
+        shell: dir.join("no-such-shell").to_str().unwrap().to_owned(),
+        ..host(&dir)
+    };
+    let remote = RunContext {
+        host: "edge01.example.com".into(),
+        credential: Some(credential(
+            "ssh",
+            "deploy",
+            &[("privateKey", KEY), ("passphrase", "open sesame")],
+        )),
+        ..context(&dir)
+    };
+    let log = KeptLog::default();
+    let applied = runner.apply(&remote, &shop(), &log).unwrap();
+    assert_eq!(applied.changes.len(), 2);
+
+    // ssh was told the user, and the agent's socket, and nothing else of the
+    // credential; the socket was there while it ran.
+    let calls = lines(dir.join("ssh.calls"));
+    assert_eq!(calls.len(), 3, "{calls:?}");
+    for call in &calls {
+        assert_eq!(
+            call,
+            "-o BatchMode=yes -l deploy edge01.example.com sh -c 'eval \"$(cat)\"'"
+        );
+    }
+    let env = fs::read_to_string(dir.join("ssh.env")).unwrap();
+    let socket = env
+        .lines()
+        .find_map(|l| l.strip_prefix("SSH_AUTH_SOCK="))
+        .expect("ssh is told where the agent is");
+    assert!(socket.ends_with("agent.sock"), "{socket}");
+    assert_eq!(lines(dir.join("ssh.sockets")).len(), 3);
+    assert!(!env.contains("not-a-real-key") && !env.contains("sesame"));
+    // The agent was started on that socket and given the key on ssh-add's
+    // standard input, with the passphrase answered by the askpass program.
+    assert_eq!(
+        lines(dir.join("ssh-agent.args")),
+        [format!("-D -a {socket}")]
+    );
+    assert_eq!(lines(dir.join("ssh-add.args")), ["-"]);
+    assert_eq!(
+        fs::read_to_string(dir.join("added-key")).unwrap(),
+        format!("{KEY}\n")
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("added-passphrase")).unwrap(),
+        "open sesame\n"
+    );
+    let add_env = fs::read_to_string(dir.join("ssh-add.env")).unwrap();
+    assert!(
+        add_env.contains(&format!("SSH_AUTH_SOCK={socket}")),
+        "{add_env}"
+    );
+    assert!(!add_env.contains("not-a-real-key") && !add_env.contains("sesame"));
+    // Nothing printed holds them, and the agent and its directory are gone.
+    assert!(!log
+        .text()
+        .iter()
+        .any(|l| l.contains("not-a-real-key") || l.contains("sesame")));
+    assert!(log
+        .text()
+        .iter()
+        .any(|l| l.contains("started an SSH agent for the credential's key")));
+    assert!(!Path::new(socket).parent().unwrap().exists());
+}
+
+#[test]
+fn a_credential_without_a_key_starts_no_agent() {
+    let dir = scratch(TMP, "credential-ambient");
+    let ssh = stand_in(
+        &dir,
+        "ssh",
+        &format!(
+            r#"echo "$@" >> "{d}/ssh.calls"
+env >> "{d}/ssh.env"
+for last in "$@"; do :; done
+exec sh -c "$last""#,
+            d = dir.display()
+        ),
+    );
+    let runner = PodmanRunner {
+        ssh: ssh.to_str().unwrap().to_owned(),
+        agent: agent_stand_ins(&dir),
+        ..host(&dir)
+    };
+    let remote = RunContext {
+        host: "edge01.example.com".into(),
+        credential: Some(credential("ssh", "ops", &[])),
+        ..context(&dir)
+    };
+    runner.plan(&remote, &shop(), &KeptLog::default()).unwrap();
+    assert!(lines(dir.join("ssh.calls"))[0].contains("-l ops edge01.example.com"));
+    assert!(!dir.join("ssh-agent.args").exists());
+    // ssh sees the agent the user has, if any (macOS gives every process
+    // one), and none of Meridian's.
+    let env = fs::read_to_string(dir.join("ssh.env")).unwrap();
+    let told: Vec<&str> = env
+        .lines()
+        .filter_map(|l| l.strip_prefix("SSH_AUTH_SOCK="))
+        .collect();
+    let own = std::env::var("SSH_AUTH_SOCK").ok();
+    assert_eq!(told, own.iter().map(String::as_str).collect::<Vec<_>>());
+}
+
+#[test]
+fn a_credential_for_this_machine_is_refused() {
+    let dir = scratch(TMP, "credential-local");
+    let runner = PodmanRunner {
+        agent: agent_stand_ins(&dir),
+        ..host(&dir)
+    };
+    let local = RunContext {
+        credential: Some(credential("ssh", "deploy", &[("privateKey", KEY)])),
+        ..context(&dir)
+    };
+    let err = runner
+        .plan(&local, &shop(), &KeptLog::default())
+        .unwrap_err();
+    assert!(
+        err.msg.starts_with(
+            "the document names the credential \"deploy\" for its host, and the host is this machine"
+        ),
+        "{err}"
+    );
+    assert!(!dir.join("ssh-agent.args").exists());
 }

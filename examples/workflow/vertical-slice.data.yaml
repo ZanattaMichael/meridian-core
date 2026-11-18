@@ -1,0 +1,4 @@
+# Where the edge and site stages of vertical-slice.yaml write. The test gives
+# a scratch directory with --set root=...; this is for running it by hand.
+root: /tmp/meridian-vertical-slice
+site_title: Meridian vertical slice

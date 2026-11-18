@@ -79,6 +79,7 @@ fn explain(what: &str, failure: &RunFailure, printed: &[String]) -> String {
     let detail = match failure {
         RunFailure::Tool(e) => format!("{}\n{}\n{}", e.msg, e.command, e.output),
         RunFailure::Plugin(e) => e.to_string(),
+        RunFailure::Stopped(e) => e.to_string(),
     };
     format!(
         "{what} failed: {detail}\n--- printed ---\n{}",

@@ -53,8 +53,30 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::{
     Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph,
+    ResourceGraph, SshTakes,
 };
+
+/// What `ssh` can take of the credential a document reaches its host as:
+/// the user, as `-l`, and a key through an agent Meridian starts for the
+/// run, with its passphrase. A password cannot: `ssh` asks for one on a
+/// terminal, and a run has none. Nothing of the credential is in the units.
+pub(crate) const SSH_TAKES: SshTakes = SshTakes {
+    tool: "ssh",
+    password: Err("ssh asks for a password on a terminal, which a run has not"),
+};
+
+fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
+    let Some(credential) = &graph.credential else {
+        return Ok(());
+    };
+    meridian_sdk::check_ssh_credential(credential, &SSH_TAKES).map_err(|msg| CompileError {
+        target: NAME.to_owned(),
+        resource: String::new(),
+        rule: "unsupported-credential".to_owned(),
+        msg: format!("the credential {:?}: {msg}", credential.name),
+        pos: Position::default(),
+    })
+}
 
 /// The name of the Podman secret a document's secret becomes. The runner
 /// creates it on the host from the value, over the script's own standard
@@ -262,7 +284,7 @@ impl Emitter for Podman {
             synthetic_notify: false,
             runtime_condition: false,
             secrets: true,
-            credentials: false,
+            credentials: true,
         }
     }
 
@@ -271,6 +293,7 @@ impl Emitter for Podman {
     }
 
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        check_credential(graph)?;
         let mut units = transform::transform(graph)?;
         sort::apply_ordering(graph, &mut units)?;
         let warnings = validate::validate(&units)?;

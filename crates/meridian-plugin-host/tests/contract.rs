@@ -53,7 +53,7 @@ const TARGETS: &[Target] = &[
             synthetic_notify: false,
             runtime_condition: false,
             secrets: true,
-            credentials: false,
+            credentials: true,
         },
     },
 ];

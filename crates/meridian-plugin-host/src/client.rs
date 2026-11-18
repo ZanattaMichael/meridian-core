@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -17,7 +18,9 @@ use meridian_sdk::{
 use tokio::runtime::Runtime;
 use tonic::transport::{Channel, Endpoint};
 
-use crate::{EmitError, Error, ImportFailure, Info, RunFailure, Verification};
+use crate::{
+    EmitError, Error, ImportFailure, Info, RunFailure, Stop, StopCause, Stopped, Verification,
+};
 
 /// How long a host waits for a plugin to announce itself. A plugin that has
 /// not printed its handshake line by then is either not a Meridian plugin or is
@@ -31,6 +34,31 @@ const EXIT_GRACE: Duration = Duration::from_secs(5);
 /// crash loop can produce a great deal of it, and an unbounded buffer in the
 /// host would be a denial of service by a misbehaving target.
 const STDERR_LIMIT: usize = 64 << 10;
+
+/// How often a run's stream is left to look at its stop conditions.
+const STOP_POLL: Duration = Duration::from_millis(100);
+
+/// How long the plugin has to acknowledge a request to stop.
+const CANCEL_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How reading a run's stream ended.
+struct Driven<R> {
+    /// The result the plugin sent, if the stream ended cleanly, or how the
+    /// stream failed.
+    result: Result<Option<R>, tonic::Status>,
+    /// Set when the run was stopped before the tool finished.
+    stopped: Option<Stopped>,
+}
+
+impl Stopped {
+    /// Fills in what the plugin reported when it stopped.
+    fn with(mut self, error: meridian_sdk::RunError) -> Stopped {
+        self.changes = error.changes;
+        self.output = error.output;
+        self.command = error.command;
+        self
+    }
+}
 
 /// How a plugin is launched.
 #[derive(Clone, Debug)]
@@ -410,27 +438,55 @@ impl Client {
         artifact: &Artifact,
         log: &mut dyn FnMut(LogLine),
     ) -> Result<Plan, RunFailure> {
+        self.plan_with(context, artifact, log, &Stop::default())
+    }
+
+    /// [`Client::plan`], stopped early as `stop` says.
+    pub fn plan_with(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &mut dyn FnMut(LogLine),
+        stop: &Stop,
+    ) -> Result<Plan, RunFailure> {
         let mut runner = self.runner("plan", self.info.operations.plan)?;
         let request = pb::PlanRequest {
             context: Some(wire::context_to_wire(context)),
             artifact: Some(wire::artifact_to_wire(artifact)),
         };
-        let result = self.runtime.block_on(async {
-            let mut events = runner.plan(request).await?.into_inner();
-            let mut result = None;
-            while let Some(event) = events.message().await? {
-                match event.event {
-                    Some(pb::plan_event::Event::Log(line)) => log(wire::log_from_wire(line)),
-                    Some(pb::plan_event::Event::Result(r)) => result = Some(r),
-                    None => {}
-                }
-            }
-            Ok::<_, tonic::Status>(result)
+        let run = self.runtime.block_on(async {
+            let events = runner.plan(request).await?.into_inner();
+            Ok::<_, tonic::Status>(
+                self.drive(events, stop, |event| match event.event {
+                    Some(pb::plan_event::Event::Log(line)) => {
+                        log(wire::log_from_wire(line));
+                        None
+                    }
+                    Some(pb::plan_event::Event::Result(r)) => Some(r),
+                    None => None,
+                })
+                .await,
+            )
         });
-        let result = self.finished("planning", result)?;
-        wire::plan_result_from_wire(result)
-            .map_err(|e| self.unreadable("planning", e))?
-            .map_err(RunFailure::Tool)
+        let run = run.unwrap_or_else(|status| Driven {
+            result: Err(status),
+            stopped: None,
+        });
+        let decode = |result| {
+            wire::plan_result_from_wire(result).map_err(|e| self.unreadable("planning", e))
+        };
+        match run.stopped {
+            None => decode(self.finished("planning", run.result)?)?.map_err(RunFailure::Tool),
+            Some(stopped) => match run.result {
+                // The tool finished in the moment before it was stopped: that
+                // is a result, and it is kept.
+                Ok(Some(result)) => match decode(result)? {
+                    Ok(plan) => Ok(plan),
+                    Err(error) => Err(RunFailure::Stopped(stopped.with(error))),
+                },
+                _ => Err(RunFailure::Stopped(stopped)),
+            },
+        }
     }
 
     /// Makes an artifact's desired state real. `log` receives the tool's
@@ -441,27 +497,137 @@ impl Client {
         artifact: &Artifact,
         log: &mut dyn FnMut(LogLine),
     ) -> Result<Applied, RunFailure> {
+        self.apply_with(context, artifact, log, &Stop::default())
+    }
+
+    /// [`Client::apply`], stopped early as `stop` says. A stopped apply
+    /// reports what the tool had done, as far as the plugin could tell.
+    pub fn apply_with(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &mut dyn FnMut(LogLine),
+        stop: &Stop,
+    ) -> Result<Applied, RunFailure> {
         let mut runner = self.runner("apply", self.info.operations.apply)?;
         let request = pb::ApplyRequest {
             context: Some(wire::context_to_wire(context)),
             artifact: Some(wire::artifact_to_wire(artifact)),
         };
-        let result = self.runtime.block_on(async {
-            let mut events = runner.apply(request).await?.into_inner();
-            let mut result = None;
-            while let Some(event) = events.message().await? {
-                match event.event {
-                    Some(pb::apply_event::Event::Log(line)) => log(wire::log_from_wire(line)),
-                    Some(pb::apply_event::Event::Result(r)) => result = Some(r),
-                    None => {}
-                }
-            }
-            Ok::<_, tonic::Status>(result)
+        let run = self.runtime.block_on(async {
+            let events = runner.apply(request).await?.into_inner();
+            Ok::<_, tonic::Status>(
+                self.drive(events, stop, |event| match event.event {
+                    Some(pb::apply_event::Event::Log(line)) => {
+                        log(wire::log_from_wire(line));
+                        None
+                    }
+                    Some(pb::apply_event::Event::Result(r)) => Some(r),
+                    None => None,
+                })
+                .await,
+            )
         });
-        let result = self.finished("applying", result)?;
-        wire::apply_result_from_wire(result)
-            .map_err(|e| self.unreadable("applying", e))?
-            .map_err(RunFailure::Tool)
+        let run = run.unwrap_or_else(|status| Driven {
+            result: Err(status),
+            stopped: None,
+        });
+        let decode = |result| {
+            wire::apply_result_from_wire(result).map_err(|e| self.unreadable("applying", e))
+        };
+        match run.stopped {
+            None => decode(self.finished("applying", run.result)?)?.map_err(RunFailure::Tool),
+            Some(stopped) => match run.result {
+                Ok(Some(result)) => match decode(result)? {
+                    Ok(applied) => Ok(applied),
+                    Err(error) => Err(RunFailure::Stopped(stopped.with(error))),
+                },
+                _ => Err(RunFailure::Stopped(stopped)),
+            },
+        }
+    }
+
+    /// Reads a run's stream to its end, or until `stop` says to stop it.
+    ///
+    /// A stop asks the plugin to cancel and keeps reading, so that the
+    /// plugin's account of what the tool had done is heard, for up to the
+    /// stop's grace. A plugin too old to be asked is hung up on instead.
+    async fn drive<E, R>(
+        &self,
+        mut events: tonic::Streaming<E>,
+        stop: &Stop,
+        mut each: impl FnMut(E) -> Option<R>,
+    ) -> Driven<R> {
+        let started = Instant::now();
+        let mut result = None;
+        let mut stopped: Option<Stopped> = None;
+        let mut hear_until: Option<Instant> = None;
+        loop {
+            match tokio::time::timeout(STOP_POLL, events.message()).await {
+                Ok(Ok(Some(event))) => {
+                    if let Some(r) = each(event) {
+                        result = Some(r);
+                    }
+                }
+                Ok(Ok(None)) => break,
+                // A stream that breaks after the plugin was asked to stop is
+                // the plugin stopping; before, it is a failure to report.
+                Ok(Err(status)) => {
+                    if stopped.is_none() {
+                        return Driven {
+                            result: Err(status),
+                            stopped: None,
+                        };
+                    }
+                    break;
+                }
+                Err(_elapsed) => {}
+            }
+            match (&stopped, hear_until) {
+                (None, _) => {
+                    let cause = if stop.when.as_ref().is_some_and(|w| w.load(Ordering::SeqCst)) {
+                        Some(StopCause::Interrupted)
+                    } else {
+                        stop.after
+                            .filter(|limit| started.elapsed() >= *limit)
+                            .map(StopCause::TimedOut)
+                    };
+                    if let Some(cause) = cause {
+                        let answered = self.cancel().await;
+                        stopped = Some(Stopped {
+                            cause,
+                            changes: Vec::new(),
+                            output: String::new(),
+                            command: String::new(),
+                            answered,
+                        });
+                        if !answered {
+                            break;
+                        }
+                        hear_until = Some(Instant::now() + stop.grace);
+                    }
+                }
+                (Some(_), Some(until)) if Instant::now() >= until => break,
+                _ => {}
+            }
+        }
+        Driven {
+            result: Ok(result),
+            stopped,
+        }
+    }
+
+    /// Asks the plugin to stop the run in progress. Whether it could be asked
+    /// and said yes.
+    async fn cancel(&self) -> bool {
+        let Some(channel) = &self.channel else {
+            return false;
+        };
+        let mut runner = RunnerClient::new(channel.clone());
+        matches!(
+            tokio::time::timeout(CANCEL_TIMEOUT, runner.cancel(pb::CancelRequest {})).await,
+            Ok(Ok(response)) if response.get_ref().was_running
+        )
     }
 
     /// Reads the values the last apply produced, without applying anything.
@@ -767,6 +933,10 @@ impl Process {
             version::PROTOCOLS_ENV,
             version::offer(&version::supported_protocols()),
         );
+        // In a process group of its own, so that a Ctrl-C meant for the host
+        // does not end the plugin under the host's feet: the host hears the
+        // interrupt, asks the plugin to stop, and records what it says.
+        own_process_group(&mut command);
         let mut child = spawn_when_ready(&mut command).map_err(|e| Error {
             path: path.to_owned(),
             msg: "could not start the plugin".to_owned(),
@@ -897,6 +1067,22 @@ const _: fn() = || {
     fn shareable<T: Send + Sync>() {}
     shareable::<Client>();
 };
+
+/// Puts the plugin in a process group of its own. See [`Process::spawn`].
+#[cfg(unix)]
+fn own_process_group(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    command.process_group(0);
+}
+
+/// On Windows a new process group also detaches the plugin from the
+/// console's Ctrl-C, which is the point.
+#[cfg(windows)]
+fn own_process_group(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+}
 
 /// Starts a process, trying again when the program is briefly "busy".
 ///

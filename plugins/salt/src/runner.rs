@@ -10,8 +10,9 @@ use std::path::{Path, PathBuf};
 
 use meridian_sdk::tool::{write_artifact, Finished, Tool};
 use meridian_sdk::{
-    decode_value, Applied, Artifact, Change, ChangeAction, Log, Operations, Part, Plan, RunContext,
-    RunError, Runner, SecretFile, Value,
+    agent_for, credential_for_this_machine, decode_value, AgentPrograms, Applied, Artifact, Change,
+    ChangeAction, HeldCredential, Log, Operations, Part, Plan, RunContext, RunError, Runner,
+    SecretFile, Value,
 };
 use meridian_sdk::{settings, Setting};
 
@@ -31,7 +32,7 @@ pub const ARGS_VARIABLE: &str = "MERIDIAN_SALT_ARGS";
 /// What an operator can configure about this runner, in the order the
 /// settings are documented.
 pub fn settings() -> Vec<Setting> {
-    vec![
+    let mut declared = vec![
         Setting::new(
             "salt-call",
             SALT_CALL_VARIABLE,
@@ -56,7 +57,9 @@ pub fn settings() -> Vec<Setting> {
             "",
             "Extra arguments for every run, split like a shell command line. For example `--config-dir /srv/salt-config` locally, or `--user deploy --priv /home/me/.ssh/deploy -i` over SSH.",
         ),
-    ]
+    ];
+    declared.extend(meridian_sdk::agent::settings());
+    declared
 }
 
 /// The files `salt-ssh` needs beside the states: its configuration, which
@@ -86,6 +89,9 @@ pub struct SaltRunner {
     pub transport: Option<Transport>,
     /// Arguments added to every run, after Meridian's own options.
     pub extra_args: Vec<String>,
+    /// The programs an SSH agent is started with, when the document reaches
+    /// its host as a credential with a key.
+    pub agent: AgentPrograms,
 }
 
 impl SaltRunner {
@@ -105,6 +111,7 @@ impl SaltRunner {
                 _ => None,
             },
             extra_args: settings::args(setting("args")),
+            agent: AgentPrograms::from_settings(&declared),
         }
     }
 
@@ -137,7 +144,17 @@ impl SaltRunner {
             meridian_sdk::check_host(&context.host).map_err(|why| {
                 RunError::new(format!("salt-ssh cannot be given this host: {why}"))
             })?;
+        } else if let Some(credential) = &context.credential {
+            // salt-call configures this machine as the user running it,
+            // whoever the document names.
+            return Err(credential_for_this_machine("salt-call", credential));
         }
+        // The credential's key, when it has one, is in an agent for the
+        // length of the run, and salt-ssh is told where the agent is.
+        let agent = match transport {
+            Transport::Ssh => agent_for(&self.agent, context.credential.as_ref(), log)?,
+            Transport::Local => None,
+        };
 
         // Salt wants its file root as an absolute path, and the work
         // directory can only be made absolute once it exists.
@@ -154,14 +171,38 @@ impl SaltRunner {
         let pillar = pillar_root(context)?;
         let pillar_dir = pillar.as_ref().map(|p| p.dir().to_path_buf());
         let mut on_disk = artifact.clone();
+        // The roster is in the work directory, unless it holds the
+        // credential's password: then it is a file only the user can read,
+        // removed when the run ends, and the work directory never holds it.
+        let mut roster_path = work.join(SSH_ROSTER_PATH);
+        let mut private_roster = None;
         if transport == Transport::Ssh {
             on_disk.files.insert(
                 SSH_CONFIG_PATH.to_owned(),
                 ssh_config(&work, pillar_dir.as_deref()),
             );
-            on_disk
-                .files
-                .insert(SSH_ROSTER_PATH.to_owned(), ssh_roster(&context.host));
+            let roster = ssh_roster(&context.host, context.credential.as_ref());
+            match context
+                .credential
+                .as_ref()
+                .and_then(|c| c.secret("password"))
+            {
+                Some(password) => {
+                    let parts = [
+                        Part::Text(&roster),
+                        Part::Text("  passwd: \""),
+                        Part::JsonString(password),
+                        Part::Text("\"\n"),
+                    ];
+                    let file = SecretFile::create("roster", &parts)
+                        .map_err(|e| RunError::new(format!("writing the roster: {e}")))?;
+                    roster_path = file.path().to_path_buf();
+                    private_roster = Some(file);
+                }
+                None => {
+                    on_disk.files.insert(SSH_ROSTER_PATH.to_owned(), roster);
+                }
+            }
         }
         write_artifact(&work, &on_disk)?;
 
@@ -177,17 +218,20 @@ impl SaltRunner {
                 tool.args(["--out", "json", "--no-color", "--retcode-passthrough"])
                     .args(self.extra_args.iter().cloned())
             }),
-            Transport::Ssh => (
-                "salt-ssh",
-                Tool::new(&self.salt_ssh)
+            Transport::Ssh => ("salt-ssh", {
+                let tool = Tool::new(&self.salt_ssh)
                     .arg("--config-dir")
                     .arg(path_text(&work.join("ssh")))
                     .arg("--roster-file")
-                    .arg(path_text(&work.join(SSH_ROSTER_PATH)))
-                    .args(["--out", "json", "--no-color"])
-                    .args(self.extra_args.iter().cloned())
-                    .arg(&context.host),
-            ),
+                    .arg(path_text(&roster_path))
+                    .args(["--out", "json", "--no-color"]);
+                let tool = match &agent {
+                    Some(agent) => agent.tell(tool),
+                    None => tool,
+                };
+                tool.args(self.extra_args.iter().cloned())
+                    .arg(&context.host)
+            }),
         };
         let mut tool = tool.args(["state.apply", sls.as_str()]);
         if test {
@@ -198,6 +242,8 @@ impl SaltRunner {
         // line per state.
         let finished = tool.dir(&work).capture_stdout().run(log)?;
         drop(pillar);
+        drop(private_roster);
+        drop(agent);
         read_result(program, finished, test, log)
     }
 }
@@ -328,13 +374,26 @@ fn pillar_root(context: &RunContext) -> Result<Option<SecretFile>, RunError> {
     Ok(Some(file))
 }
 
-fn ssh_roster(host: &str) -> String {
-    format!(
+/// The roster entry for the host, with what the credential says about how to
+/// sign in: its user, and `priv: agent-forwarding` when its key is in the
+/// agent Meridian started or, with `agent: true`, in the user's own. A
+/// password is not here: the caller appends it, and keeps the file private.
+fn ssh_roster(host: &str, credential: Option<&HeldCredential>) -> String {
+    let mut roster = format!(
         "# Written by Meridian for salt-ssh. It is rewritten on every run.\n\
          {}:\n  host: {}\n",
         yaml_text(host),
         yaml_text(host),
-    )
+    );
+    if let Some(credential) = credential {
+        if let Some(user) = credential.text("user") {
+            roster.push_str(&format!("  user: {}\n", yaml_text(user)));
+        }
+        if credential.secret("privateKey").is_some() || credential.flag("agent") {
+            roster.push_str("  priv: agent-forwarding\n");
+        }
+    }
+    roster
 }
 
 /// What a run said.
@@ -582,6 +641,7 @@ mod tests {
             salt_ssh: "salt-ssh".into(),
             transport: None,
             extra_args: Vec::new(),
+            agent: AgentPrograms::default(),
         };
         assert_eq!(runner.transport_for("localhost"), Transport::Local);
         assert_eq!(runner.transport_for("127.0.0.1"), Transport::Local);
@@ -594,7 +654,7 @@ mod tests {
     #[test]
     fn the_ssh_files_quote_what_they_are_given() {
         assert_eq!(
-            ssh_roster("web01"),
+            ssh_roster("web01", None),
             "# Written by Meridian for salt-ssh. It is rewritten on every run.\n\"web01\":\n  host: \"web01\"\n"
         );
         // The paths are spelled the Unix way: salt-ssh, which reads this

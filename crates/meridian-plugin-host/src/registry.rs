@@ -7,7 +7,7 @@ use meridian_sdk::{
 };
 
 use crate::client::{Client, StartOptions};
-use crate::{EmitError, Error, ImportFailure, Info, RunFailure, BINARY_PREFIX};
+use crate::{EmitError, Error, ImportFailure, Info, RunFailure, Stop, BINARY_PREFIX};
 
 /// A registered target: an emitter compiled into this binary, or a plugin
 /// process. Code that compiles a document does not need to tell them apart.
@@ -98,7 +98,18 @@ impl Target {
         artifact: &Artifact,
         log: &mut dyn FnMut(LogLine),
     ) -> Result<Plan, RunFailure> {
-        self.client("plan")?.plan(context, artifact, log)
+        self.plan_with(context, artifact, log, &Stop::default())
+    }
+
+    /// [`Target::plan`], stopped early as `stop` says.
+    pub fn plan_with(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &mut dyn FnMut(LogLine),
+        stop: &Stop,
+    ) -> Result<Plan, RunFailure> {
+        self.client("plan")?.plan_with(context, artifact, log, stop)
     }
 
     /// Makes an artifact's desired state real.
@@ -108,7 +119,19 @@ impl Target {
         artifact: &Artifact,
         log: &mut dyn FnMut(LogLine),
     ) -> Result<Applied, RunFailure> {
-        self.client("apply")?.apply(context, artifact, log)
+        self.apply_with(context, artifact, log, &Stop::default())
+    }
+
+    /// [`Target::apply`], stopped early as `stop` says.
+    pub fn apply_with(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &mut dyn FnMut(LogLine),
+        stop: &Stop,
+    ) -> Result<Applied, RunFailure> {
+        self.client("apply")?
+            .apply_with(context, artifact, log, stop)
     }
 
     /// Reads the values the last apply produced.

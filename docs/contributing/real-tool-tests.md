@@ -74,6 +74,39 @@ opentofu, kubernetes, pulumi, dsc) has a schema export test in the same file,
 switched on by the same variable, that runs the export against the installed
 tool and checks a type it knows.
 
+## The vertical slice
+
+The tests above run one tool each, through its plugin's runner. One workflow is also
+applied end to end, through the real `meridian` binary and the real plugin binaries,
+with three tools at once: [`examples/workflow/vertical-slice.yaml`](../../examples/workflow/vertical-slice.yaml),
+walked through in [worked workflows](../quickstart/workflows.md#vertical-slice).
+`vertical-slice.yml` starts a kind cluster, installs Terraform and `ansible-core`, and
+runs [`crates/meridian-cli/tests/vertical_slice.rs`](../../crates/meridian-cli/tests/vertical_slice.rs)
+with `MERIDIAN_TEST_REAL_SLICE=1`.
+
+What it proves that the per-tool tests cannot: that a value one stage produces reaches
+the next through the orchestrator and the command line, with nothing standing in. The
+Kubernetes stage's `workload` output is imported by the Terraform stage and arrives as
+`TF_VAR_workload`; the Terraform stage's `address` output becomes the host the Ansible
+stage plays against. The test checks what each tool left behind (the Deployment and
+ConfigMap on the cluster, the file Terraform wrote, the file and marker Ansible wrote),
+that the record and the report name every stage, and that a second `plan` and a `drift`
+find every stage in sync.
+
+What it does not prove: anything about a cloud. The cluster is kind inside Docker,
+Terraform uses `terraform_data` and the `hashicorp/local` provider, and Ansible reaches
+the runner over the local connection, so no credentials are needed and none are read.
+A slice against real infrastructure (a machine Terraform creates and Ansible reaches
+over SSH) needs an account and a budget, and is the owner's to set up; the
+[Azure job](#azure) shows the shape such a job takes.
+
+To run it yourself:
+
+```
+kind create cluster --wait 180s
+MERIDIAN_TEST_REAL_SLICE=1 cargo test -p meridian-cli --test vertical_slice -- --ignored --nocapture
+```
+
 ## What a real-tool test should do
 
 The ones in this repository follow one shape. A new one should too.

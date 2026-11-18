@@ -27,11 +27,16 @@ pub enum Reason {
     StateFailed,
     /// The run's policy does not allow the change, or could not be asked.
     PolicyDenied,
+    /// The operator stopped the run while the stage was going, or before it
+    /// reached its tool.
+    Interrupted,
+    /// The stage's tool ran past the run's time limit and was stopped.
+    TimedOut,
 }
 
 impl Reason {
     /// Every reason, in the order the reference lists them.
-    pub const ALL: [Reason; 7] = [
+    pub const ALL: [Reason; 9] = [
         Reason::NoPlugin,
         Reason::CompileRefused,
         Reason::NotSupported,
@@ -39,6 +44,8 @@ impl Reason {
         Reason::ToolFailed,
         Reason::StateFailed,
         Reason::PolicyDenied,
+        Reason::Interrupted,
+        Reason::TimedOut,
     ];
 
     /// The word the record keeps.
@@ -51,11 +58,15 @@ impl Reason {
             Reason::ToolFailed => "tool-failed",
             Reason::StateFailed => "state-failed",
             Reason::PolicyDenied => "policy-denied",
+            Reason::Interrupted => "interrupted",
+            Reason::TimedOut => "timed-out",
         }
     }
 
     /// Whether the stage got as far as handing its artifact to the tool, so
-    /// the tool may have changed something.
+    /// the tool may have changed something. A stopped stage is not counted:
+    /// `meridian rollback` leaves what an interrupted or timed-out tool did
+    /// alone, because the plugin's account of it may be incomplete.
     pub fn reached_the_tool(self) -> bool {
         matches!(self, Reason::ToolFailed | Reason::PluginFailed)
     }

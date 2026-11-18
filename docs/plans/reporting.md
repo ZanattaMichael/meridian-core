@@ -150,8 +150,7 @@ sequenceDiagram
 | P6 | The server's storage | event files in the run record's layout, folded on request | a database, which would be a second thing to keep in step |
 | P7 | The server's access control | one write token, an optional read token, TLS at a proxy | users and roles in the server |
 
-P2 to P7 are recommendations the owner has not been asked to confirm one by
-one.
+P2 to P7 were made during the work and accepted by the owner on 2026-11-18.
 
 ## 7. Delivery
 

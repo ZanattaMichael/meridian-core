@@ -59,6 +59,8 @@ and in the `failure` element of a [JUnit report](reporting.md).
 | `tool-failed` | the tool said no: it exited non-zero, or could not reach the machine |
 | `state-failed` | the step's working directory could not be prepared |
 | `policy-denied` | the run's [policy](policy.md) does not allow the change, or could not be asked |
+| `interrupted` | the operator stopped the run with Ctrl-C (or a `SIGTERM`) while the step was going, or before its tool was started |
+| `timed-out` | the step's tool ran past `--stage-timeout` and was stopped |
 
 A step's record can also hold words that are not a stage failure: a step that
 was skipped because an earlier one failed says `earlier-step-failed`, and a

@@ -1,0 +1,20 @@
+# Dependabot version updates. The Rust crates in Cargo.lock and the actions
+# the workflows use are grouped so that at most two pull requests open a week.
+# There is no Go section: the Go implementation was removed when the core
+# moved to Rust (issue 56).
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      rust-dependencies:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

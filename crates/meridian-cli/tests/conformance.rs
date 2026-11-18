@@ -128,13 +128,13 @@ const CASES: &[Case] = &[
     case(
         "package",
         "`name` is a number",
-        Varies,
+        Same,
         "    - id: a\n      type: package\n      params:\n        name: 42\n",
     ),
     case(
         "package",
         "`name` is a list",
-        Varies,
+        Same,
         "    - id: a\n      type: package\n      params:\n        name: [nginx, curl]\n",
     ),
     // ---- service -------------------------------------------------------
@@ -189,7 +189,7 @@ const CASES: &[Case] = &[
     case(
         "service",
         "`enabled` is text, not true or false",
-        Varies,
+        Same,
         "    - id: a\n      type: service\n      params:\n        name: nginx\n        enabled: 'yes'\n",
     ),
     case(
@@ -268,7 +268,7 @@ const CASES: &[Case] = &[
     case(
         "file",
         "`mode` unquoted, so read as a number",
-        Varies,
+        Same,
         "    - id: a\n      type: file\n      params:\n        path: /etc/app/app.conf\n        content: \"x\\n\"\n        mode: 0644\n",
     ),
     case(
@@ -317,7 +317,7 @@ const CASES: &[Case] = &[
     case(
         "user",
         "`groups` is text, not a list",
-        Varies,
+        Same,
         "    - id: a\n      type: user\n      params:\n        name: deploy\n        groups: adm\n",
     ),
     case(

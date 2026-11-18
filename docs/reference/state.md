@@ -137,7 +137,7 @@ and compare.
 |---|---|
 | `id` | the run's id: the second it started, and four characters that order and separate runs within that second |
 | `mode` | `plan`, `apply`, `drift` or `rollback` |
-| `status` | `running`, `succeeded` or `failed`. A run that was killed stays `running` |
+| `status` | `running`, `succeeded` or `failed`. A run that was stopped with Ctrl-C or by a time limit is `failed`, with a step whose `reason` says which; a run that was killed stays `running` |
 | `resumes` | the run this one continued, when it was started with `--resume` |
 | `selector` | the `-l` selection, when there was one |
 
@@ -168,6 +168,8 @@ A step's `reason`, when it failed:
 | `tool-failed` | the tool said no: it exited non-zero, or could not reach the machine |
 | `state-failed` | the step's working directory could not be prepared |
 | `policy-denied` | the run's [policy](policy.md) does not allow the change, or could not be asked |
+| `interrupted` | the operator stopped the run with Ctrl-C (or a `SIGTERM`) while the step was going, or before its tool was started |
+| `timed-out` | the step's tool ran past `--stage-timeout` and was stopped |
 
 These words are fixed: a new kind of failure gets a new word, and a word is
 never reused. They are also listed with every other error code in

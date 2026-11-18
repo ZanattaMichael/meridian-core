@@ -12,8 +12,8 @@ use std::sync::Mutex;
 
 use meridian_sdk::tool::Tool;
 use meridian_sdk::{
-    decode_value, Applied, Artifact, Log, NoLog, Operations, Plan, RunContext, RunError, Runner,
-    Value,
+    decode_value, AgentPrograms, Applied, Artifact, Log, NoLog, Operations, Plan, RunContext,
+    RunError, Runner, Value,
 };
 use meridian_sdk::{settings, Setting};
 use meridian_target_puppet::{PuppetRunner, Transport};
@@ -32,7 +32,7 @@ pub const VERIFY_VARIABLE: &str = "MERIDIAN_OPENVOX_VERIFY";
 /// What an operator can configure about this runner, in the order the
 /// settings are documented.
 pub fn settings() -> Vec<Setting> {
-    vec![
+    let mut declared = vec![
         Setting::new(
             "openvox",
             OPENVOX_VARIABLE,
@@ -63,7 +63,9 @@ pub fn settings() -> Vec<Setting> {
             "warn",
             "`warn`, `strict` or `off`: what to do when the tool turns out not to be OpenVox. `warn` says so and runs it, `strict` refuses, `off` does not ask.",
         ),
-    ]
+    ];
+    declared.extend(meridian_sdk::agent::settings());
+    declared
 }
 
 /// Where the OpenVox and OpenBolt packages install their commands. The
@@ -171,6 +173,7 @@ impl OpenVoxRunner {
                 bolt: bolt.into(),
                 transport: None,
                 extra_args: Vec::new(),
+                agent: AgentPrograms::default(),
             },
             verify: Verify::default(),
             checked: Mutex::new(None),
@@ -203,6 +206,7 @@ impl OpenVoxRunner {
             "bolt" => Some(Transport::Bolt),
             _ => None,
         };
+        runner.tool.agent = AgentPrograms::from_settings(&declared);
         runner.tool.extra_args = settings::args(setting("args"));
         runner.verify = Verify::parse(&settings::text(setting("verify")));
         runner

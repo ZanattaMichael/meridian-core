@@ -14,8 +14,8 @@ use meridian_ir::Bundle;
 use meridian_orchestrator::backend::{Backend, ExecBackend, LocalBackend, MemoryBackend};
 use meridian_orchestrator::record::{self, RunStatus, StepStatus};
 use meridian_orchestrator::{
-    event, lock, run, work_dir, Event, LockInfo, Mode, Observer, Options, Outcome, Quiet, Reason,
-    Refusal, Resume, RunState, StageId, StageKind, StageReport,
+    event, lock, run, work_dir, Event, LockInfo, Mode, Observer, OnFailure, Options, Outcome,
+    Quiet, Reason, Refusal, Resume, RunState, StageId, StageKind, StageReport, Stop,
 };
 use meridian_plugin_host::{Registry, StartOptions};
 use meridian_sdk::LogLine;
@@ -448,6 +448,156 @@ fn a_stage_not_run_is_recorded_as_skipped_because_of_the_one_that_failed() {
 
 /// Applies a workflow whose second stage fails, and returns the options and
 /// the failed run's id.
+#[test]
+fn a_stage_past_the_time_limit_is_recorded_as_timed_out_and_the_lock_is_released() {
+    let registry = registry();
+    let options = Options {
+        stop: Stop::after(Duration::from_millis(300)),
+        ..options("timed-out")
+    };
+    let backend = options.store();
+    let mut recorder = Recorder::default();
+    let report = run(
+        &workflow("HANG welcome"),
+        &registry,
+        Mode::Apply,
+        &options,
+        &mut recorder,
+    );
+    assert!(!report.succeeded());
+    assert!(!report.interrupted());
+    assert!(lock::holder(backend.as_ref()).unwrap().is_none());
+
+    let record = record::load_run(backend.as_ref(), &report.run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(record.status, RunStatus::Failed);
+    let timed_out = record.step(&web()).unwrap();
+    assert_eq!(timed_out.status, StepStatus::Failed);
+    assert_eq!(timed_out.reason, "timed-out");
+    let Outcome::Failed(why) = &report.stages[1].outcome else {
+        panic!("{:?}", report.stages[1].outcome);
+    };
+    assert!(why.starts_with("timed out after 300ms"), "{why}");
+    let event = recorder
+        .events
+        .iter()
+        .find(|e| e.kind == event::STEP_FAILED)
+        .unwrap();
+    assert_eq!(event.detail["reason"].as_str(), Some("timed-out"));
+    assert_eq!(*kinds(&recorder.events).last().unwrap(), "lock.released");
+
+    // Fixed, the run is resumed like any failed one: the stage that timed
+    // out is applied, the one before it left alone.
+    let resumed = run(
+        &workflow("welcome"),
+        &registry,
+        Mode::Apply,
+        &resuming(&options, Resume::Last),
+        &mut Quiet,
+    );
+    assert!(resumed.succeeded(), "{:?}", resumed.stages);
+    assert!(matches!(resumed.stages[0].outcome, Outcome::Skipped { .. }));
+    assert!(matches!(resumed.stages[1].outcome, Outcome::Applied { .. }));
+}
+
+#[test]
+fn an_interrupted_apply_is_recorded_as_such_and_is_not_rolled_back_by_itself() {
+    let registry = registry();
+    let flag = Arc::new(AtomicBool::new(false));
+    let options = Options {
+        stop: Stop::when(Arc::clone(&flag)),
+        on_failure: OnFailure::Rollback,
+        ..options("interrupted")
+    };
+    let backend = options.store();
+    // The interrupt arrives while the second stage's tool is waiting.
+    let asked = Arc::clone(&flag);
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(500));
+        asked.store(true, Ordering::SeqCst);
+    });
+    let report = run(
+        &workflow("HANG welcome"),
+        &registry,
+        Mode::Apply,
+        &options,
+        &mut Quiet,
+    );
+    assert!(report.interrupted());
+    assert!(lock::holder(backend.as_ref()).unwrap().is_none());
+    let record = record::load_run(backend.as_ref(), &report.run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(record.status, RunStatus::Failed);
+    assert_eq!(
+        record.step(&network()).unwrap().status,
+        StepStatus::Succeeded
+    );
+    let interrupted = record.step(&web()).unwrap();
+    assert_eq!(interrupted.status, StepStatus::Failed);
+    assert_eq!(interrupted.reason, "interrupted");
+    let Outcome::Failed(why) = &report.stages[1].outcome else {
+        panic!("{:?}", report.stages[1].outcome);
+    };
+    assert!(why.starts_with("interrupted: the run was stopped"), "{why}");
+
+    // Nothing was put back: the operator asked for the run to stop, not
+    // for more tools to run. They are told how to roll back by hand.
+    assert!(report.rollbacks.is_empty(), "{:?}", report.rollbacks);
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.contains("nothing was rolled back")),
+        "{:?}",
+        report.warnings
+    );
+    assert_eq!(motd_in(&options), "", "the interrupted stage wrote nothing");
+}
+
+/// A stage that has not started when the interrupt arrives is interrupted
+/// without its tool ever being asked.
+#[test]
+fn an_interrupt_before_a_stage_starts_does_not_start_its_tool() {
+    let registry = registry();
+    let flag = Arc::new(AtomicBool::new(true));
+    let options = Options {
+        stop: Stop::when(flag),
+        ..options("interrupted-early")
+    };
+    let report = run(
+        &workflow("welcome"),
+        &registry,
+        Mode::Apply,
+        &options,
+        &mut Quiet,
+    );
+    assert!(report.interrupted());
+    assert_eq!(report.stages[0].reason, Some(Reason::Interrupted));
+    let Outcome::Failed(why) = &report.stages[0].outcome else {
+        panic!("{:?}", report.stages[0].outcome);
+    };
+    assert_eq!(
+        why,
+        "interrupted: the run was stopped before the tool was started"
+    );
+    assert!(matches!(report.stages[1].outcome, Outcome::NotRun { .. }));
+    assert!(!work_dir(&options.state_dir, &network(), "fake")
+        .join("current")
+        .exists());
+}
+
+/// What the web stage's tool has written, or nothing.
+fn motd_in(options: &Options) -> String {
+    fs::read_to_string(
+        work_dir(&options.state_dir, &web(), "fake")
+            .join("current")
+            .join("motd"),
+    )
+    .unwrap_or_default()
+}
+
 fn failed_apply(registry: &Registry, test: &str) -> (Options, String) {
     let options = options(test);
     let report = run(

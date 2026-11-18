@@ -526,6 +526,8 @@ The runner is configured through the environment of the `meridian` command.
 | `MERIDIAN_PODMAN_SCOPE` | `user` | `user` installs rootless units in `~/.config/containers/systemd` and uses `systemctl --user`. `system` installs them in `/etc/containers/systemd`, using `sudo -n` for the changes when you are not root. |
 | `MERIDIAN_PODMAN_SSH_ARGS` | none | Extra arguments for every `ssh`, such as `-l deploy -i ~/.ssh/deploy`. |
 | `MERIDIAN_PODMAN_SSH` | `ssh` | The `ssh` program. |
+| `MERIDIAN_SSH_AGENT` | `ssh-agent` | The `ssh-agent` program, started for a credential's key; see [Credentials](#credentials). |
+| `MERIDIAN_SSH_ADD` | `ssh-add` | The `ssh-add` program. |
 | `MERIDIAN_PODMAN` | `podman` | The `podman` program on the host. |
 | `MERIDIAN_PODMAN_SYSTEMCTL` | `systemctl` | The `systemctl` program on the host. |
 | `MERIDIAN_PODMAN_QUADLET` | found automatically | Quadlet's generator on the host, when it is not where distributions install it. |
@@ -545,6 +547,51 @@ For rootless units to keep running after you log out, enable lingering for the u
 
 Podman uses its own configuration for registries and credentials. Meridian does not store
 or pass any: if `podman pull` works for the user on the host, so will an apply.
+
+## Credentials
+
+`targetHost.credential` names the [credential](../reference/dsl/credentials.md) the host is
+reached as. The plugin reaches another machine with `ssh`, so it takes an `ssh` credential with a user and a private key, and gives `ssh` the two the way `ssh` takes them:
+
+```yaml
+spec:
+  target: podman
+  targetHost:
+    from: inline
+    host: edge01.example.com
+    credential: deploy
+  secrets:
+    - name: deploy_key
+      from: env
+      key: DEPLOY_KEY
+  credentials:
+    - name: deploy
+      type: ssh
+      user: deploy
+      privateKey: ${{ secret.deploy_key }}
+```
+
+- **The user** is `ssh`'s `-l`, before the arguments of `MERIDIAN_PODMAN_SSH_ARGS`.
+- **A key is never on disk.** It goes into an SSH agent Meridian starts for the stage:
+  `ssh-agent -D -a <socket>`, its socket in a directory only you can enter, loaded with
+  `ssh-add -` from standard input. `ssh` is told the socket in `SSH_AUTH_SOCK` and
+  nothing else. A `passphrase` is answered to `ssh-add` from a file only you can read. The
+  agent is stopped and its directory removed when the stage ends. Nothing of the key is on
+  the command line, in the environment, in the compiled files or in a file Meridian keeps.
+- **`agent: true`** names a key in your own agent: `ssh` reads `SSH_AUTH_SOCK` as it is,
+  and Meridian starts nothing. **`from: ambient`** leaves signing in to the tool's own
+  configuration, as with no credential at all.
+- **Refused at compile**, rule `unsupported-credential`: a `password` (`ssh` asks for one on a terminal, which a run has not; reach the host as an `ssh` credential with a `privateKey`); a `certificate` (put it
+  beside the key in an agent of your own and set `agent: true`); a `domain` (for WinRM
+  hosts, which this plugin does not reach); a user name with a space or a line break.
+- **Refused at run time:** a credential for this machine (`localhost`, `127.0.0.1`, `::1`
+  or no host). The scripts run here as the user running Meridian, whoever the document names. Leave the credential out, or name another host.
+
+The plan line names the identity, `web (podman) on edge01.example.com as deploy (ssh,
+user deploy)`, and never a value. `ssh-agent` and `ssh-add` are run from `PATH`, or from
+`MERIDIAN_SSH_AGENT` and `MERIDIAN_SSH_ADD`.
+
+The handover is tested against stand-ins for `ssh`, `ssh-agent` and `ssh-add` that keep what they are given: `ssh` sees `-l deploy` and the socket, `ssh-add` sees the key on its standard input and the passphrase from its askpass program, and the key is in nothing printed or left behind. The real `ssh` is not driven in CI; the Podman workflow has no SSH server.
 
 ## What this target cannot express
 

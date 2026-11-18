@@ -7,6 +7,21 @@ this page says Puppet, the same holds for `openvox`.
 Anything outside these tables is refused, never dropped: a param a target does
 not take, a state it cannot express, an action it cannot perform.
 
+The kind of value each param takes is checked in one place, the same way on all
+six targets, before a plugin applies its own rules: text where a name is wanted
+(`name`, `path`, `mode`, `shell`), true or false where a flag is wanted
+(`enabled`, `system`, `append`), a whole number for `uid` and `gid`, a list for
+`groups`, `members` and `ssh_authorized_keys`. A value of the wrong kind is
+refused as `invalid-param` with the same message whichever target the document
+names, so a document that compiles for Ansible does not fail on Chef for a
+reason that has nothing to do with Chef. The strict reading was chosen on
+purpose: a number or a list where a name is wanted, or `yes` where true is
+wanted, is refused rather than passed to the tool to interpret
+([decision 0024](../decisions/0024-shared-param-kinds-are-checked-once-strictly.md)).
+A secret passes wherever text would. A param with no value, and a secret inside
+a list or a map, are refused by the target itself under the rule that names the
+problem (`empty-param`, `unsupported-secret-place`).
+
 How the rest of a configuration management document is written is in
 [the configuration management flavour](dsl/configuration-management.md).
 

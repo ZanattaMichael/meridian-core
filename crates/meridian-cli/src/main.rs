@@ -24,6 +24,7 @@ macro_rules! out {
     };
 }
 
+mod interrupt;
 mod tools;
 
 use std::collections::BTreeMap;
@@ -39,9 +40,9 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use meridian_ir::Bundle;
 use meridian_orchestrator::{
-    lock, record, run_selected, selected, Backend, Drift, Event, ExecBackend, LocalBackend, Mode,
-    Observer, OnFailure, Options, Outcome, Policy, Reason, Resume, RollbackOutcome, RollbackReport,
-    RunRecord, Selector, StageId, StageReport, MASK,
+    describe_duration, lock, record, run_selected, selected, Backend, Drift, Event, ExecBackend,
+    LocalBackend, Mode, Observer, OnFailure, Options, Outcome, Policy, Reason, Resume,
+    RollbackOutcome, RollbackReport, RunRecord, Selector, StageId, StageReport, Stop, MASK,
 };
 use meridian_plugin_host::{
     signature::signature_path, Policy as SignaturePolicy, PublicKey, Registry, SecretKey,
@@ -594,6 +595,10 @@ struct Workflow {
     /// 30s, 5m or 1h. By default a locked state is refused at once
     #[arg(long, value_name = "DURATION", default_value = "0s", value_parser = parse_duration)]
     lock_timeout: Duration,
+    /// Stop a stage whose tool has run this long, as in 30m or 2h, and fail
+    /// the run as timed out. By default a tool may take as long as it takes
+    #[arg(long, value_name = "DURATION", value_parser = parse_duration)]
+    stage_timeout: Option<Duration>,
     /// Write every event of the run to standard output as it happens, one
     /// JSON object per line. The report for people moves to standard error
     #[arg(long, value_name = "FORMAT")]
@@ -826,6 +831,8 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(Failure::Reported) => ExitCode::FAILURE,
         Err(Failure::Drifted) => ExitCode::from(2),
+        // The status a shell gives a command ended by Ctrl-C.
+        Err(Failure::Interrupted) => ExitCode::from(130),
         Err(Failure::Message(msg)) => {
             eprintln!("error: {msg}");
             ExitCode::FAILURE
@@ -903,6 +910,8 @@ pub(crate) enum Failure {
     Reported,
     /// A drift check ran, and found drift. Already printed.
     Drifted,
+    /// The operator stopped the run. Already printed.
+    Interrupted,
 }
 
 pub(crate) fn count(n: usize, noun: &str) -> String {
@@ -1832,6 +1841,9 @@ fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Result<(), Fai
     if how.rollback_on_failure {
         command.push("--on-failure rollback".to_owned());
     }
+    if let Some(limit) = workflow.stage_timeout {
+        command.push(format!("--stage-timeout {}", describe_duration(limit)));
+    }
     for path in &workflow.policy {
         command.push(format!("--policy {}", path.display()));
     }
@@ -1880,6 +1892,13 @@ fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Result<(), Fai
         },
         policy,
         strict_secrets: workflow.strict_secrets,
+        // Compiling drives no tool, so there is nothing to interrupt but the
+        // process itself, which Ctrl-C does as it always did.
+        stop: Stop {
+            when: (mode != Mode::Compile).then(interrupt::install),
+            after: workflow.stage_timeout,
+            ..Stop::default()
+        },
         ..Options::new(&workflow.state.state_dir)
     };
     let registry = registry(&workflow.state.plugins)?;
@@ -1958,23 +1977,37 @@ fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Result<(), Fai
             .stages
             .iter()
             .any(|s| matches!(s.outcome, Outcome::Applied { .. }));
+        // A line that can be pasted: the same documents and selection.
+        let files: Vec<String> = workflow
+            .files
+            .iter()
+            .map(|f| f.display().to_string())
+            .collect();
+        let selectors: Vec<String> = workflow
+            .selector
+            .iter()
+            .map(|text| format!(" -l {text}"))
+            .collect();
+        if report.interrupted() {
+            if mode == Mode::Apply {
+                eprintln!(
+                    "run {} was interrupted. `meridian apply --resume {}{}` continues from the \
+                     stage that was stopped",
+                    report.run_id,
+                    files.join(" "),
+                    selectors.join("")
+                );
+            } else {
+                eprintln!("run {} was interrupted", report.run_id);
+            }
+            return Err(Failure::Interrupted);
+        }
         if denied && mode == Mode::Apply && !applied {
             eprintln!(
                 "run {} was stopped by its policy before anything was applied",
                 report.run_id
             );
         } else if mode == Mode::Apply && report.rollbacks.is_empty() {
-            // A line that can be pasted: the same documents and selection.
-            let files: Vec<String> = workflow
-                .files
-                .iter()
-                .map(|f| f.display().to_string())
-                .collect();
-            let selectors: Vec<String> = workflow
-                .selector
-                .iter()
-                .map(|text| format!(" -l {text}"))
-                .collect();
             eprintln!(
                 "run {} failed. Once the cause is fixed, `meridian apply --resume {}{}` \
                  continues from the stage that failed",

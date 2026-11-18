@@ -3,8 +3,10 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
-use meridian_sdk::{Artifact, RunContext, Runner, SecretRef};
+use meridian_plugin_testkit::{
+    agent_stand_ins, artifact, credential, scratch, secrets, stand_in, KeptLog,
+};
+use meridian_sdk::{AgentPrograms, Artifact, RunContext, Runner, SecretRef};
 use meridian_target_puppet::{PuppetRunner, Transport};
 
 const TMP: &str = env!("CARGO_TARGET_TMPDIR");
@@ -41,6 +43,7 @@ fn runner(dir: &Path, puppet: &str, bolt: &str) -> PuppetRunner {
         bolt: record("bolt", bolt),
         transport: None,
         extra_args: Vec::new(),
+        agent: AgentPrograms::default(),
     }
 }
 
@@ -323,4 +326,165 @@ fn a_run_without_secrets_names_no_hiera_configuration() {
         .unwrap();
     let args = fs::read_to_string(dir.join("puppet.args")).unwrap();
     assert!(!args.contains("hiera"), "{args}");
+}
+
+// ---- credentials ----------------------------------------------------------
+
+const KEY: &str =
+    "-----BEGIN OPENSSH PRIVATE KEY-----\nnot-a-real-key-9fXw\n-----END OPENSSH PRIVATE KEY-----";
+
+/// A `bolt` stand-in body that keeps its environment and a copy of the
+/// inventory it is given, with the inventory's mode, then prints the report.
+fn keeping_inventory(dir: &Path) -> String {
+    format!(
+        "env > \"{dir}/env\"
+while [ $# -gt 0 ]; do
+  case \"$1\" in
+    --inventoryfile)
+      echo \"$2\" > \"{dir}/inventory-path\"
+      cp \"$2\" \"{dir}/inventory.yaml\"
+      stat -c %a \"$2\" > \"{dir}/mode\" 2>/dev/null || stat -f %Lp \"$2\" > \"{dir}/mode\"
+      shift;;
+  esac
+  shift
+done
+{BOLT_REPORT}",
+        dir = dir.display()
+    )
+}
+
+fn with_credential(dir: &Path, host: &str, kind: &str, fields: &[(&str, &str)]) -> RunContext {
+    let mut context = context(dir, host);
+    context.credential = Some(credential(kind, "deploy", fields));
+    context
+}
+
+#[test]
+fn a_credentials_key_reaches_bolt_through_an_agent_and_its_user_in_a_private_inventory() {
+    let dir = scratch(TMP, "credential-agent");
+    let mut puppet = runner(&dir, "exit 9", &keeping_inventory(&dir));
+    puppet.agent = agent_stand_ins(&dir);
+    let log = KeptLog::default();
+    let applied = puppet
+        .apply(
+            &with_credential(
+                &dir,
+                "web01",
+                "ssh",
+                &[("privateKey", KEY), ("passphrase", "open sesame")],
+            ),
+            &compiled(),
+            &log,
+        )
+        .unwrap();
+    assert_eq!(applied.changes.len(), 1);
+
+    let args = fs::read_to_string(dir.join("bolt.args")).unwrap();
+    assert!(
+        args.starts_with("apply apply.pp --targets web01 --format json --inventoryfile "),
+        "{args}"
+    );
+    assert!(!args.contains("deploy"), "{args}");
+    assert_eq!(
+        fs::read_to_string(dir.join("inventory.yaml")).unwrap(),
+        "---\n# Written by Meridian for this run, and removed with it.\n\
+         targets:\n  - uri: \"web01\"\n    config:\n      transport: ssh\n      ssh:\n        user: \"deploy\"\n"
+    );
+    // Bolt was told the agent's socket and nothing else of the credential.
+    let agent_args = fs::read_to_string(dir.join("ssh-agent.args")).unwrap();
+    let socket = agent_args
+        .trim()
+        .strip_prefix("-D -a ")
+        .expect("ssh-agent -D -a <socket>");
+    let env = fs::read_to_string(dir.join("env")).unwrap();
+    assert!(env.contains(&format!("SSH_AUTH_SOCK={socket}")), "{env}");
+    assert!(
+        !env.contains("not-a-real-key") && !env.contains("sesame"),
+        "{env}"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("added-key")).unwrap(),
+        format!("{KEY}\n")
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("added-passphrase")).unwrap(),
+        "open sesame\n"
+    );
+    // The inventory and the agent's directory are gone, and nothing printed
+    // holds the key.
+    let inventory_path = fs::read_to_string(dir.join("inventory-path")).unwrap();
+    assert!(!Path::new(inventory_path.trim()).exists());
+    assert!(!Path::new(socket).parent().unwrap().exists());
+    assert!(!log
+        .text()
+        .iter()
+        .any(|l| l.contains("not-a-real-key") || l.contains("sesame")));
+}
+
+#[test]
+fn a_credentials_password_is_in_the_private_inventory_and_nowhere_else() {
+    let dir = scratch(TMP, "credential-password");
+    let mut puppet = runner(&dir, "exit 9", &keeping_inventory(&dir));
+    puppet.agent = agent_stand_ins(&dir);
+    let log = KeptLog::default();
+    puppet
+        .plan(
+            &with_credential(
+                &dir,
+                "web01",
+                "usernamePassword",
+                &[("password", "hunter2\"\\")],
+            ),
+            &compiled(),
+            &log,
+        )
+        .unwrap();
+    assert!(fs::read_to_string(dir.join("inventory.yaml"))
+        .unwrap()
+        .ends_with(
+            "      ssh:\n        user: \"deploy\"\n        password: \"hunter2\\\"\\\\\"\n"
+        ));
+    #[cfg(unix)]
+    assert_eq!(fs::read_to_string(dir.join("mode")).unwrap().trim(), "600");
+    assert!(
+        !dir.join("ssh-agent.args").exists(),
+        "an agent was started for no key"
+    );
+    let shown = format!(
+        "{}\n{}\n{}",
+        fs::read_to_string(dir.join("bolt.args")).unwrap(),
+        fs::read_to_string(dir.join("env")).unwrap(),
+        log.text().join("\n")
+    );
+    assert!(!shown.contains("hunter2"), "{shown}");
+    for entry in fs::read_dir(dir.join("work")).unwrap() {
+        let path = entry.unwrap().path();
+        if let Ok(text) = fs::read_to_string(&path) {
+            assert!(
+                !text.contains("hunter2"),
+                "{} holds the password",
+                path.display()
+            );
+        }
+    }
+}
+
+#[test]
+fn a_credential_for_this_machine_is_refused() {
+    let dir = scratch(TMP, "credential-local");
+    let err = runner(&dir, NOOP, "exit 9")
+        .plan(
+            &with_credential(&dir, "localhost", "ssh", &[("privateKey", KEY)]),
+            &compiled(),
+            &KeptLog::default(),
+        )
+        .unwrap_err();
+    assert!(
+        err.msg.contains(
+            "the host is this machine, which puppet apply configures as the user running Meridian"
+        ),
+        "{}",
+        err.msg
+    );
+    assert!(!dir.join("puppet.args").exists(), "puppet was started");
 }

@@ -63,6 +63,8 @@ for each target by name.
 | `run` | `MERIDIAN_CHEF_RUN` | `chef-run` | The `chef-run` program, when it is not on `PATH`. |
 | `transport` | `MERIDIAN_CHEF_TRANSPORT` | none | `local` or `remote`, to override the choice made from the host: `local` converges this machine with chef-client, `remote` reaches the host with chef-run. |
 | `args` | `MERIDIAN_CHEF_ARGS` | none | Extra arguments for every run, split like a shell command line. |
+| `ssh-agent` | `MERIDIAN_SSH_AGENT` | `ssh-agent` | The `ssh-agent` program, when it is not on `PATH`. It is started for the length of a stage when the document reaches its host as a credential with a private key, which the tool is then given through the agent and nothing else. |
+| `ssh-add` | `MERIDIAN_SSH_ADD` | `ssh-add` | The `ssh-add` program, when it is not on `PATH`. It loads the credential's key into the agent from its standard input. |
 
 ## [cloud-init](../targets/cloud-init.md)
 
@@ -129,6 +131,8 @@ for each target by name.
 | `transport` | `MERIDIAN_OPENVOX_TRANSPORT` | none | `local` or `bolt`, to override the choice made from the host: `local` applies on this machine, `bolt` reaches the host with OpenBolt. |
 | `args` | `MERIDIAN_OPENVOX_ARGS` | none | Extra arguments for every run, split like a shell command line. |
 | `verify` | `MERIDIAN_OPENVOX_VERIFY` | `warn` | `warn`, `strict` or `off`: what to do when the tool turns out not to be OpenVox. `warn` says so and runs it, `strict` refuses, `off` does not ask. |
+| `ssh-agent` | `MERIDIAN_SSH_AGENT` | `ssh-agent` | The `ssh-agent` program, when it is not on `PATH`. It is started for the length of a stage when the document reaches its host as a credential with a private key, which the tool is then given through the agent and nothing else. |
+| `ssh-add` | `MERIDIAN_SSH_ADD` | `ssh-add` | The `ssh-add` program, when it is not on `PATH`. It loads the credential's key into the agent from its standard input. |
 
 ## [packer](../targets/packer.md)
 
@@ -148,6 +152,8 @@ for each target by name.
 | `quadlet` | `MERIDIAN_PODMAN_QUADLET` | none | Where Quadlet's generator is on the host, when it is not in one of the places distributions put it. |
 | `ssh` | `MERIDIAN_PODMAN_SSH` | `ssh` | The `ssh` program used to reach another host. |
 | `ssh-args` | `MERIDIAN_PODMAN_SSH_ARGS` | none | Extra arguments for every `ssh`, split like a shell command line: which user, which key, which port. For example `-l deploy -i ~/.ssh/deploy`. |
+| `ssh-agent` | `MERIDIAN_SSH_AGENT` | `ssh-agent` | The `ssh-agent` program, when it is not on `PATH`. It is started for the length of a stage when the document reaches its host as a credential with a private key, which the tool is then given through the agent and nothing else. |
+| `ssh-add` | `MERIDIAN_SSH_ADD` | `ssh-add` | The `ssh-add` program, when it is not on `PATH`. It loads the credential's key into the agent from its standard input. |
 
 ## [pulumi](../targets/pulumi.md)
 
@@ -164,6 +170,8 @@ for each target by name.
 | `bolt` | `MERIDIAN_BOLT` | `bolt` | The `bolt` program, when it is not on `PATH`. |
 | `transport` | `MERIDIAN_PUPPET_TRANSPORT` | none | `local` or `bolt`, to override the choice made from the host: `local` applies on this machine with `puppet apply`, `bolt` reaches the host with `bolt apply`. |
 | `args` | `MERIDIAN_PUPPET_ARGS` | none | Extra arguments for every run, split like a shell command line. |
+| `ssh-agent` | `MERIDIAN_SSH_AGENT` | `ssh-agent` | The `ssh-agent` program, when it is not on `PATH`. It is started for the length of a stage when the document reaches its host as a credential with a private key, which the tool is then given through the agent and nothing else. |
+| `ssh-add` | `MERIDIAN_SSH_ADD` | `ssh-add` | The `ssh-add` program, when it is not on `PATH`. It loads the credential's key into the agent from its standard input. |
 
 ## [salt](../targets/salt.md)
 
@@ -173,6 +181,8 @@ for each target by name.
 | `salt-ssh` | `MERIDIAN_SALT_SSH` | `salt-ssh` | The `salt-ssh` program, when it is not on `PATH`. |
 | `transport` | `MERIDIAN_SALT_TRANSPORT` | none | `local` or `ssh`, to override the choice made from the host: `local` applies on this machine with `salt-call --local`, `ssh` reaches the host with `salt-ssh`. |
 | `args` | `MERIDIAN_SALT_ARGS` | none | Extra arguments for every run, split like a shell command line. For example `--config-dir /srv/salt-config` locally, or `--user deploy --priv /home/me/.ssh/deploy -i` over SSH. |
+| `ssh-agent` | `MERIDIAN_SSH_AGENT` | `ssh-agent` | The `ssh-agent` program, when it is not on `PATH`. It is started for the length of a stage when the document reaches its host as a credential with a private key, which the tool is then given through the agent and nothing else. |
+| `ssh-add` | `MERIDIAN_SSH_ADD` | `ssh-add` | The `ssh-add` program, when it is not on `PATH`. It loads the credential's key into the agent from its standard input. |
 
 ## [terraform](../targets/terraform.md)
 

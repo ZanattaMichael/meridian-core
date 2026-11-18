@@ -120,6 +120,55 @@ flowchart LR
 Resuming is a saving, not a different result. A plain `meridian apply` of
 the same documents reaches the same end, by asking every tool again.
 
+## Stopping a run
+
+A run that reaches a tool can be stopped before the tool finishes, and the
+record says so.
+
+**Ctrl-C.** The first interrupt asks the run to stop: `meridian` tells the
+plugin to cancel, the plugin stops its tool (politely, then by force after
+ten seconds) and reports what the tool had done, the stage is recorded as
+failed with the reason `interrupted`, the stages after it as not run, the run
+as failed, and the lock is released. The command exits `130`, as a shell
+reports a command ended by Ctrl-C. A second interrupt ends the process at
+once, and the record is left as a killed run leaves it: `running`, with the
+lock to remove by hand.
+
+```
+$ meridian apply site.yaml
+network (Infrastructure, target terraform)
+  applied 4 changes
+web (ResourceSet, target ansible on 203.0.113.10)
+^C
+stopping: waiting for the tool to stop so the run can be recorded; press Ctrl-C again to exit at once
+  ~ update nginx_conf
+  FAILED: interrupted: the run was stopped (was running `ansible-playbook ...`)
+run 2026-11-17T09-14-03Z-0cc7 was interrupted. `meridian apply --resume site.yaml` continues from the stage that was stopped
+```
+
+An interrupted apply is not rolled back, even with `--on-failure rollback`:
+the operator asked for nothing more to happen, and a rollback runs more
+tools. `meridian rollback` puts it back when that is what is wanted. A
+`SIGTERM` from a supervisor is handled the same way as Ctrl-C.
+
+**A time limit.** `--stage-timeout 30m` stops a stage whose tool has run that
+long: a tool waiting on a prompt, a dead connection or a stuck cloud operation
+no longer holds the run, and the lock, forever. The stage is recorded as
+failed with the reason `timed-out`, and the run goes on as after any failure:
+later stages are not run, `--on-failure rollback` rolls back. There is no
+limit unless one is asked for, so a long apply is as long as it always was.
+
+Either way, `--resume` continues from the stopped stage, exactly as from a
+failed one: a stage that was stopped is applied again, and an apply is safe to
+repeat. What the tool had done before it was stopped is listed above the
+failure, as far as the tool reported it, and counted in the record's
+`changes`.
+
+A plugin built against an SDK that does not know how to be asked to stop
+cannot be stopped this way. `meridian` then gives up on the run and says that
+the tool may still be running; the lock is still released. The plugins in
+this repository all know.
+
 ## Sharing the record
 
 By default the record is in the state directory, which suits one person or

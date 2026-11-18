@@ -245,6 +245,8 @@ empty, so a run never says "nothing to do" on no evidence.
 | `MERIDIAN_BOLT` | the `bolt` program, when it is not on `PATH` |
 | `MERIDIAN_PUPPET_TRANSPORT` | `local` or `bolt`, to override the choice made from the host |
 | `MERIDIAN_PUPPET_ARGS` | arguments added to every run, split like a shell command line (quotes hold a word together): `--confdir /tmp/p --vardir /tmp/v --codedir /tmp/c` for an isolated run, or Bolt's `--inventoryfile inventory.yaml` |
+| `MERIDIAN_SSH_AGENT` | the `ssh-agent` program, when it is not on `PATH`; started for a credential's key, see [Credentials](#credentials) |
+| `MERIDIAN_SSH_ADD` | the `ssh-add` program, when it is not on `PATH` |
 
 Every setting can also be written in the project's `meridian.yaml` under
 `spec.settings.puppet`, by its short name; the environment variable still wins.
@@ -314,6 +316,66 @@ data file, its mode, its arguments and its environment, and against the real
 `puppet` in CI (`MERIDIAN_TEST_REAL_PUPPET=1`), which applies a file whose
 content is a secret and whose value then appears in the file and in nothing
 Puppet printed or the plugin wrote.
+
+## Credentials
+
+`targetHost.credential` names the [credential](../reference/dsl/credentials.md) the host is
+reached as. Another machine is reached with `bolt`, which reads how to sign in from an inventory, so the plugin writes one for the run:
+
+```yaml
+spec:
+  target: puppet
+  targetHost:
+    from: inline
+    host: web01.example.com
+    credential: deploy
+  secrets:
+    - name: deploy_key
+      from: env
+      key: DEPLOY_KEY
+  credentials:
+    - name: deploy
+      type: ssh
+      user: deploy
+      privateKey: ${{ secret.deploy_key }}
+```
+
+- **The user and a password** (an `ssh` credential with a `password`, or a
+  `usernamePassword` one) go into a Bolt inventory written for the run, in a directory only
+  you can enter and removed when the run ends, and `--inventoryfile` names it:
+
+  ```yaml
+  targets:
+    - uri: "web01.example.com"
+      config:
+        transport: ssh
+        ssh:
+          user: "deploy"
+          password: "..."
+  ```
+
+- Bolt's own `--inventoryfile` in `MERIDIAN_PUPPET_ARGS` is then a second inventory; leave
+  it out when the document names a credential.
+- **A key is never on disk.** It goes into an SSH agent Meridian starts for the stage:
+  `ssh-agent -D -a <socket>`, its socket in a directory only you can enter, loaded with
+  `ssh-add -` from standard input. `bolt` is told the socket in `SSH_AUTH_SOCK` and
+  nothing else. A `passphrase` is answered to `ssh-add` from a file only you can read. The
+  agent is stopped and its directory removed when the stage ends. Nothing of the key is on
+  the command line, in the environment, in the compiled files or in a file Meridian keeps.
+- **`agent: true`** names a key in your own agent: `bolt` reads `SSH_AUTH_SOCK` as it is,
+  and Meridian starts nothing. **`from: ambient`** leaves signing in to the tool's own
+  configuration, as with no credential at all.
+- **Refused at compile**, rule `unsupported-credential`: a `certificate` (put it
+  beside the key in an agent of your own and set `agent: true`); a `domain` (for WinRM
+  hosts, which this plugin does not reach); a user name with a space or a line break.
+- **Refused at run time:** a credential for this machine (`localhost`, `127.0.0.1`, `::1`
+  or no host). `puppet apply` configures this machine as the user running Meridian, whoever the document names. Leave the credential out, or name another host.
+
+The plan line names the identity, `web (puppet) on web01.example.com as deploy (ssh,
+user deploy)`, and never a value. `ssh-agent` and `ssh-add` are run from `PATH`, or from
+`MERIDIAN_SSH_AGENT` and `MERIDIAN_SSH_ADD`.
+
+The handover is tested against stand-ins for `bolt`, `ssh-agent` and `ssh-add` that keep what they are given (the inventory and its mode, the environment, the key and the passphrase). The real `bolt` is not driven in CI.
 
 ## What is refused
 

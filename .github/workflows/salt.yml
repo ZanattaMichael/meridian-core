@@ -76,4 +76,5 @@ jobs:
           export MERIDIAN_TEST_REAL_SALT_CALL_ROOT="$RUNNER_TEMP/salt-call-as-root"
           export MERIDIAN_TEST_REAL_SALT_SSH="$(command -v salt-ssh)"
           export MERIDIAN_TEST_REAL_SALT_SSH_ARGS="--priv $HOME/.ssh/meridian_test --user $(id -un) -i"
+          export MERIDIAN_TEST_REAL_SALT_SSH_KEY="$HOME/.ssh/meridian_test"
           cargo test -p meridian-target-salt --locked --test real_salt -- --ignored

@@ -76,8 +76,18 @@ const PLACE_FOR_A_SECRET: &[(&str, &str)] = &[
     ),
 ];
 
-/// The targets that reach a host as a credential.
-const TAKE_A_CREDENTIAL: &[&str] = &["ansible"];
+/// The targets that reach a host as a credential, in name order, and
+/// whether the artifact names its user. Ansible writes the user into the
+/// inventory; the others hand it to their tool at run time (an ssh option,
+/// a roster or inventory written for the run) and compile nothing of it.
+const TAKE_A_CREDENTIAL: &[(&str, bool)] = &[
+    ("ansible", true),
+    ("chef", false),
+    ("openvox", false),
+    ("podman", false),
+    ("puppet", false),
+    ("salt", false),
+];
 
 /// The targets, each with the examples of its own that hold one document
 /// and decide nothing from data, in name order.
@@ -438,7 +448,9 @@ fn credential(target: &str, files: &[PathBuf]) -> Vec<String> {
         &format!("credential-conformance-{target}"),
     );
     let (document, named) = with_credential(&example);
-    let takes = TAKE_A_CREDENTIAL.contains(&target);
+    let takes = TAKE_A_CREDENTIAL.iter().find(|(name, _)| *name == target);
+    let names_user = takes.is_some_and(|(_, names_user)| *names_user);
+    let takes = takes.is_some();
 
     let validated = meridian(&dir, "validate", &document);
     nothing_leaked(&format!("{target}: validate"), &validated);
@@ -464,10 +476,11 @@ fn credential(target: &str, files: &[PathBuf]) -> Vec<String> {
                     outcome.said
                 ));
             }
-            if !outcome.said.contains(&format!(
-                "targets that do: {}",
-                TAKE_A_CREDENTIAL.join(", ")
-            )) {
+            let takers: Vec<&str> = TAKE_A_CREDENTIAL.iter().map(|(name, _)| *name).collect();
+            if !outcome
+                .said
+                .contains(&format!("targets that do: {}", takers.join(", ")))
+            {
                 failures.push(format!(
                     "{target}: {command}: the refusal must say who takes one:\n{}",
                     outcome.said
@@ -483,7 +496,7 @@ fn credential(target: &str, files: &[PathBuf]) -> Vec<String> {
                     outcome.said
                 ));
             }
-            if named && takes && !artifact.contains("deploy") {
+            if named && names_user && !artifact.contains("deploy") {
                 failures.push(format!(
                     "{target}: the artifact does not name the user:\n{artifact}"
                 ));

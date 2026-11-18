@@ -21,7 +21,7 @@ mod validate;
 
 use meridian_sdk::{
     Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, Value,
+    ResourceGraph, SshTakes, Value,
 };
 
 pub use emit::{sls_path, STATES_DIR, TOP_PATH};
@@ -51,6 +51,29 @@ pub fn secret_reference(name: &str) -> String {
 /// The pillar file the runner writes the secrets into, and the name the
 /// pillar top file applies it by.
 pub const PILLAR_NAME: &str = "meridian";
+
+/// What `salt-ssh` can take of the credential a document reaches its host
+/// as: the user and a password in its roster, which the runner writes to a
+/// file only the user can read, and a key through an agent Meridian starts
+/// for the run, which the roster names as `priv: agent-forwarding`. Nothing
+/// of the credential is in the state files.
+pub(crate) const SSH_TAKES: SshTakes = SshTakes {
+    tool: "salt-ssh",
+    password: Ok(()),
+};
+
+fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
+    let Some(credential) = &graph.credential else {
+        return Ok(());
+    };
+    meridian_sdk::check_ssh_credential(credential, &SSH_TAKES).map_err(|msg| CompileError {
+        target: NAME.to_owned(),
+        resource: String::new(),
+        rule: "unsupported-credential".to_owned(),
+        msg: format!("the credential {:?}: {msg}", credential.name),
+        pos: Position::default(),
+    })
+}
 
 /// Another state, as a requisite names it: the state module and the state's
 /// ID, which Salt writes `- pkg: nginx_pkg`.
@@ -164,7 +187,7 @@ impl Emitter for Salt {
             synthetic_notify: false,
             runtime_condition: true,
             secrets: true,
-            credentials: false,
+            credentials: true,
         }
     }
 
@@ -177,6 +200,7 @@ impl Emitter for Salt {
     /// The resolved hierarchy data is not consumed: Meridian bakes resolved
     /// values into the tree as literals before a plugin sees it.
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        check_credential(graph)?;
         // A resource here has nothing to read at apply time, so a reference
         // is settled now, from what the document declares, or refused.
         let graph = &meridian_sdk::expr::resolve_declared(graph, NAME)?;

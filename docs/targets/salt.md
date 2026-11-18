@@ -542,6 +542,8 @@ The plugin reads four environment variables:
 | `MERIDIAN_SALT_SSH` | The `salt-ssh` program | `salt-ssh` on `PATH` |
 | `MERIDIAN_SALT_TRANSPORT` | `local` or `ssh`, to override the choice made from the host | chosen from the host |
 | `MERIDIAN_SALT_ARGS` | Extra arguments for every run, split like a shell command line (quotes hold a word together) | none |
+| `MERIDIAN_SSH_AGENT` | The `ssh-agent` program, started for a credential's key; see [Credentials](#credentials) | `ssh-agent` on `PATH` |
+| `MERIDIAN_SSH_ADD` | The `ssh-add` program | `ssh-add` on `PATH` |
 
 Every setting can also be written in the project's `meridian.yaml` under
 `spec.settings.salt`, by its short name; the environment variable still wins.
@@ -627,6 +629,60 @@ The handover is tested against a stand-in `salt-call` that keeps a copy of the p
 files, their mode, its arguments and its environment, and against the real `salt-call` in
 CI, which applies a file whose content is a secret, and whose value then appears in the
 file and in nothing Salt printed or the plugin wrote.
+
+## Credentials
+
+`targetHost.credential` names the [credential](../reference/dsl/credentials.md) the host is
+reached as. Another machine is reached with `salt-ssh`, which reads how to sign in from its roster, so the plugin writes the credential into the roster it already writes for the run, and the roster into a private place when it holds a password:
+
+```yaml
+spec:
+  target: salt
+  targetHost:
+    from: inline
+    host: web01.example.com
+    credential: deploy
+  secrets:
+    - name: deploy_key
+      from: env
+      key: DEPLOY_KEY
+  credentials:
+    - name: deploy
+      type: ssh
+      user: deploy
+      privateKey: ${{ secret.deploy_key }}
+```
+
+- **The user** is the roster's `user:`.
+- **A password** (an `ssh` credential with a `password`, or a `usernamePassword` one) is the
+  roster's `passwd:`. The roster is then written to a file only you can read, in a
+  directory of its own that is removed when the run ends, and `--roster-file` names it; the
+  work directory's `ssh/roster` is not written. Without a password the roster is in the
+  work directory, as before, and holds the user and `priv: agent-forwarding` at most.
+- **A key** is the roster's `priv: agent-forwarding`, which makes `salt-ssh` use the agent
+  `SSH_AUTH_SOCK` names.
+- Leave `--user`, `--priv` and `--passwd` out of `MERIDIAN_SALT_ARGS` when the document
+  names a credential: `salt-ssh` lets a command-line option override the roster.
+- **A key is never on disk.** It goes into an SSH agent Meridian starts for the stage:
+  `ssh-agent -D -a <socket>`, its socket in a directory only you can enter, loaded with
+  `ssh-add -` from standard input. `salt-ssh` is told the socket in `SSH_AUTH_SOCK` and
+  nothing else. A `passphrase` is answered to `ssh-add` from a file only you can read. The
+  agent is stopped and its directory removed when the stage ends. Nothing of the key is on
+  the command line, in the environment, in the compiled files or in a file Meridian keeps.
+- **`agent: true`** names a key in your own agent: `salt-ssh` reads `SSH_AUTH_SOCK` as it is,
+  and Meridian starts nothing. **`from: ambient`** leaves signing in to the tool's own
+  configuration, as with no credential at all.
+- **Refused at compile**, rule `unsupported-credential`: a `certificate` (put it
+  beside the key in an agent of your own and set `agent: true`); a `domain` (for WinRM
+  hosts, which this plugin does not reach); a user name with a space or a line break.
+- **Refused at run time:** a credential for this machine (`localhost`, `127.0.0.1`, `::1`
+  or no host). `salt-call` configures this machine as the user running Meridian, whoever the document names. Leave the credential out, or name another host.
+
+The plan line names the identity, `web (salt) on web01.example.com as deploy (ssh,
+user deploy)`, and never a value. `ssh-agent` and `ssh-add` are run from `PATH`, or from
+`MERIDIAN_SSH_AGENT` and `MERIDIAN_SSH_ADD`.
+
+The handover is tested against stand-ins for `salt-ssh`, `ssh-agent` and `ssh-add` that keep what they are given (the roster and its mode, the environment, the key and the passphrase), and against the real `salt-ssh` in CI, which configures the machine the tests run on over SSH as a credential whose key is read into a secret and reaches `salt-ssh` only through the agent Meridian starts.
 
 ## Using the files with a Salt master
 

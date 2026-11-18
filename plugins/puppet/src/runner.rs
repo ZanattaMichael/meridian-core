@@ -10,8 +10,9 @@ use std::path::PathBuf;
 
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
-    decode_value, Applied, Artifact, Change, ChangeAction, Log, LogLine, LogStream, Operations,
-    Part, Plan, RunContext, RunError, Runner, SecretFile, Value,
+    agent_for, credential_for_this_machine, decode_value, AgentPrograms, Applied, Artifact, Change,
+    ChangeAction, HeldCredential, Log, LogLine, LogStream, Operations, Part, Plan, RunContext,
+    RunError, Runner, SecretFile, Value,
 };
 use meridian_sdk::{settings, Setting};
 
@@ -29,7 +30,7 @@ pub const ARGS_VARIABLE: &str = "MERIDIAN_PUPPET_ARGS";
 /// What an operator can configure about this runner, in the order the
 /// settings are documented.
 pub fn settings() -> Vec<Setting> {
-    vec![
+    let mut declared = vec![
         Setting::new(
             "puppet",
             PUPPET_VARIABLE,
@@ -54,7 +55,9 @@ pub fn settings() -> Vec<Setting> {
             "",
             "Extra arguments for every run, split like a shell command line.",
         ),
-    ]
+    ];
+    declared.extend(meridian_sdk::agent::settings());
+    declared
 }
 
 /// The manifest the runner hands to the tool: the compiled class followed by
@@ -83,6 +86,9 @@ pub struct PuppetRunner {
     pub transport: Option<Transport>,
     /// Arguments added to every run, after Meridian's own.
     pub extra_args: Vec<String>,
+    /// The programs an SSH agent is started with, when the document reaches
+    /// its host as a credential with a key.
+    pub agent: AgentPrograms,
 }
 
 impl PuppetRunner {
@@ -102,6 +108,7 @@ impl PuppetRunner {
                 _ => None,
             },
             extra_args: settings::args(setting("args")),
+            agent: AgentPrograms::from_settings(&declared),
         }
     }
 
@@ -154,7 +161,12 @@ impl PuppetRunner {
             .as_ref()
             .map(|h| h.config.to_string_lossy().into_owned());
         let report = match self.transport_for(&context.host) {
-            Transport::Local => self.run_puppet(context, noop, config.as_deref(), log),
+            Transport::Local => match &context.credential {
+                // puppet apply configures this machine as the user running
+                // it, whoever the document names.
+                Some(credential) => Err(credential_for_this_machine("puppet apply", credential)),
+                None => self.run_puppet(context, noop, config.as_deref(), log),
+            },
             Transport::Bolt => self.run_bolt(context, noop, config.as_deref(), log),
         };
         drop(hiera);
@@ -217,6 +229,14 @@ impl PuppetRunner {
         // between it and Bolt's command line.
         meridian_sdk::check_host(&context.host)
             .map_err(|why| RunError::new(format!("bolt cannot be given this target: {why}")))?;
+        // The credential reaches Bolt as an inventory: the user and password
+        // in a file only the user can read, removed when the run ends, and
+        // the key through an agent Meridian starts, which Bolt is told of.
+        let agent = agent_for(&self.agent, context.credential.as_ref(), log)?;
+        let inventory = match &context.credential {
+            Some(credential) => Some(inventory_file(&context.host, credential)?),
+            None => None,
+        };
         let mut tool = Tool::new(&self.bolt)
             .args(["apply", APPLY_PATH, "--targets", &context.host])
             .args(["--format", "json"])
@@ -228,9 +248,19 @@ impl PuppetRunner {
         if let Some(config) = hiera_config {
             tool = tool.arg("--hiera-config").arg(config);
         }
+        if let Some(inventory) = &inventory {
+            tool = tool
+                .arg("--inventoryfile")
+                .arg(inventory.path().to_string_lossy().into_owned());
+        }
+        if let Some(agent) = &agent {
+            tool = agent.tell(tool);
+        }
         tool = tool.args(self.extra_args.iter().cloned());
 
         let finished = tool.run(log)?;
+        drop(inventory);
+        drop(agent);
         let report = read_bolt(&finished.stdout, noop);
         for change in &report.changes {
             log.out(&change.to_string());
@@ -247,6 +277,34 @@ impl PuppetRunner {
         }
         Err(error)
     }
+}
+
+/// Bolt's inventory for the host, as the credential says how to sign in:
+/// the SSH transport, the user, and the password when there is one, written
+/// as a JSON string, which YAML reads the same. A key is not here: it is in
+/// the agent, which Bolt's SSH library reads from `SSH_AUTH_SOCK` as `ssh`
+/// does. The file is in a directory only the user can enter, and is removed
+/// when it is dropped.
+fn inventory_file(host: &str, credential: &HeldCredential) -> Result<SecretFile, RunError> {
+    let mut head = format!(
+        "---\n# Written by Meridian for this run, and removed with it.\n\
+         targets:\n  - uri: {}\n    config:\n      transport: ssh\n      ssh:\n",
+        Value::String(host.to_owned()).canonical()
+    );
+    if let Some(user) = credential.text("user") {
+        head.push_str(&format!(
+            "        user: {}\n",
+            Value::String(user.to_owned()).canonical()
+        ));
+    }
+    let mut parts = vec![Part::Text(&head)];
+    if let Some(password) = credential.secret("password") {
+        parts.push(Part::Text("        password: \""));
+        parts.push(Part::JsonString(password));
+        parts.push(Part::Text("\"\n"));
+    }
+    SecretFile::create("inventory.yaml", &parts)
+        .map_err(|e| RunError::new(format!("writing Bolt's inventory: {e}")))
 }
 
 /// The secrets as Hiera data: the data file, and the `hiera.yaml` that
