@@ -29,70 +29,44 @@ meridian lsp
 meridian mcp      [--allow-plan] [--root DIR] [--state-dir DIR]
 ```
 
-Every command also takes `--output text|json`: with `json` it prints one JSON
-object instead of text, for a pipeline or a wrapping tool.
-[Machine-readable output](cli-json.md) describes every object.
+Every command takes `--output text|json` ([objects](cli-json.md)).
 
-The files given to one command are one workflow. A file may hold several
-documents separated by `---`. Infrastructure documents run before ResourceSets
-([why](../concepts/two-stage-architecture.md)), and a document runs after every
-document it [imports](dsl/outputs-and-hand-offs.md#imports) from.
-
-A file can also be one inside a [module](modules.md) the project has pinned,
-written `@<module>:<path>`:
+The files given to one command are one workflow (`---` separates documents).
+Infrastructure runs before ResourceSets ([why](../concepts/two-stage-architecture.md)), and a
+document runs after those it [imports](dsl/outputs-and-hand-offs.md#imports) from. A pinned
+[module](modules.md) file is written `@<module>:<path>`:
 
 ```
 meridian plan site.yaml @acme/nginx:documents/proxy.yaml --data @acme/nginx:data/defaults.yaml
 ```
 
-This works wherever a document or a `--data` file is given. The module must be
-in the project's `meridian.lock` and already fetched: `validate`, `compile`,
-`plan` and `apply` never fetch anything, and they check each module against
-its pinned hash before reading it.
+The module must already be installed; commands never fetch and always verify the hash.
 
 ## Commands
 
 ### `validate`
 
-Checks the documents without loading plugins: required fields, unique ids,
-dependencies that exist and have no cycle, well-formed conditions, and hand-offs
-that name a real document and output. Errors give the file, line and field. A
-cycle lists its resources:
+Checks documents without plugins: required fields, unique ids, dependencies and cycles,
+conditions and hand-offs. Errors give file, line and field:
 
 ```
 site.yaml:12:7: spec.resources[1].dependsOn: dependency cycle among 2 resources: key -> lock -> key
 ```
 
-It does not know what a target can express, so it cannot say whether the
-target takes the document's kind, its `targetVersion` or its resource types;
-`compile` does. [Which check happens when](dsl/index.md#which-check-happens-when)
-has the full list.
+Target checks happen in `compile` ([which check happens when](dsl/index.md#which-check-happens-when)).
 
 ### `compile`
 
-Compiles each document into its target's own files and changes nothing. With
-`--out DIR` the files are written to `DIR/<document name>/`. Without it, the
-command only reports whether each document compiles, with any warnings.
+Compiles each document to its target's files, changing nothing. `--out DIR` writes
+`DIR/<document name>/`. A ResourceSet whose host output does not exist yet is deferred.
 
-A ResourceSet whose host is an output that has not been produced yet is reported
-as deferred.
-
-Before a document reaches its plugin, Meridian settles what is its own to
-settle, and refuses the document if it cannot:
-
-- the document's kind is one the target's category takes
-  ([the pairing](dsl/index.md#the-document));
-- the target compiles for the document's
-  [`targetVersion`](dsl/index.md#targetversion), if it sets one;
-- every [`when`](dsl/index.md#when-and-runtimewhen) is decided from the `--data`
-  files, and the resources whose condition is false are left out.
-
-`plan` and `apply` compile first, so the same holds for them.
+Before the plugin, Meridian checks the [kind pairing](dsl/index.md#the-document) and
+[`targetVersion`](dsl/index.md#targetversion), and decides every
+[`when`](dsl/index.md#when-and-runtimewhen) from `--data`. `plan` and `apply` compile first.
 
 ### `plan`
 
-Compiles each document and asks its tool what an apply would change, using the
-tool's own preview. Changes are listed by the ids the document uses:
+Compiles and asks each tool what an apply would change, listed by document ids:
 
 ```
   + create ...
@@ -101,47 +75,24 @@ tool's own preview. Changes are listed by the ids the document uses:
   ! replace ...
 ```
 
-When a tool cannot say what would change, the plan is reported as unknown
-instead of empty.
+A tool that cannot preview reports `unknown`. A plan takes the
+[state lock](../concepts/run-safety.md#one-run-at-a-time) and is recorded.
 
-A plan runs each tool, so it takes the [state lock](../concepts/run-safety.md#one-run-at-a-time)
-and is recorded like an apply.
+`--detailed-exitcode`: `2` for changes (including `unknown` and deferred), `0` in sync, `1`
+on error ([run object](cli-json.md#compile-plan-apply-drift-rollback)).
 
-A plan exits `0` whether or not there are changes. With `--detailed-exitcode`
-it exits `2` when an apply would do something (a stage with changes, a tool
-that cannot preview, or a stage deferred on an infrastructure output), `0` when
-everything is in sync, and `1` on error, like `drift`. A pipeline can then ask
-"anything to apply?" without reading the plan. With `--output json` the plan is
-one object ([the run object](cli-json.md#compile-plan-apply-drift-rollback)).
+`--policy` checks every stage ([policy](policy.md)); denials fail the stage and exit `1`,
+but planning continues.
 
-With `--policy`, every stage is put to the [policy](policy.md), and its
-warnings and its decision are shown above the plan. A stage the policy denies
-is reported as failed and the command exits `1`; the stages after it are
-still planned, so one plan shows every denial.
-
-`--out FILE` (or `-o`) saves the plan: one JSON file holding what was asked,
-the id of the run, and for each stage the hash of the artifact it compiled
-to, the changes, the policy's decision and, where the tool saves a plan of
-its own, that plan. `apply --plan FILE` then carries out exactly that plan.
-The file is written only when every stage planned; a failed or denied stage
-leaves nothing to apply, and the command says the plan was not saved and
-exits `1`. The file never holds a value: a tool's saved plan is left out
-when it would carry one. [A saved plan](../operations/pull-requests.md) has
-the file, the checks and the pull request automation built on it.
+`--out FILE` (`-o`) [saves the plan](../operations/pull-requests.md) for `apply --plan`. Not
+written if any stage failed or was denied.
 
 ### `apply`
 
-Compiles and applies each document in order, stopping at the first failure. A
-stage's outputs are shown and handed to the stages that asked for them.
-Values a tool marks sensitive are shown as `(sensitive)`.
-
-An apply holds the [state lock](../concepts/run-safety.md#one-run-at-a-time)
-while it runs, so a second one against the same state is refused, and it is
-[recorded](../concepts/run-safety.md#the-record) step by step.
-
-When a stage fails, what its tool had already changed is listed above the
-failure, the stages after it are not run, and the command says how to
-continue:
+Compiles and applies each document in order, stopping at the first failure. Outputs are
+shown (sensitive ones masked) and handed on. Holds the
+[state lock](../concepts/run-safety.md#one-run-at-a-time) and is
+[recorded](../concepts/run-safety.md#the-record). On failure:
 
 ```
 web (ResourceSet, target ansible on 203.0.113.10)
@@ -150,30 +101,15 @@ web (ResourceSet, target ansible on 203.0.113.10)
 run 2026-11-17T09-14-03Z-0cc7 failed. Once the cause is fixed, `meridian apply --resume site.yaml` continues from the stage that failed
 ```
 
-`--resume` continues the last apply that failed or was interrupted, and
-`--resume=<run>` a named one. The run's id is joined to the flag with `=`, so
-that a file after `--resume` is always a file; `--resume` may come before or
-after the documents. Stages that run already applied, from documents
-that still compile to the same artifact, are left alone; the rest are applied.
-[Picking up where a run stopped](../concepts/run-safety.md#picking-up-where-a-run-stopped)
-has the rules.
+`--resume` continues the last failed or interrupted apply; `--resume=<run>` a named one
+(always with `=`). Stages already applied with unchanged artifacts are skipped
+([rules](../concepts/run-safety.md#picking-up-where-a-run-stopped)).
 
-`--plan FILE` applies a plan saved by `plan --out`, and nothing else. The
-documents, data, values and selector come from the file and may be left off
-the command line; any that is given must be what the plan was taken with.
-Before anything runs, the plan is held against the run: it must name the
-same stages, and no stage may have been applied since it was taken, by any
-run; otherwise the apply is refused (`kind: plan`, exit `1`) before it holds
-anything but the lock. Then each stage is compiled again and must compile to
-the artifact hash the plan recorded, or it fails with the reason
-`plan-differs` and the stages after it are not run. Where the tool saved a
-plan, it is handed that plan back and applies it. A stage the plan could not
-preview is applied unchecked, with a warning. `--plan` and `--resume` cannot
-be combined. [What `apply --plan` checks](../operations/pull-requests.md#what-apply---plan-checks)
-has the rules.
+`--plan FILE` applies only a saved plan; see
+[what `apply --plan` checks](../operations/pull-requests.md#what-apply---plan-checks). Not with
+`--resume`.
 
-With `--policy`, the [policy](policy.md) is asked about every stage before
-the first one is applied. If it denies any of them, nothing is applied:
+`--policy` checks every stage first; any denial applies nothing:
 
 ```
 network (Infrastructure, target terraform)
@@ -184,25 +120,18 @@ web (ResourceSet, target ansible)
 run 2026-11-17T09-14-03Z-0cc7 was stopped by its policy before anything was applied
 ```
 
-With `--on-failure rollback`, a failed apply instead
-[puts back](../concepts/run-safety.md#putting-a-run-back) every stage it
-changed, failed one first then earlier ones, by re-applying each stage's last
-successful artifact. It still exits `1`: the apply failed.
+`--on-failure rollback` [puts back](../concepts/run-safety.md#putting-a-run-back) every changed
+stage, newest first. Still exits `1`.
 
-Ctrl-C [stops the run](../concepts/run-safety.md#stopping-a-run): the tool is
-stopped, the stage is recorded as `interrupted`, the lock is released and the
-command exits `130`. A second Ctrl-C exits at once. `--stage-timeout 30m`
-stops a stage whose tool has run that long and records it as `timed-out`;
-without it a tool may take as long as it takes. Both apply to `plan`,
-`drift` and `rollback` as well.
+Ctrl-C [stops the run](../concepts/run-safety.md#stopping-a-run) (`interrupted`, exit `130`;
+twice exits at once). `--stage-timeout 30m` records `timed-out`. Both also apply to `plan`,
+`drift` and `rollback`.
 
 ### `drift`
 
-Checks whether what was applied is still in place, changing nothing. Each
-document is compiled, its tool asked for a preview, and each stage reported as `in sync`, `DRIFTED`, `pending` (the document changed since the
-last apply, so the differences are changes waiting to be applied), `unknown`
-(the tool cannot preview) or `never applied`.
-[Finding drift](../concepts/run-safety.md#finding-drift) has the rules.
+Checks what was applied is still in place. Each stage is `in sync`, `DRIFTED`, `pending`
+(document changed since apply), `unknown` or `never applied`
+([finding drift](../concepts/run-safety.md#finding-drift)).
 
 ```
 web (ResourceSet, target ansible on 203.0.113.10)
@@ -211,25 +140,17 @@ web (ResourceSet, target ansible on 203.0.113.10)
 drift: 1 of 2 stages drifted
 ```
 
-It exits `2` when a stage drifted, so a scheduled job can tell drift from a
-clean check (`0`) and from a check that could not be made (`1`).
+Exit `2` on drift, `0` clean, `1` on error.
 
 ### `rollback`
 
-Puts back what the last apply changed: each stage it handed to a tool is
-re-applied from its previous successful artifact, last stage first. `--run RUN`
-names another apply. Pass the same files the apply used.
-
-A stage that cannot be put back is reported as `NOT ROLLED BACK` with the
-reason, and the command exits `1`.
-[Putting a run back](../concepts/run-safety.md#putting-a-run-back) lists the
-cases, among them a stage that was applied for the first time, which has
-nothing to go back to.
+Re-applies each stage of the last apply (or `--run RUN`) from its previous good artifact,
+last first. Pass the same files. A stage that cannot be put back is `NOT ROLLED BACK`, exit
+`1` ([cases](../concepts/run-safety.md#putting-a-run-back)).
 
 ### `status`
 
-Shows the current or last run: what was asked, who ran it, how each step
-stands, and whether the state is locked and by whom.
+The current or last run, its steps, and the lock.
 
 ```
 run 2026-11-17T09-14-03Z-0cc7: apply, failed
@@ -241,12 +162,9 @@ run 2026-11-17T09-14-03Z-0cc7: apply, failed
 not locked
 ```
 
-A run that was killed is shown as `interrupted`.
-
 ### `runs`
 
-Lists every recorded run, oldest first: its id, whether it was a plan or an
-apply, how it ended, and which run it resumed.
+Every recorded run, oldest first.
 
 ```
 2026-11-17T09-14-03Z-0cc7  apply    failed     2 steps, 1 failed
@@ -255,9 +173,8 @@ apply, how it ended, and which run it resumed.
 
 ### `events`
 
-Prints a run's [events](state.md#events), one JSON object per line; the last
-run's when no run is named. `--type` keeps only events of that type, takes a
-family as `'step.*'`, and may be repeated.
+A run's [events](state.md#events) (default: the last), one per line. `--type` filters
+(repeatable, `'step.*'` for a family).
 
 ```
 meridian events --type step.failed --type 'resource.*'
@@ -265,11 +182,8 @@ meridian events --type step.failed --type 'resource.*'
 
 ### `report`
 
-Writes a [report](reporting.md) of a recorded run, the last one when no run
-is named: `--format` is `json`, `junit`, `markdown` (the default) or `html`,
-and `--out` names a file to write instead of standard output. `--from FILE`
-reports on a file of events, as `--events json` wrote them, and not on the
-state; `-` reads standard input.
+A [report](reporting.md) of a run: `--format json|junit|markdown|html`, `--out FILE`,
+`--from FILE` (or `-`) for an events file.
 
 ```
 meridian report --format junit --out meridian.xml
@@ -278,18 +192,12 @@ meridian apply site.yaml --events json | meridian report --from - --format html 
 
 ### `unlock`
 
-Removes the state lock a run left behind when it was killed. It takes the
-lock's id, as `status` and the refused run show it, and refuses any other, so
-the lock removed is the one you looked at. Make sure the run that held it is
-really gone first: removing the lock of a run that is still going lets a
-second one collide with it.
+Removes a stale lock by its id (from `status`). Make sure the run is really gone.
 
 ### `plugins`
 
-Lists every plugin Meridian finds: category, capabilities, resource types, tool
-versions it compiles for (if any), `spec.settings` keys it reads (if any), its
-own [refusal rules](refusal-rules.md) (if any), binary location, and signature
-check result.
+Lists plugins: category, capabilities, resource types, tool versions, `spec.settings` keys,
+[refusal rules](refusal-rules.md), binary and signature.
 
 ```
 dsc
@@ -305,20 +213,12 @@ dsc
   signature: verified, signed by key 780001b5de1d7691
 ```
 
-`inputs` in the `can` line says the plugin hands its tool the values a
-document's [`spec.imports`](dsl/outputs-and-hand-offs.md#imports) brings from
-other documents.
+`inputs` under `can` means it accepts [`spec.imports`](dsl/outputs-and-hand-offs.md#imports);
+`import` means it has an importer. Settings keys are what
+[`spec.settings`](dsl/index.md#settings) accepts.
 
-The category decides which kind of document the plugin gets, the versions which
-`targetVersion` a document may ask for, and the settings keys what a document
-may write under [`spec.settings`](dsl/index.md#settings) (none listed means none
-accepted). A plugin that can import lists `import` under `can`, and each
-format's file names under `imports`.
-
-`meridian plugins --settings` adds each runner setting: its short name under
-`spec.settings` in `meridian.yaml`, environment variable, default and purpose.
-`meridian plugins --rules` adds each plugin's own [refusal rules](refusal-rules.md),
-with what each refuses and what to write instead; a plugin with none says so.
+`--settings` adds runner settings (name, variable, default, purpose). `--rules` adds
+[refusal rules](refusal-rules.md).
 
 ```
 ansible
@@ -330,16 +230,12 @@ ansible
       Extra arguments for every run, split like a shell command line: ...
 ```
 
-The same list for every shipped plugin is the
-[plugin settings reference](plugin-settings.md). When the current directory has
-a `meridian.yaml`, every command that starts plugins reads its `spec.settings`
-and passes each target its own. An undeclared setting stops the plugin from
-starting, with a list of the ones it accepts.
+See the [plugin settings reference](plugin-settings.md). A `meridian.yaml` in the current
+directory supplies `spec.settings`; undeclared names stop the plugin.
 
 ### `import`
 
-Turns a tool's existing configuration into Meridian documents. It only reads:
-no tool is run and nothing but the documents is written.
+Turns a tool's configuration into documents, running no tool.
 
 ```
 meridian import ./compose.yaml                      # print the document
@@ -357,29 +253,16 @@ meridian import ./playbooks -r -o imported --strict  # fail if anything was lost
 | `--force` | replace a document that already exists under `--out` |
 | `--strict` | exit `1` when anything was changed or not translated. The documents are still written |
 
-The report is written to standard error: the documents and how many resources
-each holds, then what was **not translated**, what was **changed**, and any
-**notes**. Everything in the first two groups is also a comment in the document
-that starts `TODO(meridian-import)`, beside the resource it is about. Nothing a
-source says is left out without one.
+The stderr report lists documents, then what was **not translated**, **changed**, and
+**notes**; the first two are also `TODO(meridian-import)` comments. Documents are validated
+before writing. See [importing](../operations/importing.md).
 
-Every document is validated before it is written, exactly as `meridian
-validate` would.
-
-[Importing existing configuration](../operations/importing.md) walks through an
-import, says what each plugin reads, and what an imported document does and
-does not promise.
-
-`sdk` is the SDK release the plugin was built against, and `protocol` is the
-protocol version `meridian` and the plugin agreed on when it started. A plugin
-whose protocol or SDK this `meridian` cannot work with is not listed: the
-command fails and says which side is behind.
-[Compatibility](compatibility.md) has the rules.
+`sdk` and `protocol` (for `plugins`) are the SDK and negotiated protocol. An incompatible
+plugin fails the command ([compatibility](compatibility.md)).
 
 ### `migrate`
 
-Rewrites documents from an older language version (`apiVersion`) to a newer
-one, in place.
+Rewrites documents to a newer `apiVersion`, in place.
 
 ```
 meridian migrate site.yaml modules/*.yaml
@@ -387,35 +270,22 @@ meridian migrate site.yaml --to meridian/v1
 meridian migrate site.yaml --check
 ```
 
-- `--to` names the version to move to. Without it, the newest version this
-  build supports.
-- `--check` changes nothing and exits `1` if any file would change. Use it in
-  CI to keep an estate on the current version.
+- `--to` (default: newest).
+- `--check` exits `1` if any file would change.
 
-Each file is reported on its own line:
+One line per file:
 
 ```
 site.yaml: already at meridian/v1
 ```
 
-A file is rewritten as text, so comments, key order and layout are kept. Only
-an `apiVersion` at the top level of a document is changed; an `apiVersion`
-inside a resource's `params`, such as a Kubernetes object's, is left alone. A
-file is rewritten whole or not at all.
-
-`migrate` never guesses. Where a change between two versions needs a decision
-only you can make, it lists those decisions for that file, leaves the file as
-it was, and exits `1`. It never moves a document to an older version.
-
-`meridian/v1` is the only language version so far, so today the command
-reports that every Meridian document is already current. It is here now so
-that the release that introduces `meridian/v2` ships with its migration.
+Comments and layout are kept; only top-level `apiVersion` changes; files are rewritten
+whole or not at all. Decisions it cannot make are listed and the file is left (exit `1`).
+Never downgrades. `meridian/v1` is the only version today.
 
 ### `version`
 
-Shows every version this build carries. One number cannot answer "which
-version of Meridian": the core, the language, the plugin SDK and the plugin
-protocol each move on their own.
+Shows the core, language, plugin SDK and protocol versions.
 
 ```
 meridian 0.1.0
@@ -425,18 +295,14 @@ meridian 0.1.0
   lockfile format  1
 ```
 
-A language version is `supported`, `deprecated since meridian <release>` or
-`removed in meridian <release>`. `plugin protocol` is the range this build
-speaks, such as `2` or `2 to 3`. `lockfile format` is the format of
-[`meridian.lock`](modules.md#the-lockfile) this build writes. `meridian --version`
-prints the first line only. [Compatibility](compatibility.md) explains each.
+Languages are `supported`, `deprecated since …` or `removed in …`; `lockfile format` is that of
+[`meridian.lock`](modules.md#the-lockfile). `--version` prints the first line
+([compatibility](compatibility.md)).
 
 ### `rules check`
 
-Loads a hierarchy's layers and checks them against its
-[compile rules](compile-rules.md), such as "a more specific layer may not change
-a variable or secret a less specific layer set". It compiles nothing and loads
-no plugin.
+Checks a hierarchy's layers against its [compile rules](compile-rules.md), loading no
+plugin.
 
 ```
 $ meridian rules check --hierarchy config/hierarchy.yaml --set env=prod --set node=web01
@@ -444,20 +310,14 @@ error: compile rules: 1 violation; nothing was compiled
   - [meridian/protect-variables] layer "node/web01.yaml" (team) changes "variables.Region", which layer "common.yaml" (organization) set
 ```
 
-The rules file is `rules.yaml` beside the hierarchy file, or the file given
-with `--rules`. Every violation is listed, each naming the rule, the layer,
-its group and the key, and never a value. With no rules file nothing is
-checked, unless `--require-rules` is given, which makes that an error.
-`--data FILE` and `--set KEY=VALUE` mean what they mean on `compile`: values
-merged over the hierarchy, `--set` last. Each is checked as a layer of the
-group `(command line)`, and a layer path's `%{KEY}` reads the `--set` value. [The reference](compile-rules.md#running-the-check) has the options
-and the output in full.
+Rules come from `rules.yaml` beside the hierarchy, or `--rules`. `--require-rules` makes a
+missing file an error. `--data` and `--set` are checked as `(command line)` layers
+([details](compile-rules.md#running-the-check)).
 
 ### `secret check`
 
-Says, for every [secret](dsl/secrets.md) the documents declare, where it comes
-from and whether that place would answer. It reads no value: a file is looked
-at and not opened, a command is found and not run.
+For each declared [secret](dsl/secrets.md), says where it comes from and whether it would be
+found, without reading it.
 
 ```
 $ meridian secret check site.yaml
@@ -478,14 +338,9 @@ error: 1 secret would not be found by plan or apply
 | `REFUSED` | the place is there and a fetch would refuse it, or the command was not found | yes |
 | `UNAVAILABLE` | the store cannot be used on this machine: another operating system, no session bus, its tool not installed | yes |
 
-A secret with [several places](dsl/secrets.md#several-places-for-one-secret)
-is shown with the first place that would answer, or with every place's reason
-when none would. The Secret Service and the keychain are `not checked`, since
-asking them can open a prompt.
-
-Credentials declared [`from: ambient`](dsl/credentials.md#from-ambient) are
-checked too, where the tool would look, so a job with a missing identity stops
-here rather than an hour later inside the tool:
+With [several places](dsl/secrets.md#several-places-for-one-secret), the first that answers is
+shown. Secret Service and keychain are `not checked`. [`from: ambient`](dsl/credentials.md#from-ambient)
+credentials are checked too:
 
 ```
 $ meridian secret check site.yaml
@@ -494,23 +349,14 @@ site (site.yaml)
   deployer     aws    ambient, ok: the environment holds AWS_WEB_IDENTITY_TOKEN_FILE and AWS_ROLE_ARN (web identity, such as a pipeline's OIDC token)
 ```
 
-`aws`, `azure` and `gcp` credentials are looked for in the cloud's own order:
-environment, login files, then the machine's identity endpoint (one request,
-one-second timeout). `ssh` means the agent at `SSH_AUTH_SOCK`; `kubeconfig` the
-file at `KUBECONFIG`; other types are `not checked`. A credential that would not
-be found is `MISSING`, or `REFUSED` if it points at a missing file, and fails
-the check. [The places, type by type](../operations/running-in-a-pipeline.md#checking-the-jobs-identity-first).
-
-It takes `--state-dir`, for a file written `@<module>:<path>`, and loads no
-plugin.
+Clouds: environment, login files, then the identity endpoint (1 s timeout). `ssh`:
+`SSH_AUTH_SOCK`. `kubeconfig`: `KUBECONFIG`. Others are `not checked`. `MISSING` or `REFUSED`
+fails ([details](../operations/running-in-a-pipeline.md#checking-the-jobs-identity-first)).
 
 ### `secret set`
 
-Stores a value for the [secret](dsl/secrets.md#storing-a-secret) `NAME`, as the
-documents declare it, in the first of its places that Meridian can write and
-this machine has: the kernel keyring (`from: keyring`) or the Secret Service
-(`from: secret-service`). The value comes from stdin or a hidden prompt, never
-an argument.
+Stores [secret](dsl/secrets.md#storing-a-secret) `NAME` in its first writable place
+(`keyring` or `secret-service`), read from stdin or a hidden prompt.
 
 ```
 $ meridian secret set deploy_token site.yaml
@@ -520,17 +366,12 @@ $ printf '%s' "$TOKEN" | meridian secret set deploy_token site.yaml
 stored deploy_token in the kernel keyring, key meridian:deploy-token
 ```
 
-From a pipe the value is everything read without its last line ending; at a
-terminal it is the line typed. An empty value stores nothing. A secret that
-names no writable place, or one that is not declared, is refused and the
-value is not read. It takes `--state-dir` as `secret check` does.
+A trailing newline is dropped; an empty value stores nothing. Undeclared or unwritable
+secrets are refused.
 
 ### `test`
 
-Runs [`Test` documents](testing.md): each case compiles the named documents
-with its data (or plans them from scratch state with `run: plan`) and checks
-the result against its expectations and assertions. Nothing is applied and no
-record is kept.
+Runs [`Test` documents](testing.md). Nothing is applied or recorded.
 
 ```
 $ meridian test
@@ -542,34 +383,19 @@ tests/site.test.yaml (site)
 3 cases: 2 passed, 1 failed
 ```
 
-With no files, every `*.test.yaml` under `tests/` in the current directory is
-run. `--case TEXT` runs only the cases whose name holds the text. `--junit
-FILE` also writes the results as JUnit XML, which a pipeline engine shows as
-tests. Every case of every file runs; the command exits `1` when any case
-failed or could not run, when a test file does not read, or when nothing was
-run. Each case plans in its own directory under `tests/` in `--state-dir`,
-emptied first, so no test touches the project's state. The plugins are found
-as for every other command. [The reference](testing.md) has every field of a
-test and what an assertion can read.
+Defaults to `tests/*.test.yaml`. `--case TEXT` filters; `--junit FILE` writes JUnit. Exit `1`
+if any case fails or nothing ran.
 
 ### `fmt`
 
-Rewrites documents in the one standard layout: two-space indentation, the
-language's own field order, no trailing spaces. It changes how a document is
-laid out and never what it says, and it checks that before writing. `--check`
-changes nothing, lists the files that are not formatted and exits `1` if there
-are any. `--keep-order` leaves fields in the order they were written. `-` reads
-standard input and writes standard output.
-
-A path may be a directory, which is searched for Meridian documents. Full
-description: [The formatter](../tooling/formatter.md).
+Rewrites documents in the standard layout, never changing meaning. `--check` exits `1` if
+any need it; `--keep-order` keeps field order; `-` uses stdin/stdout. See
+[the formatter](../tooling/formatter.md).
 
 ### `lint`
 
-Reports everything `validate` and `compile` would refuse, for every document
-under the paths given, and then things that compile and are probably mistakes.
-Each document is compiled by its target's plugin in memory; nothing is written
-and no tool is run.
+Reports what `validate` and `compile` would refuse, plus likely mistakes. Nothing is written
+or run.
 
 ```console
 $ meridian lint stacks/
@@ -579,65 +405,35 @@ stacks/web.yaml:35:21: error: spec.resources[3].dependsOn[0].resource: resource 
 2 errors, 1 warning, 0 notes
 ```
 
-`--fix` applies the fixes that are safe. `--strict` fails on warnings as well
-as errors. `--json` prints one JSON object per finding. `--data` and `--set`
-are as for `compile`; without them a document that needs data is checked
-with every `when` treated as true. `--state-dir` is where the project's
-fetched modules and [synced tool schemas](../tooling/schema-sync.md) are,
-so a tool's own params are checked too. Full
-description: [The linter](../tooling/linter.md); the rules:
-[Lint rules](lint.md).
+`--fix`, `--strict`, `--json`, `--data`, `--set` (without data, every `when` is true).
+`--state-dir` supplies modules and [tool schemas](../tooling/schema-sync.md). See
+[the linter](../tooling/linter.md) and [lint rules](lint.md).
 
 ### `schema`
 
-Prints a JSON Schema (draft 7) of the document language and of the resource
-types of every plugin found, for editors that validate YAML against a schema.
-The tool schemas cached under `--state-dir` are written in too. `--target`
-writes one target's rules only; `-o` writes to a file. Full
-description: [The JSON Schema](../tooling/json-schema.md).
+Prints a JSON Schema (draft 7) of the language, plugin types and cached tool schemas.
+`--target` for one target, `-o` for a file. See [the JSON Schema](../tooling/json-schema.md).
 
 ### `schema sync`, `schema status`, `schema clean`
 
-`schema sync` asks each target's installed tool, through its plugin, for the
-schemas of resource types the documents use, caches them under `--state-dir`
-(`.meridian/schemas/<target>.json`), and records their versions in
-`meridian.lock`. Editors, `lint` and `schema` read the cache, so a tool's own
-types (`aws_instance`, `apps/v1/Deployment`) are completed and checked without
-the editor running a tool. `--target` syncs one target; `--check` changes
-nothing and exits `1` if a cache is missing or differs from the lock;
-`--no-lock` leaves the lock alone.
-
-`schema status` shows what is cached for each target and how it stands
-against the lock, as text or with `--json` one object per line. `schema
-clean` removes the cache of the targets named, or of every target, and their
-records in the lock.
-
-Full description: [Tool schemas](../tooling/schema-sync.md).
+`schema sync` caches tool schemas for used types in `.meridian/schemas/<target>.json` and
+records them in `meridian.lock` (`--target`, `--check`, `--no-lock`). `schema status` shows
+the cache against the lock (`--json`). `schema clean` removes caches. See
+[tool schemas](../tooling/schema-sync.md).
 
 ### `lsp`
 
-Runs the language server on standard input and output. An editor starts it;
-there is nothing to see when it is run by hand. It takes the plugin options
-(`--plugin-dir`, `--plugin-signatures`, `--trusted-key`) like every command,
-plus `--trust-editor-plugin-dirs` to load unsigned plugins from directories the
-editor names. Full description:
-[The language server](../tooling/language-server.md).
+The language server on stdio. Takes the plugin options and `--trust-editor-plugin-dirs`.
+See [the language server](../tooling/language-server.md).
 
 ### `mcp`
 
-Runs the Model Context Protocol server on stdin and stdout. An AI client starts
-it; run by hand it shows nothing. It takes the usual plugin options, `--root DIR`
-(the directory file arguments are confined to; default the current directory),
-`--state-dir` (for cached tool schemas), and `--allow-plan` to offer the `plan`
-tool, which runs the real tool and takes the state lock. Without it the server
-changes nothing. Full description:
-[The MCP server](../tooling/mcp-server.md).
+The MCP server on stdio. `--root DIR` confines files; `--allow-plan` offers `plan`. See
+[the MCP server](../tooling/mcp-server.md).
 
 ### `signing`
 
-Makes signing keys, signs plugin binaries and checks their signatures. It is
-for people who ship a plugin, or who want to check one without starting it;
-[Plugin signatures](plugin-signatures.md) is the guide.
+Makes keys, signs and verifies plugin binaries ([guide](plugin-signatures.md)).
 
 ```
 meridian signing keygen --secret acme.key --public acme.pub
@@ -686,21 +482,12 @@ meridian signing verify --trusted-key acme.pub meridian-target-acme
 
 ### Inside a pipeline engine
 
-Every engine sets one variable in the jobs it runs: `GITHUB_ACTIONS`,
-`TF_BUILD` (Azure Pipelines), `GITLAB_CI`, `BUILDKITE`, `JENKINS_URL`, any
-`ARGO_*` (Argo Workflows) or any `TEKTON_*`. When one is set and standard
-output is not a terminal, `meridian` also writes for the engine:
+When `GITHUB_ACTIONS`, `TF_BUILD`, `GITLAB_CI`, `BUILDKITE`, `JENKINS_URL`, `ARGO_*` or
+`TEKTON_*` is set and stdout is not a terminal, `meridian` also writes:
 
-- each problem in the engine's annotation syntax, on stderr beside the
-  human-readable error: a refused document at its file, line and column, a
-  failed step at its document, a refused run with no location. GitHub Actions
-  shows these on the pull request; Azure Pipelines as job issues. GitLab CI,
-  Jenkins, Argo and Tekton have no such syntax and get the log only;
-- the run's report (the Markdown `--report markdown=FILE` writes) as the job
-  summary: appended to `$GITHUB_STEP_SUMMARY`, uploaded with
-  `##vso[task.uploadsummary]` on Azure, or passed to `buildkite-agent annotate`
-  on Buildkite when the agent is on `PATH`. A command that failed before a run
-  started summarises its problems instead.
+- problems as annotations on stderr (GitHub Actions and Azure Pipelines only);
+- the Markdown report as the job summary (`$GITHUB_STEP_SUMMARY`,
+  `##vso[task.uploadsummary]`, `buildkite-agent annotate`).
 
 ```
 $ GITHUB_ACTIONS=true meridian validate site.yaml 2>&1 | cat
@@ -708,13 +495,8 @@ error: site.yaml:34:7: spec.resources[0]: unknown field "colour"
 ::error file=site.yaml,line=34,col=7,title=Meridian%3A validate::spec.resources[0]: unknown field "colour"
 ```
 
-Standard output is untouched, so `--events json` and `--output json` work as
-they do anywhere. Nothing is coloured, inside an engine or out of it, and
-nothing is masked, because no value is ever printed. `--annotations off`
-turns it off; `--annotations on` keeps it on when standard output is a
-terminal, which is how Buildkite runs a job.
-[Running Meridian in a pipeline](../operations/running-in-a-pipeline.md)
-has a snippet per engine and the table of what each engine shows.
+Stdout is untouched. `--annotations off|on` overrides detection (Buildkite needs `on`).
+See [running in a pipeline](../operations/running-in-a-pipeline.md).
 
 ### Running part of a workflow
 
@@ -722,9 +504,8 @@ has a snippet per engine and the table of what each engine shows.
 meridian apply site.yaml -l tier=web
 ```
 
-Only the documents labelled `tier: web` run. The others are still loaded and
-checked, and a selected document can still take its host from an unselected
-one's last apply. A selector that matches no document is an error.
+Only `tier: web` documents run; others are still checked and can supply hosts. Matching
+nothing is an error.
 
 ### Deciding conditions
 
@@ -732,15 +513,9 @@ one's last apply. A selector that matches no document is an error.
 meridian plan site.yaml --data common.yaml --data prod.yaml
 ```
 
-A resource with `when: "data.env != 'prod'"` is in the plan or not, depending on
-what the data files say `env` is. A condition that reads a key no file sets is
-an error; nothing is guessed.
-
-The same values are what an [interpolation](dsl/interpolation.md) reads:
-`${{ data.env }}` inside a value is replaced before the document is compiled.
-
-Every decision is printed under its stage, and a document its own `spec.when`
-leaves out is reported as skipped. Neither is a failure:
+`when` is decided from the data; an unset key is an error.
+[Interpolation](dsl/interpolation.md) (`${{ data.env }}`) reads the same values. Decisions are
+printed per stage; a document left out by `spec.when` is skipped:
 
 ```
 site (ResourceSet, target ansible on shop-dev.example.com)
@@ -752,38 +527,25 @@ monitoring (Infrastructure, target kubernetes)
   skipped: its when (data.monitoring.enabled ?? false) is false
 ```
 
-A label can be interpolated too, and `-l` matches the value it comes to, so
-the data is read before the selector is applied.
+`-l` matches interpolated labels.
 
 ### Secrets
 
-A document's [secrets](dsl/secrets.md) are fetched by `plan` and `apply` only,
-each just before the stage that declares it, and wiped from memory when that
-stage ends. `validate` and `compile` never read a provider: `compile` writes a
-secret's name where its value would go, as `(secret db_password)`.
-
-A secret's value is in nothing a command prints: plans, the tool's log lines,
-errors and the run's state show `(sensitive)`. The process also turns off its
-own core dumps before it reads anything
-([how a secret is held](../concepts/secrets-in-memory.md)).
-
-A secret is locked in memory so that it cannot be written to swap. Where the
-machine does not allow that (the limit on locked memory, `ulimit -l`, is too
-small), the run says so once and goes on:
+[Secrets](dsl/secrets.md) are fetched only by `plan` and `apply`, just before their stage,
+and wiped after. `compile` writes `(secret db_password)`. Output shows `(sensitive)`. Core
+dumps are off and memory is locked ([details](../concepts/secrets-in-memory.md)). If
+`ulimit -l` is too small:
 
 ```
 site (ResourceSet, target ansible on web01)
   warning: secrets: the secret "db_password" could not be locked in memory and may reach swap. Raise the limit on locked memory (ulimit -l, or LimitMEMLOCK= for a service). --strict-secrets makes this an error
 ```
 
-With `--strict-secrets` the stage stops instead, before its tool is run.
-[`meridian secret check`](#secret-check) says where each declared secret
-comes from and whether it would be found, without reading any.
+`--strict-secrets` stops the stage instead. See also [`secret check`](#secret-check).
 
 ### `module`
 
-Fetches, pins and checks the [modules](modules.md) that the `meridian.yaml` in
-the current directory requires.
+Manages the [modules](modules.md) `meridian.yaml` requires.
 
 | Command | Does |
 |---|---|
@@ -795,13 +557,11 @@ the current directory requires.
 | `meridian module pack [--out FILE]` | Writes the module in the current directory as the archive a registry stores |
 | `meridian module push REPOSITORY [--insecure] [--credential NAME]` | Publishes the module in the current directory to an OCI registry under its version. A version that is already published is never replaced with other content. `--credential` logs in with a [credential the manifest declares](modules.md#registry-logins) instead of the Docker configuration |
 
-Only `install`, `update` and `push` use the network. Each command, its output and its
-errors are described in [Modules](modules.md#commands).
+Only `install`, `update` and `push` use the network ([commands](modules.md#commands)).
 
 ### A deprecated language version
 
-When a run reads documents written in a deprecated `apiVersion`, it prints one
-warning for the whole run, however many documents there are, and carries on:
+One warning per run:
 
 ```
 warning: 14 documents, the first being "web", use apiVersion "meridian/v1", which is deprecated since meridian 2.0.0 and will stop being read; run `meridian migrate --to meridian/v2` to move to meridian/v2
@@ -818,21 +578,12 @@ No version is deprecated today.
 | `2` | `drift`: a stage has drifted. `plan --detailed-exitcode`: an apply would do something. Any command: a mistake in the command line itself |
 | `130` | the run was [stopped with Ctrl-C](../concepts/run-safety.md#stopping-a-run), as a shell reports a command ended that way |
 
-With `--output json` the object on standard output says the same: `ok` is
-false for `1` and `130`, and the `summary` of a run carries `drifted` and
-`hasChanges` for the two meanings of `2`
-([machine-readable output](cli-json.md#what-every-object-has)).
-
-A reader that stops early, as in `meridian plugins | head`, only ends the
-printing: the command still finishes and exits with its usual status, so
-`meridian module verify | head -1` still fails on a tampered module. If stdout
-cannot be written for another reason (a full disk, say), the command reports it
-on stderr and exits `1`.
+In JSON, `ok` is false for `1` and `130`; `summary.drifted` and `summary.hasChanges` explain
+`2` ([output](cli-json.md#what-every-object-has)). A closed pipe (`| head`) does not change the
+exit status; other stdout write failures exit `1`.
 
 ## Plugins and their tools
 
-A plugin is a separate program named `meridian-target-<name>`. Each one runs its
-tool as you would by hand, with the credentials and configuration the tool
-already has. Every plugin reads a few environment variables that name a
-different binary or add arguments to every call; they are listed on each
+A plugin is a program `meridian-target-<name>` that runs its tool with the tool's own
+credentials. Environment variables for the binary and extra arguments are on each
 [target's page](../targets/ansible.md#running).
