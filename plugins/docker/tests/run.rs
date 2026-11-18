@@ -391,7 +391,7 @@ fn runner_keeping_env(dir: &Path, cases: &str) -> DockerRunner {
         dir,
         "docker",
         &format!(
-            "echo \"$@\" >> \"{d}/calls\"\nprev=''\nfor a in \"$@\"; do\n  if [ \"$prev\" = --env-file ]; then cp \"$a\" \"{d}/env\"; stat -c %a \"$a\" > \"{d}/env.mode\"; fi\n  prev=$a\ndone\ncase \"$*\" in\n{cases}\nesac"
+            "echo \"$@\" >> \"{d}/calls\"\nprev=''\nfor a in \"$@\"; do\n  if [ \"$prev\" = --env-file ]; then cp \"$a\" \"{d}/env\"; stat -c %a \"$a\" > \"{d}/env.mode\" 2>/dev/null || stat -f %Lp \"$a\" > \"{d}/env.mode\"; fi\n  prev=$a\ndone\ncase \"$*\" in\n{cases}\nesac"
         ),
     );
     DockerRunner {
