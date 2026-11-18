@@ -1,40 +1,23 @@
 # Releasing Meridian
 
-The maintainer's guide to a release: what the pipeline builds and checks, what
-must be enabled before publishing, and the steps to cut one. Version policy is
-in the [release and versioning plan](../plans/release-and-versioning.md); this
-page is the mechanics.
-
-Everything is in one workflow, [`.github/workflows/release.yml`](../../.github/workflows/release.yml),
-with its scripts in [`tools/release/`](../../tools/release) and its packaging
-files in [`packaging/`](../../packaging).
+How to cut a release. Policy: [release and versioning plan](../plans/release-and-versioning.md).
+Workflow: [`.github/workflows/release.yml`](../../.github/workflows/release.yml); scripts in
+[`tools/release/`](../../tools/release); packaging in [`packaging/`](../../packaging).
 
 ## Two kinds of run
 
-**A rehearsal** builds and tests everything and publishes nothing. It runs on
-every pull request that touches the workflow, `packaging/`, `tools/release/`
-or the root `Cargo.toml`, and on demand from the Actions tab (Run workflow).
-What it makes stays in the run as workflow artifacts, kept for seven days.
+**A rehearsal** builds and tests, publishing nothing (artifacts kept 7 days). It runs on pull
+requests touching the workflow, `packaging/`, `tools/release/` or root `Cargo.toml`, and on
+demand.
 
-**A release** is the same build and the same tests, followed by the `publish`
-job. It happens in either of two ways:
+**A release** adds the `publish` job. It runs when:
 
-- the **`cut release`** workflow was run from the Actions tab. It makes the
-  tag `v<version>` itself and starts `release` on it. This is the usual way,
-  described under [Cutting a release](#cutting-a-release); or
-- a tag `v<version>` was pushed by hand, where `<version>` is the workspace
-  version in `Cargo.toml`, **and** the repository variable
-  `MERIDIAN_RELEASE_PUBLISH` is `true`.
+- **`cut release`** is run from the Actions tab ([below](#cutting-a-release)), or `release` is
+  dispatched at a `v*` tag; or
+- a `v<version>` tag is pushed by hand **and** `MERIDIAN_RELEASE_PUBLISH` is `true`.
 
-A tag pushed by hand without the variable is a rehearsal, and says so in the
-run. A tag that does not match `Cargo.toml` fails at once, whichever way it
-arrived. Choosing a `v*` tag under Run workflow on the `release` workflow
-itself is also a release: a dispatch at a tag is read as the decision to
-release.
-
-Even a release publishes nothing final: it opens a **draft** GitHub release.
-Nobody is notified and `releases/latest` does not move until you publish the
-draft by hand.
+A tag not matching `Cargo.toml` fails. A release opens a **draft**; nothing is public until
+you publish it.
 
 ## What is built
 
@@ -47,30 +30,19 @@ draft by hand.
 | `image` | the container image for `linux/amd64` and `linux/arm64` | run on both; every plugin must verify; a document is compiled as the unprivileged user |
 | `publish` | signatures, attestations, the pushed image, the draft release | runs only in a release |
 
-The targets are `x86_64` and `aarch64` for each of `unknown-linux-musl`
-(static, so one binary serves every distribution), `apple-darwin` and
-`pc-windows-msvc`. The x86-64 macOS and arm64 Windows archives are
-cross-compiled and are not executed in CI, because the runners cannot run
-them.
-
-Binaries are built with the `dist` profile in the root `Cargo.toml`: the
-release profile with symbols stripped and thin LTO. A release build never uses
-a build cache.
+Targets: `x86_64` and `aarch64` for `unknown-linux-musl` (static), `apple-darwin` and
+`pc-windows-msvc`. x86-64 macOS and arm64 Windows are cross-compiled and not run in CI.
+Profile `dist` (stripped, thin LTO), no build cache.
 
 ## How the plugins are signed
 
-Each `build` job creates a new Ed25519 key pair, compiles the public key into
-its `meridian` (via `MERIDIAN_RELEASE_PUBLIC_KEY`), signs the plugins, and
-deletes the secret key before the job ends. The key never leaves the runner and
-is never stored, so there is no signing secret to configure, rotate or leak.
-Each platform's archive has its own key.
-
-What that gives a user, and how they trust a plugin from elsewhere, is in
-[Plugin signatures](../reference/plugin-signatures.md).
+Each `build` job makes an Ed25519 key pair, embeds the public key
+(`MERIDIAN_RELEASE_PUBLIC_KEY`), signs the plugins and deletes the secret key. No signing
+secret exists. See [plugin signatures](../reference/plugin-signatures.md).
 
 ## What `publish` does
 
-In order, and only in a release:
+In order:
 
 1. Signs the checksums file with Sigstore's keyless signing
    (`cosign sign-blob`). The certificate names this workflow and the tag. The
@@ -84,13 +56,11 @@ In order, and only in a release:
    registry.
 5. Opens the draft release with every file attached.
 
-Steps 1, 2 and 4 write to Sigstore's public transparency log, and step 3
-publishes an image. None of it can be taken back, which is why the job sits
-behind the variable and an environment.
+Steps 1 to 4 cannot be undone.
 
 ## Settings a release needs
 
-Nothing has to be set for rehearsals. For a release:
+For a release only:
 
 | What | Where | Value |
 |---|---|---|
@@ -99,68 +69,41 @@ Nothing has to be set for rehearsals. For a release:
 | Restrict the environment to tags (recommended) | the same page, Deployment branches and tags | allow the tag pattern `v*` only |
 | Make the image public | after the first release: your profile, Packages, `meridian`, Package settings | change visibility to Public, and connect the package to this repository. A package pushed by a workflow starts private |
 
-**No secrets are needed.** The workflow uses the run's `GITHUB_TOKEN` to create
-the release and push the image, and Sigstore keyless signing, which uses the
-run's identity token instead of a key. The `publish` job requests the four
-write permissions it needs (`contents`, `packages`, `id-token`,
-`attestations`); every other job is read-only.
-
-Attestations work as they are on a public repository. On a private repository
-they need a GitHub Enterprise Cloud plan.
+**No secrets are needed**: `GITHUB_TOKEN` and keyless Sigstore. Only `publish` has write
+permissions (`contents`, `packages`, `id-token`, `attestations`). Attestations on a private
+repository need GitHub Enterprise Cloud.
 
 ## Cutting a release
 
-1. Set the version: `version` under `[workspace.package]` in the root
-   `Cargo.toml`, and `version` in `editors/vscode/package.json` to match. Run
-   `cargo build` so `Cargo.lock` follows. Merge that.
-2. Wait for CI on `main` to be green. The `release` rehearsal runs on that
-   pull request because it touches `Cargo.toml`, so it has been tried too.
-3. Open the Actions tab, choose **cut release**, press **Run workflow** and
-   fill in:
-   - **version**: the version being released, such as `0.1.0`. It must be
-     what `Cargo.toml` says; left empty, that is what is used.
-   - **ref**: the commit or branch to release. Left empty, `main`.
-   - **require_green_ci**: on, unless you have a reason. The workflow refuses
-     a commit whose `rust` run is not `success`, including one still running.
+1. Set `version` in root `Cargo.toml` (`[workspace.package]`) and
+   `editors/vscode/package.json`, run `cargo build`, and merge.
+2. Wait for green CI on `main`.
+3. Actions tab, **cut release**, **Run workflow**:
+   - **version**: must match `Cargo.toml` (default).
+   - **ref**: default `main`.
+   - **require_green_ci**: on; refuses a commit whose `rust` run is not `success`.
 
-   The workflow checks the version is SemVer and matches `Cargo.toml`, that
-   the tag does not exist, and that CI passed; then it makes the annotated
-   tag `v<version>` and starts `release` on it. Its summary links the run.
-   Only people with write access to the repository can press the button.
+   It checks SemVer, the tag is new and CI passed, then tags `v<version>` and starts
+   `release`. (By hand: `git tag -a v0.1.0 -m "Meridian 0.1.0"` and push, with the variable
+   `true`.)
+4. Approve `publish` if a reviewer is required. This is the last point to stop.
+5. Check the draft (six archives, checksums and `.sigstore.json`, `VERSION`, `install.sh`,
+   `install.ps1`, two SBOMs, package manifests) and publish.
+6. Install it and run [Check what you downloaded](../quickstart/install.md#check-what-you-downloaded).
+7. Update the package managers.
 
-   By hand, the same thing is `git tag -a v0.1.0 -m "Meridian 0.1.0"` and
-   `git push origin v0.1.0`, which needs the variable above to be `true`.
-4. Watch the `release` run. If you set a required reviewer, approve the
-   `publish` job when the rest is green. Everything before that job is
-   a rehearsal; the approval is the last moment to stop.
-5. Open the draft under Releases. Read the notes, check the files are all
-   there (six archives, checksums and its `.sigstore.json`, `VERSION`,
-   `install.sh`, `install.ps1`, two SBOMs, the package manifests), and press
-   Publish.
-6. Check it as a user would: run the install script on a machine, then the
-   commands under [Check what you downloaded](../quickstart/install.md#check-what-you-downloaded).
-7. Update the package managers, below.
-
-If a run fails after the tag was made, fix the cause on `main`, delete the
-tag and the draft, and cut again. Do not move a tag once its release has been
-published: the signatures and attestations name the commit.
+If a run fails after tagging, fix `main`, delete the tag and draft, and cut again. Never move
+a published tag.
 
 ### Why a tag made by the workflow needs the dispatch
 
-GitHub does not start workflows for a push made with a run's own token, so a
-tag made by `cut release` would never set off `release` on its own. `cut
-release` therefore dispatches `release` at the tag, and `release` reads a
-dispatch at a `v*` tag as a release. The `MERIDIAN_RELEASE_PUBLISH` variable
-only governs tags pushed by hand, where the push itself is the trigger and
-the variable is the confirmation. See [decision 21](../decisions/0021-a-dispatch-at-a-tag-is-a-release.md).
+A push with a run's own token starts no workflow, so `cut release` dispatches `release` at
+the tag. See [decision 21](../decisions/0021-a-dispatch-at-a-tag-is-a-release.md).
 
 ## Package managers
 
-A release carries the manifests in
-`meridian-<version>-package-manifests.tar.gz`. They are generated, with the
-release's URLs and checksums filled in, by `tools/release/manifests.py`. The
-pipeline does not send them anywhere: each of these needs something outside
-this repository, and is a decision for the owner.
+`tools/release/manifests.py` writes `meridian-<version>-package-manifests.tar.gz`. Nothing is
+submitted automatically:
 
 | Manager | File | What publishing it takes |
 |---|---|---|
@@ -169,31 +112,18 @@ this repository, and is a decision for the owner.
 | winget | `packaging/winget/*.yaml` | a pull request to `microsoft/winget-pkgs` adding the three files under `manifests/z/ZanattaMichael/Meridian/<version>/`. Microsoft's validation runs on the pull request |
 | crates.io | none | not set up. `cargo install --git` works today. Publishing to crates.io would need the crate names reserved, a version on every path dependency between the crates, and a `CARGO_REGISTRY_TOKEN` secret |
 
-The formula and the manifests are checked for syntax in every run. They have
-not been installed through Homebrew, Scoop or winget, because that needs a
-published release to download from. Do that once, by hand, at the first
-release.
+Syntax is checked each run; real installs are untested until a release exists.
 
 ## Known limits
 
-- **macOS notarisation.** The macOS binaries are not signed with an Apple
-  Developer ID or notarised. They run when installed with the script, Homebrew
-  or `curl`. Downloaded in a browser, Gatekeeper blocks them until the
-  quarantine flag is removed. Fixing this needs an Apple Developer account and
-  certificate as secrets.
-- **Windows code signing.** The Windows binaries are not Authenticode-signed,
-  so SmartScreen may warn about an archive downloaded with a browser. Fixing
-  that needs a code-signing certificate.
-- **Actions are pinned by tag** (such as `actions/checkout@v4`), as in the other
-  workflows. Pinning by commit would remove the trust placed in those tags.
-- **One key per platform.** Plugins and `meridian` must come from the same
-  archive. Shipping plugins on their own schedule, as the versioning plan
-  intends, needs a longer-lived signing identity than a per-build key.
+- **No macOS notarisation.** Browser downloads are blocked by Gatekeeper.
+- **No Windows code signing.** SmartScreen may warn.
+- **Actions are pinned by tag**, not commit.
+- **One key per platform build**, so plugins cannot ship separately yet.
 
 ## Running the pieces by hand
 
-Everything the workflow does to make an archive can be done on a workstation,
-which is the quickest way to debug it:
+To debug locally:
 
 ```
 cargo build --release -p meridian-cli
@@ -205,7 +135,6 @@ python3 tools/release/package.py --version 0.1.0 --target x86_64-unknown-linux-m
     --signer target/release/meridian --key release.key
 ```
 
-`tools/release/manifests.py --version 0.1.0 --dir dist` then writes the
-checksums and manifests, once `dist` holds all six archives, and
-`MERIDIAN_DOWNLOAD_BASE=$PWD/dist sh packaging/install/install.sh` installs
-from it.
+With all six archives in `dist`, `tools/release/manifests.py --version 0.1.0 --dir dist`
+writes checksums and manifests, and `MERIDIAN_DOWNLOAD_BASE=$PWD/dist sh
+packaging/install/install.sh` installs from it.
