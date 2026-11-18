@@ -13,6 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::expr::{self, Part};
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{CompileError, Value, Warning};
 
 use crate::{refuse_at, Block, Config, Kind, NAME};
@@ -35,7 +36,7 @@ struct Checker<'a> {
 }
 
 impl Checker<'_> {
-    fn refuse(&self, rule: &str, msg: String) -> CompileError {
+    fn refuse(&self, rule: &Rule, msg: String) -> CompileError {
         refuse_at(&self.block.name, &self.block.pos, rule, msg)
     }
 
@@ -48,7 +49,7 @@ impl Checker<'_> {
         };
         let shape = || {
             self.refuse(
-                "invalid-param",
+                &rules::INVALID_PARAM,
                 format!(
                     "param {argument:?} must be a map of types to names to settings, such as \
                      {argument}: {{{example}: {{main: {{…}}}}}}",
@@ -89,12 +90,12 @@ impl Checker<'_> {
         };
         let invalid = || {
             self.refuse(
-                "invalid-param",
+                &rules::INVALID_PARAM,
                 format!("{whose} must be a reference such as {example}"),
             )
         };
         let text = value.as_str().ok_or_else(invalid)?;
-        let parts = expr::parse(text).map_err(|msg| self.refuse("invalid-reference", msg))?;
+        let parts = expr::parse(text).map_err(|msg| self.refuse(&rules::INVALID_REFERENCE, msg))?;
         let [Part::Expr(expression)] = parts.as_slice() else {
             return Err(invalid());
         };
@@ -105,7 +106,7 @@ impl Checker<'_> {
             // are an ordinary argument and may be computed.
             if namespace == "method" {
                 return Err(self.refuse(
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     format!(
                         "{whose} must be one fixed reference such as {example}; OpenTofu \
                          chooses the method before it evaluates anything, so an expression \
@@ -134,7 +135,7 @@ impl Checker<'_> {
                 "key provider"
             };
             return Err(self.refuse(
-                "unknown-reference",
+                &rules::INVALID_REFERENCE,
                 format!("{whose} names the {what} {named:?}, which the block does not declare ({known})"),
             ));
         }
@@ -151,11 +152,14 @@ impl Checker<'_> {
         used: &mut BTreeSet<String>,
     ) -> Result<(), CompileError> {
         let Some(settings) = value.as_map() else {
-            return Err(self.refuse("invalid-param", format!("param {whose:?} must be a map")));
+            return Err(self.refuse(
+                &rules::INVALID_PARAM,
+                format!("param {whose:?} must be a map"),
+            ));
         };
         let Some(method) = settings.get("method") else {
             return Err(self.refuse(
-                "missing-param",
+                &rules::MISSING_PARAM,
                 format!(
                     "{whose} does not say which method encrypts it; add \
                      method: ${{method.<type>.<name>}}"
@@ -166,7 +170,7 @@ impl Checker<'_> {
         if let Some(fallback) = settings.get("fallback") {
             let Some(fallback) = fallback.as_map() else {
                 return Err(self.refuse(
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     format!("param \"{whose}.fallback\" must be a map"),
                 ));
             };
@@ -182,7 +186,7 @@ impl Checker<'_> {
         if let Some(enforced) = settings.get("enforced") {
             if !matches!(enforced, Value::Bool(_)) {
                 return Err(self.refuse(
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     format!("param \"{whose}.enforced\" must be true or false"),
                 ));
             }
@@ -216,7 +220,7 @@ pub(crate) fn check(config: &Config) -> Result<Vec<Warning>, CompileError> {
 
     if let Some(unknown) = block.body.keys().find(|k| !ARGUMENTS.contains(&k.as_str())) {
         return Err(checker.refuse(
-            "invalid-param",
+            &rules::INVALID_PARAM,
             format!(
                 "param {unknown:?} is not part of an encryption block (accepted: {})",
                 ARGUMENTS.join(", ")
@@ -240,7 +244,7 @@ pub(crate) fn check(config: &Config) -> Result<Vec<Warning>, CompileError> {
             )?),
             None if name.starts_with("aes_gcm.") => {
                 return Err(checker.refuse(
-                    "missing-param",
+                    &rules::MISSING_PARAM,
                     format!(
                         "method {name:?} has no keys; add keys: ${{key_provider.<type>.<name>}}"
                     ),
@@ -250,7 +254,7 @@ pub(crate) fn check(config: &Config) -> Result<Vec<Warning>, CompileError> {
         }
         if unencrypted && !settings.is_empty() {
             return Err(checker.refuse(
-                "invalid-param",
+                &rules::INVALID_PARAM,
                 format!("method {name:?} encrypts nothing and takes no settings"),
             ));
         }
@@ -267,7 +271,7 @@ pub(crate) fn check(config: &Config) -> Result<Vec<Warning>, CompileError> {
     if let Some(remote) = block.body.get("remote_state_data_sources") {
         let Some(remote) = remote.as_map() else {
             return Err(checker.refuse(
-                "invalid-param",
+                &rules::INVALID_PARAM,
                 "param \"remote_state_data_sources\" must be a map".to_owned(),
             ));
         };
@@ -285,7 +289,7 @@ pub(crate) fn check(config: &Config) -> Result<Vec<Warning>, CompileError> {
                 "remote_state_data_source" => {
                     let Some(sources) = value.as_map() else {
                         return Err(checker.refuse(
-                            "invalid-param",
+                            &rules::INVALID_PARAM,
                             "param \"remote_state_data_sources.remote_state_data_source\" must \
                              be a map of data source names to settings"
                                 .to_owned(),
@@ -303,7 +307,7 @@ pub(crate) fn check(config: &Config) -> Result<Vec<Warning>, CompileError> {
                 }
                 other => {
                     return Err(checker.refuse(
-                        "invalid-param",
+                        &rules::INVALID_PARAM,
                         format!(
                             "param \"remote_state_data_sources.{other}\" is not part of an \
                              encryption block (accepted: default, remote_state_data_source)"
@@ -315,7 +319,7 @@ pub(crate) fn check(config: &Config) -> Result<Vec<Warning>, CompileError> {
     }
     if targets == 0 {
         return Err(checker.refuse(
-            "missing-param",
+            &rules::MISSING_PARAM,
             "the encryption block protects nothing: add state, plan or \
              remote_state_data_sources, each naming the method that encrypts it"
                 .to_owned(),
@@ -485,7 +489,7 @@ mod tests {
         let err = refusal(&format!(
             r#"{{{PROVIDER},{METHOD},"state":{{"method":"${{method.aes_gcm.mian}}"}}}}"#
         ));
-        assert_eq!(err.rule, "unknown-reference");
+        assert_eq!(err.rule, "invalid-reference");
         assert_eq!(err.resource, "state_encryption");
         assert_eq!(
             err.msg,
@@ -499,7 +503,7 @@ mod tests {
         let err = refusal(&format!(
             r#"{{{METHOD},"state":{{"method":"${{method.aes_gcm.main}}"}}}}"#
         ));
-        assert_eq!(err.rule, "unknown-reference");
+        assert_eq!(err.rule, "invalid-reference");
         assert_eq!(
             err.msg,
             "method.aes_gcm.main.keys names the key provider \"pbkdf2.main\", which the block \

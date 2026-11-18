@@ -215,6 +215,7 @@ impl Registry {
             category: emitter.category(),
             target_versions: emitter.target_versions(),
             settings_keys: emitter.settings_keys(),
+            rules: emitter.rules().iter().map(Into::into).collect(),
             resource_schemas: emitter.resource_schemas(),
             import_formats: importer.as_ref().map(|i| i.formats()).unwrap_or_default(),
             exports_schemas: schemas.is_some(),

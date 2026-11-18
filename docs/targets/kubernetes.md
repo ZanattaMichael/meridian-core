@@ -136,7 +136,7 @@ in a Secret's `data` the document would have to base64-encode it itself, which t
 secret into text; and inside a `stringData` value, such as `postgres://app:${{
 secret.db_password }}@db/app`, because a value is one string, so the secret has to be the
 whole value. Text that reads as a token, `${meridian_secret_`, is refused too, rule
-`reserved-text`, so a document cannot make the runner fill a value in where the document
+`reserved-name`, so a document cannot make the runner fill a value in where the document
 wrote the token itself.
 
 The handover is tested against a stand-in `kubectl` that keeps what it reads

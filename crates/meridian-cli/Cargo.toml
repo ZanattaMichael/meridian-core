@@ -18,6 +18,7 @@ meridian-expr = { path = "../meridian-expr" }
 meridian-import = { path = "../meridian-import" }
 meridian-ir = { path = "../meridian-ir" }
 meridian-lsp = { path = "../meridian-lsp" }
+meridian-mcp = { path = "../meridian-mcp" }
 meridian-module = { path = "../meridian-module" }
 meridian-orchestrator = { path = "../meridian-orchestrator" }
 meridian-plugin-host = { path = "../meridian-plugin-host" }

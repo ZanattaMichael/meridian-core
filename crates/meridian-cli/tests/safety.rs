@@ -72,6 +72,7 @@ fn plugin_dirs() -> String {
 
 fn meridian(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(args)
         .current_dir(dir)
         .env("MERIDIAN_PLUGIN_DIR", plugin_dirs())
@@ -355,6 +356,7 @@ fn ctrl_c_stops_the_run_records_it_as_interrupted_and_releases_the_lock() {
     use std::process::Stdio;
     let dir = scratch("ctrl-c", "HANG welcome");
     let child = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(["apply", "site.yaml", "--on-failure", "rollback"])
         .current_dir(&dir)
         .env("MERIDIAN_PLUGIN_DIR", plugin_dirs())
@@ -776,6 +778,7 @@ fn meridian_with_engine(dir: &Path, args: &[&str]) -> Output {
     fs::write(&engine, ENGINE).unwrap();
     fs::set_permissions(&engine, fs::Permissions::from_mode(0o755)).unwrap();
     Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(args)
         .current_dir(dir)
         .env(

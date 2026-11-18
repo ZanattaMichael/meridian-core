@@ -1,0 +1,43 @@
+# The workflow the pipeline-shell smoke test runs inside a real GitHub Actions
+# job (.github/workflows/pipeline-shell.yml): two stages on the fake target,
+# a secret the engine puts in the job's environment, and an output handed
+# from the first stage to the second. The job makes the second stage fail on
+# purpose, then continues it with `apply --resume`.
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: network
+spec:
+  target: fake
+  resources:
+    - id: vm
+      type: file
+      params:
+        content: 10.0.0.5
+  outputs:
+    - name: address
+      value: "${vm.content}"
+---
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: web
+spec:
+  target: fake
+  secrets:
+    - name: db_password
+      from: env
+      key: SITE_DB_PASSWORD
+  targetHost:
+    from: infrastructure
+    ref: network
+    output: address
+  resources:
+    - id: conf
+      type: file
+      params:
+        content: "password=${{ secret.db_password }}\n"
+    - id: motd
+      type: file
+      params:
+        content: "welcome\n"

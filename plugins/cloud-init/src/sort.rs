@@ -18,9 +18,10 @@
 
 use std::collections::{HashMap, HashSet};
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{CompileError, EdgeKind, ResourceGraph};
 
-use crate::{CloudConfig, Command, Item, Placed, NAME};
+use crate::{own, CloudConfig, Command, Item, Placed, NAME};
 
 /// The points of a first boot at which this target has work done, in order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -175,10 +176,11 @@ fn check_edges(
     for edge in graph.edges_of_kind(EdgeKind::HardOrder) {
         // A hard-order edge points from the dependency to the resource that
         // declared it, so `from` must be applied before `to`.
-        let refuse = |rule: &str, msg: String| CompileError {
+        let refuse = |rule: &Rule, msg: String| CompileError {
             target: NAME.to_owned(),
             resource: edge.to.clone(),
-            rule: rule.to_owned(),
+            rule: rule.name.to_owned(),
+            hint: rule.hint.to_owned(),
             msg,
             pos: edge.pos.clone(),
         };
@@ -194,7 +196,7 @@ fn check_edges(
                 continue;
             }
             return Err(refuse(
-                "unsatisfiable-order",
+                &own::UNSATISFIABLE_ORDER,
                 format!(
                     "depends on {:?}, but resource {module:?} is a cloud-config module, which \
                      cloud-init applies at its own point of the first boot: a document cannot \
@@ -205,7 +207,7 @@ fn check_edges(
         };
         if first > then {
             return Err(refuse(
-                "unsatisfiable-order",
+                &own::UNSATISFIABLE_ORDER,
                 format!(
                     "depends on {:?}, but cloud-init {} before it {}: \
                      the order of a first boot is cloud-init's own and a document cannot change it",
@@ -223,7 +225,7 @@ fn check_edges(
             && position[edge.from.as_str()] > position[edge.to.as_str()]
         {
             return Err(refuse(
-                "ordering-violated",
+                &rules::ORDERING_VIOLATED,
                 format!(
                     "resource {:?} is ordered before its dependency {:?}; \
                      the graph stage produced an order this target cannot keep",

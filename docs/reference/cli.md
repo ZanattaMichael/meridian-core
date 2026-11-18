@@ -26,6 +26,7 @@ meridian schema   sync <paths>... [--target TARGET] [--data FILE] [--set KEY=VAL
 meridian schema   status [--state-dir DIR] [--json]
 meridian schema   clean [TARGET]... [--state-dir DIR]
 meridian lsp
+meridian mcp      [--allow-plan] [--root DIR] [--state-dir DIR]
 ```
 
 Every command also takes `--output text|json`: with `json` it prints one JSON
@@ -268,8 +269,9 @@ second one collide with it.
 
 Lists every plugin Meridian can find: its category, what it can do, the resource
 types it takes, the versions of its tool it compiles for (when it declares any),
-the keys of a document's `spec.settings` it reads (when it takes any), where its
-binary is, and what checking its signature found.
+the keys of a document's `spec.settings` it reads (when it takes any), the
+[refusal rules](refusal-rules.md) it has of its own (when it declares any),
+where its binary is, and what checking its signature found.
 
 ```
 dsc
@@ -299,6 +301,9 @@ file names each of its formats claims under `imports`.
 `meridian plugins --settings` adds, under each plugin, every setting its
 runner declares: the short name to use under `spec.settings` in
 `meridian.yaml`, the environment variable, the default and what it does.
+`meridian plugins --rules` adds each plugin's own [refusal rules](refusal-rules.md),
+with what each refuses and what to write instead; a plugin that has none says
+so, and refuses only under the general rules of that page.
 
 ```
 ansible
@@ -463,6 +468,26 @@ is shown with the first place that would answer, or with every place's reason
 when none would. The Secret Service and the keychain are `not checked`, since
 asking them can open a prompt.
 
+A credential declared [`from: ambient`](dsl/credentials.md#from-ambient) is
+looked for too, where the tool itself would look, so that a job whose
+identity is missing stops here and not an hour later inside the tool:
+
+```
+$ meridian secret check site.yaml
+site (site.yaml)
+  db_password  env    ok: the environment variable SITE_DB_PASSWORD is set
+  deployer     aws    ambient, ok: the environment holds AWS_WEB_IDENTITY_TOKEN_FILE and AWS_ROLE_ARN (web identity, such as a pipeline's OIDC token)
+```
+
+An `aws`, `azure` or `gcp` credential is looked for in the cloud's own
+order: the environment, the files a login leaves behind, and last the
+machine's identity endpoint, which is asked one question with a one-second
+timeout. An `ssh` credential is the agent `SSH_AUTH_SOCK` names, a
+`kubeconfig` one the file `KUBECONFIG` names; any other type is
+`not checked`. A credential that would not be found is `MISSING`, or
+`REFUSED` when what is set points at a file that is not there, and fails the
+check. [The places, type by type](../operations/running-in-a-pipeline.md#checking-the-jobs-identity-first).
+
 It takes `--state-dir`, for a file written `@<module>:<path>`, and loads no
 plugin.
 
@@ -558,6 +583,17 @@ plus `--trust-editor-plugin-dirs` to load unsigned plugins from directories the
 editor names. Full description:
 [The language server](../tooling/language-server.md).
 
+### `mcp`
+
+Runs the Model Context Protocol server on standard input and output. An AI
+client starts it; there is nothing to see when it is run by hand. It takes
+the plugin options like every command, `--root DIR` for the directory file
+arguments are confined to (the current directory by default), `--state-dir`
+for the cached tool schemas, and `--allow-plan` to offer the `plan` tool,
+which runs the real tool and takes the state lock; without it the server
+changes nothing anywhere. Full description:
+[The MCP server](../tooling/mcp-server.md).
+
 ### `signing`
 
 Makes signing keys, signs plugin binaries and checks their signatures. It is
@@ -607,6 +643,40 @@ meridian signing verify --trusted-key acme.pub meridian-target-acme
 | `--data FILE` | | no data | `compile`, `plan`, `apply`: a YAML or JSON mapping of values that [`when`](dsl/index.md#when-and-runtimewhen) conditions and [interpolations](dsl/interpolation.md) read as `data.<key>`. May be repeated; a later file's key replaces an earlier file's |
 | `--strict-secrets` | `MERIDIAN_STRICT_SECRETS` | off | `plan`, `apply`: stop a stage whose secret cannot be [locked in memory](#secrets), instead of warning once and going on |
 | `--set KEY=VALUE` | | | `compile`, `plan`, `apply`: one value for `when` conditions and interpolations, applied after every `--data` file, so it wins. `KEY` may be dotted to set one key inside a mapping (`region.name=eu-west-1`). The value is typed as YAML types it. May be repeated. See [giving the data](dsl/conditions.md#giving-the-data) |
+| `--annotations MODE` | `MERIDIAN_ANNOTATIONS` | `auto` | any command: inside a [pipeline engine](#inside-a-pipeline-engine), also write each problem in the engine's annotation syntax and the run's report as the job's summary. `auto` does so when standard output is not a terminal, `on` does so regardless, `off` never does |
+
+### Inside a pipeline engine
+
+Every engine sets one variable in the jobs it runs: `GITHUB_ACTIONS`,
+`TF_BUILD` (Azure Pipelines), `GITLAB_CI`, `BUILDKITE`, `JENKINS_URL`, any
+`ARGO_*` (Argo Workflows) or any `TEKTON_*`. When one is set and standard
+output is not a terminal, `meridian` also writes for the engine:
+
+- each problem in the engine's own annotation syntax, on standard error
+  beside the error for a person: a refused document at its file, line and
+  column, a failed step at its document, a refused run with no place. GitHub
+  Actions shows it on the pull request; Azure Pipelines as an issue of the
+  job. GitLab CI, Jenkins, Argo and Tekton have no such syntax, and get the
+  log;
+- the run's report, the same Markdown that `--report markdown=FILE` writes,
+  as the job's summary: appended to `$GITHUB_STEP_SUMMARY`, uploaded with
+  `##vso[task.uploadsummary]` on Azure, or handed to `buildkite-agent
+  annotate` on Buildkite when the agent is on the `PATH`. A command that
+  failed before it had a run summarises its problems instead.
+
+```
+$ GITHUB_ACTIONS=true meridian validate site.yaml 2>&1 | cat
+error: site.yaml:34:7: spec.resources[0]: unknown field "colour"
+::error file=site.yaml,line=34,col=7,title=Meridian%3A validate::spec.resources[0]: unknown field "colour"
+```
+
+Standard output is untouched, so `--events json` and `--output json` work as
+they do anywhere. Nothing is coloured, inside an engine or out of it, and
+nothing is masked, because no value is ever printed. `--annotations off`
+turns it off; `--annotations on` keeps it on when standard output is a
+terminal, which is how Buildkite runs a job.
+[Running Meridian in a pipeline](../operations/running-in-a-pipeline.md)
+has a snippet per engine and the table of what each engine shows.
 
 ### Running part of a workflow
 

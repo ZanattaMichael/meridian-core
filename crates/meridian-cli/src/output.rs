@@ -464,6 +464,11 @@ pub(crate) fn plugin(name: &str, info: &meridian_plugin_host::Info, can: &[&str]
             "default": text_or_null(&setting.default),
             "description": setting.description,
         })).collect::<Vec<_>>(),
+        "rules": info.rules.iter().map(|rule| json!({
+            "name": rule.name,
+            "meaning": rule.meaning,
+            "hint": text_or_null(&rule.hint),
+        })).collect::<Vec<_>>(),
     })
 }
 

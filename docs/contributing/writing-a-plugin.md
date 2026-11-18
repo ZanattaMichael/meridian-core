@@ -185,22 +185,61 @@ Maps each `Resource` to your model, or refuses it. A resource is plain data:
 | `runtime_when` | a condition to check on the node during the apply; empty when there is none |
 | `pos` | the file, line and column the author wrote it at |
 
+#### Refusals
+
 Almost every refusal lives in this stage. Build one with the `refuse` helper
-the template gives you. It carries a stable rule name, a message and the
-author's position, so the operator is pointed at their own line:
+the template gives you. It carries a rule, a message and the author's
+position, so the operator is pointed at their own line:
 
 ```rust
+use meridian_sdk::rules;
+
 return Err(refuse(
     r,
-    "unsupported-state",
+    &rules::UNSUPPORTED_STATE,
     format!("has the state {other:?} (supported: present, absent)"),
 ));
 ```
 
-Use the rule names the other plugins already use where they fit:
-`unsupported-resource-type`, `unsupported-state`, `unsupported-action`,
-`unsupported-runtime-condition`, `missing-param`. Say what is supported in the
-message, as above, so the author knows what to write instead.
+The rule is a value, not a string: one of the constants in
+[`meridian_sdk::rules`](../../crates/meridian-sdk/src/rules.rs), each with a
+stable name, what it refuses and a hint. The same mistake carries the same
+name on every target, which is what lets a policy check, an editor or a test
+key off it, and the [refusal rules](../reference/refusal-rules.md) page is
+generated from the registry. Use a general rule wherever one fits:
+`unsupported-resource-type`, `unsupported-state`, `unsupported-param`,
+`missing-param`, `invalid-param`, `duplicate-resource`, `invalid-reference`,
+`unsupported-action`, `unsupported-runtime-condition` cover most of what a
+plugin refuses. Say what is supported in the message, as above, so the author
+knows what to write instead; the rule's own hint says it in general terms, and
+`.with_hint(...)` on the error replaces it with a specific one.
+
+A mistake that exists on your tool only, such as Salt's `shell-required`,
+gets a rule of the plugin's own. Declare it once, in a table in `lib.rs`, and
+return the table from `Emitter::rules`:
+
+```rust
+pub(crate) mod own {
+    use meridian_sdk::rules::Rule;
+
+    pub(crate) const SHELL_REQUIRED: Rule = Rule::new(
+        "shell-required",
+        "an `exec` command holds shell syntax, and Salt always runs a command through a shell",
+        "set param `shell` to true to say the shell syntax is intended",
+    );
+
+    pub(crate) const ALL: &[Rule] = &[SHELL_REQUIRED];
+}
+
+fn rules(&self) -> Vec<Rule> {
+    own::ALL.to_vec()
+}
+```
+
+A test fails when a plugin's own rule has a general rule's name, and the
+conformance suite fails when a refusal carries a rule neither the registry nor
+the plugin declares. Run the tests with `UPDATE_GOLDEN=1` once to add your
+rules to the reference page.
 
 #### References
 
@@ -295,6 +334,10 @@ them, so each one is a promise:
   check the values as you check params, and document each key on your
   target's page. Leave it out, and a document that sets any is refused. A
   tool-wide setting is not a resource: do not add a resource type for it.
+- `rules()`: the [refusal rules](../reference/refusal-rules.md) your target
+  has of its own, if a mistake exists on your tool and no other. Most targets
+  leave it out and refuse only under the general rules; see
+  [Refusals](#refusals).
 - `placed_text()`: the openings of your tool's own expression syntax, if it
   has any beyond `${`, and how each is written as literal text. The core
   applies them to every value an interpolation places from data before `emit`

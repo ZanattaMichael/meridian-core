@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use meridian_sdk::expr::{self, Part};
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
 
 use crate::{refuse, refuse_at, Cluster, Manifests, Object, OutputPart};
@@ -37,7 +38,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Manifests, CompileError
             if cluster_seen {
                 return Err(refuse(
                     r,
-                    "duplicate-cluster",
+                    &rules::DUPLICATE_RESOURCE,
                     "a document goes to one cluster; this one has two resources of type \"cluster\""
                         .to_owned(),
                 ));
@@ -49,7 +50,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Manifests, CompileError
         let Some((api_version, kind)) = split_type(&r.r#type) else {
             return Err(refuse(
                 r,
-                "unsupported-resource-type",
+                &rules::UNSUPPORTED_RESOURCE_TYPE,
                 format!(
                     "{:?} is not a Kubernetes object type. Write the API version and the kind, \
                      such as apps/v1/Deployment or v1/Service, or \"cluster\" for where the \
@@ -65,7 +66,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Manifests, CompileError
             Some(_) => {
                 return Err(refuse(
                     r,
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     "param \"metadata\" must be a map".to_owned(),
                 ))
             }
@@ -76,7 +77,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Manifests, CompileError
                 Some(Value::String(s)) if !expr::has_expr(s) => Ok(Some(s.clone())),
                 Some(_) => Err(refuse(
                     r,
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     format!("metadata.{key} must be a plain string"),
                 )),
             }
@@ -104,14 +105,19 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Manifests, CompileError
             if key == "apiVersion" || key == "kind" {
                 return Err(refuse(
                     r,
-                    "unsupported-param",
+                    &rules::UNSUPPORTED_PARAM,
                     format!(
                         "param {key:?} is given by the resource's type and cannot be set again"
                     ),
                 ));
             }
-            let rewritten = rewrite(value, &manifests.objects)
-                .map_err(|msg| refuse(r, "invalid-reference", format!("param {key:?}: {msg}")))?;
+            let rewritten = rewrite(value, &manifests.objects).map_err(|msg| {
+                refuse(
+                    r,
+                    &rules::INVALID_REFERENCE,
+                    format!("param {key:?}: {msg}"),
+                )
+            })?;
             body.insert(key.clone(), rewritten);
         }
         let name = manifests.objects[index].name.clone();
@@ -129,7 +135,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Manifests, CompileError
             refuse_at(
                 "",
                 &output.pos,
-                "invalid-reference",
+                &rules::INVALID_REFERENCE,
                 format!("output {:?}: {msg}", output.name),
             )
         };
@@ -166,7 +172,7 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
     if !r.runtime_when.is_empty() {
         return Err(refuse(
             r,
-            "unsupported-runtime-condition",
+            &rules::UNSUPPORTED_RUNTIME_CONDITION,
             format!(
                 "resource carries runtimeWhen {:?}, which this target cannot express: a \
                  manifest is declared state, with no condition for the cluster to evaluate",
@@ -178,14 +184,14 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
         "" | "present" => Ok(()),
         "absent" => Err(refuse(
             r,
-            "unsupported-state",
+            &rules::UNSUPPORTED_STATE,
             "state \"absent\" has no meaning on this target: applying manifests never deletes \
              an object, so delete it with kubectl and remove it from the document"
                 .to_owned(),
         )),
         other => Err(refuse(
             r,
-            "unsupported-state",
+            &rules::UNSUPPORTED_STATE,
             format!(
                 "resource type {:?} does not accept state {other:?} on this target (accepted: present)",
                 r.r#type
@@ -203,7 +209,7 @@ fn read_cluster(r: &Resource, cluster: &mut Cluster) -> Result<(), CompileError>
             _ => {
                 return Err(refuse(
                     r,
-                    "unsupported-param",
+                    &rules::UNSUPPORTED_PARAM,
                     format!(
                         "resource type \"cluster\" does not accept param {name:?} on this \
                          target (accepted: context, kubeconfig, namespace)"
@@ -214,7 +220,7 @@ fn read_cluster(r: &Resource, cluster: &mut Cluster) -> Result<(), CompileError>
         let Value::String(text) = value else {
             return Err(refuse(
                 r,
-                "invalid-param",
+                &rules::INVALID_PARAM,
                 format!("param {name:?} of the cluster must be a string"),
             ));
         };

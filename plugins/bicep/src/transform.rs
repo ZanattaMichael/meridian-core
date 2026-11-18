@@ -4,6 +4,7 @@
 use std::collections::BTreeSet;
 
 use meridian_sdk::expr::{self, Part};
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
 
 use crate::{refuse, refuse_at, secret_parameter, Deployment, Expr, Piece, Statement, Template};
@@ -47,7 +48,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
             if deployment_seen {
                 return Err(refuse(
                     r,
-                    "duplicate-deployment",
+                    &rules::DUPLICATE_RESOURCE,
                     "a document is one deployment; this one has two resources of type \"deployment\""
                         .to_owned(),
                 ));
@@ -59,7 +60,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
         } else {
             return Err(refuse(
                 r,
-                "unsupported-resource-type",
+                &rules::UNSUPPORTED_RESOURCE_TYPE,
                 format!(
                     "{:?} is not an Azure resource type. Use Azure's own type with its API \
                      version, such as Microsoft.Storage/storageAccounts@2023-01-01, or \
@@ -84,8 +85,13 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
         let mut refs = BTreeSet::new();
         let mut body = Vec::with_capacity(r.params.len());
         for (name, value) in &r.params {
-            let rewritten = rewrite(value, &symbols, &mut refs)
-                .map_err(|msg| refuse(r, "invalid-reference", format!("param {name:?}: {msg}")))?;
+            let rewritten = rewrite(value, &symbols, &mut refs).map_err(|msg| {
+                refuse(
+                    r,
+                    &rules::INVALID_REFERENCE,
+                    format!("param {name:?}: {msg}"),
+                )
+            })?;
             body.push((name.clone(), rewritten));
         }
         refs.remove(&r.id);
@@ -119,7 +125,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
                 refuse_at(
                     "",
                     &output.pos,
-                    "invalid-reference",
+                    &rules::INVALID_REFERENCE,
                     format!("output {:?}: {msg}", output.name),
                 )
             })?;
@@ -140,7 +146,7 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
     if !r.runtime_when.is_empty() {
         return Err(refuse(
             r,
-            "unsupported-runtime-condition",
+            &rules::UNSUPPORTED_RUNTIME_CONDITION,
             format!(
                 "resource carries runtimeWhen {:?}, which this target cannot express: a Bicep \
                  condition is decided when the deployment starts, not from the state of what \
@@ -153,14 +159,14 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
         "" | "present" => Ok(()),
         "absent" => Err(refuse(
             r,
-            "unsupported-state",
+            &rules::UNSUPPORTED_STATE,
             "state \"absent\" has no meaning on this target: a deployment creates and updates \
              resources and never deletes one, so delete it in Azure and remove it from the document"
                 .to_owned(),
         )),
         other => Err(refuse(
             r,
-            "unsupported-state",
+            &rules::UNSUPPORTED_STATE,
             format!(
                 "resource type {:?} does not accept state {other:?} on this target (accepted: present)",
                 r.r#type
@@ -178,7 +184,7 @@ fn read_deployment(r: &Resource, deployment: &mut Deployment) -> Result<(), Comp
             _ => {
                 return Err(refuse(
                     r,
-                    "unsupported-param",
+                    &rules::UNSUPPORTED_PARAM,
                     format!(
                         "resource type \"deployment\" does not accept param {name:?} on this \
                          target (accepted: name, resourceGroup, subscription)"
@@ -189,7 +195,7 @@ fn read_deployment(r: &Resource, deployment: &mut Deployment) -> Result<(), Comp
         let Value::String(text) = value else {
             return Err(refuse(
                 r,
-                "invalid-param",
+                &rules::INVALID_PARAM,
                 format!("param {name:?} of the deployment must be a string"),
             ));
         };

@@ -546,7 +546,7 @@ bootcmd:
 | `runtimeWhen` | refused, as for the six |
 | Secrets | not on this target |
 | References | `${id.param}` is settled from the document, as for the six |
-| two resources of one module | refused (`duplicate-module`): cloud-init reads one mapping, and one resource writes a module's whole value |
+| two resources of one module | refused (`duplicate-resource`): cloud-init reads one mapping, and one resource writes a module's whole value |
 
 [`examples/cloud-init/native-modules.yaml`](../../examples/cloud-init/native-modules.yaml)
 is a whole document of both kinds. A document that names a module compiles for
@@ -645,21 +645,21 @@ Each of these stops the compile with the resource, the rule and the line.
 | `runtimeWhen` on any resource | `unsupported-runtime-condition` | cloud-init evaluates nothing per resource. Put the test inside an `exec` command. |
 | a `dependsOn` that points backwards through the five steps, or at either end of a module of cloud-init's own | `unsatisfiable-order` | The order of a first boot cannot be changed, and where a module falls in it is cloud-init's to know. |
 | a `file` with no `content` | `missing-param` | It would empty the file. |
-| a relative `path` | `relative-path` | A first boot has no working directory. |
-| removing `/` | `unsafe-path` | |
-| `mode: 644` without quotes, or a mode that is not octal | `invalid-param`, `invalid-mode` | cloud-init takes the mode as a string of octal digits. |
-| two files with one `path`, the second without `append: true` | `duplicate-file-path` | The second would silently replace the first. |
-| two users, groups or packages with one name | `duplicate-user`, `duplicate-group`, `duplicate-package` | |
-| two resources of one cloud-config module | `duplicate-module` | cloud-init reads one mapping; the second would replace the first. |
-| a command with an unclosed quote and no `shell: true` | `invalid-command` | It cannot be split into words. |
+| a relative `path` | `invalid-path` | A first boot has no working directory. |
+| removing `/` | `invalid-path` | |
+| `mode: 644` without quotes, or a mode that is not octal | `invalid-param` | cloud-init takes the mode as a string of octal digits. |
+| two files with one `path`, the second without `append: true` | `duplicate-resource` | The second would silently replace the first. |
+| two users, groups or packages with one name | `duplicate-resource` | |
+| two resources of one cloud-config module | `duplicate-resource` | cloud-init reads one mapping; the second would replace the first. |
+| a command with an unclosed quote and no `shell: true` | `invalid-param` | It cannot be split into words. |
 | a param the type does not take here, such as `gid` on a `group`; `mode`, `owner` or `group` on a file in state `absent` | `unsupported-param` | The message lists the ones accepted. |
 | a resource type that is neither one of the six nor a cloud-config key: a wrong case, a dotted name, `native/<name>`, or a key a shared type writes (`packages`) | `unsupported-resource-type` | The message lists the six and says how a module is written. |
 | a required param left out, such as `name` or `path` | `missing-param` | |
 | a param that is there and empty, such as `command: ""` | `empty-param` | An empty name or command is a mistake, not a request for nothing. |
 | `value` beside other params on a module; a module with no params; a `state` on a module | `invalid-param`, `missing-param`, `unsupported-state` | A module's value is the one param `value`, or its keys as params. |
 | a param of the wrong kind, such as a list where one string is expected | `invalid-param` | The message says what was expected and what was found. |
-| an `encoding` cloud-init does not read | `invalid-encoding` | The message lists the ones accepted. |
-| an `owner` or `group` on a file that holds a colon | `invalid-owner` | cloud-init joins the two with a colon. Give them as separate params. |
+| an `encoding` cloud-init does not read | `invalid-param` | The message lists the ones accepted. |
+| an `owner` or `group` on a file that holds a colon | `invalid-param` | cloud-init joins the two with a colon. Give them as separate params. |
 | a user or group name with a space or a colon; a package name with a space | `invalid-name` | It would be read as two values. |
 | notifying a `file`, `package`, `user` or `group`, a module of cloud-init's own, or an action the type does not have | `unsupported-action` | Only a service or an exec can react. |
 | notifying an id that is not in the document | `unknown-notify-target` | |

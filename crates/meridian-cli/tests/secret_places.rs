@@ -300,6 +300,7 @@ fn scratch(index: usize) -> PathBuf {
 
 fn meridian(dir: &Path, command: &str, password: Option<&str>) -> Output {
     let mut meridian = Command::new(env!("CARGO_BIN_EXE_meridian"));
+    meridian.env("MERIDIAN_ANNOTATIONS", "off");
     meridian.args([command, "site.yaml"]);
     if command != "validate" {
         meridian.args(["--set", "env=prod"]);

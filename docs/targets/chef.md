@@ -290,7 +290,7 @@ policy as it is.
 
 Because the cookbook's name comes from the document name, the name may hold
 only lower-case letters, digits, hyphens and underscores. A name that cannot
-be a cookbook name is refused, not rewritten (`invalid-cookbook-name`).
+be a cookbook name is refused, not rewritten (`invalid-name`).
 
 Strings are written as Ruby strings: single-quoted where the text has no
 escape in it, double-quoted with `\n`, `\"` and `\#` where it has. A value
@@ -497,9 +497,9 @@ target can raise, and what to do:
 | `unknown-dependency` | an edge names a resource the document does not declare | fix the id |
 | `ordering-violated` | the order the core handed over puts a resource before its dependency | a core bug; report it |
 | `duplicate-resource` | two resources that manage the same package, service, file, user or group | merge them |
-| `invalid-cookbook-name` | a document name that cannot be a cookbook name | use lower-case letters, digits, hyphens and underscores |
-| `empty-cookbook` | a document with no resources | give it something to converge |
-| `dangling-reference` | `${id.param}` names a resource or a param that is not there | fix the reference |
+| `invalid-name` | a document name that cannot be a cookbook name | use lower-case letters, digits, hyphens and underscores |
+| `empty-document` | a document with no resources | give it something to converge |
+| `invalid-reference` | `${id.param}` names a resource or a param that is not there | fix the reference |
 
 ## Troubleshooting
 

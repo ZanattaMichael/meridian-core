@@ -164,7 +164,7 @@ file. It says where the file goes:
 | `name` | the deployment's name in Azure: letters, digits, hyphens, underscores, periods and parentheses | the document's name |
 | `subscription` | the subscription, when it is not the `az` command's current one | the current one |
 
-A second `deployment` resource is refused (`duplicate-deployment`), and a
+A second `deployment` resource is refused (`duplicate-resource`), and a
 `deployment` may not take part in `dependsOn` (`unsupported-dependency`).
 
 ## References and expressions
@@ -346,21 +346,21 @@ target can raise, and what to do:
 | Rule | Meaning | What to do |
 |---|---|---|
 | `unsupported-resource-type` | a type without `@api-version`, or not of the form `Namespace/type` | write the Azure type with its API version |
-| `missing-deployment` | no resource of type `deployment`, or one without `resourceGroup` | add one with the resource group |
-| `duplicate-deployment` | two resources of type `deployment` | keep one |
-| `invalid-deployment-name` | a deployment name Azure does not accept | letters, digits, hyphens, underscores, periods and parentheses |
+| `missing-resource` | no resource of type `deployment`, or one without `resourceGroup` | add one with the resource group |
+| `duplicate-resource` | two resources of type `deployment` | keep one |
+| `invalid-name` | a deployment name Azure does not accept | letters, digits, hyphens, underscores, periods and parentheses |
 | `unsupported-param` | a param the `deployment` resource does not take | only `resourceGroup`, `name` and `subscription` |
 | `invalid-param` | a `deployment` param that is not a string | quote it |
 | `missing-param` | a resource without `name` | add the resource's name in Azure |
 | `invalid-name` | a resource or output id that cannot be a Bicep name | start with a letter; use letters, digits and underscores |
-| `duplicate-name` | an output with the same name as a resource | rename one; Bicep keeps both in one namespace |
+| `duplicate-resource` | an output with the same name as a resource | rename one; Bicep keeps both in one namespace |
 | `duplicate-output` | two outputs with the same name | rename one |
 | `invalid-reference` | `${id.x}` where `id` is a resource and the path cannot be read | fix the path |
 | `unsupported-state` | `state: absent`, or any state but `present` | remove the resource from the document, and delete it in Azure |
 | `unsupported-runtime-condition` | `runtimeWhen` on any resource | decide with a compile-time `when` instead |
 | `unsupported-action` | `notifies` on any resource | drop it; a deployment has no notifications |
 | `unsupported-dependency` | a `dependsOn` to or from the `deployment` resource | the deployment is not a resource of the file |
-| `empty-template` | a document with no resources but the deployment | add a resource |
+| `empty-document` | a document with no resources but the deployment | add a resource |
 
 ## Troubleshooting
 

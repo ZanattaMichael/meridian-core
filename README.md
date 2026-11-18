@@ -92,6 +92,15 @@ they happen. A report names steps, resources and outputs, and never holds a valu
 [reports and sinks](docs/reference/reporting.md). To keep every project's runs in one place, the
 optional [`meridian-report-server`](docs/reference/report-server.md) receives them through a sink.
 
+Every pipeline engine runs Meridian as one job, with no plugin: the job runs `meridian apply`,
+and Meridian does the rest. Inside GitHub Actions or Azure Pipelines, a refused document shows
+on the pull request at its line and the run's report becomes the job's summary; on Buildkite
+the report is an annotation. [Running Meridian in a pipeline](docs/operations/running-in-a-pipeline.md)
+has a tested GitHub Actions workflow and a snippet for each of the other engines, what the engine
+owns and what Meridian owns, and how the job's identity is checked before anything runs.
+
+<p align="center"><img src="docs/graphics/meridian-in-a-pipeline.svg" alt="Meridian inside a pipeline engine: the engine's band above Meridian's band, the job running meridian apply, and the events coming back as annotations and a summary" width="100%"></p>
+
 A workflow's Infrastructure documents run first, then its ResourceSets. A ResourceSet whose
 `targetHost` comes from an Infrastructure output is compiled for, and applied to, whatever
 that output turns out to be; until that infrastructure has been applied it is reported as
@@ -111,6 +120,7 @@ meridian lint --strict .                    # every error in a project, plus pro
 meridian schema -o meridian.schema.json     # a JSON Schema, for editors that only know YAML
 meridian schema sync .                      # cache each tool's own types, for completion and checking
 meridian lsp                                # the language server, started by your editor
+meridian mcp                                # the MCP server, started by an AI client
 ```
 
 ![Writing a resource with completion](docs/tooling/images/writing-a-resource.gif)
@@ -147,6 +157,7 @@ The core is a Cargo workspace under `crates/`:
   and navigation, and the JSON Schema export, all read from the parser's own field tables and
   from what the plugins declare
 - `meridian-lsp` — the language server
+- `meridian-mcp` — the MCP server: the compiler and the catalogue as tools for an AI model
 - `meridian-cli` — the `meridian` command
 - `meridian-policy-opa` — the policy engine for Open Policy Agent, which `--policy` asks whether
   a change may be made

@@ -163,7 +163,7 @@ fn two_configurations_of_one_provider_need_aliases() {
     let err = refusal(
         "  resources:\n    - id: east\n      type: provider\n      params: {name: aws, region: us-east-1}\n    - id: west\n      type: provider\n      params: {name: aws, region: us-west-2}\n",
     );
-    assert_eq!(err.rule, "duplicate-provider");
+    assert_eq!(err.rule, "duplicate-resource");
     assert_eq!(
         err.msg,
         "provider \"aws\" is configured twice; give all but one an alias"

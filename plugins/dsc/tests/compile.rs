@@ -211,7 +211,7 @@ fn what_dsc_cannot_take_is_refused() {
     // Settings alone configure nothing: the only resource being the old
     // runner resource leaves no instance.
     let err = refusal("    - id: settings\n      type: runner\n      params: {engine: Auto}\n");
-    assert_eq!(err.rule, "empty-configuration");
+    assert_eq!(err.rule, "empty-document");
 }
 
 #[test]
@@ -283,7 +283,7 @@ fn a_runner_resource_still_works_with_a_warning_and_cannot_contradict_the_settin
     let err = refusal(&format!(
         "    - id: a\n      type: runner\n      params: {{engine: DscV2}}\n    - id: b\n      type: runner\n      params: {{target: Local}}\n{KEY}"
     ));
-    assert_eq!(err.rule, "duplicate-runner");
+    assert_eq!(err.rule, "duplicate-resource");
     let err = refusal(&format!(
         "    - id: settings\n      type: runner\n      params: {{mode: x}}\n{KEY}"
     ));
@@ -327,7 +327,7 @@ fn the_target_version_chooses_the_engine() {
 
     // One that disagrees is refused, not overruled.
     let e = versioned_with("2", "{engine: DscV3}").expect_err("the engines disagree");
-    assert_eq!(e.rule, "conflicting-engine");
+    assert_eq!(e.rule, "conflicting-settings");
     assert!(
         e.msg.contains("targetVersion \"2\" means the engine DscV2")
             && e.msg.contains("spec.settings.engine asks for DscV3"),
@@ -338,7 +338,7 @@ fn the_target_version_chooses_the_engine() {
     let agrees =
         format!("    - id: settings\n      type: runner\n      params: {{engine: DscV3}}\n{KEY}");
     let e = versioned("2", &agrees).expect_err("the engines disagree");
-    assert_eq!(e.rule, "conflicting-engine");
+    assert_eq!(e.rule, "conflicting-settings");
     assert!(e.msg.contains("the runner asks for DscV3"), "{}", e.msg);
 }
 

@@ -479,7 +479,7 @@ fn two_configurations_of_one_provider_need_aliases() {
     let err = refusal(
         "  resources:\n    - id: east\n      type: provider\n      params: {name: aws, region: us-east-1}\n    - id: west\n      type: provider\n      params: {name: aws, region: us-west-2}\n",
     );
-    assert_eq!(err.rule, "duplicate-provider");
+    assert_eq!(err.rule, "duplicate-resource");
     assert_eq!(
         err.msg,
         "provider \"aws\" is configured twice; give all but one an alias"
@@ -518,7 +518,7 @@ fn a_backend_and_a_module_are_written_where_opentofu_expects_them() {
     let err = refusal(
         "  resources:\n    - id: s3\n      type: backend\n      params: {bucket: a}\n    - id: gcs\n      type: backend\n      params: {bucket: b}\n",
     );
-    assert_eq!(err.rule, "duplicate-backend");
+    assert_eq!(err.rule, "duplicate-resource");
 }
 
 #[test]
@@ -611,7 +611,7 @@ fn an_encryption_block_is_checked_before_opentofu_ever_runs() {
         "  resources:\n{ENCRYPTION}        state:\n          method: ${{method.aes_gcm.primary}}\n"
     ));
     assert_eq!(err.target, "opentofu");
-    assert_eq!(err.rule, "unknown-reference");
+    assert_eq!(err.rule, "invalid-reference");
     assert_eq!(err.resource, "sealed");
     assert_eq!(err.pos.file, "infra.yaml");
     assert!(err.pos.line > 0);
@@ -647,7 +647,7 @@ fn a_configuration_has_one_encryption_block() {
     let err = refusal(&format!(
         "  resources:\n{ENCRYPTION}        state:\n          method: ${{method.aes_gcm.main}}\n    - id: again\n      type: encryption\n      params:\n        state:\n          method: ${{method.aes_gcm.main}}\n"
     ));
-    assert_eq!(err.rule, "duplicate-encryption");
+    assert_eq!(err.rule, "duplicate-resource");
     assert_eq!(err.resource, "again");
 }
 

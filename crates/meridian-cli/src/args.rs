@@ -186,6 +186,11 @@ pub(crate) enum Command {
         /// default and what it does
         #[arg(long)]
         settings: bool,
+        /// Also list each plugin's own refusal rules, with what each refuses
+        /// and what to write instead. The general rules every target shares
+        /// are on the refusal rules reference page
+        #[arg(long)]
+        rules: bool,
         #[command(flatten)]
         plugins: PluginDirs,
     },
@@ -224,6 +229,8 @@ pub(crate) enum Command {
     Schema(tools::SchemaArgs),
     /// Run the language server, for editors, on standard input and output
     Lsp(tools::LspArgs),
+    /// Run the MCP server, for AI models, on standard input and output
+    Mcp(tools::McpArgs),
     /// Make signing keys, sign plugin binaries and check their signatures
     Signing {
         #[command(subcommand)]
@@ -278,6 +285,7 @@ impl Command {
             Command::Lint(_) => "lint".to_owned(),
             Command::Schema(_) => "schema".to_owned(),
             Command::Lsp(_) => "lsp".to_owned(),
+            Command::Mcp(_) => "mcp".to_owned(),
             Command::Signing { command } => format!(
                 "signing {}",
                 match command {

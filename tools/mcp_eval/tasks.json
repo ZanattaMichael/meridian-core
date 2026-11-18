@@ -1,0 +1,66 @@
+[
+  {
+    "id": "ansible-nginx",
+    "target": "ansible",
+    "kind": "ResourceSet",
+    "task": "An nginx web server for Ansible on the host web01.example.com: install the nginx package, write its configuration file at /etc/nginx/nginx.conf with mode 0644, and keep the service running and enabled. The service reloads when the configuration file changes.",
+    "expectTypes": ["package", "file", "service"],
+    "expectText": ["notifies"]
+  },
+  {
+    "id": "puppet-user-and-group",
+    "target": "puppet",
+    "kind": "ResourceSet",
+    "task": "For Puppet on the host build01: a group named builders and a user named ci whose primary group is builders, with the group created before the user.",
+    "expectTypes": ["group", "user"],
+    "expectText": ["dependsOn"]
+  },
+  {
+    "id": "chef-exec-guarded",
+    "target": "chef",
+    "kind": "ResourceSet",
+    "task": "For Chef on the host app01: run the command /opt/app/bin/migrate once, only if the file /opt/app/.migrated does not exist yet.",
+    "expectTypes": ["exec"],
+    "expectText": ["creates"]
+  },
+  {
+    "id": "bicep-storage-account",
+    "target": "bicep",
+    "kind": "Infrastructure",
+    "task": "A storage account in Bicep named stmeridiandemo in the location westeurope, with the Standard_LRS SKU and the StorageV2 kind.",
+    "expectTypes": ["Microsoft.Storage/storageAccounts"],
+    "expectText": ["westeurope"]
+  },
+  {
+    "id": "terraform-aws-instance",
+    "target": "terraform",
+    "kind": "Infrastructure",
+    "task": "A Terraform document with one AWS EC2 instance of type t3.micro from the image ami-0123456789abcdef0, tagged Name=web, and an output called instance_id that reads the instance's id.",
+    "expectTypes": ["aws_instance"],
+    "expectText": ["outputs"]
+  },
+  {
+    "id": "kubernetes-deployment-service",
+    "target": "kubernetes",
+    "kind": "Infrastructure",
+    "task": "A Kubernetes Deployment of three replicas of the image nginx:1.27 listening on port 80, and a Service of type ClusterIP in front of it on port 80.",
+    "expectTypes": ["apps/v1/Deployment", "v1/Service"],
+    "expectText": ["replicas"]
+  },
+  {
+    "id": "docker-compose-web-and-db",
+    "target": "docker",
+    "kind": "Infrastructure",
+    "task": "For Docker: a web service from the image nginx:1.27 publishing port 8080 to 80, and a database service from postgres:16 with a named volume for its data; the web service starts after the database.",
+    "expectTypes": ["service"],
+    "expectText": ["postgres:16"]
+  },
+  {
+    "id": "salt-package-with-secret",
+    "target": "salt",
+    "kind": "ResourceSet",
+    "task": "For Salt on the host db01: install the postgresql package and write /etc/app/db.conf containing a password that must not be written into the document; the password comes from the environment variable APP_DB_PASSWORD.",
+    "expectTypes": ["package", "file"],
+    "expectText": ["secrets", "secret."]
+  }
+]

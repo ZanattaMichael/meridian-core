@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 use meridian_sdk::expr::{self, Part};
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
 use meridian_yaml::Yaml;
 
@@ -97,7 +98,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Chart, CompileError> {
                 let Some((api_version, kind)) = object_type(other) else {
                     return Err(refuse(
                         r,
-                        "unsupported-resource-type",
+                        &rules::UNSUPPORTED_RESOURCE_TYPE,
                         format!(
                             "{other:?} is not a Kubernetes object type. Write the object's \
                              apiVersion and kind joined by a slash, such as apps/v1/Deployment \
@@ -114,7 +115,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Chart, CompileError> {
         if slot.is_some() {
             return Err(refuse(
                 r,
-                "duplicate-settings",
+                &rules::DUPLICATE_RESOURCE,
                 format!(
                     "a document has one resource of type {:?}; this is the second",
                     r.r#type
@@ -130,7 +131,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Chart, CompileError> {
             .iter()
             .map(|(name, value)| Ok((name.clone(), literal_value(value)?)))
             .collect::<Result<_, String>>()
-            .map_err(|msg| refuse(r, "invalid-reference", msg))?;
+            .map_err(|msg| refuse(r, &rules::INVALID_REFERENCE, msg))?;
     }
     if let Some(r) = settings.chart {
         read_chart(r, &mut chart.chart)?;
@@ -180,7 +181,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Chart, CompileError> {
                 refuse_at(
                     "",
                     &output.pos,
-                    "invalid-reference",
+                    &rules::INVALID_REFERENCE,
                     format!("output {:?}: {msg}", output.name),
                 )
             })?;
@@ -197,7 +198,7 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
     if !r.runtime_when.is_empty() {
         return Err(refuse(
             r,
-            "unsupported-runtime-condition",
+            &rules::UNSUPPORTED_RUNTIME_CONDITION,
             format!(
                 "resource carries runtimeWhen {:?}, which this target cannot express: a chart \
                  is rendered from its values before anything reaches the cluster, not from \
@@ -210,14 +211,14 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
         "" | "present" => Ok(()),
         "absent" => Err(refuse(
             r,
-            "unsupported-state",
+            &rules::UNSUPPORTED_STATE,
             "state \"absent\" has no meaning on this target: Helm deletes whatever its chart \
              no longer declares, so remove the resource from the document"
                 .to_owned(),
         )),
         other => Err(refuse(
             r,
-            "unsupported-state",
+            &rules::UNSUPPORTED_STATE,
             format!(
                 "resource type {:?} does not accept state {other:?} on this target (accepted: present)",
                 r.r#type
@@ -258,7 +259,7 @@ fn check_id(r: &Resource) -> Result<(), CompileError> {
     }
     Err(refuse(
         r,
-        "invalid-name",
+        &rules::INVALID_NAME,
         format!(
             "resource id {:?} cannot name a template of the chart: an id starts with a letter \
              or a digit, holds only letters, digits, underscores and hyphens, and is at most \
@@ -322,7 +323,7 @@ impl Params<'_> {
             None => Ok(()),
             Some(name) => Err(refuse(
                 self.r,
-                "unsupported-param",
+                &rules::UNSUPPORTED_PARAM,
                 format!(
                     "resource type {:?} does not accept param {name:?} on this target (accepted: {})",
                     self.r.r#type,
@@ -338,13 +339,13 @@ impl Params<'_> {
             Some(Value::String(s)) => literal_text(s).map(Some).map_err(|msg| {
                 refuse(
                     self.r,
-                    "invalid-reference",
+                    &rules::INVALID_REFERENCE,
                     format!("param {name:?}: {msg}"),
                 )
             }),
             Some(other) => Err(refuse(
                 self.r,
-                "invalid-param",
+                &rules::INVALID_PARAM,
                 format!(
                     "param {name:?} of {} must be a string, and this is {}{}",
                     self.what,
@@ -365,7 +366,7 @@ impl Params<'_> {
             Some(Value::Bool(b)) => Ok(Some(*b)),
             Some(other) => Err(refuse(
                 self.r,
-                "invalid-param",
+                &rules::INVALID_PARAM,
                 format!(
                     "param {name:?} of {} must be true or false, and this is {}",
                     self.what,
@@ -661,7 +662,7 @@ fn metadata(r: &Resource) -> Result<Option<&BTreeMap<String, Value>>, CompileErr
         Some(Value::Map(map)) => Ok(Some(map)),
         Some(other) => Err(refuse(
             r,
-            "invalid-param",
+            &rules::INVALID_PARAM,
             format!(
                 "param \"metadata\" must be a mapping, and this is {}",
                 other.describe()
@@ -677,7 +678,7 @@ fn metadata_text<'a>(r: &'a Resource, field: &str) -> Result<Option<&'a str>, Co
         Some(Value::String(s)) => Ok(Some(s)),
         Some(other) => Err(refuse(
             r,
-            "invalid-param",
+            &rules::INVALID_PARAM,
             format!(
                 "param \"metadata.{field}\" must be a string, and this is {}",
                 other.describe()
@@ -698,7 +699,7 @@ fn name_of(r: &Resource, scope: &Scope) -> Result<Vec<Piece>, CompileError> {
         Some(written) => scope.pieces(written).map_err(|msg| {
             refuse(
                 r,
-                "invalid-reference",
+                &rules::INVALID_REFERENCE,
                 format!("param \"metadata.name\": {msg}"),
             )
         }),
@@ -716,7 +717,7 @@ fn namespace_of(r: &Resource, scope: &Scope) -> Result<Vec<Piece>, CompileError>
         Some(written) => scope.pieces(written).map_err(|msg| {
             refuse(
                 r,
-                "invalid-reference",
+                &rules::INVALID_REFERENCE,
                 format!("param \"metadata.namespace\": {msg}"),
             )
         }),
@@ -731,7 +732,13 @@ fn manifest(
 ) -> Result<Manifest, CompileError> {
     let bad_reference = |name: &str| {
         let name = name.to_owned();
-        move |msg: String| refuse(r, "invalid-reference", format!("param {name:?}: {msg}"))
+        move |msg: String| {
+            refuse(
+                r,
+                &rules::INVALID_REFERENCE,
+                format!("param {name:?}: {msg}"),
+            )
+        }
     };
     let names = scope.names.as_ref().expect("the names are read first");
     let name_pieces = &names[r.id.as_str()];
@@ -767,7 +774,7 @@ fn manifest(
             "apiVersion" | "kind" => {
                 return Err(refuse(
                     r,
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     format!(
                         "param {param:?} is not needed: the resource's type, {:?}, already \
                          says it",
@@ -796,21 +803,27 @@ fn manifest(
 fn read_kustomization(r: &Resource, scope: &Scope) -> Result<Kustomization, CompileError> {
     let bad_reference = |name: &str| {
         let name = name.to_owned();
-        move |msg: String| refuse(r, "invalid-reference", format!("param {name:?}: {msg}"))
+        move |msg: String| {
+            refuse(
+                r,
+                &rules::INVALID_REFERENCE,
+                format!("param {name:?}: {msg}"),
+            )
+        }
     };
     let mut kustomization = Kustomization::default();
     for (name, value) in &r.params {
         if name == "apiVersion" || name == "kind" {
             return Err(refuse(
                 r,
-                "unsupported-param",
+                &rules::UNSUPPORTED_PARAM,
                 format!("param {name:?} is not needed: Meridian writes it"),
             ));
         }
         if KUSTOMIZATION_REFUSED.contains(&name.as_str()) {
             return Err(refuse(
                 r,
-                "unsupported-param",
+                &rules::UNSUPPORTED_PARAM,
                 format!(
                     "resource type \"kustomization\" does not accept param {name:?} on this \
                      target: the overlay is applied to what the chart renders and to nothing \
@@ -829,7 +842,7 @@ fn read_kustomization(r: &Resource, scope: &Scope) -> Result<Kustomization, Comp
             let Value::String(written) = value else {
                 return Err(refuse(
                     r,
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     format!(
                         "param {name:?} of the overlay must be a string, and this is {}",
                         value.describe()
@@ -851,11 +864,17 @@ fn read_kustomization(r: &Resource, scope: &Scope) -> Result<Kustomization, Comp
 /// The overlay's patches. A patch may be written as the YAML it is, not only
 /// as a string holding YAML; Kustomize itself reads only the string.
 fn patches(r: &Resource, value: &Value, scope: &Scope) -> Result<Yaml, CompileError> {
-    let bad = |msg: String| refuse(r, "invalid-reference", format!("param \"patches\": {msg}"));
+    let bad = |msg: String| {
+        refuse(
+            r,
+            &rules::INVALID_REFERENCE,
+            format!("param \"patches\": {msg}"),
+        )
+    };
     let Value::List(items) = value else {
         return Err(refuse(
             r,
-            "invalid-param",
+            &rules::INVALID_PARAM,
             format!(
                 "param \"patches\" of the overlay must be a list, and this is {}",
                 value.describe()
@@ -867,7 +886,7 @@ fn patches(r: &Resource, value: &Value, scope: &Scope) -> Result<Yaml, CompileEr
         let Value::Map(patch) = item else {
             return Err(refuse(
                 r,
-                "invalid-param",
+                &rules::INVALID_PARAM,
                 "every patch of the overlay must be a mapping with a \"patch\" and, usually, a \
                  \"target\""
                     .to_owned(),
@@ -879,7 +898,7 @@ fn patches(r: &Resource, value: &Value, scope: &Scope) -> Result<Yaml, CompileEr
                 ("path", _) => {
                     return Err(refuse(
                         r,
-                        "unsupported-param",
+                        &rules::UNSUPPORTED_PARAM,
                         "a patch of the overlay cannot name a file with \"path\": write the \
                          patch itself under \"patch\""
                             .to_owned(),

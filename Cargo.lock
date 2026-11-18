@@ -1226,6 +1226,7 @@ dependencies = [
  "meridian-import",
  "meridian-ir",
  "meridian-lsp",
+ "meridian-mcp",
  "meridian-module",
  "meridian-orchestrator",
  "meridian-plugin-host",
@@ -1295,6 +1296,23 @@ dependencies = [
  "meridian-target-terraform",
  "meridian-tooling",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "meridian-mcp"
+version = "0.1.0"
+dependencies = [
+ "meridian-ast",
+ "meridian-expr",
+ "meridian-import",
+ "meridian-ir",
+ "meridian-plugin-host",
+ "meridian-sdk",
+ "meridian-target-ansible",
+ "meridian-target-fake",
+ "meridian-target-terraform",
+ "meridian-tooling",
  "serde_json",
 ]
 

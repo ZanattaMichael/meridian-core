@@ -20,6 +20,7 @@ mod sort;
 mod transform;
 mod validate;
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
     Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
     ResourceGraph, SshTakes, Value,
@@ -71,7 +72,8 @@ fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
     meridian_sdk::check_ssh_credential(credential, &SSH_TAKES).map_err(|msg| CompileError {
         target: NAME.to_owned(),
         resource: String::new(),
-        rule: "unsupported-credential".to_owned(),
+        rule: rules::UNSUPPORTED_CREDENTIAL.name.to_owned(),
+        hint: rules::UNSUPPORTED_CREDENTIAL.hint.to_owned(),
         msg: format!("the credential {:?}: {msg}", credential.name),
         pos: Position::default(),
     })
@@ -154,8 +156,23 @@ impl Sls {
     }
 }
 
+/// The refusal rules only this target has. Everything else it refuses carries
+/// a general rule from `meridian_sdk::rules`.
+pub(crate) mod own {
+    use meridian_sdk::rules::Rule;
+
+    pub(crate) const SHELL_REQUIRED: Rule = Rule::new(
+        "shell-required",
+        "an `exec` command holds shell syntax, and Salt always runs a command through a shell",
+        "set param `shell` to true to say the shell syntax is intended, or quote the command",
+    );
+
+    /// Every rule here, for `Emitter::rules` and the reference page.
+    pub(crate) const ALL: &[Rule] = &[SHELL_REQUIRED];
+}
+
 /// A refusal of one resource, stamped with this target.
-pub(crate) fn refuse(r: &Resource, rule: &str, msg: String) -> CompileError {
+pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
         ..CompileError::for_resource(r, rule, msg)
@@ -195,6 +212,9 @@ impl Emitter for Salt {
             secrets: true,
             credentials: true,
         }
+    }
+    fn rules(&self) -> Vec<Rule> {
+        own::ALL.to_vec()
     }
 
     fn category(&self) -> Category {

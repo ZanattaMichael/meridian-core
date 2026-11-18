@@ -63,6 +63,7 @@ fn scratch(test: &str, workflow: &str) -> PathBuf {
 
 fn meridian(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(args)
         .arg("--output")
         .arg("json")
@@ -175,6 +176,7 @@ fn plan_and_apply_print_one_object_each_and_the_detailed_exit_code_says_whether_
 
     // Without the flag a plan with changes still exits 0.
     let text_mode = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(["plan", "site.yaml"])
         .current_dir(&dir)
         .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())
@@ -182,6 +184,7 @@ fn plan_and_apply_print_one_object_each_and_the_detailed_exit_code_says_whether_
         .unwrap();
     assert_eq!(text_mode.status.code(), Some(0));
     let with_flag = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(["plan", "site.yaml", "--detailed-exitcode"])
         .current_dir(&dir)
         .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())
@@ -194,6 +197,7 @@ fn plan_and_apply_print_one_object_each_and_the_detailed_exit_code_says_whether_
     )
     .unwrap();
     let with_flag = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(["plan", "site.yaml", "--detailed-exitcode"])
         .current_dir(&dir)
         .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())
@@ -447,6 +451,7 @@ spec:
     )
     .unwrap();
     let check = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(["secret", "check", "secrets.yaml", "--output", "json"])
         .current_dir(&dir)
         .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())
@@ -533,6 +538,7 @@ fn a_failure_before_a_result_is_an_object_too_and_events_cannot_share_stdout() {
 
     // The environment variable is the flag.
     let by_env = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(["version"])
         .current_dir(&dir)
         .env("MERIDIAN_OUTPUT", "json")

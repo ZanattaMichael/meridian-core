@@ -602,9 +602,9 @@ fn a_package_is_its_name_or_a_name_and_version_pair() {
 #[test]
 fn two_resources_for_one_thing_are_refused() {
     for (kind, rule) in [
-        ("package", "duplicate-package"),
-        ("user", "duplicate-user"),
-        ("group", "duplicate-group"),
+        ("package", "duplicate-resource"),
+        ("user", "duplicate-resource"),
+        ("group", "duplicate-resource"),
     ] {
         let err = refusal(&format!(
             "    - id: a\n      type: {kind}\n      params: {{name: same}}\n    \
@@ -687,7 +687,7 @@ fn file_params_that_contradict_the_state_are_refused() {
         ))
     };
     let err = file("directory", "path: /srv/app, content: x");
-    assert_eq!(err.rule, "unsupported-param");
+    assert_eq!(err.rule, "param-conflicts-with-state");
     assert_eq!(
         err.msg,
         "param \"content\" does not apply to a file in state \"directory\""
@@ -709,14 +709,17 @@ fn file_params_that_contradict_the_state_are_refused() {
     assert_eq!(file("present", "content: x").rule, "missing-param");
     assert_eq!(
         file("present", "path: etc/app, content: x").rule,
-        "relative-path"
+        "invalid-path"
     );
     assert_eq!(
         file("linked", "path: /etc/app, content: x").rule,
         "unsupported-state"
     );
     for root in ["/", "//", "/./"] {
-        assert_eq!(file("absent", &format!("path: {root}")).rule, "unsafe-path");
+        assert_eq!(
+            file("absent", &format!("path: {root}")).rule,
+            "invalid-path"
+        );
     }
 }
 
@@ -736,19 +739,19 @@ fn a_mode_or_encoding_cloud_init_would_not_read_is_refused() {
         err.msg
     );
     let err = file("mode: \"u+rw\"");
-    assert_eq!(err.rule, "invalid-mode");
+    assert_eq!(err.rule, "invalid-param");
     assert_eq!(
         err.msg,
         "mode \"u+rw\" is not an octal file mode such as \"0644\""
     );
     let err = file("encoding: rot13");
-    assert_eq!(err.rule, "invalid-encoding");
+    assert_eq!(err.rule, "invalid-param");
     assert!(
         err.msg.contains("accepted: b64, base64, gz,"),
         "{}",
         err.msg
     );
-    assert_eq!(file("owner: \"root:adm\"").rule, "invalid-owner");
+    assert_eq!(file("owner: \"root:adm\"").rule, "invalid-param");
     assert_eq!(file("append: \"yes\"").rule, "invalid-param");
 }
 
@@ -761,7 +764,7 @@ fn one_path_is_written_once_unless_the_second_appends() {
         )
     };
     let err = refusal(&two(""));
-    assert_eq!(err.rule, "duplicate-file-path");
+    assert_eq!(err.rule, "duplicate-resource");
     assert_eq!(err.resource, "b");
     assert_eq!(
         err.msg,
@@ -914,7 +917,7 @@ fn guards_wrap_a_line_of_shell_without_letting_a_comment_swallow_them() {
 fn a_command_that_cannot_be_a_command_is_refused() {
     let run = |params: &str| refusal(&format!("    - id: run\n      type: exec\n{params}"));
     let err = run("      params: {command: \"echo 'unfinished\"}\n");
-    assert_eq!(err.rule, "invalid-command");
+    assert_eq!(err.rule, "invalid-param");
     assert_eq!(
         err.msg,
         "command \"echo 'unfinished\" cannot be split into words: a single quote is never closed. \
@@ -1145,7 +1148,7 @@ fn a_module_takes_its_whole_value_once_and_no_state() {
     let err = refusal(
         "    - id: a\n      type: ntp\n      params: {enabled: true}\n    - id: b\n      type: ntp\n      params: {enabled: false}\n",
     );
-    assert_eq!(err.rule, "duplicate-module");
+    assert_eq!(err.rule, "duplicate-resource");
     assert_eq!(err.resource, "b");
 }
 

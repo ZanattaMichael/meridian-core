@@ -495,12 +495,12 @@ target can raise, and what to do:
 | `unknown-notify-target` | a notify names a resource the document does not declare | fix the id |
 | `ordering-violated` | the order the core handed over puts a resource before its dependency | a core bug; report it |
 | `duplicate-resource` | two resources with the same id | rename one |
-| `duplicate-task-name`, `duplicate-handler-name` | two tasks or two handlers that would share a name | rename one; a handler is named after its action and resource |
-| `empty-name`, `multiline-name` | an id that cannot be a task name | use one line of letters, digits and underscores |
-| `missing-module`, `empty-module-args` | a task with no module, or a module given nothing | a plugin bug; report it |
-| `missing-handler` | a task notifies a handler the play does not define | a plugin bug; report it |
-| `conditional-handler` | a `runtimeWhen` on a handler | a plugin bug; report it |
-| `dangling-reference` | `${id.param}` names a resource or a param that is not there | fix the reference |
+| `duplicate-resource` | two tasks or two handlers that would share a name | rename one; a handler is named after its action and resource |
+| `invalid-name` | an id that cannot be a task name | use one line of letters, digits and underscores |
+| `missing-param`, `empty-param` | a task with no module, or a module given nothing | a plugin bug; report it |
+| `unknown-notify-target` | a task notifies a handler the play does not define | a plugin bug; report it |
+| `unsupported-runtime-condition` | a `runtimeWhen` on a handler | a plugin bug; report it |
+| `invalid-reference` | `${id.param}` names a resource or a param that is not there | fix the reference |
 | `invalid-host` | a host that is not a name, so it cannot be an inventory line | the core refuses one first ([`targetHost`](../reference/dsl/outputs-and-hand-offs.md#rules)) |
 | `unsupported-credential` | a credential field `ansible-playbook` cannot take: a `passphrase`, a `certificate`, a `domain`, a user that cannot be an inventory line, or a type that is not `ssh` or `usernamePassword` | see [Reaching the host as a credential](#reaching-the-host-as-a-credential) |
 | `missing-host` | a ResourceSet with no host to write the inventory for | give it a `targetHost` |

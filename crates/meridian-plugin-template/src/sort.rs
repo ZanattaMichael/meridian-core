@@ -5,6 +5,7 @@
 //! do here. A tool with its own way to say "after" (Compose's `depends_on`,
 //! Terraform's references) writes the edges into its model in this stage.
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, EdgeKind, ResourceGraph, Warning};
 
 use crate::{refuse_at, Entry};
@@ -26,7 +27,7 @@ pub(crate) fn apply_ordering(
         return Err(refuse_at(
             &edge.from,
             &edge.pos,
-            "unsupported-notify",
+            &rules::UNSUPPORTED_NOTIFY,
             format!(
                 "notifies resource {:?}, and filesync has no way to react to a change",
                 edge.to

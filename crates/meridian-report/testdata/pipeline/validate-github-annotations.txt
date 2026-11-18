@@ -1,0 +1,2 @@
+::error file=site.yaml,line=34,col=7,title=Meridian%3A validate::spec.resources[0]: unknown field "colour"
+::error title=Meridian%3A plan::no document's labels match the selector tier=none

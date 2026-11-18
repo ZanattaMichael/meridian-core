@@ -410,13 +410,17 @@ violations; a hierarchy that cannot be loaded at all is an
 
 ### `secret check`
 
-One object per document that declares a secret (`name`, `file`, `secrets`),
-each secret with `name`, `from` (the provider), `optional`, `state` (`ok`,
-`not-checked`, `absent-optional`, `missing`, `refused` or `unavailable`, the
+One object per document that declares a secret or an ambient credential
+(`name`, `file`, `secrets`, `credentials`), each secret with `name`, `from`
+(the provider), `optional`, `state` (`ok`, `not-checked`, `absent-optional`,
+`missing`, `refused` or `unavailable`, the
 [states of the text](cli.md#secret-check) as words), `answered` (whether
-`plan` or `apply` would get past it) and `detail`; then `declared` and
-`unanswered`. No value is read or shown. Schema:
-`schemas/output/secret-check.schema.json`.
+`plan` or `apply` would get past it) and `detail`; each credential declared
+`from: ambient` with `name`, `type`, `state` (`ok`, `not-checked`, `missing`,
+`refused` or `unavailable`), `answered` and `detail`; then `declared` and
+`unanswered` for the secrets, and `credentialsDeclared` and
+`credentialsUnanswered` for the credentials. No value is read or shown.
+Schema: `schemas/output/secret-check.schema.json`.
 
 ### `secret set`
 

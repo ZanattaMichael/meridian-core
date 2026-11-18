@@ -94,7 +94,7 @@ spec:
 
 Say it once. A document whose `targetVersion` means one engine and whose
 `spec.settings.engine` names another (including `Auto`) is refused with the rule
-`conflicting-engine`; it is not resolved in favour of either. Any other version
+`conflicting-settings`; it is not resolved in favour of either. Any other version
 is refused by Meridian before the plugin is asked.
 
 When the document's host is another machine, `spec.settings.target` must be

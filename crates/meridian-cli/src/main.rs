@@ -29,6 +29,7 @@ mod commands;
 mod import;
 mod interrupt;
 mod output;
+mod pipeline;
 mod print;
 mod tools;
 
@@ -60,6 +61,7 @@ use meridian_sdk::{ChangeAction, Data, LogLine, LogStream, Output};
 use args::*;
 use commands::*;
 use output::*;
+use pipeline::*;
 use print::*;
 pub(crate) use print::{count, Stdout};
 
@@ -85,6 +87,19 @@ struct Cli {
         default_value = "text"
     )]
     output: OutputFormat,
+    /// Inside a pipeline engine (GitHub Actions, Azure Pipelines, GitLab CI,
+    /// Buildkite, Jenkins, Argo Workflows, Tekton), also write each problem
+    /// in the engine's own annotation syntax and the run's report as the
+    /// job's summary: auto does so when standard output is not a terminal,
+    /// on does so regardless, off never does
+    #[arg(
+        long,
+        global = true,
+        value_name = "MODE",
+        env = "MERIDIAN_ANNOTATIONS",
+        default_value = "auto"
+    )]
+    annotations: AnnotationMode,
 }
 
 fn main() -> ExitCode {
@@ -94,6 +109,7 @@ fn main() -> ExitCode {
     let _ = meridian_secret::harden_process();
     let cli = Cli::parse();
     settle_output(cli.output, &cli.command.name());
+    settle_pipeline(cli.annotations);
     let outcome = settle(cli.trust).and_then(|()| match cli.command {
         Command::Validate { files, state_dir } => load(&files, &state_dir).map(|bundle| {
             if json_output() {
@@ -199,7 +215,11 @@ fn main() -> ExitCode {
                 strict,
             },
         ),
-        Command::Plugins { settings, plugins } => list_plugins(&plugins, settings),
+        Command::Plugins {
+            settings,
+            rules,
+            plugins,
+        } => list_plugins(&plugins, settings, rules),
         Command::Rules {
             command:
                 RulesCommand::Check {
@@ -229,6 +249,7 @@ fn main() -> ExitCode {
         Command::Lint(args) => tools::lint(&args),
         Command::Schema(args) => tools::schema(&args),
         Command::Lsp(args) => tools::lsp(&args),
+        Command::Mcp(args) => tools::mcp(&args),
         Command::Signing { command } => signing(command),
     });
     // What stdout holds is the command's result, so a result that could not
@@ -246,6 +267,9 @@ fn main() -> ExitCode {
             if json_output() {
                 emit_error(&msg);
             }
+            // And the pipeline engine, where there is one, so the problem
+            // shows on the job and not only in its log.
+            report_refusal(&msg);
             1
         }
     };

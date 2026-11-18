@@ -24,6 +24,7 @@ fn scratch(test: &str) -> PathBuf {
 /// documents read, and with any further variables.
 fn meridian_with(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_meridian"));
+    command.env("MERIDIAN_ANNOTATIONS", "off");
     command
         .args(args)
         .current_dir(dir)
@@ -611,6 +612,7 @@ fn meridian_unlockable(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Outpu
     command
         .args(["-c", "ulimit -l 0 && exec \"$0\" \"$@\""])
         .arg(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(args)
         .current_dir(dir)
         .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())
@@ -810,5 +812,8 @@ fn secret_check_of_documents_without_secrets_says_so() {
     fs::write(dir.join("site.yaml"), document).unwrap();
     let check = meridian(&dir, &["secret", "check", "site.yaml"]);
     assert!(check.status.success(), "{}", stderr(&check));
-    assert_eq!(stdout(&check), "no secret is declared\n");
+    assert_eq!(
+        stdout(&check),
+        "no secret or ambient credential is declared\n"
+    );
 }

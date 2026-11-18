@@ -30,6 +30,7 @@ fn scratch(test: &str) -> PathBuf {
 
 fn meridian(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .env("MERIDIAN_ANNOTATIONS", "off")
         .args(args)
         .current_dir(dir)
         .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())

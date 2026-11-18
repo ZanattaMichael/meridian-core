@@ -413,14 +413,13 @@ names the resource, the line it was written on and a rule:
 | Rule | Why |
 |---|---|
 | `unsupported-resource-type` | The type is not `Namespace/type`, `deployment` or `parameter` |
-| `missing-param`, `invalid-param`, `unsupported-param`, `reserved-param` | A param is missing, has the wrong form, is unknown, or is one Meridian writes itself |
+| `missing-param`, `invalid-param`, `unsupported-param`, `reserved-name` | A param is missing, has the wrong form, is unknown, or is one Meridian writes itself |
 | `invalid-name` | A name does not have as many parts as its type has levels |
-| `invalid-reference` | A `${...}` names nothing in the document, or is not a path |
-| `unsupported-reference` | A resource's state is read where ARM does not allow `reference()` |
-| `self-reference`, `reference-cycle`, `dependency-cycle` | A resource reads its own state, names are defined by each other, or resources depend on each other in a circle |
+| `invalid-reference` | A `${...}` names nothing in the document, is not a path, reads a resource's state where ARM does not allow `reference()`, or reads the resource's own state |
+| `dependency-cycle` | Names are defined by each other, or resources depend on each other in a circle |
 | `invalid-expression` | A string in square brackets is not a well-formed ARM expression |
-| `duplicate-resource`, `duplicate-output`, `duplicate-deployment` | The same thing is declared twice. Azure compares names without regard to case. Two resources with the same name are allowed when one has a `condition` or a `copy`. |
-| `invalid-deployment-name`, `empty-template`, `template-too-large` | Resource Manager's own limits: a deployment name of up to 64 characters, at least one resource, and at most 800 resources, 256 parameters and 64 outputs |
+| `duplicate-resource`, `duplicate-output` | The same thing is declared twice. Azure compares names without regard to case. Two resources with the same name are allowed when one has a `condition` or a `copy`. |
+| `invalid-name`, `empty-document`, `template-too-large` | Resource Manager's own limits: a deployment name of up to 64 characters, at least one resource, and at most 800 resources, 256 parameters and 64 outputs |
 | `unsupported-dependency` | A `dependsOn` names a `parameter` or the `deployment`, which are not resources of the template |
 | `unsupported-action` | `notifies` has nothing to compile into: Resource Manager cannot act on one resource because another changed |
 | `unsupported-state` | `state: absent`: a template only says what should exist. Remove the resource, and use mode `Complete` if it should be deleted. |

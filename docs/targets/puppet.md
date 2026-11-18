@@ -164,7 +164,7 @@ Notes on how they map:
 - A resource's **id is the Puppet title**; the Puppet name or path comes from
   `name` or `path`. Puppet identifies a managed thing by that name, not by the
   title, so two resources that manage the same package, file, service, user
-  or group are refused at compile time (`duplicate-namevar`), where Puppet
+  or group are refused at compile time (`duplicate-resource`), where Puppet
   would only have refused them on the node.
 - `file` with `state: directory` and `content` is refused
   (`param-conflicts-with-state`): a directory has no content.
@@ -257,7 +257,7 @@ compiles to
 | `runtimeWhen` | refused, as for the six |
 | Secrets | as for the six: a `Sensitive` lookup the runner answers through Hiera |
 | References | `${id.param}` is settled from the document, as for the six |
-| `native/file` and a shared `file` on one path | refused (`duplicate-namevar`), as two shared files would be: they are one Puppet type |
+| `native/file` and a shared `file` on one path | refused (`duplicate-resource`), as two shared files would be: they are one Puppet type |
 
 [`examples/puppet/native-types.yaml`](../../examples/puppet/native-types.yaml)
 is a whole document of both kinds. A document that names a Puppet type
@@ -511,11 +511,11 @@ target can raise, and what to do:
 | `unsupported-action` | a notify action the type does not take: `reload`, `start`, `stop` on a service, anything on a package, anything but `refresh` on a Puppet type of its own | use `restart` or `refresh`, or declare the state you want |
 | `unknown-notify-target`, `unknown-dependency` | an edge names a resource the document does not declare | fix the id |
 | `ordering-violated` | the order the core handed over puts a resource before its dependency | a core bug; report it |
-| `duplicate-resource`, `duplicate-title` | two resources with the same id | rename one |
-| `duplicate-namevar` | two resources that manage the same package, file, service, user or group | merge them |
-| `empty-title`, `multiline-title`, `quoted-title` | an id that cannot be a Puppet title | use letters, digits and underscores |
-| `empty-resource` | a shared resource with nothing to declare | give it params |
-| `dangling-reference` | `${id.param}` names a resource or a param that is not there | fix the reference |
+| `duplicate-resource` | two resources with the same id | rename one |
+| `duplicate-resource` | two resources that manage the same package, file, service, user or group | merge them |
+| `invalid-name` | an id that cannot be a Puppet title | use letters, digits and underscores |
+| `missing-param` | a shared resource with nothing to declare | give it params |
+| `invalid-reference` | `${id.param}` names a resource or a param that is not there | fix the reference |
 | `invalid-host` | a host that is not a name, so it cannot be written into a node statement | the core refuses one first ([`targetHost`](../reference/dsl/outputs-and-hand-offs.md#rules)) |
 | `missing-host` | a ResourceSet with no host to write the node statement for | give it a `targetHost` |
 

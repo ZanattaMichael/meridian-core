@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::expr::{self, Part};
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{CompileError, Resource, ResourceGraph, Value};
 
 use crate::expression::{self, quote};
@@ -104,7 +105,7 @@ impl Operand {
 }
 
 /// Why a value could not be rewritten: the rule broken, and the message.
-struct Fault(&'static str, String);
+struct Fault(&'static Rule, String);
 
 /// Where a value being rewritten sits.
 struct Site<'a> {
@@ -137,7 +138,7 @@ impl Resolver<'_> {
             (Some(Value::String(text)), _) => Some(text.clone()),
             (Some(other), _) => {
                 return Err(Fault(
-                    "invalid-param",
+                    &rules::INVALID_PARAM,
                     format!(
                         "param {key:?} of resource {:?} must be text, not {}",
                         r.id,
@@ -153,7 +154,7 @@ impl Resolver<'_> {
             Some(text) => {
                 if self.resolving.contains(&(index, key)) {
                     return Err(Fault(
-                        "reference-cycle",
+                        &rules::DEPENDENCY_CYCLE,
                         format!(
                             "the {key} of resource {:?} is defined in terms of itself",
                             r.id
@@ -187,7 +188,7 @@ impl Resolver<'_> {
                 let parts: Vec<&str> = text.split('/').collect();
                 if parts.len() != segments || parts.iter().any(|p| p.is_empty()) {
                     return Err(Fault(
-                        "invalid-name",
+                        &rules::INVALID_NAME,
                         format!(
                             "resource {:?} has the type {:?}, whose name has {segments} part{} \
                              separated by \"/\", but its name is {text:?}",
@@ -234,7 +235,7 @@ impl Resolver<'_> {
         let (name, rest) = expr::head(expression);
         let unreadable = |why: &str| {
             Fault(
-                "invalid-reference",
+                &rules::INVALID_REFERENCE,
                 format!("${{{expression}}} is not a reference this target can read: {why}"),
             )
         };
@@ -245,7 +246,7 @@ impl Resolver<'_> {
         let index = match self.symbols.get(name) {
             None => {
                 return Err(Fault(
-                    "invalid-reference",
+                    &rules::INVALID_REFERENCE,
                     format!(
                         "${{{expression}}} refers to {name:?}, which is not a resource or a \
                          parameter of this document. An ARM expression is written in square \
@@ -282,7 +283,7 @@ impl Resolver<'_> {
         let api_version = || match r.params.get("apiVersion") {
             Some(Value::String(v)) => Ok(v.clone()),
             _ => Err(Fault(
-                "missing-param",
+                &rules::MISSING_PARAM,
                 format!("resource {name:?} has no apiVersion to read it with"),
             )),
         };
@@ -300,7 +301,7 @@ impl Resolver<'_> {
             "apiVersion" => Ok((Operand::Literal(api_version()?), true)),
             "" => Err(unreadable("a dot must be followed by a name")),
             _ if !site.runtime => Err(Fault(
-                "unsupported-reference",
+                &rules::INVALID_REFERENCE,
                 format!(
                     "${{{expression}}} reads the state of {name:?}, which needs reference(). \
                      Resource Manager allows that only inside a resource's \"properties\" and in \
@@ -308,7 +309,7 @@ impl Resolver<'_> {
                 ),
             )),
             _ if own => Err(Fault(
-                "self-reference",
+                &rules::INVALID_REFERENCE,
                 format!(
                     "${{{expression}}} reads the state of the resource it is written in, which \
                      Resource Manager refuses as a circular dependency"
@@ -335,7 +336,7 @@ impl Resolver<'_> {
         site: &Site,
         refs: &mut BTreeSet<String>,
     ) -> Result<(String, bool), Fault> {
-        let parts = expr::parse(text).map_err(|why| Fault("invalid-reference", why))?;
+        let parts = expr::parse(text).map_err(|why| Fault(&rules::INVALID_REFERENCE, why))?;
         if let [Part::Expr(expression)] = parts.as_slice() {
             let (operand, text) = self.reference(expression, site, refs)?;
             return Ok((operand.template(), text));
@@ -448,7 +449,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
                 if settings_seen {
                     return Err(refuse(
                         r,
-                        "duplicate-deployment",
+                        &rules::DUPLICATE_RESOURCE,
                         "a document is one deployment; this one has two resources of type \
                          \"deployment\""
                             .to_owned(),
@@ -471,7 +472,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
             other => {
                 return Err(refuse(
                     r,
-                    "unsupported-resource-type",
+                    &rules::UNSUPPORTED_RESOURCE_TYPE,
                     format!(
                         "{other:?} is not an ARM resource type. Use Azure's own type, such as \
                          Microsoft.Storage/storageAccounts, \"parameter\" for a template \
@@ -521,7 +522,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
                 ("type" | "dependsOn", _) => {
                     return Err(refuse(
                         r,
-                        "reserved-param",
+                        &rules::RESERVED_NAME,
                         format!(
                             "param {key:?} is written by Meridian: the type is the resource's \
                              own type, and an order is given with the resource's dependsOn"
@@ -534,7 +535,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
                 ("apiVersion", _) => {
                     return Err(refuse(
                         r,
-                        "invalid-param",
+                        &rules::INVALID_PARAM,
                         "param \"apiVersion\" must be a version of the resource type's API, \
                          such as 2023-09-01 or 2023-09-01-preview"
                             .to_owned(),
@@ -561,7 +562,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
                 ("name" | "scope", other) => {
                     return Err(refuse(
                         r,
-                        "invalid-param",
+                        &rules::INVALID_PARAM,
                         format!("param {key:?} must be text, not {}", other.describe()),
                     ))
                 }
@@ -580,7 +581,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Template, CompileError>
         let Some(api_version) = api_version else {
             return Err(refuse(
                 r,
-                "missing-param",
+                &rules::MISSING_PARAM,
                 format!(
                     "resource type {:?} needs param \"apiVersion\": the version of the type's \
                      API to deploy it with, such as 2023-09-01",
@@ -637,7 +638,7 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
     if !r.runtime_when.is_empty() {
         return Err(refuse(
             r,
-            "unsupported-runtime-condition",
+            &rules::UNSUPPORTED_RUNTIME_CONDITION,
             format!(
                 "resource carries runtimeWhen {:?}, which this target cannot express: an ARM \
                  condition is decided from the template's parameters before anything is \
@@ -650,7 +651,7 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
         "" | "present" => Ok(()),
         "absent" => Err(refuse(
             r,
-            "unsupported-state",
+            &rules::UNSUPPORTED_STATE,
             "state \"absent\" has no meaning on this target: a template only says what should \
              exist. Remove the resource from the document, and deploy with mode Complete if \
              what the template no longer declares should be deleted"
@@ -658,7 +659,7 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
         )),
         other => Err(refuse(
             r,
-            "unsupported-state",
+            &rules::UNSUPPORTED_STATE,
             format!(
                 "resource type {:?} does not accept state {other:?} on this target (accepted: present)",
                 r.r#type
@@ -673,9 +674,9 @@ fn read_settings(r: &Resource, settings: &mut Settings) -> Result<(), CompileErr
             return Err(refuse(
                 r,
                 if is_setting(name) {
-                    "invalid-param"
+                    &rules::INVALID_PARAM
                 } else {
-                    "unsupported-param"
+                    &rules::UNSUPPORTED_PARAM
                 },
                 if is_setting(name) {
                     format!("param {name:?} of the deployment must be text")
@@ -697,7 +698,7 @@ fn read_settings(r: &Resource, settings: &mut Settings) -> Result<(), CompileErr
                     other => {
                         return Err(refuse(
                             r,
-                            "invalid-param",
+                            &rules::INVALID_PARAM,
                             format!(
                                 "{other:?} is not a scope this target deploys to (accepted: \
                                  resourceGroup, subscription)"
@@ -706,7 +707,7 @@ fn read_settings(r: &Resource, settings: &mut Settings) -> Result<(), CompileErr
                     }
                 }
             }
-            _ => return Err(refuse(r, "unsupported-param", unknown_setting(name))),
+            _ => return Err(refuse(r, &rules::UNSUPPORTED_PARAM, unknown_setting(name))),
         }
     }
     Ok(())

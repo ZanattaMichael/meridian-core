@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{CompileError, Warning};
 
 use crate::keys::{self, Lookup};
@@ -40,11 +41,11 @@ pub(crate) fn validate(units: &Units) -> Result<Vec<Warning>, CompileError> {
     let mut services: BTreeMap<&str, &Unit> = BTreeMap::new();
 
     for unit in &units.units {
-        let refuse = |rule: &str, msg: String| refuse_at(&unit.id, &unit.pos, rule, msg);
+        let refuse = |rule: &Rule, msg: String| refuse_at(&unit.id, &unit.pos, rule, msg);
 
         if !is_unit_stem(&unit.id) {
             return Err(refuse(
-                "invalid-name",
+                &rules::INVALID_NAME,
                 format!(
                     "resource id {:?} cannot name a unit file: a name starts with a letter or \
                      a digit, holds only letters, digits, underscores and hyphens, and is at \
@@ -56,7 +57,7 @@ pub(crate) fn validate(units: &Units) -> Result<Vec<Warning>, CompileError> {
 
         if let Some(other) = services.insert(&unit.service, unit) {
             return Err(refuse(
-                "duplicate-service",
+                &rules::DUPLICATE_RESOURCE,
                 format!(
                     "{} and {} would both run as {}; rename one of the resources, or give one \
                      a ServiceName",
@@ -70,7 +71,7 @@ pub(crate) fn validate(units: &Units) -> Result<Vec<Warning>, CompileError> {
         let needed = required(unit.kind);
         if !needed.is_empty() && !needed.iter().any(|key| unit.body.contains_key(*key)) {
             return Err(refuse(
-                "missing-param",
+                &rules::MISSING_PARAM,
                 format!(
                     "resource type {:?} requires param {} on this target",
                     unit.kind.as_str(),
@@ -87,7 +88,7 @@ pub(crate) fn validate(units: &Units) -> Result<Vec<Warning>, CompileError> {
             && !unit.body.contains_key("SetWorkingDirectory")
         {
             return Err(refuse(
-                "missing-param",
+                &rules::MISSING_PARAM,
                 "resource type \"build\" requires param \"File\" or \"SetWorkingDirectory\" on \
                  this target, to say where the Containerfile is"
                     .to_owned(),
@@ -192,7 +193,7 @@ mod rule_tables {
             ("invalid-name", "web@1", |u| {
                 at(u, "web").id = "web@1".to_owned()
             }),
-            ("duplicate-service", "chroot", |u| {
+            ("duplicate-resource", "chroot", |u| {
                 at(u, "chroot").service = "web.service".to_owned();
             }),
             ("missing-param", "web", |u| at(u, "web").body.clear()),

@@ -123,6 +123,33 @@
                 "description"
               ]
             }
+          },
+          "rules": {
+            "type": "array",
+            "description": "The refusal rules the plugin has of its own, beside the general ones every target shares",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "meaning": {
+                  "type": "string"
+                },
+                "hint": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "meaning",
+                "hint"
+              ]
+            }
           }
         },
         "additionalProperties": false,
@@ -137,7 +164,8 @@
           "protocol",
           "binary",
           "signature",
-          "settings"
+          "settings",
+          "rules"
         ]
       }
     }

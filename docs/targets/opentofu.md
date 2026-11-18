@@ -373,10 +373,10 @@ anything runs:
 
 | Rule | Refused when |
 |---|---|
-| `unknown-reference` | `state`, `plan`, a `fallback` or a remote state names a method the block does not declare, or a method takes its `keys` from a key provider the block does not declare |
+| `invalid-reference` | `state`, `plan`, a `fallback` or a remote state names a method the block does not declare, or a method takes its `keys` from a key provider the block does not declare |
 | `missing-param` | the block protects nothing; a target names no `method`; an `aes_gcm` method has no `keys` |
 | `invalid-param` | an argument is not part of an encryption block; a `method` is an expression, or it or `keys` is not written as a reference; `enforced` is not true or false |
-| `duplicate-encryption` | the document declares two encryption blocks |
+| `duplicate-resource` | the document declares two encryption blocks |
 
 And these are compiled, with a warning:
 
@@ -468,7 +468,7 @@ says why.
 | `unsupported-action` | a `notifies` uses an action other than `replace` |
 | `unknown-dependency` | `dependsOn` or `notifies` names a resource the document does not declare |
 | `unsupported-dependency` | `dependsOn` names, or is written on, a provider, backend, variable, local value or encryption block |
-| `duplicate-provider`, `duplicate-backend`, `duplicate-output` | the same thing is declared twice |
+| `duplicate-resource`, `duplicate-output` | the same thing is declared twice |
 | `missing-param` | a `module` has no `source`, or a `local` has no `value` |
 
 The compile needs no provider schema, because the configuration is written in OpenTofu's

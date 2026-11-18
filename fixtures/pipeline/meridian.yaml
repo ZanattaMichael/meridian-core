@@ -1,0 +1,8 @@
+# The project manifest of the pipeline-shell smoke test. It requires no
+# module; `meridian module install --locked` still runs, as the page's
+# snippet says every job should, and says so.
+apiVersion: meridian/v1
+kind: Module
+metadata:
+  name: pipeline-shell
+spec: {}

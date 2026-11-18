@@ -1,1 +1,1 @@
-plugins/opentofu/tests/documents/refused-reference.yaml:9:7: opentofu: resource "web_vm" [invalid-reference]: param "subnet_id": ${public_subnet.id} refers to "public_subnet", which is not a resource in this document
+plugins/opentofu/tests/documents/refused-reference.yaml:9:7: opentofu: resource "web_vm" [invalid-reference]: param "subnet_id": ${public_subnet.id} refers to "public_subnet", which is not a resource in this document (hint: reference a resource of this document and a value it declares; see the references page)

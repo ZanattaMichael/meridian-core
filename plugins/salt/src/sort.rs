@@ -2,14 +2,16 @@
 
 use std::collections::HashMap;
 
+use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{CompileError, EdgeKind, Position, ResourceGraph};
 
 use crate::{Sls, NAME};
 
-fn fail(rule: &str, resource: &str, pos: &Position, msg: String) -> CompileError {
+fn fail(rule: &Rule, resource: &str, pos: &Position, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
-        rule: rule.to_owned(),
+        rule: rule.name.to_owned(),
+        hint: rule.hint.to_owned(),
         resource: resource.to_owned(),
         pos: pos.clone(),
         msg,
@@ -50,7 +52,7 @@ pub(crate) fn apply_ordering(graph: &ResourceGraph, sls: &mut Sls) -> Result<(),
         let after = pos.get(edge.to.as_str()).copied().unwrap_or(0);
         if before > after {
             return Err(fail(
-                "ordering-violated",
+                &rules::ORDERING_VIOLATED,
                 &edge.to,
                 &edge.pos,
                 format!(
@@ -63,7 +65,7 @@ pub(crate) fn apply_ordering(graph: &ResourceGraph, sls: &mut Sls) -> Result<(),
         let (Some(&dependent), Some(&dependency)) = (index.get(&edge.to), index.get(&edge.from))
         else {
             return Err(fail(
-                "unknown-dependency",
+                &rules::UNKNOWN_DEPENDENCY,
                 &edge.to,
                 &edge.pos,
                 format!(
@@ -115,7 +117,8 @@ fn check_acyclic(graph: &ResourceGraph, order: &[&str]) -> Result<(), CompileErr
     if placed != indegree.len() {
         return Err(CompileError {
             target: NAME.to_owned(),
-            rule: "cycle".to_owned(),
+            rule: rules::DEPENDENCY_CYCLE.name.to_owned(),
+            hint: rules::DEPENDENCY_CYCLE.hint.to_owned(),
             msg: "a dependency cycle reached this target's sort stage; \
                   the graph stage should have rejected it first"
                 .to_owned(),

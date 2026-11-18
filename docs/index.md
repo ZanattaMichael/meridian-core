@@ -56,6 +56,10 @@ byte. The reasons, the layout and the order of work are in
 |---|---|
 | [Importing existing configuration](operations/importing.md) | `meridian import`: Terraform, OpenTofu, Ansible, Compose, Kubernetes and DSC configuration into documents, with everything that could not be carried over marked |
 
+| Operating | |
+|---|---|
+| [Running Meridian in a pipeline](operations/running-in-a-pipeline.md) | one job per engine: a tested GitHub Actions workflow and reviewed snippets for Azure Pipelines, GitLab CI, Buildkite, Jenkins, Argo Workflows, Tekton and Octopus; what the engine owns and what Meridian owns; annotations and job summaries; checking the job's identity first; sharing the record between jobs |
+
 | Concepts | |
 |---|---|
 | [Documents, resources and targets](concepts/ir-overview.md) | the two kinds of document, and the two families of resource types |
@@ -75,6 +79,7 @@ byte. The reasons, the layout and the order of work are in
 | [A secret's path](concepts/secrets-in-memory.md) | from a provider into locked memory, as a reference everywhere else, to the tool by a private file |
 | [A run](concepts/run-safety.md) | the lock, the policy check, the record, the run-state, and what happens when a stage fails |
 | [Modules](reference/modules.md) | the manifest, the sources, the lockfile, and what every run verifies |
+| [Inside a pipeline engine](operations/running-in-a-pipeline.md) | the engine's band above Meridian's: the job runs `meridian apply`, and the events come back as annotations and a summary |
 
 Each picture is drawn by [`tools/wiki/graphics.py`](https://github.com/ZanattaMichael/meridian-core/blob/main/tools/wiki/graphics.py)
 and checked against the file in every build, so none can fall behind the script that describes it.
@@ -89,6 +94,7 @@ and checked against the file in every build, so none can fall behind the script 
 | [The linter](tooling/linter.md) | `meridian lint`: every error in a project, plus probable mistakes |
 | [The JSON Schema](tooling/json-schema.md) | `meridian schema`: validation for editors that only know YAML |
 | [Tool schemas](tooling/schema-sync.md) | `meridian schema sync`: a tool's own types, read once from the tool and cached, so the editor completes and checks them |
+| [The MCP server](tooling/mcp-server.md) | `meridian mcp`: the compiler and the catalogue as tools for an AI model, read-only, with the one diagnostic shape a small model can act on |
 
 | Reference | |
 |---|---|
@@ -109,6 +115,7 @@ and checked against the file in every build, so none can fall behind the script 
 | [Capability matrix](reference/capability-matrix.md) | generated from the plugins |
 | [Plugin settings](reference/plugin-settings.md) | every setting of every target's runner, how a value is found, how argument lists are split; generated from the plugins |
 | [Conformance matrix](reference/conformance-matrix.md) | the same document on every configuration management target, cell by cell; generated from the plugins |
+| [Refusal rules](reference/refusal-rules.md) | every rule a compile-time refusal can carry, what it refuses and what to write instead; generated from the registry and the plugins |
 | [Compatibility](reference/compatibility.md) | which language versions a build reads, and which plugins it loads; generated from the code |
 | [Compile rules](reference/compile-rules.md) | the rules file, every rule and every refusal, and `meridian rules check` |
 | [Error kinds and codes](reference/errors.md) | every kind of error the crates produce, with its fixed code: expressions, stages of a run, modules, compile rules, layered data, keys and signatures |

@@ -200,7 +200,8 @@ fn a_rust_plugin_compiles_warns_and_refuses() {
             assert_eq!(
                 e.to_string(),
                 "site.yaml:7:3: fake: resource \"fw\" [unsupported-resource-type]: \
-                 the fake target has no mapping for type \"firewall_rule\""
+                 the fake target has no mapping for type \"firewall_rule\" (hint: use a type \
+                 from the target's resource types; `meridian plugins` lists them)"
             );
         }
         other => panic!("expected a refusal, got {other:?}"),

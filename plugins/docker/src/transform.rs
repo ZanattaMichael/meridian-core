@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use meridian_sdk::expr::{self, Part};
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, Resource, ResourceGraph, SecretName, Value};
 
 use crate::{
@@ -40,7 +41,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Composition, CompileErr
             if project_seen {
                 return Err(refuse(
                     r,
-                    "duplicate-project",
+                    &rules::DUPLICATE_RESOURCE,
                     "a document is one Compose project; this one has two resources of type \"project\""
                         .to_owned(),
                 ));
@@ -52,7 +53,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Composition, CompileErr
         let Some(section) = sections.get(r.id.as_str()).copied() else {
             return Err(refuse(
                 r,
-                "unsupported-resource-type",
+                &rules::UNSUPPORTED_RESOURCE_TYPE,
                 format!(
                     "{:?} is not something a Compose file declares (supported: config, network, \
                      secret, service, volume, and \"project\" for where it runs)",
@@ -68,7 +69,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Composition, CompileErr
                 let Value::Secret(slot) = value else {
                     return Err(refuse(
                         r,
-                        "invalid-param",
+                        &rules::INVALID_PARAM,
                         "param \"value\" of a secret is the secret's value, so it must be a \
                          secret, ${{ secret.<name> }}; to read a file or a variable of your \
                          own, write file or environment instead"
@@ -82,8 +83,13 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Composition, CompileErr
                 );
                 continue;
             }
-            let rewritten = rewrite(value, &sections, &graph.secrets)
-                .map_err(|msg| refuse(r, "invalid-reference", format!("param {key:?}: {msg}")))?;
+            let rewritten = rewrite(value, &sections, &graph.secrets).map_err(|msg| {
+                refuse(
+                    r,
+                    &rules::INVALID_REFERENCE,
+                    format!("param {key:?}: {msg}"),
+                )
+            })?;
             body.insert(key.clone(), rewritten);
         }
         composition.elements.push(Element {
@@ -99,7 +105,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Composition, CompileErr
             refuse_at(
                 "",
                 &output.pos,
-                "invalid-reference",
+                &rules::INVALID_REFERENCE,
                 format!("output {:?}: {msg}", output.name),
             )
         };
@@ -172,7 +178,7 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
     if !r.runtime_when.is_empty() {
         return Err(refuse(
             r,
-            "unsupported-runtime-condition",
+            &rules::UNSUPPORTED_RUNTIME_CONDITION,
             format!(
                 "resource carries runtimeWhen {:?}, which this target cannot express: a Compose \
                  file is declared state, with no condition for Docker to evaluate",
@@ -184,14 +190,14 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
         "" | "present" | "running" => Ok(()),
         "absent" => Err(refuse(
             r,
-            "unsupported-state",
+            &rules::UNSUPPORTED_STATE,
             "state \"absent\" is not written on this target: remove the resource from the \
              document, and bringing the project up removes what the document no longer declares"
                 .to_owned(),
         )),
         other => Err(refuse(
             r,
-            "unsupported-state",
+            &rules::UNSUPPORTED_STATE,
             format!(
                 "resource type {:?} does not accept state {other:?} on this target (accepted: present, running)",
                 r.r#type
@@ -201,7 +207,7 @@ fn check_meta(r: &Resource) -> Result<(), CompileError> {
 }
 
 fn read_project(r: &Resource, project: &mut Project) -> Result<(), CompileError> {
-    let invalid = |msg: String| refuse(r, "invalid-param", msg);
+    let invalid = |msg: String| refuse(r, &rules::INVALID_PARAM, msg);
     for (name, value) in &r.params {
         match (name.as_str(), value) {
             ("name", Value::String(text)) => project.name = text.clone(),
@@ -254,7 +260,7 @@ fn read_project(r: &Resource, project: &mut Project) -> Result<(), CompileError>
             _ => {
                 return Err(refuse(
                     r,
-                    "unsupported-param",
+                    &rules::UNSUPPORTED_PARAM,
                     format!(
                         "resource type \"project\" does not accept param {name:?} on this \
                          target (accepted: context, directory, host, name, profiles, wait, \

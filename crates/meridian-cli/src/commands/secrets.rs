@@ -50,19 +50,45 @@ pub(crate) fn set_secret(name: &str, files: &[PathBuf], state_dir: &Path) -> Res
 }
 
 /// Says where each declared secret comes from and whether that place would
-/// answer. Nothing is fetched: a file is looked at and not read, a command is
-/// found and not run. Fails when a secret that is not optional has no answer.
+/// answer, and whether each credential declared `from: ambient` would be
+/// found. Nothing is fetched: a file is looked at and not read, a command is
+/// found and not run, an identity endpoint is asked for its status. Fails
+/// when a secret that is not optional, or an ambient credential, has no
+/// answer.
 pub(crate) fn check_secrets(files: &[PathBuf], state_dir: &Path) -> Result<(), Failure> {
     use meridian_orchestrator::check_declared;
     use meridian_secret::Probe;
     let bundle = load(files, state_dir)?;
     let (mut declared, mut unanswered) = (0, 0);
+    let (mut credentials_declared, mut credentials_unanswered) = (0, 0);
     let mut documents = Vec::new();
+    let environment = meridian_secret::ambient_environment();
     for doc in &bundle.documents {
         let rows = check_declared(doc);
-        if rows.is_empty() {
+        // An ambient credential is one the tool finds for itself; in a
+        // pipeline it is the engine's identity, which a missing setting
+        // makes fail late and far from here, so it is looked for now.
+        let ambient: Vec<(&meridian_ir::Credential, Probe)> = doc
+            .credentials()
+            .iter()
+            .filter(|credential| credential.is_ambient())
+            .map(|credential| {
+                (
+                    credential,
+                    meridian_secret::probe_ambient(&credential.r#type, &environment),
+                )
+            })
+            .collect();
+        if rows.is_empty() && ambient.is_empty() {
             continue;
         }
+        let credential_state = |probe: &Probe| match probe {
+            Probe::Present(_) => ("ok", true),
+            Probe::Unknown(_) => ("not checked", true),
+            Probe::Absent(_) => ("MISSING", false),
+            Probe::Refused(_) => ("REFUSED", false),
+            Probe::Unavailable(_) => ("UNAVAILABLE", false),
+        };
         if json_output() {
             let secrets: Vec<serde_json::Value> = rows
                 .iter()
@@ -89,18 +115,46 @@ pub(crate) fn check_secrets(files: &[PathBuf], state_dir: &Path) -> Result<(), F
                     })
                 })
                 .collect();
+            let credentials: Vec<serde_json::Value> = ambient
+                .iter()
+                .map(|(credential, probe)| {
+                    credentials_declared += 1;
+                    let (state, answered) = credential_state(probe);
+                    if !answered {
+                        credentials_unanswered += 1;
+                    }
+                    serde_json::json!({
+                        "name": credential.name,
+                        "type": credential.r#type,
+                        "state": state.to_lowercase().replace(' ', "-"),
+                        "answered": answered,
+                        "detail": probe.words(),
+                    })
+                })
+                .collect();
             documents.push(serde_json::json!({
                 "name": doc.name(),
                 "file": doc.position().file,
                 "secrets": secrets,
+                "credentials": credentials,
             }));
             continue;
         }
         outln!("{} ({})", doc.name(), doc.position().file);
-        let width = rows.iter().map(|row| row.name.len()).max().unwrap_or(0);
+        let width = rows
+            .iter()
+            .map(|row| row.name.len())
+            .chain(ambient.iter().map(|(credential, _)| credential.name.len()))
+            .max()
+            .unwrap_or(0);
         let provider = rows
             .iter()
             .map(|row| row.from.len())
+            .chain(
+                ambient
+                    .iter()
+                    .map(|(credential, _)| credential.r#type.len()),
+            )
             .max()
             .unwrap_or(0)
             .max(5);
@@ -126,25 +180,55 @@ pub(crate) fn check_secrets(files: &[PathBuf], state_dir: &Path) -> Result<(), F
                 row.probe.words()
             );
         }
+        for (credential, probe) in &ambient {
+            credentials_declared += 1;
+            let (state, answered) = credential_state(probe);
+            if !answered {
+                credentials_unanswered += 1;
+            }
+            outln!(
+                "  {:width$}  {:provider$}  ambient, {state}: {}",
+                credential.name,
+                credential.r#type,
+                probe.words()
+            );
+        }
     }
     if json_output() {
         emit(
-            unanswered == 0,
+            unanswered == 0 && credentials_unanswered == 0,
             body([
                 ("documents", documents.into()),
                 ("declared", declared.into()),
                 ("unanswered", unanswered.into()),
+                ("credentialsDeclared", credentials_declared.into()),
+                ("credentialsUnanswered", credentials_unanswered.into()),
             ]),
         );
-    } else if declared == 0 {
-        outln!("no secret is declared");
+    } else if declared == 0 && credentials_declared == 0 {
+        outln!("no secret or ambient credential is declared");
     }
-    if unanswered == 0 {
+    if unanswered == 0 && credentials_unanswered == 0 {
         Ok(())
     } else {
+        let mut missing = Vec::new();
+        if unanswered > 0 {
+            missing.push(count(unanswered, "secret"));
+        }
+        if credentials_unanswered > 0 {
+            missing.push(format!(
+                "{} ambient {}",
+                credentials_unanswered,
+                if credentials_unanswered == 1 {
+                    "credential"
+                } else {
+                    "credentials"
+                }
+            ));
+        }
         let message = format!(
             "{} would not be found by plan or apply",
-            count(unanswered, "secret")
+            missing.join(" and ")
         );
         if json_output() {
             eprintln!("error: {message}");

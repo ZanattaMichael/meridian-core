@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use meridian_sdk::rules;
 use meridian_sdk::{CompileError, EdgeKind, ResourceGraph};
 
 use crate::transform::mapping;
@@ -35,7 +36,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.to,
                 &edge.pos,
-                "unknown-dependency",
+                &rules::UNKNOWN_DEPENDENCY,
                 format!("an edge names resource {missing:?}, which this document does not declare"),
             ));
         };
@@ -45,7 +46,7 @@ pub(crate) fn apply_ordering(
                 return Err(refuse_at(
                     &edge.to,
                     &edge.pos,
-                    "ordering-violated",
+                    &rules::ORDERING_VIOLATED,
                     format!(
                         "resource {:?} is ordered before its dependency {:?}; the graph stage \
                          produced an order this target cannot trust",
@@ -70,7 +71,7 @@ pub(crate) fn apply_ordering(
                 return Err(refuse_at(
                     &edge.from,
                     &edge.pos,
-                    "unsupported-action",
+                    &rules::UNSUPPORTED_ACTION,
                     format!(
                         "notifies resource {:?} with action {:?}, which is not a Chef action: \
                          on resource {resource} the action is written as the recipe writes it, \
@@ -85,7 +86,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.from,
                 &edge.pos,
-                "unsupported-action",
+                &rules::UNSUPPORTED_ACTION,
                 format!(
                     "notifies resource {:?}, a {notified}, which has nothing to do when notified \
                      on this target (a service or an exec does)",
@@ -97,7 +98,7 @@ pub(crate) fn apply_ordering(
             return Err(refuse_at(
                 &edge.from,
                 &edge.pos,
-                "unsupported-action",
+                &rules::UNSUPPORTED_ACTION,
                 format!(
                     "notifies resource {:?} with action {:?}, which resource type {notified:?} \
                      does not support on this target (supported: {})",
