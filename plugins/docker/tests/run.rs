@@ -451,6 +451,8 @@ fn secrets_reach_compose_in_a_private_environment_file_for_the_stage_alone() {
         fs::read_to_string(dir.join("env")).unwrap(),
         "meridian_secret_db_password=\"hunter2 \\\"q\\\" $$5 it's \\\\\"\n"
     );
+    // Windows has no mode; there the file's directory is private to the user.
+    #[cfg(unix)]
     assert_eq!(
         fs::read_to_string(dir.join("env.mode")).unwrap().trim(),
         "600"
