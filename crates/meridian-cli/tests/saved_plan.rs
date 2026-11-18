@@ -462,3 +462,67 @@ fn the_github_actions_snippet_on_the_page_uses_the_actions_the_workflow_runs() {
         "{apply}"
     );
 }
+
+/// A data file is never a reason to refuse on its own, since a key no
+/// stage reads can change and a real target compiles to the same artifact.
+/// (The fake target echoes all of its data into its artifact, so that half
+/// cannot be shown here.) When a stage does compile to something else and a
+/// data file has changed, the failure names the file.
+#[test]
+fn a_changed_data_file_is_named_when_a_stage_differs() {
+    let dir = scratch("data", "${{ data.motd }}");
+    fs::write(dir.join("prod.yaml"), "motd: welcome\n").unwrap();
+    ok(&meridian(
+        &dir,
+        &[
+            "plan",
+            "site.yaml",
+            "--data",
+            "prod.yaml",
+            "--out",
+            "plan.mplan",
+        ],
+    ));
+    let plan = plan_file(&dir);
+    let hashes = plan["dataHashes"]
+        .as_array()
+        .expect("the plan records the data's hashes");
+    assert_eq!(hashes.len(), 1, "{plan}");
+    assert!(hashes[0].as_str().unwrap().starts_with("sha256:"), "{plan}");
+
+    fs::write(dir.join("prod.yaml"), "motd: goodbye\n").unwrap();
+    let applied = meridian(&dir, &["apply", "--plan", "plan.mplan"]);
+    assert_eq!(applied.status.code(), Some(1));
+    let text = stdout(&applied);
+    assert!(
+        text.contains("and the data file prod.yaml has changed since the plan; take a new plan"),
+        "{text}"
+    );
+}
+
+/// A document that changed while the data did not names no data file.
+#[test]
+fn an_unchanged_data_file_is_not_named() {
+    let dir = scratch("data-same", "${{ data.motd }} at first");
+    fs::write(dir.join("prod.yaml"), "motd: welcome\n").unwrap();
+    ok(&meridian(
+        &dir,
+        &[
+            "plan",
+            "site.yaml",
+            "--data",
+            "prod.yaml",
+            "--out",
+            "plan.mplan",
+        ],
+    ));
+    write(&dir, "${{ data.motd }} later");
+    let applied = meridian(&dir, &["apply", "--plan", "plan.mplan"]);
+    assert_eq!(applied.status.code(), Some(1));
+    let text = stdout(&applied);
+    assert!(
+        text.contains("plan-differs") || text.contains("no longer compiles"),
+        "{text}"
+    );
+    assert!(!text.contains("data file"), "{text}");
+}

@@ -58,10 +58,25 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
     }
     // What is run: the command line's, or with `apply --plan` the plan's
     // where the command line left it out.
-    let plan_file = match how.from_plan {
+    let mut plan_file = match how.from_plan {
         None => None,
         Some(path) => Some(PlanFile::read(path).map_err(Failure::Message)?),
     };
+    // Which data files are not what the plan was taken with. This never
+    // refuses the apply: it only names the file when a stage then fails
+    // with `plan-differs`.
+    if let Some(plan) = plan_file.as_mut() {
+        plan.changed_data = plan
+            .asked
+            .data
+            .iter()
+            .zip(&plan.asked.data_hashes)
+            .filter(|(path, hash)| {
+                std::fs::read(path).map_or(true, |bytes| file_hash(&bytes) != **hash)
+            })
+            .map(|(path, _)| path.clone())
+            .collect();
+    }
     let planned = plan_file.as_ref().map(|plan| &plan.asked);
     let path_text = |path: &PathBuf| path.display().to_string();
     let (files, data_files, sets, selectors) = match planned {
@@ -303,6 +318,12 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
                         Asked {
                             files: files.iter().map(|f| f.display().to_string()).collect(),
                             data: data_files.iter().map(|f| f.display().to_string()).collect(),
+                            data_hashes: data_files
+                                .iter()
+                                .map(|f| {
+                                    std::fs::read(f).map(|b| file_hash(&b)).unwrap_or_default()
+                                })
+                                .collect(),
                             set: sets.clone(),
                             selector: selector.to_string(),
                             command: options.command.clone(),

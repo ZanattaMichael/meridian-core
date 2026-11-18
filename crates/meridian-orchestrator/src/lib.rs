@@ -76,7 +76,7 @@ pub use backend::{Backend, ExecBackend, LocalBackend, MemoryBackend};
 pub use event::Event;
 pub use lock::{LockError, LockInfo};
 pub use options::{mask, Observer, OnFailure, Options, Quiet, Resume, DEFAULT_KEEP_RUNS, MASK};
-pub use plan::{Asked, PlanFile, PlannedStage, PlannedStatus, PLAN_FILE_VERSION};
+pub use plan::{file_hash, Asked, PlanFile, PlannedStage, PlannedStatus, PLAN_FILE_VERSION};
 pub use policy::{Decisions, Policy};
 pub use reason::{Reason, UnknownReason};
 pub use record::{RunRecord, RunStatus, StepRecord, StepStatus};

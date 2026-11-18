@@ -47,6 +47,12 @@ either carries it out or refuses. Four things were decided:
    documents, data, values and selector from the plan, and refuses any that
    is typed differently. An apply job in a pipeline can then be given the
    plan and nothing else, and cannot be pointed at other documents.
+5. **A data file's hash explains, and never refuses.** The file records
+   the hash of each `--data` file's bytes. A data file that changed is
+   already caught by the artifact of every stage that reads it; the hash
+   only lets the `plan-differs` failure name the file. Refusing on the hash
+   alone would throw out a plan that still holds whenever a key no stage
+   reads was edited, such as another environment's value.
 
 A stage the plan could not preview, because it waited on an output that
 did not exist yet, is applied unchecked, with a warning: refusing it would
@@ -72,9 +78,7 @@ for, and the file and the report both say which stages were not checked.
 
 ## Status
 
-Proposed. Open to the owner: whether a plan with a `deferred` stage should
-be refused unless `--allow-unplanned` is given, so that a pipeline can insist
-on a fully reviewed plan; and whether the plan file should carry a hash of
-the data it was taken with, in addition to the artifact hashes, so that a
-changed data file is named as the cause rather than found through the
-artifact that differs.
+Proposed. The owner agreed on 2026-11-18 that a plan with a `deferred`
+stage is applied with a warning rather than refused, and that the file
+carries each data file's hash to name it as the cause, never to refuse on
+it.

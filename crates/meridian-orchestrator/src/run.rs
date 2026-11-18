@@ -264,12 +264,13 @@ impl Run<'_> {
                         .to_owned(),
                 }),
                 _ if planned.artifact_hash != hash => {
+                    let data = self.changed_data();
                     return fail(
                         report,
                         Reason::PlanDiffers,
                         format!(
                             "the document no longer compiles to what was planned (the plan \
-                             has {}, and it now compiles to {hash}); take a new plan",
+                             has {}, and it now compiles to {hash}){data}; take a new plan",
                             if planned.artifact_hash.is_empty() {
                                 "no artifact".to_owned()
                             } else {
@@ -1125,6 +1126,25 @@ impl Run<'_> {
             .from_plan
             .as_ref()
             .and_then(|plan| plan.stage(id))
+    }
+
+    /// The data files that changed since the plan was taken, as words to
+    /// put after a `plan-differs` failure; empty when none did.
+    fn changed_data(&self) -> String {
+        let changed = self
+            .options
+            .from_plan
+            .as_ref()
+            .map(|plan| plan.changed_data.as_slice())
+            .unwrap_or_default();
+        match changed {
+            [] => String::new(),
+            [one] => format!(", and the data file {one} has changed since the plan"),
+            many => format!(
+                ", and the data files {} have changed since the plan",
+                many.join(", ")
+            ),
+        }
     }
 
     pub(crate) fn record(&mut self, id: &StageId, target: &str, hash: &str, applied: bool) {

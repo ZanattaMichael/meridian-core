@@ -33,6 +33,11 @@ pub struct Asked {
     pub files: Vec<String>,
     /// Every `--data` file, as typed.
     pub data: Vec<String>,
+    /// The hash of each `--data` file's bytes, in the order of `data`, as
+    /// [`file_hash`] gives it. Never a refusal on its own: a data file can
+    /// change where no stage reads it. It names the file when a stage no
+    /// longer compiles to what was planned.
+    pub data_hashes: Vec<String>,
     /// Every `--set KEY=VALUE`, as typed.
     pub set: Vec<String>,
     /// The selector, as [`crate::Selector`] prints it.
@@ -113,6 +118,22 @@ pub struct PlanFile {
     pub run: String,
     pub asked: Asked,
     pub stages: Vec<PlannedStage>,
+    /// The `--data` files whose bytes are not what the plan was taken with,
+    /// as the apply found them. Not part of the file: it is filled in by
+    /// whoever reads the plan to apply it, and only explains a
+    /// `plan-differs` failure.
+    pub changed_data: Vec<String>,
+}
+
+/// The hash of a file's bytes, `sha256:<hex>`, as a plan records a data file.
+pub fn file_hash(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+    let mut out = String::from("sha256:");
+    for byte in Sha256::digest(bytes) {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
 }
 
 impl PlanFile {
@@ -139,6 +160,7 @@ impl PlanFile {
             run: report.run_id.clone(),
             asked,
             stages,
+            changed_data: Vec::new(),
         })
     }
 
@@ -187,6 +209,7 @@ impl PlanFile {
         map.insert("run".to_owned(), Value::from(self.run.as_str()));
         map.insert("files".to_owned(), strings(&self.asked.files));
         map.insert("data".to_owned(), strings(&self.asked.data));
+        map.insert("dataHashes".to_owned(), strings(&self.asked.data_hashes));
         map.insert("set".to_owned(), strings(&self.asked.set));
         map.insert(
             "selector".to_owned(),
@@ -240,11 +263,13 @@ impl PlanFile {
             asked: Asked {
                 files: list("files"),
                 data: list("data"),
+                data_hashes: list("dataHashes"),
                 set: list("set"),
                 selector: text("selector"),
                 command: text("command"),
             },
             stages,
+            changed_data: Vec::new(),
         })
     }
 }
@@ -515,6 +540,7 @@ mod tests {
             asked: Asked {
                 files: vec!["site.yaml".to_owned()],
                 data: vec!["prod.yaml".to_owned()],
+                data_hashes: vec![file_hash(b"region: eu\n")],
                 set: vec!["region=eu".to_owned()],
                 selector: "env=prod".to_owned(),
                 command: "plan site.yaml".to_owned(),
@@ -554,6 +580,7 @@ mod tests {
                     policy: None,
                 },
             ],
+            changed_data: Vec::new(),
         }
     }
 

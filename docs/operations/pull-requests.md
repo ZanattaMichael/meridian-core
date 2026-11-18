@@ -34,8 +34,8 @@ meridian apply --plan plan.mplan
 `plan --out FILE` runs the plan as always and then writes the file, one JSON
 object, with:
 
-- what the plan was asked: the documents, every `--data` file, every
-  `--set`, the selector, and the command line;
+- what the plan was asked: the documents, every `--data` file and the hash
+  of its bytes, every `--set`, the selector, and the command line;
 - the id of the run that took it, which the apply's record then names;
 - one entry per stage: its name and kind, the target, the **hash of the
   artifact** the document compiled to, the changes the tool reported, the
@@ -81,7 +81,11 @@ Then, stage by stage, as each is about to be applied:
   recorded. If it does not, the stage fails with the reason `plan-differs`,
   the stages after it are not run, and the stages before it stay applied,
   as after any failed stage. A stage the plan previewed and whose own
-  `spec.when` now leaves out fails the same way.
+  `spec.when` now leaves out fails the same way. When a `--data` file's
+  bytes are not what the plan recorded, the failure names it: `... and the
+  data file prod.yaml has changed since the plan`. A changed data file is
+  never a refusal on its own: a key no stage reads can change, and the
+  artifacts, and so the plan, still hold.
 - **the tool's own plan**: where the plugin saved one, the tool is handed it
   back and applies that and nothing else. Terraform and OpenTofu apply the
   plan file and refuse a stale one themselves; Pulumi constrains its update
