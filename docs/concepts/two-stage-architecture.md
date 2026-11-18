@@ -1,7 +1,7 @@
 # The two-stage architecture
 
 Meridian has two kinds of document, `Infrastructure` and `ResourceSet`, and runs
-them as two stages. This page says why they are not one.
+them as two stages. This page explains why.
 
 <p align="center"><img src="../graphics/meridian-two-stage-workflow.svg" alt="An Infrastructure stage creates the machine and promises an output; a ResourceSet stage names that output as its host" width="100%"></p>
 
@@ -17,17 +17,16 @@ Puppet, OpenVox, Chef, DSC) log in to a machine, or run on it, and converge pack
 files and services. They need the machine to exist first, and they need to know
 where it is.
 
-Meridian holds a document to its question. Each plugin declares its category,
-and a ResourceSet aimed at Terraform, or an Infrastructure document aimed at
-Ansible, is refused when it is compiled. Docker is the one tool that answers
-both: a container project either stands on its own, or runs on the daemon of a
-machine the document names, so the `docker` target takes either kind.
+Each plugin declares its category, and a ResourceSet aimed at Terraform, or an
+Infrastructure document aimed at Ansible, is refused at compile time. Docker
+answers both questions: a container project either stands alone or runs on the
+daemon of a named machine, so the `docker` target takes either kind.
 [The table](../reference/dsl/index.md#the-document) is in the language
 reference.
 
-A single graph over both would have to pretend that "create a VM" and "install
-nginx" are the same sort of step. They are not: one of them does not have a
-place to run until the other has finished.
+A single graph over both would treat "create a VM" and "install nginx" as the
+same sort of step. They are not: one has nowhere to run until the other
+finishes.
 
 ## The hand-off is one declared value
 
@@ -48,19 +47,18 @@ targetHost:
   output: address
 ```
 
-That is the whole interface between the stages. `meridian validate` checks that
-the document and the output exist. The value itself is only known after the
-first stage has been applied, and Meridian is strict about that:
+That is the whole interface between stages. `meridian validate` checks that the
+document and output exist. The value is only known after the first stage is
+applied:
 
-- Until then, the ResourceSet is **deferred**. It is not compiled against a
-  guess.
-- When the first stage is applied, its tool reports the outputs, and the
-  ResourceSet is compiled for the real value and applied. The outputs stay
-  with the tool: a later run asks it again.
+- Until then, the ResourceSet is **deferred**, not compiled against a guess.
+- Once the first stage is applied, its tool reports the outputs, and the
+  ResourceSet is compiled for the real value and applied. Outputs stay with the
+  tool; a later run asks again.
 - If the first stage fails, later stages do not run.
 
-A ResourceSet for a machine that is already there says so directly, and needs no
-first stage:
+A ResourceSet for an existing machine names it directly and needs no first
+stage:
 
 ```yaml
 targetHost:
@@ -70,32 +68,30 @@ targetHost:
 
 ## Order within a workflow
 
-Every Infrastructure document in a workflow runs before any ResourceSet,
-whatever order the files are given in, unless a document
-[imports](../reference/dsl/outputs-and-hand-offs.md#imports) a value from
-another: a document always runs after the ones it needs, so a cloud-init
-ResourceSet runs before the Infrastructure document that creates the machine
-with its user-data. A workflow is simply the documents passed
-to one `meridian` command, in one file separated by `---` or in several files.
+Every Infrastructure document runs before any ResourceSet, whatever the file
+order, unless a document [imports](../reference/dsl/outputs-and-hand-offs.md#imports)
+a value from another. A document always runs after the ones it needs, so a
+cloud-init ResourceSet runs before the Infrastructure document that creates the
+machine with its user-data. A workflow is the documents passed to one
+`meridian` command, in one file separated by `---` or in several files.
 
 ## What this does not do
 
-By default Meridian does not roll back a first stage because a second failed.
-A run stops at the stage that failed, and
+By default Meridian does not roll back a first stage when a second fails. A run
+stops at the failed stage, and
 [`apply --resume`](run-safety.md#picking-up-where-a-run-stopped) continues
-from there once the cause is fixed. Asked to with `--on-failure rollback`, it
-[puts back](run-safety.md#putting-a-run-back) what the run changed by applying
-what was applied before; it cannot remove what a first apply created.
+from there once fixed. With `--on-failure rollback` it
+[puts back](run-safety.md#putting-a-run-back) what the run changed by
+re-applying the previous version; it cannot remove what a first apply created.
 
-Each tool keeps its own state and its own idea of drift: Terraform notices
-drift when it plans, Ansible and Chef only when they run, Puppet and DSC
-agents on their own schedule. [`meridian drift`](run-safety.md#finding-drift)
-asks every tool the same question and reports what each says, without
-papering over the difference: a tool that cannot preview is reported as
-unknown, never as in sync.
+Each tool has its own state and idea of drift: Terraform notices it when it
+plans, Ansible and Chef when they run, Puppet and DSC agents on their own
+schedule. [`meridian drift`](run-safety.md#finding-drift) asks every tool and
+reports each answer. A tool that cannot preview is reported as unknown, never as
+in sync.
 
-What Meridian does across stages, so that a run is safe to repeat and to
-share, is on [running safely](run-safety.md): one run at a time, a record of
-every run, resuming a run that failed, putting one back, and finding drift.
+[Running safely](run-safety.md) covers what Meridian does across stages: one run
+at a time, a record of every run, resuming, putting a run back, and finding
+drift.
 
 A worked example: [a two-stage workflow](../quickstart/first-two-stage.md).

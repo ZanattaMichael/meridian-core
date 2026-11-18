@@ -1,24 +1,21 @@
 # How a secret is held in memory
 
-A password that Meridian fetches for a tool exists in Meridian's memory for a
-while. This page says what is done to it during that while, what is not
-promised, and where the code is. The design, with what is still to be built, is
-in [the language plan](../plans/language-expansion.md#115-holding-a-secret-in-memory).
+A password Meridian fetches for a tool sits in Meridian's memory for a while.
+This page covers how it is protected, what is not promised, and where the code
+is. The design, including what is not built yet, is in [the language plan](../plans/language-expansion.md#115-holding-a-secret-in-memory).
 
 Everything here lives in one crate, `meridian-secret`. No other crate holds
 the bytes of a secret.
 
 <p align="center"><img src="../graphics/meridian-secrets-flow.svg" alt="How a secret moves: from a provider into locked memory, as a reference everywhere else, and to the tool by a private file at run time" width="100%"></p>
 
-> **Where this stands.** A document can declare secrets and read them: see
-> [the secrets reference](../reference/dsl/secrets.md). A secret can decide a
-> `when` today, `meridian secret check` says whether each would be found, and
-> a credential can be resolved outside a run, a secret can name several
-> places and be kept in the operating system's own stores, and
-> `meridian secret set` puts it there. A secret in a resource's params is
-> handed to the tool by a private file on the targets that
-> [take one](../reference/dsl/secrets.md#handing-a-secret-to-a-tool), and a
-> [credential's](../reference/dsl/credentials.md) secret fields the same way.
+> **Status.** Built today (see [the secrets reference](../reference/dsl/secrets.md)):
+> declaring and reading secrets; secrets in `when`; `meridian secret check`;
+> credentials resolved outside a run; a secret with several possible places;
+> OS secret stores, written with `meridian secret set`; and handing a secret in
+> params, or a [credential's](../reference/dsl/credentials.md) secret fields, to
+> the tool by a private file on targets that
+> [take one](../reference/dsl/secrets.md#handing-a-secret-to-a-tool).
 
 ## The promise, and its limit
 
@@ -27,15 +24,15 @@ the run record, panic messages, error messages), out of swap and core dumps,
 out of the environment and arguments of the programs it starts, and out of its
 own memory once the secret is no longer needed.
 
-It does not protect a secret from `root`, from a debugger attached by `root`,
-from a compromised kernel, or from the tool the secret is handed to. A tool
-that is given a password has the password.
+It does not protect a secret from `root`, a debugger attached by `root`, a
+compromised kernel, or the tool it is handed to. A tool given a password has
+the password.
 
 ## One home for each secret
 
-A secret is a `SecretValue`. Its bytes are in a block of memory mapped for that
-secret alone, of its final size from the start, so the bytes are never moved or
-left behind in freed memory.
+A secret is a `SecretValue`. Its bytes sit in a memory block mapped for that
+secret alone, at its final size, so they are never moved or left in freed
+memory.
 
 | Property | Linux | macOS and other Unix | Windows |
 |---|---|---|---|
@@ -45,75 +42,70 @@ left behind in freed memory.
 | Left out of core dumps (`MADV_DONTDUMP`) | yes | no | no |
 | Zeroes in a forked child (`MADV_WIPEONFORK`) | yes | no | no |
 
-`SecretValue::protection()` reports which of these were achieved for a value,
-so a run can say so once instead of assuming. Locking can fail when the limit
-on locked memory (`RLIMIT_MEMLOCK`) is small; the value is still created, and
-`protection().locked` is false. A run that holds such a secret
+`SecretValue::protection()` reports which of these were achieved, so a run can
+report it instead of assuming. Locking can fail when `RLIMIT_MEMLOCK` is small;
+the value is still created, with `protection().locked` false. A run holding
+such a secret
 [warns once](../reference/cli.md#secrets), naming it, and with
 `--strict-secrets` stops the stage instead.
 
 A `SecretValue` cannot be printed, copied or compared by accident:
 
-- `Debug` and `Display` both give `(sensitive)`, so a `{:?}` on a structure
-  that holds one, an `unwrap` on an error that holds one and a panic message
-  all print that and nothing else.
+- `Debug` and `Display` both give `(sensitive)`, so `{:?}` on a containing
+  structure, `unwrap` on a containing error, and panic messages print only
+  that.
 - It does not implement `Clone`, `PartialEq`, `Hash`, `Serialize` or `Deref`.
-  A copy is `duplicate()`, which makes a second locked block. A comparison is
-  `same()`, which takes the same time whatever the bytes are.
-- The bytes are reached only through `expose(|bytes| ...)`, which lends them to
-  a closure. A new secret made from an old one (an encoded form, a secret with
-  text around it) is `derive()`, which writes straight into a new locked block.
+  Copy with `duplicate()`, which makes a second locked block. Compare with
+  `same()`, which runs in constant time.
+- The bytes are reachable only through `expose(|bytes| ...)`, which lends them
+  to a closure. A secret built from another (an encoding, or with text around
+  it) uses `derive()`, which writes straight into a new locked block.
 
 ## Few places expose a secret
 
-Every call to `expose` is a place a secret can leave its protection. A test,
-`crates/meridian-secret/tests/expose_is_rare.rs`, reads the workspace's sources
-and fails when a call appears in a file that is not on its list. Adding a call
-site means adding the file to that list, with the reason, in review.
+Every `expose` call is a place a secret can leave protection. The test
+`crates/meridian-secret/tests/expose_is_rare.rs` scans the workspace and fails
+if a call appears in a file not on its list. A new call site means adding the
+file to that list, with a reason, in review.
 
 The same test keeps `unsafe` code in one module, `sys.rs`. The rest of the
 workspace forbids it.
 
 ## The process
 
-`harden_process()` is called before any secret is read. It sets the core dump
-limit to zero (`setrlimit(RLIMIT_CORE, 0)`) and, on Linux, makes the process
-undumpable (`prctl(PR_SET_DUMPABLE, 0)`), which also stops another process of
-the same user from attaching a debugger or reading `/proc/<pid>/mem`. It
-returns what it achieved, and `hardening()` reads the same facts back from the
-system.
+`harden_process()` runs before any secret is read. It sets the core dump limit
+to zero (`setrlimit(RLIMIT_CORE, 0)`) and, on Linux, makes the process
+undumpable (`prctl(PR_SET_DUMPABLE, 0)`), which also stops other processes of
+the same user attaching a debugger or reading `/proc/<pid>/mem`. It returns
+what it achieved; `hardening()` reads the same facts back from the system.
 
-Being undumpable is a setting of the whole process, and it has a side effect
-worth knowing: the kernel gives the files under `/proc/<pid>` to `root`, so
-the same user can no longer read them. A tool that inspects a running
-`meridian` (reading `/proc/<pid>/environ` or `/proc/<pid>/fd`, attaching
-`strace` or `gdb`) has to be run as `root`. Programs Meridian starts are not
-affected: the setting is reset when a program is executed.
+Side effect: an undumpable process's `/proc/<pid>` files belong to `root`, so
+the same user can no longer read them. Inspecting a running `meridian`
+(`/proc/<pid>/environ`, `/proc/<pid>/fd`, `strace`, `gdb`) needs `root`.
+Programs Meridian starts are unaffected; the setting resets on exec.
 
 ## Everywhere else: a reference, not the value
 
-The rest of Meridian never holds a secret's bytes. A value that is a secret
-(`Value::Secret`) holds a number: which secret of the run is meant. The bytes
-are in the run's `SecretTable`, in this crate.
+The rest of Meridian never holds a secret's bytes. A `Value::Secret` holds only
+a number identifying the run's secret. The bytes are in the run's
+`SecretTable`, in this crate.
 
-- The reference prints, compares and encodes as `(sensitive)`. A plan, a log
-  line, an error, a debug dump and the run's state are all made from values,
-  so none of them can show a secret: the bytes were never in what they are
-  made from. This is stronger than masking output afterwards, which fails the
-  first time someone forgets.
-- An expression that joins a secret to text or encodes it asks the table to
-  do it. The work is done on protected memory and the answer is another
-  reference.
-- A secret that has not been fetched (`validate` and `compile` never fetch
-  one) is in the table as its name. What is made from it is a description,
-  such as `password=(secret db_password)`.
-- The table for a stage is wiped when the stage ends. A reference that
-  outlives it names nothing.
+- The reference prints, compares and encodes as `(sensitive)`. Plans, logs,
+  errors, debug dumps and run state are built from values, so none can show a
+  secret: the bytes were never there. This is stronger than masking output
+  afterwards, which fails the first time someone forgets.
+- An expression that joins a secret to text or encodes it asks the table to do
+  it, on protected memory; the result is another reference.
+- An unfetched secret (`validate` and `compile` never fetch) is in the table as
+  its name. Anything built from it is a description, such as
+  `password=(secret db_password)`.
+- A stage's table is wiped when the stage ends. A reference that outlives it
+  names nothing.
 
 ## Fetching
 
 Seven providers are built. Each reads straight into locked memory, and none
-puts a value into an error.
+puts a value in an error.
 
 | Provider | What it does | What it refuses |
 |---|---|---|
@@ -125,171 +117,162 @@ puts a value into an error.
 | `from_secret_service(attributes)` | runs `secret-tool lookup` and reads its standard output as `exec` does | no session bus, or no `secret-tool`, is `Unavailable`; the tool failing or printing nothing is `Missing` |
 | `from_keychain(service, account)` | runs `/usr/bin/security find-generic-password -w` and reads its standard output | exit status 44 is `Missing`; any other failure is refused without what the tool printed; not macOS is `Unavailable` |
 
-`Source::store(label, value)` writes the two stores Meridian writes: the
-kernel keyring with `add_key(2)` from the locked region, and the Secret
-Service by handing the value to `secret-tool store` on its standard input.
-Nothing goes through an argument.
+`Source::store(label, value)` writes the two stores Meridian can write: the
+kernel keyring via `add_key(2)` from the locked region, and the Secret Service
+via `secret-tool store` on stdin. Nothing goes through an argument.
 
-A third kind of answer, `FetchError::Unavailable`, is what lets a secret name
-several places: `fetch_first` passes over a place that is `Missing` or
-`Unavailable` for the next and stops at one that `Failed`, and `probe_first`
-and `store_first` do the same without reading or with writing. The value a
-person types for `secret set` is read by `read_from_stdin` with `read(2)` on
-the terminal, a byte at a time with echo off, into the locked region, with no
-`BufReader` keeping a copy.
+A third answer, `FetchError::Unavailable`, lets a secret name several places:
+`fetch_first` skips a place that is `Missing` or `Unavailable` and stops at one
+that `Failed`. `probe_first` and `store_first` do the same without reading, or
+while writing. A value typed for `secret set` is read by `read_from_stdin` with
+`read(2)` on the terminal, one byte at a time with echo off, into the locked
+region, with no `BufReader` copy.
 
-Where a secret comes from is a `Source`: the provider and what it needs. A
-document's declaration and a project's credential are both made of them, so
-both are checked by the same rules (`Source::problems()`) and fetched the same
-way (`Source::fetch()`). `Source::probe()` says whether the place would
-answer without reading it, which is what `meridian secret check` prints.
+A secret's origin is a `Source`: the provider and what it needs. Document
+declarations and project credentials are both built from them, so both use the
+same checks (`Source::problems()`) and fetching (`Source::fetch()`).
+`Source::probe()` says whether the place would answer, without reading it; that
+is what `meridian secret check` prints.
 
 ## A credential outside a run
 
-Some work needs an identity when no document is being run: fetching a module
-from a private registry, for one. `resolve_credential(declared, name)` answers
-it with the same model.
+Some work needs an identity outside a run, such as fetching a module from a
+private registry. `resolve_credential(declared, name)` handles this with the
+same model.
 
-- A `CredentialDeclaration` is a name, a type and fields. A field that is not
-  secret holds its text. A field that is secret holds a `Source`, never a
-  value: a secret written out is refused, and the refusal does not repeat it.
+- A `CredentialDeclaration` is a name, a type and fields. A plain field holds
+  text. A secret field holds a `Source`, never a value: a literal secret is
+  refused, and the refusal does not repeat it.
 - Three types can be resolved today: `registry` (`server`, `user`,
   `password`), `usernamePassword` (`user`, `domain`, `password`) and `token`
   (`token`, `scheme`). The rest of [the plan's list](../plans/language-expansion.md#12-credentials)
   arrive with credentials in documents.
-- Resolving fetches the secret fields of that one credential and no other,
-  into locked memory. The `Credential` that comes back prints as its name and
-  type, lends a secret field as a `SecretValue`, and wipes them when dropped.
-- An error names the field and the provider, and nothing a provider read.
+- Resolving fetches only that credential's secret fields, into locked memory.
+  The returned `Credential` prints as its name and type, lends secret fields as
+  `SecretValue`s, and wipes them when dropped.
+- An error names the field and provider, and nothing a provider read.
 
 The first user is the module system: a project declares credentials under
-`spec.credentials` in `meridian.yaml` and names one for a registry. See
+`spec.credentials` in `meridian.yaml` and names one per registry. See
 [registry logins](../reference/modules.md#registry-logins).
 
 ## A credential in a run
 
-A document declares the same kind of thing under `spec.credentials`, with
-every type the language has, and names one for its host with
-`targetHost.credential` ([Credentials](../reference/dsl/credentials.md)).
-In a run a credential's secret fields are secrets of the document, and
-nothing more is added to the model:
+A document declares credentials under `spec.credentials`, with every type the
+language has, and names one for its host with `targetHost.credential`
+([Credentials](../reference/dsl/credentials.md)). In a run, a credential's
+secret fields are simply secrets of the document:
 
-- A secret field is declared as exactly `${{ secret.<name> }}`, so once the
-  document is resolved the field *is* a `Value::Secret` slot in the run's
-  table: one home, as for any secret. A plain field (a user, a region) is
-  text, checked as shown text, so a secret cannot be placed in one.
-- The credential handed to a plugin is a `HeldCredential`: the declared
-  shape, and one `SecretValue` per secret field, duplicated from the table
-  by name into a holder of its own, wiped with the stage. It prints as its
-  name, its type and its field names.
-- It crosses to the plugin as the run context does: the values at plan and
-  apply only, over the private socket, taken straight into protected memory
-  on the other side (`SecretValue::take_from`); `outputs` is sent none. At
-  compile the plugin sees the shape and the names of the secret fields, and
-  no value.
-- What the host prints and records is the summary, `deploy (ssh, user
-  deploy)`: the plan line, the run record and the events hold that and
-  nothing of a value.
-- A rollback fetches the credential again at the stage's turn, as it does the
-  document's secrets.
+- A secret field must be exactly `${{ secret.<name> }}`, so once resolved it
+  *is* a `Value::Secret` slot in the run's table, like any secret. A plain
+  field (user, region) is text, checked as shown text, so a secret cannot go
+  there.
+- The plugin receives a `HeldCredential`: the declared shape plus one
+  `SecretValue` per secret field, duplicated from the table into its own
+  holder and wiped with the stage. It prints as its name, type and field
+  names.
+- It crosses to the plugin like the run context: values at plan and apply
+  only, over the private socket, taken straight into protected memory on the
+  other side (`SecretValue::take_from`). `outputs` gets none. At compile the
+  plugin sees the shape and secret field names, no values.
+- The host prints and records only a summary, such as `deploy (ssh, user
+  deploy)`, in the plan line, run record and events.
+- A rollback fetches the credential again at the stage's turn, as it does
+  document secrets.
 
-A credential's secret fields are counted among the stage's secrets for
-masking what the tool prints, since they are the same slots.
+A credential's secret fields count among the stage's secrets for masking tool
+output, since they are the same slots.
 
-A private key for a host over SSH takes the plan's rank 1 by way of an agent
-(`meridian-sdk/src/agent.rs`): the plugin starts `ssh-agent -D -a <socket>`,
-the socket in a directory only the user can enter, and runs `ssh-add -` with
-the key on its standard input (`Tool::stdin_secret`), so the key goes from
-protected memory into the agent's and is on no disk. A passphrase is written
-to a `SecretFile` beside the socket and answered through an askpass program
-that does nothing but print that file. The tool (`ssh`, `salt-ssh`, `bolt`,
-`chef-run`) is told the socket in `SSH_AUTH_SOCK`, and nothing else of the
-credential reaches its environment or command line. Dropping the agent kills
-the process and removes the directory, so the key lives in the agent for one
-stage. The agent's own memory is as protected as `ssh-agent` makes it, which
-is the same promise the user's own agent gives.
+An SSH private key for a host is delivered through an agent (the plan's rank 1,
+`meridian-sdk/src/agent.rs`):
+
+- The plugin starts `ssh-agent -D -a <socket>`, with the socket in a directory
+  only the user can enter.
+- It runs `ssh-add -` with the key on stdin (`Tool::stdin_secret`), so the key
+  goes from protected memory into the agent and never touches disk.
+- A passphrase goes in a `SecretFile` beside the socket, answered by an askpass
+  program that only prints that file.
+- The tool (`ssh`, `salt-ssh`, `bolt`, `chef-run`) gets the socket in
+  `SSH_AUTH_SOCK` and nothing else of the credential in its environment or
+  command line.
+- Dropping the agent kills it and removes the directory, so the key lives in
+  the agent for one stage. The agent's memory is as protected as `ssh-agent`
+  makes it, the same as the user's own agent.
 
 ## Handing a secret to a tool
 
-In order of preference: the tool's standard input or a file descriptor, then a
-file only the user can read, then (only where a tool accepts nothing else) the
-environment of that one tool. Never an argument: arguments are visible to every
-user in the process list.
+In order of preference: the tool's stdin or a file descriptor; a file only the
+user can read; and, only where a tool accepts nothing else, that tool's
+environment. Never an argument: every user can see arguments in the process
+list.
 
 `SecretFile::create(name, parts)` is the file:
 
-- It is made in a directory of its own, `meridian-secrets-<pid>-<random>`, of
-  mode `0700`, and the file is mode `0600` and must not already exist.
-- The directory is on a memory filesystem where there is one
-  (`XDG_RUNTIME_DIR`, `/run/user/<uid>`, `/dev/shm`), so the secret does not
-  reach a disk. `in_memory()` says whether it is.
-- The file is built from parts, literal text and secrets in order, so a
+- It lives in its own `0700` directory, `meridian-secrets-<pid>-<random>`. The
+  file is `0600` and must not already exist.
+- The directory is on a memory filesystem where available (`XDG_RUNTIME_DIR`,
+  `/run/user/<uid>`, `/dev/shm`), so the secret never reaches disk.
+  `in_memory()` reports whether it did.
+- The file is built from parts (literal text and secrets, in order), so a
   secret goes from locked memory to the file without becoming a `String`.
-- `beside(name, text)` writes a second file of the same protection into the
-  same directory, for a tool that reaches the secret file only through
-  another: a `hiera.yaml` naming its data directory, a pillar top file, a
-  `client.rb`. The text holds no secret; the file goes with the directory.
-- Dropping it overwrites the file and removes it and its directory, including
-  anything a tool left beside it.
-- A run that was killed cannot clean up. `sweep_stale()` removes the
-  directories of processes that no longer exist, and leaves those of live ones.
+- `beside(name, text)` writes a second, equally protected file in the same
+  directory, for tools that reach the secret file through another: a
+  `hiera.yaml` naming its data directory, a pillar top file, a `client.rb`. The
+  text holds no secret.
+- Dropping it overwrites and removes the file and directory, including anything
+  a tool left there.
+- A killed run cannot clean up. `sweep_stale()` removes directories of
+  processes that no longer exist and keeps those of live ones.
 
 ## Masking what a tool prints
 
-A tool may print the secret it was given. `Masker` is given each secret of a
-run and replaces it with `(sensitive)` in the tool's output before Meridian
-shows or records a line. It finds:
+A tool may print the secret it was given. `Masker` holds each secret of a run
+and replaces it with `(sensitive)` in tool output before Meridian shows or
+records a line. It finds:
 
 - the secret itself;
 - its base64 forms (standard and URL-safe, with and without padding), its
   hexadecimal form and its URL-encoded form;
-- each line of a secret that has several, since a tool that echoes a key
-  prints it a line at a time.
+- each line of a multi-line secret, since a tool echoing a key prints it line
+  by line.
 
-A secret or a line shorter than four bytes is not searched for: masking every
-`a` in the output would hide the output and reveal the secret's length.
-`add()` returns `false` for one, so a run can say that it is not masked.
+Secrets or lines shorter than four bytes are not searched for: masking every
+`a` would wreck the output and reveal the secret's length. `add()` returns
+`false` for these, so a run can report them as unmasked.
 
-Masking is a second line of defence. The first is not handing a tool's output
-anything to print: the delivery channels above.
+Masking is the second line of defence. The first is the delivery channels
+above, which give the tool nothing to print.
 
 ## Across the plugin boundary
 
-A target plugin is a separate process, so a secret handed to its tool
-crosses one boundary on the way. What crosses, and when:
+A target plugin is a separate process, so a secret for its tool crosses one
+boundary. What crosses, and when:
 
-- **At compile, a name.** A resource's params reach the plugin with
-  `Value::Secret` where a secret stands, and the graph names each one
-  (`ResourceGraph::secrets`). The plugin writes a reference by that name into
-  its artifact (`secrets_written_as`) and nothing else: it has no value to
-  write. The message carries `(sensitive)` where the secret is and, beside
-  it, the path to that place and the secret's slot, so the mask is put back
-  as a `Value::Secret` on the other side.
-- **At plan and apply, the value.** The run context carries the value of
-  each secret the params refer to, over the plugin's private socket and
-  nowhere else, and only to a target that declared it takes secrets. On the
-  plugin's side the SDK takes each value straight into protected memory and
-  wipes the message's bytes (`SecretValue::take_from`); on the host's side
-  the message is the one copy outside protected memory a secret passes
-  through, dropped as soon as it is sent. `outputs` is sent none.
-- **For the length of the call.** The plugin's `RunContext::secrets` holds
-  the values, each a `SecretValue` with the same missing `Debug` and
-  `Display`, and they are wiped when the call's context is dropped.
-- **To the tool by a private channel.** `Secrets::json_file` writes every
-  value into one `SecretFile` under the names the artifact uses, for a tool
-  that reads variables from a file; a plugin whose tool reads another format
-  (Hiera's YAML, a Salt pillar) builds the `SecretFile` from parts the same
-  way; `Tool::stdin_secret` pipes one into a tool's standard input. Neither
-  the command line nor the environment is a channel the SDK offers, and a
-  tool that has only the command line (`chef-run`) is refused the secret.
-- **Rollback fetches again.** The run keeps nothing of a stage's secrets once
-  the stage ends; a rollback at the end of a failed run, or `meridian
-  rollback` later, fetches the document's secrets at the stage's turn.
+- **At compile, a name.** Params reach the plugin with `Value::Secret` where a
+  secret stands, and the graph names each (`ResourceGraph::secrets`). The plugin
+  writes a reference by that name into its artifact (`secrets_written_as`); it
+  has no value to write. The message carries `(sensitive)` plus the path and
+  slot, so the other side restores a `Value::Secret`.
+- **At plan and apply, the value.** The run context carries each referenced
+  secret's value over the plugin's private socket, only to targets that declare
+  they take secrets. The plugin SDK takes each value straight into protected
+  memory and wipes the message bytes (`SecretValue::take_from`). On the host,
+  the message is the only copy outside protected memory, dropped once sent.
+  `outputs` gets none.
+- **For the length of the call.** `RunContext::secrets` holds the values as
+  `SecretValue`s (no `Debug` or `Display`), wiped when the context drops.
+- **To the tool by a private channel.** `Secrets::json_file` writes every value
+  into one `SecretFile` under the artifact's names, for tools that read
+  variables from a file. Plugins whose tool reads another format (Hiera YAML, a
+  Salt pillar) build the `SecretFile` from parts. `Tool::stdin_secret` pipes one
+  to stdin. The SDK offers neither command line nor environment, so a tool with
+  only a command line (`chef-run`) is refused the secret.
+- **Rollback fetches again.** Nothing of a stage's secrets is kept after it
+  ends; a rollback, immediate or later, fetches them again at the stage's turn.
 
-What is not claimed: a plugin given a secret can do anything with it. The
-defences are the ones for any code you run, a signed plugin from a named
-publisher, and the plugin is given only the secrets of the resources it
-compiles.
+Not claimed: a plugin given a secret can do anything with it. The defences are
+those for any code you run (a signed plugin from a named publisher), and a
+plugin gets only the secrets of the resources it compiles.
 
 ## What is tested
 

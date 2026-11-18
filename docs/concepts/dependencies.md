@@ -1,7 +1,7 @@
 # Dependencies and notifications
 
-A resource can relate to another in two ways. They look similar and mean
-different things, so they are different fields.
+A resource can relate to another in two ways. They look alike but mean
+different things, so they are separate fields.
 
 ## `dependsOn`: order
 
@@ -13,12 +13,11 @@ different things, so they are different fields.
     - resource: nginx_pkg
 ```
 
-"Do not touch this until that is done." It is about order and nothing else.
+"Do not touch this until that is done." It is only about order.
 
-Meridian builds a graph from every `dependsOn` in a document, refuses a cycle
-with the resources named, and hands each plugin the resources in an order that
-satisfies every edge. What the plugin does next depends on how its tool thinks
-about order:
+Meridian builds a graph from every `dependsOn`, refuses cycles (naming the
+resources), and hands each plugin the resources in an order that satisfies
+every edge. What the plugin does next depends on how its tool handles order:
 
 | Tool orders by | Targets | What `dependsOn` becomes |
 |---|---|---|
@@ -30,11 +29,10 @@ about order:
 | the kind of each object | `helm` | nothing written where Helm's own install order already agrees; refused where it does not ([helm](../targets/helm.md#ordering)) |
 | the stages of a first boot | `cloud-init` | nothing written; each resource is placed at the step cloud-init handles it, a file that has to wait is deferred, and a dependency that points backwards through those steps is refused |
 
-Where a reference already implies the order, as `${web_vm.id}` does in
-Terraform or `Volume: ${data}:/srv` does in a Podman unit, the plugin does not
-write it a second time. An ARM template is the exception: Resource Manager
-infers no order from a resource id, so the `arm` target writes a `dependsOn`
-for every reference as well.
+Where a reference already implies order, as `${web_vm.id}` does in Terraform
+or `Volume: ${data}:/srv` in a Podman unit, the plugin does not repeat it. ARM
+is the exception: Resource Manager infers no order from a resource id, so the
+`arm` target also writes a `dependsOn` for every reference.
 
 ## `notifies`: reaction
 
@@ -47,12 +45,11 @@ for every reference as well.
       action: restart
 ```
 
-"When this really changes, do that to the other." It is conditional: on a run
-where the file is already right, nothing is restarted. It is not an order:
-Meridian leaves it out of the sort, so if the notifier must also come first, say
-so with `dependsOn`.
+"When this actually changes, do that to the other." It is conditional: if the
+file is already right, nothing restarts. It is not an order: Meridian leaves it
+out of the sort, so add `dependsOn` if the notifier must also come first.
 
-This is where tools differ most, and where Meridian is strict.
+Tools differ most here, and Meridian is strict.
 
 **Native** means the tool has its own mechanism. Ansible's handlers, Puppet's
 and OpenVox's `notify`, Chef's `notifies`, Salt's `watch` and `onchanges` requisites,
@@ -60,12 +57,12 @@ DscPipelineRunner's `notify`, Compose's `depends_on` with `restart: true`, and
 systemd's `PartOf=` for Podman units
 ([podman](../targets/podman.md#notifications)) are native.
 
-**Synthetic** means the tool has no such mechanism, and Meridian builds the
-reaction from something the tool does have. It is real, and it is visible in the
-tool's own output, so each one is documented where it happens:
+**Synthetic** means the tool has no such mechanism, so Meridian builds the
+reaction from something it does have. It works and is visible in the tool's
+output, so each is documented on its target page:
 
 - Kubernetes: a checksum of the notifier in an annotation on the workload's pod
-  template. The checksum changes, the template changes, the pods roll.
+  template. When the checksum changes, the pods roll.
   ([kubernetes](../targets/kubernetes.md#notifications))
 - Helm: the same checksum, written as a template expression so Helm computes it
   each time it renders the chart. ([helm](../targets/helm.md#notifications))
@@ -76,25 +73,24 @@ tool's own output, so each one is documented where it happens:
 - OpenTofu: the same `replace_triggered_by`.
   ([opentofu](../targets/opentofu.md#notifications))
 - cloud-init: the notified action as a command that runs once, after every
-  other command of the first boot. A first boot changes everything, so the
-  reaction is unconditional. ([cloud-init](../targets/cloud-init.md#notifications))
+  other first-boot command. A first boot changes everything, so it is
+  unconditional. ([cloud-init](../targets/cloud-init.md#notifications))
 
-A synthetic notify always comes with a compile warning that says what it will
-look like.
+A synthetic notify always produces a compile warning describing it.
 
-**The action matters.** A notify names an action, and a target accepts only the
-actions its tool can really perform on that kind of resource. Puppet can restart
+**The action matters.** A target accepts only the actions its tool can actually
+perform on that kind of resource. Puppet can restart
 a service on refresh but cannot reload it, so `action: reload` is refused on
 Puppet with the reason, not turned into a restart. Salt restarts and reloads a
 service through the state that keeps it running, so either action aimed at a
 service whose state is `stopped` is refused. Kubernetes and Helm can roll pods and
 nothing else, so only `restart` aimed at a Deployment, StatefulSet or DaemonSet
 is accepted. systemd can propagate a restart between Podman units and nothing
-else, so only `restart` is accepted there. CloudFormation, Bicep, ARM templates and Pulumi have no way to react to a change at all,
-and refuse every notify ([pulumi](../targets/pulumi.md#notifications) says what
-to write instead). So does Packer: a build runs each step once, on a
+else, so only `restart` is accepted there. CloudFormation, Bicep, ARM templates and Pulumi cannot react to a change at
+all and refuse every notify ([pulumi](../targets/pulumi.md#notifications) says
+what to write instead). So does Packer: a build runs each step once on a
 machine it then discards.
 
-The [capability matrix](../reference/capability-matrix.md) has the summary. The
-rule behind it: Meridian either does what the document says or refuses to
-compile it. See [the capability model](capability-model.md).
+The [capability matrix](../reference/capability-matrix.md) summarises this. The
+rule: Meridian does what the document says or refuses to compile it. See
+[the capability model](capability-model.md).

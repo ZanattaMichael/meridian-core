@@ -25,9 +25,8 @@ Each plugin declares a category, and the category decides which kind it takes:
 
 <p align="center"><img src="../graphics/meridian-plugin-categories.svg" alt="Infrastructure documents go to infrastructure as code, containers and orchestration; ResourceSets go to configuration management; docker takes both" width="100%"></p>
 
-This page is the overview. Every field, with its rules, is in
-[the language reference](../reference/dsl/index.md), and each segment's way of
-writing resources is on its own page there.
+Every field and its rules are in
+[the language reference](../reference/dsl/index.md), with a page per segment.
 
 ## Resources
 
@@ -54,22 +53,20 @@ What `type` and `params` mean depends on the target's category.
 
 **Configuration management targets** (`ansible`, `puppet`, `openvox`, `chef`, `salt`,
 `cloud-init`) share six abstract types: `package`, `file`, `service`, `user`,
-`group` and `exec`. The
-same resource compiles for any of them, and each target's page has the table of
-what a type and its params become. This is where "write once" is real, because
-these tools manage the same small set of things. `cloud-init` takes the same six
-and applies them once, on a machine's first boot, which narrows what some of
-them can mean; [its page](../targets/cloud-init.md) says how. Where the six
-fall short, these targets take the tool's own types beside them, written as
-the tool writes them (`ansible.builtin.lineinfile`), with the tool's own
-params; such a resource compiles for that one target
+`group` and `exec`. The same resource compiles for any of them, and each target
+page shows what a type and its params become. This is where "write once" is
+real, because these tools manage the same small set of things. `cloud-init`
+applies the six once, on first boot, which narrows some of them;
+[its page](../targets/cloud-init.md) explains. Where the six fall short, these
+targets also take the tool's own types as the tool writes them
+(`ansible.builtin.lineinfile`), with the tool's params; such a resource compiles
+for that one target
 ([native types beside the six](../reference/dsl/configuration-management.md#native-types-beside-the-six)).
 
 **Everything else is native passthrough.** A Terraform provider has thousands of
 resource types, Kubernetes has its whole API, Azure has every service. Meridian
-does not hide them behind a smaller vocabulary, because a smaller vocabulary
-would be a worse one. The resource's `type` is the tool's own type and its
-`params` are that type's own arguments, exactly as the tool documents them:
+does not hide them behind a smaller, weaker vocabulary. `type` is the tool's own
+type and `params` are its arguments, exactly as the tool documents them:
 
 | Target | `type` is | Example |
 |---|---|---|
@@ -86,10 +83,9 @@ would be a worse one. The resource's `type` is the tool's own type and its
 | `podman` | a kind of Quadlet unit | `container` |
 | `dsc` | module and resource | `PSDscResources/Service` |
 
-What Meridian adds for these targets is everything around the resource: one
-document format, references between resources checked at compile time,
-dependencies, notifications where the tool can be made to react, outputs handed
-to the next stage, and one way to plan and apply.
+For these targets Meridian adds everything around the resource: one document
+format, compile-time-checked references, dependencies, notifications where the
+tool can react, outputs for the next stage, and one way to plan and apply.
 
 Most passthrough targets also take one **settings resource** that is not part of
 the tool's file: where to deploy, which cluster, which daemon. It has a fixed
@@ -106,25 +102,24 @@ become blocks of the configuration itself.
 
 ## References
 
-`${id}` or `${id.path}` inside a param refers to another resource in the same
-document. Meridian checks that the resource exists, and each target rewrites the
-reference into the tool's own form: a Terraform or OpenTofu address, a CloudFormation `Ref`,
-a Packer variable, the name of a Kubernetes object, a `{{ .Values }}` expression in a Helm chart. What a path can read depends on the tool, and
-the target's page says. Write `$${` for a literal `${`.
+`${id}` or `${id.path}` in a param refers to another resource in the same
+document. Meridian checks it exists, and each target rewrites it into the tool's
+own form: a Terraform or OpenTofu address, a CloudFormation `Ref`,
+a Packer variable, the name of a Kubernetes object, a `{{ .Values }}` expression in a Helm chart. What a path can read depends on the tool; see
+the target's page. Write `$${` for a literal `${`.
 
-The configuration management targets that share the six abstract types have
-nothing to read at apply time. In a ResourceSet for `ansible`, `puppet`, `openvox`, `chef`,
-`salt` or `cloud-init`, `${id.param}` becomes the value the document gives that param,
-when the document is compiled, and anything else in `${...}` is refused
+The configuration management targets have nothing to read at apply time. In a
+ResourceSet for `ansible`, `puppet`, `openvox`, `chef`, `salt` or `cloud-init`,
+`${id.param}` becomes that param's value at compile time, and anything else in
+`${...}` is refused
 ([the rules](../reference/resource-types.md#references)).
 
 ## What is not here yet
 
 The design includes hierarchical data (values merged from layers, per
-environment or per node) and facts gathered from the node. The engine for the
-data hierarchy exists, but neither is wired into the `meridian` command yet.
+environment or node) and facts gathered from the node. The hierarchy engine
+exists, but neither is wired into the `meridian` command yet.
 
-What works today: a compile-time [`when`](../reference/dsl/index.md#when-and-runtimewhen)
-is decided from the files given with `--data`, so it can depend on anything you
-can put in a file and on nothing about the node (`facts.*` is refused), and
-`runtimeWhen` works on the targets that support it.
+Today a compile-time [`when`](../reference/dsl/index.md#when-and-runtimewhen) is
+decided from `--data` files, so it can use anything in a file but nothing about
+the node (`facts.*` is refused). `runtimeWhen` works on targets that support it.

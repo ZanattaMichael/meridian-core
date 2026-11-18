@@ -1,28 +1,25 @@
 # Compile rules
 
 A hierarchy says **how** layers of configuration merge. Compile rules say what
-a layer is **allowed** to do in that merge. They are checked before anything is
-compiled, they are the same for every target and every segment, and a
-configuration that breaks one is refused with a message that names the rule,
-the layer and the key.
+each layer is **allowed** to do in that merge. They are checked before
+compiling and are the same for every target. A configuration that breaks one is
+refused with a message naming the rule, the layer and the key.
 
-The rule this feature started from comes from running
-[DscPipelineRunner](https://github.com/ZanattaMichael/Dsc.PipelineRunner)
-configurations: **a more specific file cannot overwrite a variable or a secret
-that a less specific file set.** An organization's baseline stays the
-organization's, whatever a team's node file says.
+The founding rule comes from
+[DscPipelineRunner](https://github.com/ZanattaMichael/Dsc.PipelineRunner):
+**a more specific file cannot overwrite a variable or secret that a less
+specific file set.** The organization's baseline stays fixed, whatever a team's
+node file says.
 
-This page is the design: what the rules are for, where they sit, and why they
-are shaped the way they are. The [reference](../reference/compile-rules.md) has
-every field and every message.
+This page covers the design: purpose, placement and shape. The
+[reference](../reference/compile-rules.md) has every field and message.
 
 ## The problem
 
-Layered configuration lets many people contribute to one result. An
-organization writes a baseline, an environment adjusts it, a team adds its
-roles, and a node file adds what is true of one machine. The merge is what
-makes this useful, and it is also the risk: by default the most specific layer
-wins, so the file with the least review can change anything above it.
+Layered configuration lets many people contribute to one result: an
+organization baseline, environment adjustments, team roles, and per-machine
+node files. The risk is that the most specific layer wins by default, so the
+least-reviewed file can change anything above it.
 
 ```mermaid
 flowchart LR
@@ -34,15 +31,15 @@ flowchart LR
     style X fill:#fde8e8,stroke:#c0392b,color:#000
 ```
 
-A merge strategy cannot fix this, because a strategy is about how values
-combine and not about who may set them. That takes a policy.
+A merge strategy cannot fix this. It decides how values combine, not who may
+set them. That needs a policy.
 
 ## What DscPipelineRunner does, and what Meridian takes from it
 
 DscPipelineRunner compiles a [Datum](https://github.com/gaelcolas/Datum) tree
-of YAML files into one file per node, and its capability policy says what
-each layer of that tree may use. Its ideas about where a policy lives and how
-a layer gets an owner carry over directly.
+of YAML files into one file per node, and its capability policy says what each
+layer may use. Its ideas about where a policy lives and how layers get owners
+carry over directly.
 
 | DscPipelineRunner `Policy.yml` | Meridian `rules.yaml` |
 |---|---|
@@ -54,25 +51,25 @@ a layer gets an owner carry over directly.
 | Every violation is listed, nothing runs, and offending values are not logged | Every violation is listed, nothing is compiled, and a refusal never holds a value |
 | `-RequirePolicy` fails a run that has no policy, and `-PolicyPath` takes the policy from somewhere contributors cannot write | `--require-rules` and `--rules FILE` |
 
-The capabilities themselves differ, because what is layered differs. A
-DscPipelineRunner layer file holds resources, so its policy governs what
-resources may use: `Targets`, `Engines`, `ExecutionScripts` and
+The capabilities differ because the layers hold different things. A
+DscPipelineRunner layer holds resources, so its policy governs what resources
+may use: `Targets`, `Engines`, `ExecutionScripts` and
 `DatumScriptBlocks`. A Meridian hierarchy layer holds data, so the capability
 is `keys`: which keys a layer may set. The
 [reference](../reference/compile-rules.md#from-dscpipelinerunner) puts the two
 files side by side.
 
-`Policy.yml` says what a layer may *use*. It does not stop a team's file from
-changing a variable the platform set: DscPipelineRunner merges `variables`
-deeply and the most specific file wins. Compile rules add that as a second
-part of the same file.
+`Policy.yml` says what a layer may *use*. It does not stop a team file from
+changing a variable the platform set, because DscPipelineRunner merges
+`variables` deeply and the most specific file wins.
 
-So a rules file has two parts. **Capabilities** are the `Policy.yml` model:
-what each group of layers may set at all. **Rules** are what Meridian adds:
-six kinds of declarative rule over key patterns and groups, so the same file
-that keeps a team out of `secrets` can also keep a node from changing the
-organization's region, require every team layer to name an owner, or forbid a
-floating image tag.
+So a rules file has two parts:
+
+- **Capabilities**, the `Policy.yml` model: what each group of layers may set.
+- **Rules**, Meridian's addition: six kinds of declarative rule over key
+  patterns and groups. The file that keeps a team out of `secrets` can also
+  stop a node changing the organization's region, require each team layer to
+  name an owner, or forbid a floating image tag.
 
 ## Where the rules sit
 
@@ -92,20 +89,20 @@ flowchart TD
     style RU fill:#e8f0fe,stroke:#1a56db,color:#000
 ```
 
-Three things follow from this placement.
+This placement has three consequences.
 
 **The rules see layers, not only the result.** A merged value does not say who
-set it. The rules are given every layer as it was loaded, with its owner, so
-they can say that `node/web01.yaml` changed something `common.yaml` set.
+set it, so the rules get every layer as loaded, with its owner. That is how
+they can report that `node/web01.yaml` changed something `common.yaml` set.
 
-**The rules run before any target is involved.** The check is over data, and
-data is the same whichever tool a document compiles for. There is no Ansible
-rule or Terraform rule; a rule holds for all of them or for none.
+**The rules run before any target is involved.** They check data, which is the
+same whatever the tool. There are no Ansible or Terraform rules; a rule holds
+for every target.
 
-**The rules file is outside what it constrains.** A policy that a layer could
-contribute to is a policy a layer could switch off. So the rules are a file of
-their own, found beside the hierarchy file, and a hierarchy path that resolves
-to that file (by name, through `..`, or through a symbolic link) is an error.
+**The rules file is outside what it constrains.** If a layer could contribute
+to the policy, it could switch it off. So the rules are their own file beside
+the hierarchy file, and a hierarchy path that resolves to it (by name, through
+`..`, or via a symbolic link) is an error.
 
 ## Ownership: groups
 
@@ -136,17 +133,15 @@ is refused before any rule is looked at:
 [meridian/capabilities] layer "node/web01.yaml" (team) sets "secrets.database.path", which team is not allowed to set: it may set only variables, packages, web
 ```
 
-The first group whose pattern matches a layer's path owns it. Ownership is
-decided by path because a path is something a contributor cannot choose for
-someone else's file: your repository's own controls (CODEOWNERS, branch
-protection by folder) are what tie a folder to a team, and the groups mirror
-them. Nothing written inside a layer can change its group.
+The first group whose pattern matches a layer's path owns it. Ownership goes by
+path because contributors cannot choose the path of someone else's file: your
+repository controls (CODEOWNERS, folder branch protection) tie folders to
+teams, and groups mirror them. Nothing inside a layer can change its group.
 
-Values given on the command line with `--data` are merged last and win, so
-they are checked by every rule as the most specific layers, in a group of
-their own called `(command line)`. A protected value cannot be changed from
-the command line either. Capabilities do not apply to them: the command line
-belongs to whoever runs the pipeline, not to a group of layers.
+Values from `--data` on the command line merge last and win, so every rule
+checks them as the most specific layers, in a group called `(command line)`. A
+protected value cannot be changed from the command line either. Capabilities do
+not apply to them: the command line belongs to whoever runs the pipeline.
 
 ## The rules
 
@@ -159,18 +154,17 @@ belongs to whoever runs the pipeline, not to a group of layers.
 | `forbidden-value` | a key may not hold certain values | no `:latest` image tags, no plain HTTP |
 | `merge-strategy` | a key may only be merged with certain strategies | `variables` must merge deeply |
 
-Rules come after capabilities and are independent of them: being allowed to
-set `variables` does not make a team allowed to change the organization's.
+Rules are checked after capabilities and independently: permission to set
+`variables` does not let a team change the organization's.
 
 ## A deny list by default
 
-A rules file is a deny list out of the box: everything is allowed except what
-it forbids. That keeps adoption easy, because adding a rules file to an
-existing hierarchy does not require listing everything every layer already
-sets.
+A rules file is a deny list by default: everything is allowed except what it
+forbids. Adding one to an existing hierarchy does not require listing
+everything every layer already sets.
 
-A deny list that forbids nothing is not much of a default, so three rule sets
-are in force in every rules file that does not say otherwise:
+An empty deny list would protect nothing, so three rule sets apply unless the
+file says otherwise:
 
 | Set | Forbids |
 |---|---|
@@ -187,17 +181,16 @@ flowchart LR
     style B fill:#e8f0fe,stroke:#1a56db,color:#000
 ```
 
-Each step is opt-in. `use:` chooses the shipped sets explicitly, and
-`use: []` switches them off for a file that wants only its own rules.
-`default: deny` with `capabilities` turns the file into an allow list, which
-is what `Policy.yml` recommends for DscPipelineRunner. With no rules file at
-all nothing is checked, and `--require-rules` makes that an error.
+`use:` picks the shipped sets explicitly; `use: []` turns them off.
+`default: deny` with `capabilities` makes the file an allow list, as
+`Policy.yml` recommends for DscPipelineRunner. With no rules file nothing is
+checked; `--require-rules` makes that an error.
 
 ## Rules follow the merge
 
-Whether a layer has overridden something depends on how the key merges, so the
-rules ask the hierarchy. The same two layers are judged differently under
-different strategies, and rightly:
+Whether a layer overrode something depends on how the key merges, so the rules
+ask the hierarchy. The same two layers are judged differently under different
+strategies:
 
 ```yaml
 # common.yaml                      # node/web01.yaml
@@ -224,11 +217,11 @@ flowchart LR
     style f3 fill:#fde8e8,stroke:#c0392b,color:#000
 ```
 
-This is why the engine does not look for a key being *written twice*. It works
-out, value by value, what the more specific layer's contribution does to the
-less specific layer's: **changed**, **restated**, **dropped**, or untouched. A
-`no-override` rule refuses changed and dropped; `final` refuses restated too.
-The cases that follow from this are the ones an override attempt would use:
+So the engine does not just look for a key *written twice*. Value by value, it
+works out what the more specific layer does to the less specific one:
+**changed**, **restated**, **dropped**, or untouched. `no-override` refuses
+changed and dropped; `final` also refuses restated. This catches the usual ways
+to sneak an override through:
 
 - replacing a mapping with `null`, a string or an empty list, which changes
   everything beneath it without naming any of it;
@@ -242,9 +235,8 @@ Each is refused, and each has a test.
 
 The engine reduces every strategy to one of three kinds: the more specific
 value **replaces** the whole, mappings merge **deep**, or lists are
-**appended**. That is all a rule needs to know, and it is how the rules stay
-correct as the language gains strategies: a new strategy only has to say which
-of the three it is.
+**appended**. A rule needs nothing more, so a new strategy only has to say
+which kind it is.
 
 ## What a refusal looks like
 
@@ -254,25 +246,24 @@ error: compile rules: 2 violations; nothing was compiled
   - [team-layers-name-an-owner] layer "node/web01.yaml" (team) does not set "variables.Owner", which every layer of team must set
 ```
 
-Every violation is listed, in a fixed order, so one run shows everything there
-is to fix and two runs over the same files print the same text. A refusal
-never includes a value: the keys a rule guards are the ones most likely to
-hold something that must not reach a pipeline log.
+Every violation is listed in a fixed order, so one run shows everything to fix
+and repeated runs print the same text. A refusal never includes a value: guarded
+keys are the ones most likely to hold something that must not reach a pipeline
+log.
 
 ## How this fits the rest of the language
 
 **Today.** The rules are evaluated over a `hierarchy.yaml` and its layers by
 [`meridian rules check`](../reference/cli.md#rules-check), which a pipeline
-runs before `compile`, and by the library call `meridian_rules::enforce`. The
-`compile`, `plan` and `apply` commands do not read a hierarchy yet (they take
-flat `--data` files), so they do not run the rules by themselves yet.
+runs before `compile`, and by the library call `meridian_rules::enforce`. `compile`, `plan` and `apply` do not read a hierarchy yet (they take flat
+`--data` files), so they do not run the rules themselves.
 
 **With the language expansion.** The proposal in
 `docs/plans/language-expansion.md` (pull request 59) moves layers into a
 `Data` document, adds merge strategies, and makes `compile` resolve layered
-data itself. That work calls `enforce` at the point the layers are loaded, so
-from then on a broken rule stops `compile`, `plan` and `apply` directly. The
-design was agreed with that proposal:
+data itself. That work calls `enforce` when layers load, so a broken rule will
+then stop `compile`, `plan` and `apply` directly. The design matches that
+proposal:
 
 - its layers stay least specific first, which is the order the rules assume;
 - each of its strategies maps onto replace, deep or append;
@@ -281,28 +272,25 @@ design was agreed with that proposal:
 - its `final:` list on a `Data` layer is the language's own way to mark a key
   final, and the `final` rule here is the same check written as policy.
 
-**Declarations.** That proposal also declares variables, secrets and
-credentials in documents, where a nearer scope may override a farther one.
-The engine is not tied to data files: it checks any ordered stack of layers.
-Scopes are such a stack, with keys `variables.<name>`, `secrets.<name>` and
-`credentials.<name>`, so `protect-variables` and `protect-secrets` will apply
-to declarations unchanged once they exist.
+**Declarations.** The proposal also declares variables, secrets and credentials
+in documents, where a nearer scope may override a farther one. The engine checks
+any ordered stack of layers, not just data files. Scopes form such a stack, with
+keys `variables.<name>`, `secrets.<name>` and `credentials.<name>`, so
+`protect-variables` and `protect-secrets` will apply to them unchanged.
 
 ## Limits
 
-- Capabilities cover keys. Which targets, tools or scripts a layer's
-  documents may use, as `Policy.yml` governs for DscPipelineRunner resources,
-  has nothing to attach to until documents can be layered.
+- Capabilities cover keys only. Limiting which targets, tools or scripts a
+  layer's documents use (as `Policy.yml` does for DscPipelineRunner) waits until
+  documents can be layered.
 - The rules are not a sandbox. They check what layers say, not what a tool
   does with the result.
-- The rules file is in the configuration repository unless you keep it
-  elsewhere. Whoever can change it decides what every layer may do. Protect
+- Whoever can change the rules file decides what every layer may do. Protect
   `rules.yaml` and `hierarchy.yaml` with your most trusted owners, or keep the
-  rules where contributors cannot write and pass `--rules`, and use
-  `--require-rules` so that deleting the file is an error and not a way out.
-- `required` for a group checks the layers that exist. A layer file that is
-  missing is not a layer, so pair it with a `required` on the merged result
-  when the value must exist one way or another.
-- Keys are compared exactly, including case, because that is how data is read.
-  `variables.Region` and `variables.region` are two keys, and a rule protects
+  rules where contributors cannot write and pass `--rules`. Use
+  `--require-rules` so deleting the file is an error, not a way out.
+- `required` for a group checks only layers that exist. A missing file is not a
+  layer, so also put `required` on the merged result when the value must exist.
+- Keys are compared exactly, including case, as data is read.
+  `variables.Region` and `variables.region` are different keys; a rule protects
   the one it names.
