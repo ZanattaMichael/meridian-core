@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Area | Targets |
-| Status | **proposed**: made during the work and merged, not yet accepted or changed by the owner |
+| Status | **accepted** 2026-11-18 |
 | Made in | PR 36 |
 | Where it shows | [Podman](../targets/podman.md) |
 

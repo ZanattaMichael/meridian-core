@@ -44,6 +44,6 @@ page it affects. The pull request template asks for it.
 | [A dispatch of the release workflow at a `v*` tag is a release](0021-a-dispatch-at-a-tag-is-a-release.md) | Releases | accepted 2026-11-18 |
 | [cloud-init's `apply` does not touch a machine](0017-cloud-init-apply-touches-no-machine.md) | Targets | accepted 2026-11-18 |
 | [Helm's plan does not detect live drift](0018-helm-plan-does-not-detect-live-drift.md) | Targets | accepted 2026-11-18 |
-| [Podman output is Quadlet units only](0019-podman-output-is-quadlet-units-only.md) | Targets | proposed |
+| [Podman output is Quadlet units only](0019-podman-output-is-quadlet-units-only.md) | Targets | accepted 2026-11-18 |
 | [Terraform import renames colliding names](0020-terraform-import-renames-colliding-names.md) | Targets | proposed |
 | [A secret has one place on each containers target](0022-a-secret-has-one-place-on-each-containers-target.md) | Targets | proposed |
