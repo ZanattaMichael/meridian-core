@@ -107,16 +107,21 @@ fn plugin_dirs() -> String {
 }
 
 /// `meridian <args>` in `dir`, with the plugins, the example's data and the
-/// scratch root, and Ansible told to reach localhost without SSH.
+/// scratch root, and Ansible told to reach localhost without SSH. The data
+/// goes only to the commands that take documents; `validate`, `status` and
+/// `report` do not.
 fn meridian(dir: &Path, root: &Path, args: &[&str]) -> Output {
     let data = repo_root().join("examples/workflow/vertical-slice.data.yaml");
     let mut command = Command::new(env!("CARGO_BIN_EXE_meridian"));
+    command.args(args);
+    if matches!(args[0], "compile" | "plan" | "apply" | "drift") {
+        command
+            .arg("--data")
+            .arg(&data)
+            .arg("--set")
+            .arg(format!("root={}", root.display()));
+    }
     command
-        .args(args)
-        .arg("--data")
-        .arg(&data)
-        .arg("--set")
-        .arg(format!("root={}", root.display()))
         .current_dir(dir)
         .env("MERIDIAN_PLUGIN_DIR", plugin_dirs())
         .env("MERIDIAN_ANSIBLE_ARGS", "--connection local")
