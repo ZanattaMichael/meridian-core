@@ -353,25 +353,17 @@ fn a_secret_reaches_the_program_as_secret_configuration_and_is_in_nothing_kept_i
     }
     let dir = scratch(TMP, "real-secret");
     let runner = runner();
-    // The secret is a keeper of a random string. Pulumi keeps the input it
-    // was given as a secret, and so the output of the same name, even
-    // inside a map; the string itself is nothing secret. A resource whose
-    // ID is made from the secret, such as a pet with a secret prefix,
-    // would put it in the open, as Pulumi never keeps an ID secret.
-    let document = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: pets\nspec:\n  target: pulumi\n  resources:\n    - id: tag\n      type: random:index:RandomString\n      params:\n        length: 8\n        special: false\n        keepers:\n          token: placeholder\n  outputs:\n    - name: keepers\n      value: ${tag.keepers}\n    - name: tag\n      value: ${tag.result}\n";
+    // The secret is a random string's `overrideSpecial`, a plain string
+    // input the provider hands back as an output of the same name, which
+    // Pulumi keeps secret as it kept the input; the string itself is
+    // nothing secret, and with `special: false` is not shaped by it. A
+    // resource whose ID is made from the secret, such as a pet with a
+    // secret prefix, would put it in the open, as Pulumi never keeps an ID
+    // secret; and a secret inside a map is not followed into the map that
+    // comes back.
+    let document = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: pets\nspec:\n  target: pulumi\n  resources:\n    - id: tag\n      type: random:index:RandomString\n      params:\n        length: 8\n        special: false\n        overrideSpecial: placeholder\n  outputs:\n    - name: given\n      value: ${tag.overrideSpecial}\n    - name: tag\n      value: ${tag.result}\n";
     let mut graph = graph_from_text("infra.yaml", document, "pulumi");
-    // The secret sits inside the keepers map, so the helper's top-level
-    // slot is moved under `token`.
-    let slot = secret_in_param(&mut graph, "tag", "keepers", "token");
-    let tag = graph.resources.iter_mut().find(|r| r.id == "tag").unwrap();
-    tag.params.insert(
-        "keepers".to_owned(),
-        Value::Map(
-            [("token".to_owned(), Value::Secret(slot))]
-                .into_iter()
-                .collect(),
-        ),
-    );
+    let slot = secret_in_param(&mut graph, "tag", "overrideSpecial", "token");
     let artifact = Pulumi.emit(&graph, &Data::new()).unwrap().artifact;
     assert!(!artifact.files["Pulumi.yaml"].contains(SECRET));
 
@@ -391,17 +383,19 @@ fn a_secret_reaches_the_program_as_secret_configuration_and_is_in_nothing_kept_i
     // The program was given the value: it comes back as the secret output
     // of the same name. The string is nothing secret, so the masking tells
     // the two apart.
-    let keepers = output(&applied.outputs, "keepers");
-    assert!(keepers.sensitive, "the secret input is a secret output");
-    let Value::Map(keepers) = &keepers.value else {
-        panic!("the keepers are not a map: {:?}", keepers.value);
-    };
-    assert_eq!(
-        keepers.get("token"),
-        Some(&Value::String(SECRET.to_owned()))
+    let masking: Vec<String> = applied
+        .outputs
+        .iter()
+        .map(|o| format!("{} sensitive={}", o.name, o.sensitive))
+        .collect();
+    let given = output(&applied.outputs, "given");
+    assert!(
+        given.sensitive,
+        "the secret input is a secret output; the outputs: {masking:?}"
     );
+    assert_eq!(text(given), SECRET);
     let tag = output(&applied.outputs, "tag");
-    assert!(!tag.sensitive);
+    assert!(!tag.sensitive, "the outputs: {masking:?}");
     assert_eq!(text(tag).len(), 8);
     // Nothing printed holds it, and nothing left in the open: the stack's
     // settings file no longer names the key, and the state holds the value
