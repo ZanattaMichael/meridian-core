@@ -1,0 +1,17 @@
+# Makes `meridian schema sync` ask terraform for one provider at one version.
+# The provider resource alone is enough: every type it has is then listed,
+# and --all-types describes each in full. @NAME@ is the bundle name, such as
+# hashicorp-aws; the workflow writes the provider's source and local name.
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: seed
+spec:
+  target: terraform
+  resources:
+    - id: provider
+      type: provider
+      params:
+        name: "@LOCAL@"
+        source: "@SOURCE@"
+        version: "= @VERSION@"

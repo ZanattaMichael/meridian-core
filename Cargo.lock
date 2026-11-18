@@ -1677,6 +1677,8 @@ dependencies = [
  "meridian-orchestrator",
  "meridian-plugin-host",
  "meridian-sdk",
+ "meridian-signing",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

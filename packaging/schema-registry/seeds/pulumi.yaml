@@ -1,0 +1,14 @@
+# One package at one version: the explicit provider names the package, and
+# resourceOptions.version pins it.
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: seed
+spec:
+  target: pulumi
+  resources:
+    - id: provider
+      type: "pulumi:providers:@NAME@"
+      params:
+        resourceOptions:
+          version: "@VERSION@"

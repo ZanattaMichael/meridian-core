@@ -106,6 +106,42 @@ pub struct Manifest {
     /// plugin declares it. The host hands a target its map when it starts
     /// the plugin; an environment variable still wins over it.
     pub settings: BTreeMap<String, BTreeMap<String, String>>,
+    /// `spec.schemas`: where `meridian schema sync` fetches signed schema
+    /// bundles from, and whether their signatures must pass.
+    pub schemas: SchemaSettings,
+}
+
+/// `spec.schemas` in a project's manifest.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SchemaSettings {
+    /// The registries to look in, in order: `registry` first, then each of
+    /// `registries`. Empty when the project names none, and then schemas
+    /// come only from the tools.
+    pub registries: Vec<SchemaRegistry>,
+    /// What to do about a bundle's signature. `None` when the manifest
+    /// does not say, and the command line's setting is used.
+    pub signatures: Option<meridian_signing::Policy>,
+}
+
+/// One place schema bundles are fetched from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SchemaRegistry {
+    /// An OCI repository prefix with no scheme, such as
+    /// `ghcr.io/acme/meridian-schemas`, or `file://DIR` for a directory
+    /// laid out the same way (a mirror, or what `schema pack` wrote).
+    pub location: String,
+    /// A credential from `spec.credentials` to log in with.
+    pub credential: Option<String>,
+    /// Plain HTTP. For a registry on a trusted network only.
+    pub insecure: bool,
+}
+
+impl SchemaRegistry {
+    /// The directory of a `file://` registry, relative to the project when
+    /// it is not absolute; `None` for an OCI registry.
+    pub fn directory(&self) -> Option<&str> {
+        self.location.strip_prefix("file://")
+    }
 }
 
 /// Whether `name` has the shape a setting name, or a target name under
@@ -267,6 +303,135 @@ impl Reader<'_> {
             settings.insert(target.clone(), of_target);
         }
         Ok(settings)
+    }
+
+    /// `spec.schemas`.
+    fn schemas(
+        &self,
+        value: Option<&Value>,
+        credentials: &[CredentialDeclaration],
+    ) -> Result<SchemaSettings, Error> {
+        let mut out = SchemaSettings::default();
+        let Some(map) = self.map(
+            value,
+            "spec.schemas",
+            &[
+                "registry",
+                "credential",
+                "insecure",
+                "signatures",
+                "registries",
+            ],
+        )?
+        else {
+            return Ok(out);
+        };
+        if let Some(policy) = self.string(map.get("signatures"), "spec.schemas.signatures")? {
+            match policy.parse::<meridian_signing::Policy>() {
+                Ok(p) => out.signatures = Some(p),
+                Err(e) => return self.err("spec.schemas.signatures", e),
+            }
+        }
+        if map.contains_key("registry") {
+            out.registries
+                .push(self.schema_registry(map, "spec.schemas", credentials)?);
+        } else if let Some(key) = ["credential", "insecure"]
+            .into_iter()
+            .find(|k| map.contains_key(*k))
+        {
+            return self.err(
+                &format!("spec.schemas.{key}"),
+                "applies to spec.schemas.registry, which is not given",
+            );
+        }
+        match map.get("registries") {
+            None | Some(Value::Null) => {}
+            Some(Value::List(items)) => {
+                for (i, item) in items.iter().enumerate() {
+                    let field = format!("spec.schemas.registries[{i}]");
+                    let Some(entry) =
+                        self.map(Some(item), &field, &["registry", "credential", "insecure"])?
+                    else {
+                        return self.err(&field, "expected a mapping");
+                    };
+                    let registry = self.schema_registry(entry, &field, credentials)?;
+                    if out
+                        .registries
+                        .iter()
+                        .any(|r| r.location == registry.location)
+                    {
+                        return self.err(
+                            &field,
+                            format!("{} is already named above", registry.location),
+                        );
+                    }
+                    out.registries.push(registry);
+                }
+            }
+            Some(other) => {
+                return self.err(
+                    "spec.schemas.registries",
+                    format!("expected a list, found {}", other.describe()),
+                )
+            }
+        }
+        Ok(out)
+    }
+
+    fn schema_registry(
+        &self,
+        map: &BTreeMap<String, Value>,
+        field: &str,
+        credentials: &[CredentialDeclaration],
+    ) -> Result<SchemaRegistry, Error> {
+        let at = |key: &str| format!("{field}.{key}");
+        let Some(location) = self.string(map.get("registry"), &at("registry"))? else {
+            return self.err(&at("registry"), "missing required field");
+        };
+        let location = location
+            .strip_prefix("oci://")
+            .map(str::to_owned)
+            .unwrap_or(location);
+        if let Some(dir) = location.strip_prefix("file://") {
+            if dir.is_empty() || dir.contains(char::is_control) {
+                return self.err(&at("registry"), "file:// needs a directory after it");
+            }
+        } else if location.contains("://")
+            || !location.contains('/')
+            || location.contains(|c: char| c.is_whitespace() || c.is_control())
+            || location.contains(':')
+                && location.rsplit('/').next().is_some_and(|l| l.contains(':'))
+        {
+            return self.err(
+                &at("registry"),
+                format!(
+                    "{location:?} is not a registry repository such as \
+                     ghcr.io/acme/meridian-schemas (no scheme and no tag), or file://DIR"
+                ),
+            );
+        }
+        let credential = self.string(map.get("credential"), &at("credential"))?;
+        if let Some(wanted) = &credential {
+            if location.starts_with("file://") {
+                return self.err(&at("credential"), "a file:// registry takes no login");
+            }
+            if !credentials.iter().any(|c| c.name == *wanted) {
+                return self.err(
+                    &at("credential"),
+                    format!("no credential named {wanted} is declared in spec.credentials"),
+                );
+            }
+        }
+        let insecure = match map.get("insecure") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(b)) => *b,
+            Some(_) => return self.err(&at("insecure"), "expected true or false"),
+        };
+        Ok(SchemaRegistry {
+            location,
+            credential,
+            insecure,
+        })
     }
 
     fn string(&self, value: Option<&Value>, field: &str) -> Result<Option<String>, Error> {
@@ -632,7 +797,7 @@ impl Manifest {
         let spec = r.map(
             top.get("spec"),
             "spec",
-            &["meridian", "modules", "credentials", "settings"],
+            &["meridian", "modules", "credentials", "settings", "schemas"],
         )?;
         let settings = r.settings(spec.and_then(|s| s.get("settings")))?;
         let mut credentials: Vec<CredentialDeclaration> = Vec::new();
@@ -718,6 +883,8 @@ impl Manifest {
             }
         }
 
+        let schemas = r.schemas(spec.and_then(|s| s.get("schemas")), &credentials)?;
+
         Ok(Manifest {
             name,
             version,
@@ -726,6 +893,7 @@ impl Manifest {
             modules,
             credentials,
             settings,
+            schemas,
         })
     }
 }
@@ -961,6 +1129,87 @@ spec:
             let err = refused(&manifest);
             assert!(err.contains(want), "wanted {want:?} in {err:?}");
             assert!(err.starts_with("meridian.yaml: "), "{err}");
+        }
+    }
+
+    #[test]
+    fn schema_registries_are_read_in_order_with_their_logins() {
+        let text = WITH_LOGIN.replace(
+            "spec:\n",
+            "spec:\n  schemas:\n    registry: oci://ghcr.io/acme/meridian-schemas\n    \
+             signatures: require\n    registries:\n      - registry: registry.example.com/team/schemas\n        \
+             credential: internal\n      - registry: file://vendor/schemas\n",
+        );
+        let m = Manifest::parse("meridian.yaml", text.as_bytes()).unwrap();
+        let locations: Vec<&str> = m
+            .schemas
+            .registries
+            .iter()
+            .map(|r| r.location.as_str())
+            .collect();
+        assert_eq!(
+            locations,
+            [
+                "ghcr.io/acme/meridian-schemas",
+                "registry.example.com/team/schemas",
+                "file://vendor/schemas"
+            ]
+        );
+        assert_eq!(
+            m.schemas.registries[1].credential.as_deref(),
+            Some("internal")
+        );
+        assert_eq!(m.schemas.registries[2].directory(), Some("vendor/schemas"));
+        assert_eq!(
+            m.schemas.signatures,
+            Some(meridian_signing::Policy::Require)
+        );
+        assert!(Manifest::parse("meridian.yaml", WITH_LOGIN.as_bytes())
+            .unwrap()
+            .schemas
+            .registries
+            .is_empty());
+
+        for (schemas, want) in [
+            ("    registry: ghcr.io\n", "is not a registry repository"),
+            (
+                "    registry: https://ghcr.io/a/b\n",
+                "is not a registry repository",
+            ),
+            (
+                "    registry: ghcr.io/a/b:latest\n",
+                "is not a registry repository",
+            ),
+            (
+                "    registry: ghcr.io/a/b\n    credential: nobody\n",
+                "no credential named nobody",
+            ),
+            (
+                "    registry: file://x\n    credential: internal\n",
+                "takes no login",
+            ),
+            (
+                "    credential: internal\n",
+                "spec.schemas.registry, which is not given",
+            ),
+            (
+                "    registry: ghcr.io/a/b\n    signatures: always\n",
+                "not a signature policy",
+            ),
+            (
+                "    registry: ghcr.io/a/b\n    mirror: x\n",
+                "spec.schemas.mirror: unknown field",
+            ),
+            (
+                "    registry: ghcr.io/a/b\n    registries:\n      - registry: ghcr.io/a/b\n",
+                "already named above",
+            ),
+        ] {
+            let text = WITH_LOGIN.replace("spec:\n", &format!("spec:\n  schemas:\n{schemas}"));
+            let err = Manifest::parse("meridian.yaml", text.as_bytes())
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(want), "wanted {want:?} in {err:?}");
         }
     }
 

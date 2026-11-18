@@ -826,6 +826,13 @@ language server, `meridian lint` and `meridian schema` read the cache and
 never call you. What the operator sees is in
 [Tool schemas](../tooling/schema-sync.md).
 
+Your schema source is also what feeds [schema bundles](../tooling/schema-bundles.md):
+`meridian schema sync --all-types` asks you twice, first for the documents'
+types and then for every type your first answer listed by name, so a
+source that lists the rest of the catalogue by name (as the first-party
+ones do) can be packed into a bundle with no change. Nothing in a bundle
+reaches your plugin; the host reads it.
+
 ```rust
 use meridian_sdk::{Log, RunError, SchemaExport, SchemaRequest, SchemaSource};
 
