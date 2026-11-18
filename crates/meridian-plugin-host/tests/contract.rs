@@ -321,7 +321,7 @@ fn an_unsupported_resource_type_is_refused_by_every_target() {
         let client = start(target);
         let mut graph = compilable(target);
         let first = &mut graph.resources[0];
-        first.r#type = "firewall_rule".to_owned();
+        first.r#type = "Firewall.Rule".to_owned();
         first.pos = Position {
             file: "site.yaml".to_owned(),
             doc_idx: 0,
