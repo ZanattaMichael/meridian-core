@@ -483,7 +483,11 @@ spec:
     let kept = meridian(&rules, &web01);
     assert!(kept.status.success(), "{}", stderr(&kept));
     let value = object(&kept, "rules-check");
-    assert_eq!(value["rulesFile"], "config/rules.yaml");
+    // The path is shown as the system joins it: a backslash on Windows.
+    assert_eq!(
+        value["rulesFile"].as_str().unwrap().replace('\\', "/"),
+        "config/rules.yaml"
+    );
     assert_eq!(value["violations"], Value::Array(Vec::new()));
     assert!(value["layers"].as_array().unwrap().len() > 1);
     let mut rogue = web01.to_vec();
