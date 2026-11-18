@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ZanattaMichael/meridian-core/schemas/output/signing-keygen.schema.json",
+  "title": "signing keygen",
+  "description": "The key pair written.",
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "const": "signing keygen",
+      "description": "The subcommand as it is typed"
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "Whether the command did what was asked: false means it exited 1, or 130 when interrupted"
+    },
+    "keyId": {
+      "type": "string"
+    },
+    "secret": {
+      "type": "string"
+    },
+    "public": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command",
+    "ok",
+    "keyId",
+    "secret",
+    "public"
+  ],
+  "additionalProperties": false
+}

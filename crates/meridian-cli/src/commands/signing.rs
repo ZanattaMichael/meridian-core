@@ -49,6 +49,17 @@ pub(crate) fn signing(command: SigningCommand) -> Result<(), Failure> {
             write_secret(&secret, &format!("{}\n", key.to_text()))
                 .and_then(|()| std::fs::write(&public, format!("{}\n", key.public().to_text())))
                 .map_err(|e| Failure::Message(format!("writing the key pair: {e}")))?;
+            if json_output() {
+                emit(
+                    true,
+                    body([
+                        ("keyId", key.public().id().into()),
+                        ("secret", secret.display().to_string().into()),
+                        ("public", public.display().to_string().into()),
+                    ]),
+                );
+                return Ok(());
+            }
             outln!("key {}", key.public().id());
             outln!("  secret: {}", secret.display());
             outln!("  public: {}", public.display());
@@ -56,6 +67,7 @@ pub(crate) fn signing(command: SigningCommand) -> Result<(), Failure> {
         }
         SigningCommand::Sign { key, binaries } => {
             let key = SecretKey::read(&key).map_err(|e| Failure::Message(e.into()))?;
+            let mut signed = Vec::new();
             for binary in binaries {
                 let text = key
                     .sign_file(&binary)
@@ -63,17 +75,46 @@ pub(crate) fn signing(command: SigningCommand) -> Result<(), Failure> {
                 let path = signature_path(&binary);
                 std::fs::write(&path, text)
                     .map_err(|e| Failure::Message(format!("writing {}: {e}", path.display())))?;
-                outln!("signed {} with key {}", binary.display(), key.public().id());
+                if json_output() {
+                    signed.push(serde_json::json!({
+                        "binary": binary.display().to_string(),
+                        "signature": path.display().to_string(),
+                    }));
+                } else {
+                    outln!("signed {} with key {}", binary.display(), key.public().id());
+                }
+            }
+            if json_output() {
+                emit(
+                    true,
+                    body([
+                        ("keyId", key.public().id().into()),
+                        ("signed", signed.into()),
+                    ]),
+                );
             }
             Ok(())
         }
         SigningCommand::Verify { binaries } => {
             let trusted = trusted_keys()?;
             let mut failed = false;
+            let mut checked = Vec::new();
             for binary in binaries {
                 let found = meridian_plugin_host::signature::verify_file(&binary, &trusted);
-                failed |= !matches!(found, Signature::Verified { .. });
-                outln!("{}: {found}", binary.display());
+                let verified = matches!(found, Signature::Verified { .. });
+                failed |= !verified;
+                if json_output() {
+                    checked.push(serde_json::json!({
+                        "binary": binary.display().to_string(),
+                        "verified": verified,
+                        "signature": output::signature(&found),
+                    }));
+                } else {
+                    outln!("{}: {found}", binary.display());
+                }
+            }
+            if json_output() {
+                emit(!failed, body([("binaries", checked.into())]));
             }
             if failed {
                 Err(Failure::Reported)

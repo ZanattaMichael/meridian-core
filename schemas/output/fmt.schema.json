@@ -1,0 +1,95 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ZanattaMichael/meridian-core/schemas/output/fmt.schema.json",
+  "title": "fmt",
+  "description": "Each file and what fmt did to it, or with --check whether it is formatted.",
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "const": "fmt",
+      "description": "The subcommand as it is typed"
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "Whether the command did what was asked: false means it exited 1, or 130 when interrupted"
+    },
+    "check": {
+      "type": "boolean"
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "formatted",
+              "not-formatted",
+              "failed",
+              "skipped"
+            ]
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "file",
+          "status",
+          "message"
+        ]
+      }
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "checked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "changed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unchanged": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "checked",
+        "changed",
+        "unchanged",
+        "failed",
+        "skipped"
+      ]
+    }
+  },
+  "required": [
+    "command",
+    "ok",
+    "check",
+    "files",
+    "summary"
+  ],
+  "additionalProperties": false
+}

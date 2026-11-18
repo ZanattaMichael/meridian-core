@@ -8,6 +8,20 @@ use crate::*;
 pub(crate) fn load(files: &[PathBuf], state_dir: &Path) -> Result<Bundle, Failure> {
     let problems = |errors: meridian_ir::ErrorList| {
         eprintln!("error: {errors}");
+        // A document that does not read is this command's whole result,
+        // whichever command it is.
+        if json_output() {
+            emit(
+                false,
+                body([
+                    ("documents", 0.into()),
+                    (
+                        "diagnostics",
+                        errors.iter().map(output::document_error).collect(),
+                    ),
+                ]),
+            );
+        }
         Failure::Reported
     };
     let files = in_modules(files, state_dir)?;
@@ -18,6 +32,45 @@ pub(crate) fn load(files: &[PathBuf], state_dir: &Path) -> Result<Bundle, Failur
         eprintln!("warning: {warning}");
     }
     Ok(bundle)
+}
+
+/// Prints every version stream of this build.
+pub(crate) fn version() {
+    if json_output() {
+        use meridian_ir::Status;
+        use meridian_sdk::version::{describe_protocols, supported_protocols};
+        let languages: Vec<serde_json::Value> = meridian_ir::VersionTable::builtin()
+            .versions()
+            .iter()
+            .map(|v| {
+                let (status, release) = match &v.status {
+                    Status::Supported => ("supported", None),
+                    Status::Deprecated { since } => ("deprecated", Some(since.to_string())),
+                    Status::Removed { in_release } => ("removed", Some(in_release.to_string())),
+                };
+                serde_json::json!({
+                    "name": v.name(),
+                    "status": status,
+                    "release": release,
+                })
+            })
+            .collect();
+        emit(
+            true,
+            body([
+                ("meridian", env!("CARGO_PKG_VERSION").into()),
+                ("languages", languages.into()),
+                ("pluginSdk", meridian_sdk::VERSION.into()),
+                (
+                    "pluginProtocol",
+                    describe_protocols(&supported_protocols()).into(),
+                ),
+                ("lockfileFormat", meridian_module::LOCK_VERSION.into()),
+            ]),
+        );
+    } else {
+        out!("{}", versions());
+    }
 }
 
 /// Every version stream of this build, one per line.
@@ -60,31 +113,68 @@ pub(crate) fn migrate(files: &[PathBuf], to: Option<&str>, check: bool) -> Resul
     };
     let mut failed = false;
     let mut would_change = 0usize;
+    // One row per file, for the JSON result: the status word and, when
+    // there is one, the message or the decisions.
+    let mut rows = Vec::new();
+    let mut row = |file: &Path, status: &str, message: Option<String>, decisions: &[String]| {
+        rows.push(serde_json::json!({
+            "file": file.display().to_string(),
+            "status": status,
+            "message": message,
+            "decisions": decisions,
+        }));
+    };
     for file in files {
         let name = file.display();
         let text = match std::fs::read_to_string(file) {
             Ok(text) => text,
             Err(e) => {
                 eprintln!("error: {name}: cannot read file: {e}");
+                row(
+                    file,
+                    "unreadable",
+                    Some(format!("cannot read file: {e}")),
+                    &[],
+                );
                 failed = true;
                 continue;
             }
         };
         match meridian_ir::migrate(&table, meridian_ir::STEPS, &text, target.number) {
-            Ok(Migrated::Unchanged) => outln!("{name}: already at {}", target.name()),
+            Ok(Migrated::Unchanged) => {
+                row(file, "current", None, &[]);
+                if !json_output() {
+                    outln!("{name}: already at {}", target.name());
+                }
+            }
             Ok(Migrated::Rewritten(_)) if check => {
                 would_change += 1;
-                outln!("{name}: would be migrated to {}", target.name());
+                row(file, "would-migrate", None, &[]);
+                if !json_output() {
+                    outln!("{name}: would be migrated to {}", target.name());
+                }
             }
             Ok(Migrated::Rewritten(new)) => match replace_file(file, &new) {
-                Ok(()) => outln!("{name}: migrated to {}", target.name()),
+                Ok(()) => {
+                    row(file, "migrated", None, &[]);
+                    if !json_output() {
+                        outln!("{name}: migrated to {}", target.name());
+                    }
+                }
                 Err(e) => {
                     eprintln!("error: {name}: cannot write file: {e}");
+                    row(
+                        file,
+                        "unwritable",
+                        Some(format!("cannot write file: {e}")),
+                        &[],
+                    );
                     failed = true;
                 }
             },
             Err(MigrateError::Refused(why)) => {
                 eprintln!("error: {name}: {why}");
+                row(file, "refused", Some(why.to_string()), &[]);
                 failed = true;
             }
             Err(MigrateError::NeedsDecisions(decisions)) => {
@@ -92,21 +182,38 @@ pub(crate) fn migrate(files: &[PathBuf], to: Option<&str>, check: bool) -> Resul
                     "error: {name}: not migrated, because it needs {} only you can make:",
                     count(decisions.len(), "decision")
                 );
-                for decision in decisions {
+                for decision in &decisions {
                     eprintln!("  {decision}");
                 }
+                let decisions: Vec<String> = decisions.iter().map(ToString::to_string).collect();
+                row(file, "needs-decisions", None, &decisions);
                 failed = true;
             }
         }
+    }
+    if json_output() {
+        emit(
+            !failed && would_change == 0,
+            body([
+                ("to", target.name().into()),
+                ("check", check.into()),
+                ("files", rows.into()),
+            ]),
+        );
     }
     if failed {
         return Err(Failure::Reported);
     }
     if would_change > 0 {
-        return Err(Failure::Message(format!(
+        let message = format!(
             "{} would change; run without --check to migrate",
             count(would_change, "file")
-        )));
+        );
+        if json_output() {
+            eprintln!("error: {message}");
+            return Err(Failure::Reported);
+        }
+        return Err(Failure::Message(message));
     }
     Ok(())
 }
