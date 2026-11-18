@@ -1,15 +1,12 @@
 # Importing existing configuration
 
-`meridian import` reads existing configuration for one of the tools Meridian drives and
-writes Meridian documents that describe the same thing, so existing estates do not have
-to be retyped.
+`meridian import` turns a tool's existing configuration into Meridian documents.
 
 ```
 meridian import ./compose.yaml -o imported
 ```
 
-Importing only reads. It runs no tool, contacts no machine, and writes nothing but the
-documents.
+It runs no tool and writes only the documents.
 
 | It reads | With the plugin | And writes |
 |---|---|---|
@@ -20,16 +17,13 @@ documents.
 | Kubernetes manifests | [kubernetes](../targets/kubernetes.md#importing) | one Infrastructure document |
 | PowerShell DSC configurations, DSC v3 documents, DscPipelineRunner projects | [dsc](../targets/dsc.md#importing) | one ResourceSet for each node |
 
-`meridian plugins` lists which installed plugins can import, and the
-[capability matrix](../reference/capability-matrix.md) has a column for it. Each
-importer belongs to its target's plugin, so third-party plugins can import too:
-[writing a plugin](../contributing/writing-a-plugin.md#an-importer) says how.
+`meridian plugins` and the [capability matrix](../reference/capability-matrix.md) show which
+plugins import. Third-party plugins can too
+([how](../contributing/writing-a-plugin.md#an-importer)).
 
 ## The one rule
 
-**Nothing is dropped silently.** A tool's configuration can say more than a document
-can. An importer that hid the difference would hand you a document that looks complete
-but is not. So everything in the source lands in one of four places:
+**Nothing is dropped silently.** Everything lands in one of four places:
 
 | What happened | In the report | In the document |
 |---|---|---|
@@ -38,14 +32,13 @@ but is not. So everything in the source lands in one of four places:
 | Carried over, but **changed**: the document may behave differently | under **changed** | a comment that starts `TODO(meridian-import)` |
 | **Not translated**: the document does less than the source did | under **not translated** | a comment that starts `TODO(meridian-import)` |
 
-Search for `TODO(meridian-import)` to get the full list of what to review before
-applying. A note about one resource sits beside it; others go at the top of the
-document.
+Search for `TODO(meridian-import)` before applying. Resource notes sit beside the resource;
+others at the top.
 
 ## A first import
 
 [`plugins/docker/testdata/import/shop/compose.yaml`](../../plugins/docker/testdata/import/shop/compose.yaml)
-is a Compose file for a small shop: database, cache, migration, application and proxy.
+has a database, cache, migration, application and proxy.
 
 ```
 $ meridian import shop -o imported
@@ -57,8 +50,7 @@ notes (2):
 everything in the source was carried over
 ```
 
-The report goes to stderr and the documents to the `-o` directory, one file each.
-Without `-o` the documents are printed, so you can read an import before writing it.
+The report goes to stderr, documents to `-o` (or stdout without it).
 
 `imported/shop.yaml` begins:
 
@@ -85,9 +77,8 @@ spec:
         image: postgres:16
 ```
 
-Concepts with a Meridian equivalent are translated, not copied. The application waits
-for a healthy database and restarts with it, which Compose writes as `depends_on` with
-`restart: true`. In the document, the database says it:
+Equivalent concepts are translated: Compose's `depends_on` with `restart: true` becomes a
+notify on the database:
 
 ```yaml
     - id: db
@@ -97,15 +88,12 @@ for a healthy database and restarts with it, which Compose writes as `depends_on
           action: restart
 ```
 
-The whole document is
-[`shop.meridian.yaml`](../../plugins/docker/testdata/import/shop.meridian.yaml), which a
-test compares with what the importer writes.
+Full document: [`shop.meridian.yaml`](../../plugins/docker/testdata/import/shop.meridian.yaml).
 
 ## When something cannot be carried over
 
 [`plugins/terraform/testdata/import/web-vm`](../../plugins/terraform/testdata/import/web-vm)
-is a Terraform configuration in four files. It imports, with six things that need a
-person:
+imports with six things to review:
 
 ```
 $ meridian import web-vm --from terraform -o imported
@@ -122,8 +110,7 @@ changed: carried over, but not as the source wrote it (2):
 6 things to look at before applying; each is marked TODO(meridian-import) in the documents
 ```
 
-Each line gives the source location, what happened, and what to do. The document repeats
-the text beside the resource:
+Each line gives the location, what happened and what to do; the document repeats it:
 
 ```yaml
     # From main.tf:37
@@ -135,13 +122,12 @@ the text beside the resource:
       type: aws_instance
 ```
 
-A document with markers is still valid: it validates and compiles. Markers are comments;
-delete one to record that you dealt with it.
+Markers are comments; the document still compiles. Delete each one once handled.
 
 ### As a check
 
-`--strict` fails an import when anything was changed or not translated. The documents
-are still written, and the exit status is `1`:
+`--strict` exits `1` when anything was changed or not translated; documents are still
+written:
 
 ```
 $ meridian import web-vm --from terraform -o imported --strict
@@ -149,17 +135,11 @@ $ meridian import web-vm --from terraform -o imported --strict
 error: --strict: 6 things to look at; see the TODO(meridian-import) markers
 ```
 
-A script can then ask of every directory in a repository, without applying anything:
-"could Meridian take this over as it stands?"
-
 ## Saying which tool
 
-By default `meridian import` picks the plugin from file names: `compose.yaml` is
-Compose; `site.yml` and `playbook.yml` are playbooks; `Datum.yml` and `*.dsc.yaml` are
-DSC.
-
-Many names are ambiguous. `web.yaml` could be a manifest, playbook or DSC document, and
-both Terraform and OpenTofu read `main.tf`. The import then stops and asks:
+The plugin is picked from file names (`compose.yaml`, `site.yml`, `playbook.yml`,
+`Datum.yml`, `*.dsc.yaml`). Ambiguous names such as `web.yaml` or `main.tf` stop the
+import:
 
 ```
 error: these files could belong to more than one tool; say which with --from (one of: opentofu, terraform)
@@ -172,31 +152,18 @@ meridian import ./infra --from opentofu
 meridian import ./k8s/web.yaml --from kubernetes
 ```
 
-Choosing `terraform` or `opentofu` also chooses which tool Meridian will run, so it is
-never guessed.
-
 ## What is imported from where
 
-A path may be a file or directory. A directory contributes the files the plugin's
-formats claim; `-r` includes subdirectories. Hidden files and directories are skipped.
-Several paths are read as one source.
-
-The document name is `--name` if given. Otherwise it is the directory name, or the file
-name without its extension; generic names such as `main.tf` or `compose.yaml` take the
-directory's name. A name in the source itself (a Compose project's `name`, a play's name,
-a `Configuration`'s) wins.
-
-When a source holds several documents' worth (three plays, two `Node` blocks), each gets
-its own file under `-o`, named after the document.
-
-Existing files under `-o` are not replaced without `--force`, so an import cannot
-overwrite a document someone has edited.
+- Paths are files or directories (`-r` for subdirectories; hidden ones skipped), read as
+  one source.
+- The name is the source's own, else `--name`, else the directory or file name.
+- Several documents (plays, `Node` blocks) get one file each.
+- Existing files need `--force`.
 
 ## What "the same" means
 
-Importer tests compile each imported document back to the tool's format and compare it
-with the original **by meaning**, not as text. Every importer has such a test with a
-realistic source, and its inputs and expected outputs are readable files:
+Every importer's test compiles the import back and compares it with the original **by
+meaning**:
 
 | Importer | Source | Round-trip test |
 |---|---|---|
@@ -207,40 +174,23 @@ realistic source, and its inputs and expected outputs are readable files:
 | kubernetes | [`web/web.yaml`](../../plugins/kubernetes/testdata/import/web/web.yaml) | [`plugins/kubernetes/tests/import.rs`](../../plugins/kubernetes/tests/import.rs) |
 | dsc | [`iis/WebServer.ps1`](../../plugins/dsc/testdata/import/iis/WebServer.ps1), a v3 document, a runner project | [`plugins/dsc/tests/import.rs`](../../plugins/dsc/tests/import.rs) |
 
-What this does and does not promise:
-
-- **Not identical text.** Comments are dropped, keys are sorted, Ansible tasks are named
-  after resource ids, and Terraform comes back as JSON. None of this changes what the
-  tool does.
-- **Identical meaning, for what was carried over.** Anything else has a marker. A
-  document with no markers compiles to something the tool reads as it read the original.
-- **Runtime conditions stay runtime.** An Ansible `when:` becomes `runtimeWhen`, still
-  evaluated on the node at apply. Nothing fact-dependent is decided at import.
-- **Computed values are not evaluated.** A PowerShell loop, a Jinja expression over a
-  play variable, a Compose `${VARIABLE}`: importing does not run them, so it reports
-  them.
+- **Not identical text:** comments dropped, keys sorted, Ansible tasks named by id,
+  Terraform as JSON.
+- **Identical meaning** for what was carried over; the rest has a marker.
+- **Runtime conditions stay runtime:** Ansible `when:` becomes `runtimeWhen`.
+- **Computed values are reported, not evaluated.**
 
 ## After importing
 
-1. **Read the markers.** `grep -n 'TODO(meridian-import)' imported/*.yaml`.
-2. **Validate**: `meridian validate imported/*.yaml`. Imported documents are validated
-   before being written, so this passes until you edit one.
-3. **Compile and compare**: `meridian compile imported/*.yaml --out build`, then compare
-   `build/` with the original. This is the round trip on your own configuration.
-4. **Plan before applying**: `meridian plan imported/*.yaml`. For a stateful tool, a
-   clean import of already-applied configuration plans no changes. A planned
-   replacement will have a marker explaining it.
+1. `grep -n 'TODO(meridian-import)' imported/*.yaml`
+2. `meridian validate imported/*.yaml`
+3. `meridian compile imported/*.yaml --out build`, and compare with the original.
+4. `meridian plan imported/*.yaml`. A clean import of applied configuration plans no changes.
 
-Two things need care, both the tool's rules rather than Meridian's:
-
-- **Terraform and OpenTofu state.** Document ids are unique across the document;
-  Terraform names are unique only within a type. When two resources share a name, the
-  importer renames one and prints the `state mv` command that updates existing state.
-  Run it before the first apply.
-- **Where the tool keeps working files.** Meridian runs each tool in its own state
-  directory. A Terraform configuration with a `backend` keeps using it; one with local
-  state needs the state file moved or a backend added. See
-  [coexisting with what you have](../plans/migration-and-adoption.md#2-coexistence-model).
+- **Terraform and OpenTofu state.** Names that collide across types are renamed; run the
+  printed `state mv` before the first apply.
+- **Local state** must be moved, or a `backend` added. See
+  [coexistence](../plans/migration-and-adoption.md#2-coexistence-model).
 
 ## Options
 
@@ -255,12 +205,8 @@ Two things need care, both the tool's rules rather than Meridian's:
 | `--strict` | exit `1` when anything was changed or not translated; the documents are still written |
 | `--plugin-dir DIR` | where to look for plugins, as for every command |
 
-Exit status: `0` when the import succeeded, whatever it reported; `1` when the source
-could not be read, no plugin could import it, or `--strict` found something; `2` for a
-command-line mistake.
-
-Sources over 3 MiB of text are refused; import in smaller groups. Unparseable sources
-are refused too, with the file and line.
+Exit `0` on success, `1` for an unreadable source, no importer, or a `--strict` finding,
+`2` for a usage error. Sources over 3 MiB and unparseable ones are refused.
 
 ## How it works
 
@@ -274,11 +220,5 @@ flowchart LR
     V --> O[writes it, with markers]
 ```
 
-The plugin does not write YAML. It returns each document as data (resources, params,
-dependencies) plus notes, and `meridian` renders it in the current language. When the
-language changes, every importer's output follows, and no importer needs to know the
-syntax.
-
-Importing is an optional part of the [plugin protocol](../contributing/writing-a-plugin.md#an-importer):
-a plugin lists the formats it imports when it describes itself; one that lists none is
-never asked.
+The plugin returns documents as data plus notes; `meridian` renders the YAML. Importing is
+an optional part of the [plugin protocol](../contributing/writing-a-plugin.md#an-importer).
