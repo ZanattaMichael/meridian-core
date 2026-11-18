@@ -266,7 +266,7 @@ reported in notes.
 | | |
 |---|---|
 | Plan | `Invoke-DscRunner -Mode Test`: every resource is tested, none is set. A resource that is not in its desired state is a change |
-| Apply | `Invoke-DscRunner -Mode Set`, in one PowerShell. A Set tests every resource itself and sets the ones that drifted; its result says which had drifted (`Drifted`), and those are the apply's changes. With a DscPipelineRunner older than that, the same PowerShell runs `-Mode Test` first to learn what has drifted |
+| Apply | `Invoke-DscRunner -Mode Set`, in one PowerShell. A Set tests every resource itself and sets the ones that drifted; its result says which had drifted (`Drifted`), and those are the apply's changes. A resource the runner never tested, such as one a condition skipped, has `Drifted` set to null and is no change. With a DscPipelineRunner older than that, the same PowerShell runs `-Mode Test` first to learn what has drifted |
 | `MERIDIAN_PWSH` | the PowerShell to run, when it is not `pwsh` on `PATH` |
 | `MERIDIAN_DSC_MODULE` | the module to import: a name PowerShell can find, or the path of its manifest. `Dsc.PipelineRunner` by default |
 
