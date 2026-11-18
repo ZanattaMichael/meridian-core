@@ -31,15 +31,15 @@ jobs:
     name: build and check links
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
       - name: Restore mdBook
         id: mdbook
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/mdbook*
           key: mdbook-${{ runner.os }}-${{ env.MDBOOK_VERSION }}-mermaid-${{ env.MDBOOK_MERMAID_VERSION }}
@@ -83,12 +83,12 @@ jobs:
           fail: true
 
       - name: Keep the site
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: target/wiki/site/book
 
       - name: Keep the wiki pages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wiki-pages
           path: target/wiki/wiki
@@ -119,7 +119,7 @@ jobs:
       - name: Deploy
         id: deploy
         if: steps.pages.outputs.ready == 'true'
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
       - name: Say where it went
         if: steps.pages.outputs.ready == 'true'
@@ -133,7 +133,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: wiki-pages
           path: pages

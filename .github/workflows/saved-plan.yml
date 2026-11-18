@@ -46,7 +46,7 @@ jobs:
     outputs:
       has-changes: ${{ steps.plan.outputs.has-changes }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup-rust
 
@@ -82,7 +82,7 @@ jobs:
           ! grep -r "$SITE_DB_PASSWORD" meridian.mplan .meridian-pr
 
       - name: Keep the binaries for the jobs after
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: meridian-binaries
           path: |
@@ -95,10 +95,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Take the binaries from the plan job
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: meridian-binaries
           path: bin
@@ -128,10 +128,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Take the binaries from the plan job
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: meridian-binaries
           path: bin
