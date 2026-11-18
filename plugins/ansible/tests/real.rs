@@ -398,13 +398,14 @@ fn a_credential_names_the_user_in_the_inventory_and_its_key_reaches_ansible_priv
 
 /// A module named in full, beside the shared types: a line kept in a
 /// file, and a module that only reads.
-/// `create: true` is the module's own argument: in a check run the file the
-/// copy would write does not exist yet, and without it lineinfile fails
-/// rather than reporting the line it would add.
+/// `create: true` is the module's own argument: the file does not exist
+/// yet, and without it lineinfile fails rather than creating it. No shared
+/// `file` writes the file beside it, since one would put its own content
+/// back on every run.
 fn with_modules(root: &Path, line: &str) -> Artifact {
     let root = root.display();
     compile(&format!(
-        "    - id: conf\n      type: file\n      params:\n        path: {root}/app.conf\n        content: \"# settings\\n\"\n    - id: workers\n      type: ansible.builtin.lineinfile\n      state: present\n      params:\n        path: {root}/app.conf\n        regexp: '^workers'\n        line: \"{line}\"\n        create: true\n      dependsOn:\n        - resource: conf\n      notifies:\n        - resource: stamp\n          action: run\n    - id: stamp\n      type: ansible.builtin.copy\n      params:\n        dest: {root}/stamp\n        content: \"changed\\n\"\n    - id: looked\n      type: ansible.builtin.stat\n      params:\n        path: {root}/app.conf\n      dependsOn:\n        - resource: workers\n"
+        "    - id: workers\n      type: ansible.builtin.lineinfile\n      state: present\n      params:\n        path: {root}/app.conf\n        regexp: '^workers'\n        line: \"{line}\"\n        create: true\n      notifies:\n        - resource: stamp\n          action: run\n    - id: stamp\n      type: ansible.builtin.copy\n      params:\n        dest: {root}/stamp\n        content: \"changed\\n\"\n    - id: looked\n      type: ansible.builtin.stat\n      params:\n        path: {root}/app.conf\n      dependsOn:\n        - resource: workers\n"
     ))
 }
 
@@ -422,7 +423,6 @@ fn a_module_named_in_full_runs_with_its_own_arguments_and_is_run_again_when_noti
     assert_eq!(
         changes(&preview.changes),
         [
-            ("conf", ChangeAction::Update),
             ("workers", ChangeAction::Update),
             ("stamp", ChangeAction::Update),
             ("run stamp", ChangeAction::Update),
@@ -435,14 +435,13 @@ fn a_module_named_in_full_runs_with_its_own_arguments_and_is_run_again_when_noti
     assert_eq!(
         changes(&applied.changes),
         [
-            ("conf", ChangeAction::Update),
             ("workers", ChangeAction::Update),
             ("stamp", ChangeAction::Update),
         ]
     );
     assert_eq!(
         fs::read_to_string(dir.join("app.conf")).unwrap(),
-        "# settings\nworkers = 4\n"
+        "workers = 4\n"
     );
     assert_eq!(fs::read_to_string(dir.join("stamp")).unwrap(), "changed\n");
 
@@ -460,10 +459,7 @@ fn a_module_named_in_full_runs_with_its_own_arguments_and_is_run_again_when_noti
         changes(&applied.changes),
         [("workers", ChangeAction::Update)]
     );
-    assert_eq!(
-        fs::read_to_string(dir.join("app.conf")).unwrap(),
-        "# settings\n"
-    );
+    assert_eq!(fs::read_to_string(dir.join("app.conf")).unwrap(), "");
 
     // An argument the module does not take is Ansible's to refuse, when
     // the play runs and not before.
