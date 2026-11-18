@@ -321,6 +321,12 @@ them, so each one is a promise:
   [handing it over](#secrets) by a private channel. `credentials` says your
   target reaches its host as the credential `targetHost.credential` names,
   and commits your emitter and runner to [the same](#credentials).
+  `adopt` says what you do with a resource's `adopt`: `Adoption::Import`
+  when your tool keeps a state and your emitter compiles `Resource::adopt`
+  into the tool's own import (and your runner reports it as
+  `ChangeAction::Adopt`), `Adoption::Converge` when your tool keeps no state,
+  and `Adoption::None` otherwise. With `None` the host refuses `adopt` before
+  your plugin is asked; with `Converge` the SDK adds the warning for you.
 - `category()`: the one you chose before you started. It also decides which
   kind of document your target accepts, as the table near the top says.
 - `target_versions()`: only if the tool comes in versions that need different

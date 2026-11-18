@@ -749,6 +749,7 @@ fn the_plugin_declares_what_it_is() {
         Arm.capabilities(),
         Capabilities {
             secrets: true,
+            adopt: meridian_sdk::Adoption::Converge,
             ..Capabilities::default()
         }
     );

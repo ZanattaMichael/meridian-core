@@ -57,6 +57,7 @@ fn the_plugin_introduces_itself() {
         info.capabilities,
         Capabilities {
             secrets: true,
+            adopt: meridian_sdk::Adoption::Converge,
             ..Capabilities::default()
         }
     );

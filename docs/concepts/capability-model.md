@@ -20,6 +20,8 @@ Every plugin states a few facts about its tool:
   (`notifies`)
 - whether it can check a condition on the node at the moment of apply
   (`runtimeWhen`)
+- whether it can take a thing that already exists under management
+  (`adopt`): by the tool's own import, by converging on it, or not at all
 - whether it can plan, apply, and report outputs
 - its category: infrastructure as code, configuration management,
   containerization or container orchestration
@@ -71,13 +73,14 @@ the same for the same mistake on every target. The common ones:
 | `unsupported-state` | the type cannot be in that state on this target |
 | `unsupported-action` | a notify asks for something the tool cannot do to that resource |
 | `unsupported-runtime-condition` | `runtimeWhen` on a target that cannot check at apply time |
+| `unsupported-adopt` | `adopt` on a target that cannot take an existing thing under management |
 | `invalid-reference` | `${...}` names something that is not there, or a value the tool cannot know at that point |
 | `missing-param` | something the tool requires was not given |
 
 ## Warnings are not refusals in disguise
 
 A warning means the output does what the document says, and there is something
-about how that you should know. Three kinds exist today:
+about how that you should know. Four kinds exist today:
 
 - The tool is less expressive than the document, in a way that cannot change the
   result. Ansible runs independent resources in sequence; `kubectl` does not
@@ -87,6 +90,9 @@ about how that you should know. Three kinds exist today:
 - The output relies on something about the machine that the document cannot
   check. cloud-init has no module for services, so a service becomes `systemctl`
   commands and the image has to use systemd.
+- A field changes nothing on this target. `adopt` on a tool that keeps no state
+  is accepted with a warning, because that tool already converges on whatever
+  exists.
 
 ## Why plan can be "unknown"
 

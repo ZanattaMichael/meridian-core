@@ -863,6 +863,7 @@ pub fn helper(
         state: String::new(),
         params,
         runtime_when: String::new(),
+        adopt: String::new(),
         index: common.index,
         pos: common.pos.clone(),
     }
@@ -878,6 +879,7 @@ pub fn primary(common: &Resource, r#type: &str, params: BTreeMap<String, Value>)
         state: String::new(),
         params,
         runtime_when: common.runtime_when.clone(),
+        adopt: common.adopt.clone(),
         index: common.index,
         pos: common.pos.clone(),
     }
@@ -946,6 +948,7 @@ mod tests {
                 .map(|(k, v)| ((*k).to_owned(), v.clone()))
                 .collect(),
             runtime_when: String::new(),
+            adopt: String::new(),
             index: 0,
             pos: Position::default(),
         }

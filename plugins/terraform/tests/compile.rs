@@ -338,3 +338,39 @@ fn a_common_resource_mixes_with_native_ones_and_keeps_its_id() {
     ));
     assert!(text.contains("\"vpc_id\": \"${aws_vpc.net.id}\""), "{text}");
 }
+
+#[test]
+fn adopt_becomes_an_import_block_for_a_managed_resource() {
+    let text = config(
+        "  resources:\n    - id: logs\n      type: aws_s3_bucket\n      adopt: example-logs\n      params: {bucket: example-logs}\n    - id: web\n      type: aws_instance\n      adopt: i-0abc123\n      params: {ami: ami-1}\n",
+    );
+    assert!(
+        text.contains(
+            "\"import\": [\n    {\n      \"id\": \"example-logs\",\n      \"to\": \"aws_s3_bucket.logs\"\n    },\n    {\n      \"id\": \"i-0abc123\",\n      \"to\": \"aws_instance.web\"\n    }\n  ]"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
+fn adopt_on_a_data_source_or_a_provider_is_refused() {
+    for (r#type, params) in [
+        ("data.aws_ami", "{owners: [self]}"),
+        ("provider", "{region: us-east-1}"),
+    ] {
+        let e = refusal(&format!(
+            "  resources:\n    - id: x\n      type: {type}\n      adopt: whatever\n      params: {params}\n"
+        ));
+        assert_eq!(e.rule, "invalid-adopt", "{e}");
+        assert!(
+            e.msg.contains("only a managed resource can be adopted"),
+            "{e}"
+        );
+    }
+}
+
+#[test]
+fn the_adopt_example_compiles_to_its_golden_configuration() {
+    let graph = graph_from_file("examples/terraform/adopt.yaml", "terraform");
+    assert_golden(&golden(), "adopt", &emit(&graph).unwrap());
+}

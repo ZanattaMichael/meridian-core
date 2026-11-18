@@ -75,6 +75,7 @@ fn the_plugin_describes_itself_as_infrastructure_as_code() {
             runtime_condition: false,
             secrets: true,
             credentials: false,
+            adopt: meridian_sdk::Adoption::Import,
         }
     );
     assert_eq!(
@@ -724,4 +725,24 @@ fn a_secret_in_a_param_is_a_sensitive_variable_the_runner_hands_over() {
         "{config}"
     );
     assert!(!config.contains("(sensitive)"), "{config}");
+}
+
+#[test]
+fn adopt_becomes_an_import_block_for_a_managed_resource() {
+    let config = parsed(
+        "  resources:\n    - id: logs\n      type: aws_s3_bucket\n      adopt: example-logs\n      params: {bucket: example-logs}\n",
+    );
+    let imports = config.as_map().unwrap()["import"].as_list().unwrap();
+    assert_eq!(imports.len(), 1);
+    assert_eq!(at(&imports[0], "to"), &Value::from("aws_s3_bucket.logs"));
+    assert_eq!(at(&imports[0], "id"), &Value::from("example-logs"));
+}
+
+#[test]
+fn adopt_on_anything_but_a_managed_resource_is_refused() {
+    let e = compile(
+        "  resources:\n    - id: ubuntu\n      type: data.aws_ami\n      adopt: whatever\n      params: {owners: [self]}\n",
+    )
+    .expect_err("a data source cannot be adopted");
+    assert_eq!(e.rule, "invalid-adopt", "{e}");
 }

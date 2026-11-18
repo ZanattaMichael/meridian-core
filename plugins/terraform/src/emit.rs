@@ -97,5 +97,26 @@ pub(crate) fn serialise(config: &Config) -> BTreeMap<String, String> {
         );
     }
 
+    if !config.imports.is_empty() {
+        // An `import` block takes a thing that already exists into the
+        // state on the next apply. Once it is there the block does nothing,
+        // so it can stay.
+        root.insert(
+            "import".to_owned(),
+            Value::List(
+                config
+                    .imports
+                    .iter()
+                    .map(|(to, id)| {
+                        map([
+                            ("id".to_owned(), Value::String(id.clone())),
+                            ("to".to_owned(), Value::String(to.clone())),
+                        ])
+                    })
+                    .collect(),
+            ),
+        );
+    }
+
     BTreeMap::from([(CONFIG_PATH.to_owned(), Value::Map(root).pretty())])
 }

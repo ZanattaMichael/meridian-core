@@ -89,7 +89,9 @@ A `plan` or `apply` holds a lock on that state, so two runs cannot collide, and 
 recorded: `meridian status` shows the last one step by step, and `meridian apply --resume`
 continues an apply that failed from the stage that failed. `--on-failure rollback` and
 `meridian rollback` put back what an apply changed, and `meridian drift` says whether what was
-applied is still what is there. With `--policy`, a `plan` or `apply` first asks a policy, written
+applied is still what is there. A resource's `adopt` takes a thing that already exists under
+management instead of creating another ([adopting what exists](docs/reference/dsl/resources.md#adopting-what-exists)).
+With `--policy`, a `plan` or `apply` first asks a policy, written
 in Rego for Open Policy Agent, whether each change may be made, and an apply that is denied
 applies nothing ([policy checks](docs/reference/policy.md)). The record can be kept in a shared place with `--backend`. See
 [running safely](docs/concepts/run-safety.md).

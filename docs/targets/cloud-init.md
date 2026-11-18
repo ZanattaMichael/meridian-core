@@ -15,6 +15,7 @@ its SSH key, and the packages a configuration tool needs to find there.
 | `dependsOn` | Yes, within [the order of a first boot](#the-order-of-a-first-boot). cloud-init handles files, accounts, packages and commands at fixed steps, so a dependency that points backwards through those steps is refused. Nothing can depend on a module of cloud-init's own, or be depended on by one |
 | `notifies` | Emulated: each notified action is a command that runs once, after every other command, with a warning. Actions `start`, `stop`, `restart`, `reload` on a service, `run` on an exec ([how](#notifications)) |
 | `runtimeWhen` | No. It is refused: cloud-init evaluates nothing per resource |
+| `adopt` | No. Refused: cloud-init runs at first boot and keeps nothing to adopt into |
 | States | Only what a first boot can do. `absent` on a user, group or package and `latest` on a package are refused ([everything refused](#what-is-refused)) |
 | References (`${...}`) | `${id.param}` is settled from the document when it is compiled; anything else is refused. `$${` is a literal `${` ([references](#references)) |
 | Plan | Yes: `cloud-init schema` checks the user-data, and the plan says whether the seed would change. No machine is contacted |

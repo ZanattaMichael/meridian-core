@@ -524,6 +524,17 @@ fn validate_document(doc: &Document, errs: &mut ErrorList) {
                 "missing required field".into(),
             );
         }
+        if !r.adopt.is_empty() && r.state == "absent" {
+            fail(
+                &r.pos,
+                format!("{path}.adopt"),
+                format!(
+                    "resource {:?} adopts a thing and asks for it to be absent: adopting \
+                     takes it under management, absent deletes it. Remove one of the two",
+                    r.id
+                ),
+            );
+        }
     }
 
     for (i, r) in resources.iter().enumerate() {

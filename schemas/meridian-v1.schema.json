@@ -631,6 +631,10 @@
           "description": "A condition written in the tool's own language and checked on the node at the moment of apply. Only a target that can express it accepts it.",
           "type": "string"
         },
+        "adopt": {
+          "description": "The tool's own identifier of a thing that already exists, such as `i-0abc123` for an `aws_instance`. The tool takes it under management instead of creating it. Only a target that can adopt accepts it.",
+          "type": "string"
+        },
         "params": {
           "description": "The resource's settings. The target and the resource type decide which params exist.",
           "type": "object"

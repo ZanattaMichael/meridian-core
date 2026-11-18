@@ -16,6 +16,7 @@ it, previews it with `what-if` and deploys it.
 | `dependsOn` | Yes, as Bicep's `dependsOn`, unless a reference already implies the order |
 | `notifies` | No. An Azure deployment has no way to react to a change in another resource. Refused |
 | `runtimeWhen` | No. Refused |
+| `adopt` | Accepted, and changes nothing: Resource Manager updates a resource of the same name in place. The compile warns |
 | `state: absent` | No. A resource group deployment never deletes a resource; remove it from the document and delete it in Azure |
 | References | `${id}` is the resource's symbolic name, `${id.properties.x}` a property read from it, anything else Bicep's own expression language; see [References and expressions](#references-and-expressions) |
 | Plan | Yes: `what-if`. Where Azure cannot analyse a resource type, the plan is reported as unknown |

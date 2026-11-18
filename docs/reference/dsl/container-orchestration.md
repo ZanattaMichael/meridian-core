@@ -148,6 +148,13 @@ of notified object, is refused.
 
 Refused.
 
+## `adopt`
+
+| Target | `adopt` is |
+|---|---|
+| `kubernetes` | accepted with a warning, and changes nothing: `kubectl apply` takes over an object of the same kind, name and namespace |
+| `helm` | refused: Helm refuses an object that no release of its own owns |
+
 ## Outputs
 
 An output can take time to exist: a load balancer's address appears some while

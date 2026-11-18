@@ -22,8 +22,8 @@ mod validate;
 
 use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, SshTakes, Value,
+    Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph, SshTakes, Value,
 };
 
 pub use emit::{sls_path, STATES_DIR, TOP_PATH};
@@ -211,6 +211,7 @@ impl Emitter for Salt {
             runtime_condition: true,
             secrets: true,
             credentials: true,
+            adopt: Adoption::Converge,
         }
     }
     fn rules(&self) -> Vec<Rule> {
