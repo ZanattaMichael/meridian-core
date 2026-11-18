@@ -22,7 +22,7 @@ resource web 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' = {
 
 resource web_fw 'Microsoft.Network/networkSecurityGroups@2023-09-01' = {
   name: 'web_fw'
-  location: net.location
+  location: resourceGroup().location
   properties: {
     securityRules: [
       {

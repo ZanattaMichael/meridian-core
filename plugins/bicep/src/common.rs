@@ -202,13 +202,10 @@ fn expand(r: &Resource) -> Result<Expansion, CompileError> {
             }
         }
         "firewall" => {
-            // A security group is not part of a network on Azure; it is
-            // placed where the network is, unless told otherwise.
+            // A location must be known when the deployment starts, so a
+            // network's location cannot be read here; the resource group's
+            // is used unless the firewall gives one.
             let mut body = top(r, map(vec![]));
-            if !r.params.contains_key("location") {
-                let network = ref_param(r, "network").unwrap_or_default();
-                body.insert("location".to_owned(), reference(&network, "location"));
-            }
             let rules: Vec<Value> = firewall_rules(r)
                 .iter()
                 .enumerate()

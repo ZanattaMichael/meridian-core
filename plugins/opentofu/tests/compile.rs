@@ -81,14 +81,19 @@ fn the_plugin_describes_itself_as_infrastructure_as_code() {
         OpenTofu.supported_resource_types(),
         [
             "<provider>_<type>",
+            "address",
             "backend",
             "data.<type>",
             "encryption",
             "ephemeral.<type>",
+            "firewall",
             "local",
             "module",
+            "network",
             "provider",
+            "subnet",
             "variable",
+            "vm",
         ]
     );
 }

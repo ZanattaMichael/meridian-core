@@ -188,8 +188,10 @@ lets everything out, which is what every cloud does with a new firewall.
 | `aws_security_group`, with one `aws_vpc_security_group_ingress_rule` or `..._egress_rule` per rule. With no `out` rule, an egress rule that allows everything is added, because Terraform removes the one AWS gives a new group | `azurerm_network_security_group`, with one `azurerm_network_security_rule` per rule | `Microsoft.Network/networkSecurityGroups`, with the rules inside it |
 
 On Azure the rules are given priorities in the order the document lists
-them, from 100 up. An Azure security group is not part of a network, so it is
-placed at the network's location unless the firewall gives one.
+them, from 100 up. An Azure security group is not part of a network. Terraform places it at
+the network's location unless the firewall gives one. Bicep places it at the
+resource group's location, because a location must be known when the
+deployment starts and a network's is not.
 
 ## `address`
 
