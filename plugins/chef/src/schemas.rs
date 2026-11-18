@@ -290,6 +290,7 @@ mod tests {
     "actions": {"nothing": null, "add": "Creates a repository file.", "remove": "Removes the repository listing."},
     "introduced": "12.9",
     "properties": [
+      {"name": "name", "description": null, "is": "String", "required": true},
       {"name": "repo_name", "description": "An optional property to set the repository name if it differs from the resource block's name.", "introduced": "14.1", "is": "String", "name_property": true, "required": false},
       {"name": "uri", "description": "The base of the Debian distribution.", "is": "String", "required": false},
       {"name": "components", "description": "Package groupings, such as 'main' and 'stable'.", "is": "Array", "default": "[]", "required": false},
@@ -332,6 +333,7 @@ mod tests {
         );
         assert_eq!(repo.source, "chef 18.4");
         let p = |name: &str| repo.find_param(name).unwrap_or_else(|| panic!("{name}"));
+        assert!(!p("name").required, "the id supplies it");
         assert_eq!(p("uri").kind, ParamKind::String);
         assert_eq!(p("components").kind, ParamKind::List);
         assert_eq!(p("trusted").kind, ParamKind::Bool);
