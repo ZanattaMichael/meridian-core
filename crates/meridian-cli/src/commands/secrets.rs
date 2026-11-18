@@ -34,7 +34,18 @@ pub(crate) fn set_secret(name: &str, files: &[PathBuf], state_dir: &Path) -> Res
     let at = meridian_secret::store_first(&places, &format!("Meridian: {name}"), &value)
         .map_err(|e| Failure::Message(format!("{name:?} was not stored: {e}")))?;
     let place = &places[at];
-    outln!("stored {name} in {}", place.place());
+    if json_output() {
+        emit(
+            true,
+            body([
+                ("name", name.into()),
+                ("from", place.from.as_str().into()),
+                ("storedIn", place.place().into()),
+            ]),
+        );
+    } else {
+        outln!("stored {name} in {}", place.place());
+    }
     Ok(())
 }
 
@@ -46,9 +57,43 @@ pub(crate) fn check_secrets(files: &[PathBuf], state_dir: &Path) -> Result<(), F
     use meridian_secret::Probe;
     let bundle = load(files, state_dir)?;
     let (mut declared, mut unanswered) = (0, 0);
+    let mut documents = Vec::new();
     for doc in &bundle.documents {
         let rows = check_declared(doc);
         if rows.is_empty() {
+            continue;
+        }
+        if json_output() {
+            let secrets: Vec<serde_json::Value> = rows
+                .iter()
+                .map(|row| {
+                    declared += 1;
+                    if row.unanswered() {
+                        unanswered += 1;
+                    }
+                    let state = match (&row.probe, row.optional) {
+                        (Probe::Present(_), _) => "ok",
+                        (Probe::Unknown(_), _) => "not-checked",
+                        (Probe::Absent(_), true) => "absent-optional",
+                        (Probe::Absent(_), false) => "missing",
+                        (Probe::Refused(_), _) => "refused",
+                        (Probe::Unavailable(_), _) => "unavailable",
+                    };
+                    serde_json::json!({
+                        "name": row.name,
+                        "from": row.from,
+                        "optional": row.optional,
+                        "state": state,
+                        "answered": !row.unanswered(),
+                        "detail": row.probe.words(),
+                    })
+                })
+                .collect();
+            documents.push(serde_json::json!({
+                "name": doc.name(),
+                "file": doc.position().file,
+                "secrets": secrets,
+            }));
             continue;
         }
         outln!("{} ({})", doc.name(), doc.position().file);
@@ -82,15 +127,29 @@ pub(crate) fn check_secrets(files: &[PathBuf], state_dir: &Path) -> Result<(), F
             );
         }
     }
-    if declared == 0 {
+    if json_output() {
+        emit(
+            unanswered == 0,
+            body([
+                ("documents", documents.into()),
+                ("declared", declared.into()),
+                ("unanswered", unanswered.into()),
+            ]),
+        );
+    } else if declared == 0 {
         outln!("no secret is declared");
     }
     if unanswered == 0 {
         Ok(())
     } else {
-        Err(Failure::Message(format!(
+        let message = format!(
             "{} would not be found by plan or apply",
             count(unanswered, "secret")
-        )))
+        );
+        if json_output() {
+            eprintln!("error: {message}");
+            return Err(Failure::Reported);
+        }
+        Err(Failure::Message(message))
     }
 }

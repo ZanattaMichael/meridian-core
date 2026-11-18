@@ -14,6 +14,7 @@ use meridian_tooling::check::{self, Diagnostic, Env, Severity, Source, Workspace
 use meridian_tooling::schemas::{self, Cached, Freshness, Store};
 use meridian_tooling::{fmt, jsonschema, lint};
 
+use crate::output::{body, emit, json_output};
 use crate::{apply_sets, count, read_data, registry, trusted_keys, Failure, PluginDirs};
 
 #[derive(Args)]
@@ -245,6 +246,15 @@ pub fn format(args: &FmtArgs) -> Result<(), Failure> {
 
     let files = gather(&args.paths)?;
     let (mut changed, mut failed, mut skipped) = (0, 0, 0);
+    // One row per file for the JSON result.
+    let mut rows = Vec::new();
+    let mut row = |path: &Path, status: &str, message: Option<String>| {
+        rows.push(serde_json::json!({
+            "file": path.display().to_string(),
+            "status": status,
+            "message": message,
+        }));
+    };
     for (path, text) in &files {
         let name = path.to_string_lossy();
         // Only reached for a file named outright: a directory is searched
@@ -253,38 +263,65 @@ pub fn format(args: &FmtArgs) -> Result<(), Failure> {
         if !check::is_meridian(text) {
             skipped += 1;
             eprintln!("skipped {name}: not a Meridian document");
+            row(path, "skipped", Some("not a Meridian document".to_owned()));
             continue;
         }
         match fmt::format(&name, text, options) {
-            Ok(formatted) if formatted == *text => {}
+            Ok(formatted) if formatted == *text => row(path, "ok", None),
             Ok(formatted) => {
                 changed += 1;
                 if args.check {
-                    outln!("{name}");
+                    row(path, "not-formatted", None);
+                    if !json_output() {
+                        outln!("{name}");
+                    }
                 } else {
                     std::fs::write(path, formatted)
                         .map_err(|e| Failure::Message(format!("writing {name}: {e}")))?;
-                    outln!("formatted {name}");
+                    row(path, "formatted", None);
+                    if !json_output() {
+                        outln!("formatted {name}");
+                    }
                 }
             }
             Err(e) => {
                 failed += 1;
                 eprintln!("error: {name}: {e}");
+                row(path, "failed", Some(e.to_string()));
             }
         }
     }
     let checked = files.len() - skipped;
     let unchanged = checked - changed - failed;
+    if json_output() {
+        emit(
+            failed == 0 && !(args.check && changed > 0),
+            body([
+                ("check", args.check.into()),
+                ("files", rows.into()),
+                (
+                    "summary",
+                    serde_json::json!({
+                        "checked": checked,
+                        "changed": changed,
+                        "unchanged": unchanged,
+                        "failed": failed,
+                        "skipped": skipped,
+                    }),
+                ),
+            ]),
+        );
+    }
     if args.check {
         if changed > 0 {
             eprintln!(
                 "{} not formatted; run `meridian fmt` to format",
                 count(changed, "file")
             );
-        } else if failed == 0 {
+        } else if failed == 0 && !json_output() {
             outln!("{} formatted", count(checked, "file"));
         }
-    } else if failed == 0 {
+    } else if failed == 0 && !json_output() {
         outln!(
             "{} formatted, {} already formatted",
             count(changed, "file"),
@@ -373,14 +410,6 @@ pub fn lint(args: &LintArgs) -> Result<(), Failure> {
         eprintln!("warning: {e}");
     }
 
-    let mut out = crate::Stdout;
-    for d in &found {
-        let _ = if args.json {
-            writeln!(out, "{}", to_json(d))
-        } else {
-            writeln!(out, "{d}")
-        };
-    }
     let errors = found
         .iter()
         .filter(|d| d.severity == Severity::Error)
@@ -391,6 +420,45 @@ pub fn lint(args: &LintArgs) -> Result<(), Failure> {
         .count();
     let notes = found.len() - errors - warnings;
     let documents: usize = checked.files.iter().map(|f| f.docs.len()).sum();
+    let failed = errors > 0 || (args.strict && warnings > 0);
+    if json_output() {
+        // The whole result as one object; `--json` keeps its line per
+        // finding for the tools that already read it.
+        emit(
+            !failed,
+            body([
+                (
+                    "diagnostics",
+                    found.iter().map(to_json).collect::<Vec<_>>().into(),
+                ),
+                (
+                    "summary",
+                    serde_json::json!({
+                        "errors": errors,
+                        "warnings": warnings,
+                        "notes": notes,
+                        "fixed": fixed,
+                        "documents": documents,
+                        "files": files.len(),
+                        "pluginsFound": !catalog.is_empty(),
+                    }),
+                ),
+            ]),
+        );
+        return if failed {
+            Err(Failure::Reported)
+        } else {
+            Ok(())
+        };
+    }
+    let mut out = crate::Stdout;
+    for d in &found {
+        let _ = if args.json {
+            writeln!(out, "{}", to_json(d))
+        } else {
+            writeln!(out, "{d}")
+        };
+    }
     if !args.json {
         if fixed > 0 {
             let _ = writeln!(out, "fixed {}", count(fixed, "finding"));
