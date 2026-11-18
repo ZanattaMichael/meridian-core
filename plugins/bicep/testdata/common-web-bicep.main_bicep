@@ -1,0 +1,150 @@
+// Compiled by Meridian from the document web-bicep. Do not edit.
+
+resource net 'Microsoft.Network/virtualNetworks@2023-09-01' = {
+  name: 'net'
+  location: resourceGroup().location
+  properties: {
+    addressSpace: {
+      addressPrefixes: [
+        '10.0.0.0/16'
+      ]
+    }
+  }
+}
+
+resource web 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' = {
+  name: 'web'
+  parent: net
+  properties: {
+    addressPrefix: '10.0.1.0/24'
+  }
+}
+
+resource web_fw 'Microsoft.Network/networkSecurityGroups@2023-09-01' = {
+  name: 'web_fw'
+  location: resourceGroup().location
+  properties: {
+    securityRules: [
+      {
+        name: 'rule-0'
+        properties: {
+          access: 'Allow'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '22'
+          direction: 'Inbound'
+          priority: 100
+          protocol: 'Tcp'
+          sourceAddressPrefix: '203.0.113.0/24'
+          sourcePortRange: '*'
+        }
+      }
+      {
+        name: 'rule-1'
+        properties: {
+          access: 'Allow'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '80'
+          direction: 'Inbound'
+          priority: 101
+          protocol: 'Tcp'
+          sourceAddressPrefix: '0.0.0.0/0'
+          sourcePortRange: '*'
+        }
+      }
+      {
+        name: 'rule-2'
+        properties: {
+          access: 'Allow'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '443'
+          direction: 'Inbound'
+          priority: 102
+          protocol: 'Tcp'
+          sourceAddressPrefix: '0.0.0.0/0'
+          sourcePortRange: '*'
+        }
+      }
+    ]
+  }
+}
+
+resource web_ip 'Microsoft.Network/publicIPAddresses@2023-09-01' = {
+  name: 'web_ip'
+  location: resourceGroup().location
+  properties: {
+    publicIPAllocationMethod: 'Static'
+  }
+  sku: {
+    name: 'Standard'
+  }
+}
+
+resource vm_nic 'Microsoft.Network/networkInterfaces@2023-09-01' = {
+  name: 'vm-nic'
+  location: resourceGroup().location
+  properties: {
+    ipConfigurations: [
+      {
+        name: 'primary'
+        properties: {
+          privateIPAllocationMethod: 'Dynamic'
+          publicIPAddress: {
+            id: web_ip.id
+          }
+          subnet: {
+            id: web.id
+          }
+        }
+      }
+    ]
+    networkSecurityGroup: {
+      id: web_fw.id
+    }
+  }
+}
+
+resource vm 'Microsoft.Compute/virtualMachines@2024-03-01' = {
+  name: 'vm'
+  location: resourceGroup().location
+  properties: {
+    hardwareProfile: {
+      vmSize: 'Standard_B2s'
+    }
+    networkProfile: {
+      networkInterfaces: [
+        {
+          id: vm_nic.id
+        }
+      ]
+    }
+    osProfile: {
+      adminUsername: 'azureuser'
+      computerName: 'vm'
+      linuxConfiguration: {
+        disablePasswordAuthentication: true
+        ssh: {
+          publicKeys: [
+            {
+              keyData: 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCy3ccG4bHhpvuPdv4+wFBzkP+U7qF4nTg+rghAkKjOLbSJa/yUPZ0EwpJaXm+rtItFerUJK41JH4bArOJJazkHMdWR6iXYQtu5BB/CZALQHiS0LYg5zUhKMxISCESlzNDWFBza28pPjfpj3gnmrPc8D1bAsnKSaHGOffZxtJ62q3Rq0ESwzN/9ahvaiBW707kT/9NC9GqMcSk1HS1Z7Wz6sJEiCC/qIfbS3TAjJ+SloXlTC8+FIdptsxJ3KgWczg4q6Z1aiv9agASdEXMJTo+sUNt7C6qNKY1W03VxFf0cj59Zh6YIo2/ZQ1NyyUOB3rO2U2pbVGLaTvEnF6GSc0TH admin@example.com'
+              path: '/home/azureuser/.ssh/authorized_keys'
+            }
+          ]
+        }
+      }
+    }
+    storageProfile: {
+      imageReference: {
+        offer: 'ubuntu-24_04-lts'
+        publisher: 'Canonical'
+        sku: 'server'
+        version: 'latest'
+      }
+      osDisk: {
+        createOption: 'FromImage'
+      }
+    }
+  }
+}
+
+output address string = string(web_ip.properties.ipAddress)
+output private_address string = string(vm_nic.properties.ipConfigurations[0].properties.privateIPAddress)

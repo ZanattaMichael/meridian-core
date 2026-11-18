@@ -153,6 +153,32 @@ fn the_example_is_bicep_the_real_compiler_builds() {
 
 #[ignore = "needs a real az and the Bicep compiler; see docs/contributing/real-tool-tests.md"]
 #[test]
+fn the_common_types_are_bicep_the_real_compiler_builds() {
+    if !asked_for_the_compiler() {
+        return;
+    }
+    let dir = scratch(TMP, "real-build-common");
+    let artifact = compile(&graph_from_file("examples/common/web-bicep.yaml", "bicep"));
+    let template = build(&dir, &artifact);
+    // A subnet's name is written by the compiler as an expression joining
+    // its parent's, so only the types are compared.
+    let types: Vec<String> = resources(&template).into_iter().map(|(t, _)| t).collect();
+    assert_eq!(
+        types,
+        [
+            "Microsoft.Compute/virtualMachines",
+            "Microsoft.Network/networkInterfaces",
+            "Microsoft.Network/networkSecurityGroups",
+            "Microsoft.Network/publicIPAddresses",
+            "Microsoft.Network/virtualNetworks",
+            "Microsoft.Network/virtualNetworks/subnets",
+        ]
+    );
+    assert_eq!(output_names(&template), ["address", "private_address"]);
+}
+
+#[ignore = "needs a real az and the Bicep compiler; see docs/contributing/real-tool-tests.md"]
+#[test]
 fn every_kind_of_value_the_plugin_writes_is_valid_bicep() {
     if !asked_for_the_compiler() {
         return;

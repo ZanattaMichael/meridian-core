@@ -20,6 +20,7 @@ on:
       - 'plugins/bicep/**'
       - 'plugins/arm/**'
       - 'examples/bicep/**'
+      - 'examples/common/**'
       - 'examples/arm/**'
       - 'crates/**'
       - 'Cargo.toml'

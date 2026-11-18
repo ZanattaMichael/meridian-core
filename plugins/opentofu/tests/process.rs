@@ -51,14 +51,19 @@ fn the_binary_declares_its_category_and_everything_it_can_do() {
         info.resource_types,
         [
             "<provider>_<type>",
+            "address",
             "backend",
             "data.<type>",
             "encryption",
             "ephemeral.<type>",
+            "firewall",
             "local",
             "module",
+            "network",
             "provider",
+            "subnet",
             "variable",
+            "vm",
         ]
     );
     client.close().expect("the plugin exits when it is closed");

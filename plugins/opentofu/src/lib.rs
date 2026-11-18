@@ -272,14 +272,19 @@ impl Emitter for OpenTofu {
     fn supported_resource_types(&self) -> Vec<String> {
         [
             "<provider>_<type>",
+            "address",
             "backend",
             "data.<type>",
             "encryption",
             "ephemeral.<type>",
+            "firewall",
             "local",
             "module",
+            "network",
             "provider",
+            "subnet",
             "variable",
+            "vm",
         ]
         .map(str::to_owned)
         .to_vec()
@@ -308,8 +313,25 @@ impl Emitter for OpenTofu {
         Category::InfrastructureAsCode
     }
 
+    /// `cloud`, `location` and `resourceGroup`: where the common
+    /// infrastructure types are mapped to, read as the Terraform target
+    /// reads them.
+    fn settings_keys(&self) -> Vec<String> {
+        meridian_target_terraform::COMMON_SETTINGS_KEYS
+            .map(str::to_owned)
+            .to_vec()
+    }
+
+    /// The common infrastructure types, described for editors.
+    fn resource_schemas(&self) -> Vec<meridian_sdk::ResourceSchema> {
+        meridian_target_terraform::common_schemas()
+    }
+
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
         check_credential(graph)?;
+        // The common types become the provider's own resources, mapped as
+        // the Terraform target maps them, since both read the same providers.
+        let graph = &meridian_target_terraform::lower_common(graph, NAME)?;
         // A secret in a param is written as a reference to a sensitive input
         // variable, which the runner gives its value from a private file.
         let graph = &graph.secrets_written_as(secret_reference);

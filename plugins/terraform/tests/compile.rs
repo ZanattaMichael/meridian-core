@@ -305,6 +305,95 @@ fn a_credential_the_providers_cannot_take_is_refused_with_what_to_do_instead() {
     );
 }
 
+// ---- the common infrastructure types ------------------------------------
+
+#[test]
+fn the_common_types_compile_to_their_golden_configuration_on_aws_and_azure() {
+    for name in ["web-aws", "web-azure"] {
+        let graph = graph_from_file(&format!("examples/common/{name}.yaml"), "terraform");
+        assert_golden(&golden(), &format!("common-{name}"), &emit(&graph).unwrap());
+    }
+}
+
+const COMMON_NET: &str = "    - id: net\n      type: network\n      params: {cidr: 10.0.0.0/16}\n";
+
+#[test]
+fn the_cloud_is_the_one_provider_the_document_configures() {
+    let text = config(&format!(
+        "  resources:\n    - id: azurerm\n      type: provider\n      params: {{features: {{}}}}\n{COMMON_NET}  settings:\n    location: westeurope\n    resourceGroup: rg\n"
+    ));
+    assert!(text.contains("azurerm_virtual_network"), "{text}");
+    let text = config(&format!(
+        "  resources:\n    - id: aws\n      type: provider\n      params: {{region: eu-west-1}}\n{COMMON_NET}"
+    ));
+    assert!(text.contains("\"aws_vpc\""), "{text}");
+}
+
+#[test]
+fn a_document_that_does_not_say_its_cloud_is_refused_with_how_to_say_it() {
+    let err = refusal(&format!("  resources:\n{COMMON_NET}"));
+    assert_eq!(err.rule, "missing-resource");
+    assert_eq!(err.target, "terraform");
+    assert!(
+        err.msg.contains("spec.settings.cloud (aws, azure)"),
+        "{}",
+        err.msg
+    );
+}
+
+#[test]
+fn a_cloud_this_target_does_not_map_is_refused() {
+    let err = refusal(&format!(
+        "  settings:\n    cloud: gcp\n  resources:\n{COMMON_NET}"
+    ));
+    assert_eq!(err.rule, "invalid-setting");
+    assert!(err.msg.contains("aws, azure"), "{}", err.msg);
+}
+
+#[test]
+fn azure_settings_without_common_types_are_refused() {
+    let err = refusal(
+        "  settings:\n    resourceGroup: rg\n  resources:\n    - id: rg\n      type: azurerm_resource_group\n      params: {name: rg, location: westeurope}\n",
+    );
+    assert_eq!(err.rule, "invalid-setting");
+}
+
+#[test]
+fn a_size_is_the_smallest_that_fits_and_an_image_is_looked_up_by_its_publisher() {
+    let text = config(&format!(
+        "  settings:\n    cloud: aws\n  resources:\n{COMMON_NET}    - id: sub\n      type: subnet\n      params: {{network: \"${{net}}\", cidr: 10.0.1.0/24}}\n    - id: vm\n      type: vm\n      params:\n        subnet: \"${{sub}}\"\n        size: {{cpus: 3, memoryGb: 1}}\n        image: {{family: debian, version: \"12\"}}\n"
+    ));
+    assert!(text.contains("\"instance_type\": \"t3.xlarge\""), "{text}");
+    assert!(text.contains("\"136693071363\""), "{text}");
+    assert!(
+        text.contains("\"ami\": \"${data.aws_ami.vm_image.id}\""),
+        "{text}"
+    );
+    assert!(!text.contains("key_name"), "no key, no key pair: {text}");
+}
+
+#[test]
+fn a_firewall_with_no_outbound_rule_lets_everything_out() {
+    let text = config(&format!(
+        "  settings:\n    cloud: aws\n  resources:\n{COMMON_NET}    - id: fw\n      type: firewall\n      params: {{network: \"${{net}}\"}}\n"
+    ));
+    assert!(text.contains("fw_out_all"), "{text}");
+    let text = config(&format!(
+        "  settings:\n    cloud: aws\n  resources:\n{COMMON_NET}    - id: fw\n      type: firewall\n      params:\n        network: \"${{net}}\"\n        rules: [{{direction: out, cidr: \"::/0\"}}]\n"
+    ));
+    assert!(!text.contains("fw_out_all"), "{text}");
+    assert!(text.contains("\"cidr_ipv6\": \"::/0\""), "{text}");
+    assert!(text.contains("\"to_port\": 65535"), "{text}");
+}
+
+#[test]
+fn a_common_resource_mixes_with_native_ones_and_keeps_its_id() {
+    let text = config(&format!(
+        "  settings:\n    cloud: aws\n  resources:\n{COMMON_NET}    - id: flow\n      type: aws_flow_log\n      params:\n        vpc_id: ${{net.id}}\n        traffic_type: ALL\n      dependsOn:\n        - resource: net\n"
+    ));
+    assert!(text.contains("\"vpc_id\": \"${aws_vpc.net.id}\""), "{text}");
+}
+
 #[test]
 fn adopt_becomes_an_import_block_for_a_managed_resource() {
     let text = config(
