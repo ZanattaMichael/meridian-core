@@ -221,7 +221,7 @@ Missing modules, undescribed types and PowerShell errors are noted.
 | | |
 |---|---|
 | Plan | `Invoke-DscRunner -Mode Test`: every resource is tested, none is set. A resource that is not in its desired state is a change |
-| Apply | a `Test` to learn what has drifted, then `Invoke-DscRunner -Mode Set` |
+| Apply | `Invoke-DscRunner -Mode Set`, in one PowerShell. A Set tests every resource itself and sets the ones that drifted; its result says which had drifted (`Drifted`), and those are the apply's changes. A resource the runner never tested, such as one a condition skipped, has `Drifted` set to null and is no change. With a DscPipelineRunner older than that, the same PowerShell runs `-Mode Test` first to learn what has drifted |
 | `MERIDIAN_PWSH` | the PowerShell to run, when it is not `pwsh` on `PATH` |
 | `MERIDIAN_DSC_MODULE` | the module to import: a name PowerShell can find, or the path of its manifest. `Dsc.PipelineRunner` by default |
 
@@ -229,6 +229,16 @@ Settings can also go in `meridian.yaml` under `spec.settings.dsc`; the environme
 See the [plugin settings reference](../reference/plugin-settings.md#dsc).
 
 In `Test` mode, drift and untestable resources both show as changes.
+
+### How long a run takes
+
+A DSC v3 run's time is mostly process starts: one PowerShell (about 1 s on a hosted Windows
+agent), then one `dsc` per resource method. Before DscPipelineRunner
+[PR 100](https://github.com/ZanattaMichael/Dsc.PipelineRunner/pull/100), each `dsc` ran full
+discovery (about 2 s per call in dsc 3.3) and the runner called `get` after every `test` and
+`set`; a one-resource apply took about 25 s. With PR 100 each call takes about 0.08 s, no
+`get` is made, and Meridian runs one `Set` instead of `Test` then `Set`.
+`PIPELINERUNNER_DSC_FULL_DISCOVERY=1` turns the narrowing off.
 
 CI runs real PowerShell, DscPipelineRunner and DSC v3 on Linux, and DSC v2 and v3 on
 Windows with real resources. WinRM and SSH are not tested for real. See

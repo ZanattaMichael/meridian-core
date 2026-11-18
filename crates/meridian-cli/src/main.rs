@@ -31,6 +31,7 @@ mod interrupt;
 mod output;
 mod pipeline;
 mod print;
+mod schema_bundles;
 mod tools;
 
 use std::collections::BTreeMap;

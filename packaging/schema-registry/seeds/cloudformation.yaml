@@ -1,0 +1,16 @@
+# The region whose published schema zip is read. @NAME@ is the region.
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: seed
+spec:
+  target: cloudformation
+  resources:
+    - id: stack
+      type: stack
+      params:
+        name: seed
+        region: "@NAME@"
+    - id: seed
+      type: AWS::S3::Bucket
+      params: {}

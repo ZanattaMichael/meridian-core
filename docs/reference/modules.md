@@ -92,6 +92,7 @@ spec:
 | `spec.modules` | no | The modules this one needs. See [requiring a module](#requiring-a-module) |
 | `spec.credentials` | no | Logins for registries, each naming where its password comes from. See [registry logins](#registry-logins) |
 | `spec.settings` | no | How each target's runner is configured for this project, by target and then by setting name. See [plugin settings](#plugin-settings) |
+| `spec.schemas` | no | Where `meridian schema sync` fetches signed schema bundles from, and how strict to be about their signatures. See [schema registries](#schema-registries) |
 
 Unknown fields are errors. Quote versions: `version: "1.4"`.
 
@@ -258,6 +259,36 @@ environment variable would be.
 - **No secrets**; use [`spec.secrets`](dsl/secrets.md#handing-a-secret-to-a-tool).
 
 Only the current directory's manifest is read; an unreadable one stops the command.
+
+## Schema registries
+
+`spec.schemas` names the registries whose signed [schema
+bundles](../tooling/schema-bundles.md) give the editor a tool's own types
+without the tool:
+
+```yaml
+spec:
+  schemas:
+    registry: ghcr.io/zanattamichael/meridian-schemas
+    signatures: require
+    registries:
+      - registry: registry.example.com/platform/schemas
+        credential: internal
+      - registry: file://vendor/schemas
+```
+
+| Field | Value |
+|---|---|
+| `registry` | An OCI repository prefix with no scheme and no tag (`oci://` may be written), or `file://DIR`, relative to the project when not absolute. Looked in first |
+| `credential` | A credential from `spec.credentials` to log in with, as for an `oci` module; not for a `file://` registry |
+| `insecure` | `true` talks plain HTTP. For a registry on a trusted network only |
+| `signatures` | `off`, `warn` or `require`; `--schema-signatures` on the command line wins over it, and without either it is `off` |
+| `registries` | More registries, each with `registry`, `credential` and `insecure`, looked in after `registry`, in order. A registry may be named once |
+
+`credential` or `insecure` without a `registry` beside them is an error, as
+is any other field. The bundles a sync chose are recorded in the lockfile's
+`schemas` section, each by reference and digest; see [Schema bundles: the
+lock file](../tooling/schema-bundles.md#the-lock-file).
 
 ## Version requirements
 

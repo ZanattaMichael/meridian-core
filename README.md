@@ -63,8 +63,9 @@ meridian lsp / meridian mcp                 # language server, MCP server
 - In CI, a job runs `meridian apply`; `plan --out` and `apply --plan` apply exactly what was
   reviewed. See [running in a pipeline](docs/operations/running-in-a-pipeline.md) and
   [a saved plan](docs/operations/pull-requests.md).
-- Editor support: [tools for writing documents](docs/tooling/index.md) and the
-  [VS Code extension](docs/tooling/vscode.md).
+- Editor support: [tools for writing documents](docs/tooling/index.md), the
+  [VS Code extension](docs/tooling/vscode.md), and tool types from `meridian schema sync` or
+  signed [schema bundles](docs/tooling/schema-bundles.md).
 
 ![Writing a resource with completion](docs/tooling/images/writing-a-resource.gif)
 

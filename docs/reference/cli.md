@@ -417,9 +417,34 @@ Prints a JSON Schema (draft 7) of the language, plugin types and cached tool sch
 ### `schema sync`, `schema status`, `schema clean`
 
 `schema sync` caches tool schemas for used types in `.meridian/schemas/<target>.json` and
-records them in `meridian.lock` (`--target`, `--check`, `--no-lock`). `schema status` shows
-the cache against the lock (`--json`). `schema clean` removes caches. See
-[tool schemas](../tooling/schema-sync.md).
+records them in `meridian.lock` (`--target`, `--check`, `--no-lock`). `--locked` uses only
+what the lock pins; `--all-types` describes every type (for packing a bundle);
+`--prefer bundles|tool` chooses between `spec.schemas` bundles (default) and tools;
+`--schema-signatures off|warn|require` sets bundle signature strictness.
+
+`schema update` re-chooses the newest bundles for the documents and moves the lock.
+`schema status` shows the cache against the lock (`--json`). `schema clean` removes caches.
+See [tool schemas](../tooling/schema-sync.md).
+
+### `schema pack`, `schema sign`, `schema push`, `schema fetch`
+
+Make and move [schema bundles](../tooling/schema-bundles.md): one target's
+tool schemas at one set of pins, signed and published to an OCI registry so
+that other machines need no tool.
+
+```
+meridian schema pack terraform --name hashicorp-aws --version 5.60.0 [--prefix aws_]... [--key FILE] [--out FILE]
+meridian schema sign FILE --key FILE [--out FILE]
+meridian schema push FILE ghcr.io/acme/meridian-schemas [--credential NAME] [--insecure] [--no-index]
+meridian schema fetch oci://ghcr.io/acme/meridian-schemas/terraform/hashicorp-aws:5.60.0 [PATHS]... [--no-lock] [--credential NAME] [--insecure]
+```
+
+| Command | Does |
+|---|---|
+| `pack` | writes the target's cache as a bundle archive (default `.meridian/schemas/packed/<target>-<name>-<version>.tar.gz`); `--prefix` keeps only types whose names start with the text; `--key` signs it |
+| `sign` | signs a packed bundle, writing it again with `meridian.sig` inside |
+| `push` | publishes it to `<registry>/<target>/<name>:<version>` (or a `file://DIR` registry) and lists it in the registry's index; a version is published once |
+| `fetch` | writes a target's cache from one bundle, by `oci://` reference or file, checks its signature by `--schema-signatures` or `spec.schemas.signatures`, and records it in the lock; a registry `spec.schemas` names uses its own login, another takes `--credential` and `--insecure` as `push` does |
 
 ### `lsp`
 

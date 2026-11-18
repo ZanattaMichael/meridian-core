@@ -67,7 +67,7 @@ fn a_plan_is_the_runners_test_mode() {
 
     let script = fs::read_to_string(dir.join("calls")).unwrap();
     assert!(
-        script.starts_with("$ErrorActionPreference = 'Stop'; Import-Module 'Dsc.PipelineRunner'; $run = Invoke-DscRunner -ConfigurationSourcePath '"),
+        script.starts_with("$ErrorActionPreference = 'Stop'; $module = @(Import-Module 'Dsc.PipelineRunner' -PassThru)[0]; $run = Invoke-DscRunner -ConfigurationSourcePath '"),
         "{script}"
     );
     assert!(
@@ -77,37 +77,97 @@ fn a_plan_is_the_runners_test_mode() {
     assert!(dir.join("work/Projects/Present/web.yml").exists());
 }
 
+/// What an apply's PowerShell prints when the runner is too old to say what
+/// had drifted: the `Test` it runs first, then the `Set`.
+fn test_then_set(test: &str, set: &str) -> String {
+    format!(
+        "echo 'MERIDIAN-TEST {{\"Configurations\":[{{\"Status\":\"Completed\",\"Results\":[{test}]}}]}}'; {}",
+        result(set)
+    )
+}
+
 #[test]
-fn an_apply_tests_then_sets_and_reports_what_had_drifted() {
+fn an_apply_is_one_powershell_that_sets_and_reports_what_had_drifted() {
     let dir = scratch(TMP, "apply");
+    let set_said = r#"{"ResourceType":"PSDscResources/Service","InstanceName":"w3svc","Status":"OK","ErrorMessage":null,"Drifted":false,"SetInvoked":false},{"ResourceType":"PSDscResources/File","InstanceName":"site_config","Status":"OK","ErrorMessage":null,"Drifted":true,"SetInvoked":true}"#;
+    let cases = format!("*'-Mode Set'*) {} ;;", result(set_said));
+    let applied = runner(&dir, &cases)
+        .apply(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+
+    let calls = fs::read_to_string(dir.join("calls")).unwrap();
+    assert_eq!(calls.lines().count(), 1, "{calls}");
+    // The Test runs only when the module is too old to report Drifted.
+    assert!(
+        calls.contains("Get-Command -Name Resolve-DscV3ResourcePath")
+            && calls.contains("if (-not $tellsDrift) {"),
+        "{calls}"
+    );
+    assert_eq!(applied.changes.len(), 1);
+    assert_eq!(applied.changes[0].resource, "site_config");
+}
+
+#[test]
+fn an_apply_with_an_older_runner_tests_first_in_the_same_powershell() {
+    let dir = scratch(TMP, "apply-older");
     let cases = format!(
-        "*'-Mode Test'*) {} ;;\n*'-Mode Set'*) {} ;;",
-        result(&format!("{OK},{DRIFT}")),
-        result(&format!("{OK},{SET}"))
+        "*'-Mode Set'*) {} ;;",
+        test_then_set(&format!("{OK},{DRIFT}"), &format!("{OK},{SET}"))
     );
     let applied = runner(&dir, &cases)
         .apply(&context(&dir), &compiled(), &KeptLog::default())
         .unwrap();
-    let modes: Vec<bool> = fs::read_to_string(dir.join("calls"))
-        .unwrap()
-        .lines()
-        .map(|l| l.contains("-Mode Set"))
-        .collect();
-    assert_eq!(modes, [false, true]);
+    assert_eq!(
+        fs::read_to_string(dir.join("calls"))
+            .unwrap()
+            .lines()
+            .count(),
+        1
+    );
     assert_eq!(applied.changes.len(), 1);
     assert_eq!(applied.changes[0].resource, "site_config");
+}
+
+/// DscPipelineRunner 1.4.0 gives `"Drifted": null` for a resource it never
+/// tested, such as one a condition skipped: that is an answer, not a runner
+/// too old to give one.
+#[test]
+fn an_apply_takes_a_skipped_resources_null_drift_as_no_change() {
+    let dir = scratch(TMP, "apply-skipped");
+    let set_said = r#"{"ResourceType":"PSDscResources/File","InstanceName":"site_config","Status":"OK","ErrorMessage":null,"Drifted":true,"SetInvoked":true},{"ResourceType":"PSDscResources/Service","InstanceName":"w3svc","Status":"SKIP","ErrorMessage":"Resource skipped due to preCondition","Drifted":null,"SetInvoked":false}"#;
+    let cases = format!("*'-Mode Set'*) {} ;;", result(set_said));
+    let applied = runner(&dir, &cases)
+        .apply(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(applied.changes.len(), 1);
+    assert_eq!(applied.changes[0].resource, "site_config");
+}
+
+#[test]
+fn an_apply_whose_set_says_nothing_about_drift_is_an_error() {
+    let dir = scratch(TMP, "apply-unknown");
+    let cases = format!("*'-Mode Set'*) {} ;;", result(&format!("{OK},{SET}")));
+    let err = runner(&dir, &cases)
+        .apply(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap_err();
+    assert_eq!(
+        err.msg,
+        "DscPipelineRunner's Set result does not say whether \"w3svc\" had drifted, and no Test was run first"
+    );
 }
 
 #[test]
 fn a_resource_that_could_not_be_set_fails_the_apply() {
     let dir = scratch(TMP, "failed");
     let cases = format!(
-        "*'-Mode Test'*) {} ;;\n*'-Mode Set'*) {} ;;",
-        result(&format!("{OK},{DRIFT}")),
-        result(&format!(
-            "{OK},{}",
-            DRIFT.replace("not in the desired state", "Access is denied")
-        ))
+        "*'-Mode Set'*) {} ;;",
+        test_then_set(
+            &format!("{OK},{DRIFT}"),
+            &format!(
+                "{OK},{}",
+                DRIFT.replace("not in the desired state", "Access is denied")
+            )
+        )
     );
     let err = runner(&dir, &cases)
         .apply(&context(&dir), &compiled(), &KeptLog::default())

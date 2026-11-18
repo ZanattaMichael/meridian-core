@@ -11,6 +11,7 @@ All in the `meridian` command:
 | [Linter](linter.md) | `meridian lint` | the compiler's errors for a whole project, plus things that compile and are probably mistakes |
 | [JSON Schema](json-schema.md) | `meridian schema` | validation in editors that only know YAML |
 | [Tool schemas](schema-sync.md) | `meridian schema sync` | completion and checking of a tool's own types (`aws_instance`, `apps/v1/Deployment`), read once from the tool and cached |
+| [Schema bundles](schema-bundles.md) | `meridian schema pack`, `sign`, `push`, `fetch` | the same schemas, signed and published to an OCI registry, so other machines and CI need no tool |
 | [MCP server](mcp-server.md) | `meridian mcp` | the same compiler and catalogue as tools for an AI model, so a small model can write a document that compiles |
 
 ![Writing a resource with completion: the type, its params, and an error for a param the target does not take](images/writing-a-resource.gif)

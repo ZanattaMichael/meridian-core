@@ -50,6 +50,7 @@ The core knows the language; each plugin knows one tool.
 | [Linter](tooling/linter.md) | `meridian lint` |
 | [JSON Schema](tooling/json-schema.md) | `meridian schema` |
 | [Tool schemas](tooling/schema-sync.md) | `meridian schema sync` |
+| [Schema bundles](tooling/schema-bundles.md) | signed schemas from an OCI registry, no tool needed |
 | [MCP server](tooling/mcp-server.md) | `meridian mcp` |
 
 | Reference | |
