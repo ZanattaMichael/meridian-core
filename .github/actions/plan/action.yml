@@ -32,7 +32,9 @@ inputs:
     required: false
     default: meridian-plan
   comment:
-    description: Whether to post the plan's report on the pull request as one comment, updated in place. Needs `pull-requests: write` and a pull request
+    description: >-
+      Whether to post the plan's report on the pull request as one comment,
+      updated in place. Needs `pull-requests: write` and a pull request
     required: false
     default: 'true'
   install:
