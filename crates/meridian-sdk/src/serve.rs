@@ -8,7 +8,8 @@
 use std::fmt;
 use std::io::{Read, Write};
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -150,6 +151,7 @@ async fn serve_async(plugin: Plugin) -> Result<(), ServeError> {
     if let Some(runner) = &plugin.runner {
         router = router.add_service(RunnerServer::new(RunnerHandler {
             runner: Arc::clone(runner),
+            active: Arc::new(Mutex::new(None)),
         }));
     }
     if let Some(importer) = &plugin.importer {
@@ -323,26 +325,41 @@ impl ImporterService for ImporterHandler {
 
 struct RunnerHandler {
     runner: Arc<dyn Runner>,
+    /// The stop flag of the plan or apply that is running, so that `Cancel`
+    /// can reach it. A host drives one run of a plugin at a time.
+    active: Active,
 }
+
+/// The stop flag of the run in progress, when there is one.
+type Active = Arc<Mutex<Option<Arc<AtomicBool>>>>;
 
 type EventStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send>>;
 
-/// Relays a runner's log lines into the response stream as they are written.
+/// Relays a runner's log lines into the response stream as they are written,
+/// and tells the runner when the host has asked it to stop.
 struct StreamLog<T> {
     events: mpsc::UnboundedSender<Result<T, Status>>,
     wrap: fn(pb::LogLine) -> T,
+    stop: Arc<AtomicBool>,
 }
 
 impl<T: Send> Log for StreamLog<T> {
     fn line(&self, line: LogLine) {
         // The host hanging up mid-run is not the runner's problem: the tool
-        // is already running and should be left to finish.
+        // is already running and should be left to finish. A host that wants
+        // the tool stopped says so with `Cancel`.
         let _ = self.events.send(Ok((self.wrap)(wire::log_to_wire(line))));
+    }
+
+    fn cancelled(&self) -> bool {
+        self.stop.load(Ordering::SeqCst)
     }
 }
 
 /// Runs a blocking runner call, streaming its log lines and then its result.
+/// While it runs, its stop flag is the one `Cancel` sets.
 fn run_streaming<T, R>(
+    active: &Active,
     wrap_log: fn(pb::LogLine) -> T,
     wrap_result: fn(R) -> T,
     call: impl FnOnce(&dyn Log) -> R + Send + 'static,
@@ -351,6 +368,9 @@ where
     T: Send + 'static,
     R: Send + 'static,
 {
+    let stop = Arc::new(AtomicBool::new(false));
+    *active.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::clone(&stop));
+    let active = Arc::clone(active);
     let (events, stream) = mpsc::unbounded_channel();
     let (bounded, out) = mpsc::channel(64);
     // The unbounded side keeps `Log::line` non-blocking for the runner; this
@@ -367,8 +387,19 @@ where
         let log = StreamLog {
             events: events.clone(),
             wrap: wrap_log,
+            stop: Arc::clone(&stop),
         };
         let outcome = tokio::task::spawn_blocking(move || call(&log)).await;
+        // The run is over: a Cancel that arrives now has nothing to stop.
+        {
+            let mut running = active.lock().unwrap_or_else(|e| e.into_inner());
+            if running
+                .as_ref()
+                .is_some_and(|flag| Arc::ptr_eq(flag, &stop))
+            {
+                *running = None;
+            }
+        }
         let last = match outcome {
             Ok(result) => Ok(wrap_result(result)),
             Err(e) => Err(Status::internal(format!("the runner panicked: {e}"))),
@@ -419,6 +450,7 @@ impl RunnerService for RunnerHandler {
         let artifact = wire::artifact_from_wire(request.artifact);
         let runner = Arc::clone(&self.runner);
         Ok(Response::new(run_streaming(
+            &self.active,
             plan_log,
             plan_done,
             move |log| wire::plan_result(runner.plan(&context, &artifact, log)),
@@ -437,10 +469,30 @@ impl RunnerService for RunnerHandler {
         let artifact = wire::artifact_from_wire(request.artifact);
         let runner = Arc::clone(&self.runner);
         Ok(Response::new(run_streaming(
+            &self.active,
             apply_log,
             apply_done,
             move |log| wire::apply_result(runner.apply(&context, &artifact, log)),
         )))
+    }
+
+    async fn cancel(
+        &self,
+        _request: Request<pb::CancelRequest>,
+    ) -> Result<Response<pb::CancelResponse>, Status> {
+        let was_running = match self
+            .active
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
+            Some(stop) => {
+                stop.store(true, Ordering::SeqCst);
+                true
+            }
+            None => false,
+        };
+        Ok(Response::new(pb::CancelResponse { was_running }))
     }
 
     async fn outputs(

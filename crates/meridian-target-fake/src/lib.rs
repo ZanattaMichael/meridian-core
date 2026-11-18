@@ -7,7 +7,9 @@
 //! installing anything.
 //!
 //! A few magic words in a file's content make it misbehave on purpose:
-//! `FAIL` makes the tool fail at that file, `PANIC` panics the runner, and
+//! `FAIL` makes the tool fail at that file, `HANG` makes it run until the host
+//! stops it (`HANG_TOOL` does the same with a real child process, where there
+//! is a shell), `PANIC` panics the runner, and
 //! `EXIT` kills the whole plugin process mid-run.
 //!
 //! It takes secrets, as a real target does. A secret in a param is compiled
@@ -381,6 +383,9 @@ impl Runner for FakeRunner {
             context.document,
             context.host
         ));
+        if artifact.files.values().any(|c| c.contains("HANG")) {
+            hang(log)?;
+        }
         let changes = diff(&state, artifact);
         log.err(&format!("{} to change", changes.len()));
         Ok(Plan {
@@ -437,6 +442,14 @@ impl Runner for FakeRunner {
                     changes: done,
                 });
             }
+            if content.contains("HANG") {
+                // What was done so far is kept, as a real tool's state is.
+                save(&state)?;
+                if let Err(mut stopped) = hang(log) {
+                    stopped.changes = done;
+                    return Err(stopped);
+                }
+            }
             let written = path
                 .parent()
                 .map(fs::create_dir_all)
@@ -467,6 +480,36 @@ impl Runner for FakeRunner {
         }
         Ok(outputs_of(&state, context))
     }
+}
+
+/// Runs until the host stops the run, as a tool waiting on a prompt or a dead
+/// connection would, and reports the stop the way [`meridian_sdk::Tool`]
+/// does. Gives up after ten minutes, so a test that forgets to stop it does
+/// not hold a build forever.
+fn hang(log: &dyn Log) -> Result<(), RunError> {
+    log.err("fake-tool is waiting for something that will never happen");
+    let started = std::time::Instant::now();
+    #[cfg(unix)]
+    if std::env::var_os("FAKE_HANG_TOOL").is_some() {
+        // A real child process, stopped the way the SDK stops any tool.
+        return meridian_sdk::tool::Tool::new("sh")
+            .args(["-c", "sleep 600"])
+            .run(log)
+            .map(|_| ());
+    }
+    while !log.cancelled() {
+        if started.elapsed() > std::time::Duration::from_secs(600) {
+            return Err(RunError::new("fake-tool gave up waiting"));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    Err(RunError {
+        msg: "fake-tool was stopped before it finished, because the run was cancelled".to_owned(),
+        command: "fake-tool apply --password=***".to_owned(),
+        exit_code: None,
+        output: "stopped while waiting\n".to_owned(),
+        changes: Vec::new(),
+    })
 }
 
 /// The importing half: each `name = content` line of a `*.fake` file becomes

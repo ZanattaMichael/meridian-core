@@ -58,7 +58,8 @@ use meridian_ir::{
     Bundle, Document, Infrastructure, Removed, Resolution, ResourceSet, Secrets,
     TARGET_HOST_FROM_INFRASTRUCTURE,
 };
-use meridian_plugin_host::{name_secrets, to_sdk, EmitError, Registry, RunFailure};
+pub use meridian_plugin_host::{describe_duration, Stop};
+use meridian_plugin_host::{name_secrets, to_sdk, EmitError, Registry, RunFailure, StopCause};
 use meridian_sdk::{
     Artifact, Category, Change, Data, LogLine, Output, Plan, RunContext, SecretRef, Value, Warning,
 };
@@ -244,6 +245,11 @@ pub const REASON_TOOL_FAILED: &str = "tool-failed";
 pub const REASON_STATE_FAILED: &str = "state-failed";
 /// The run's policy does not allow the change, or could not be asked.
 pub const REASON_POLICY_DENIED: &str = "policy-denied";
+/// The operator stopped the run while the stage was going, or before it
+/// reached its tool.
+pub const REASON_INTERRUPTED: &str = "interrupted";
+/// The stage's tool ran past the run's time limit and was stopped.
+pub const REASON_TIMED_OUT: &str = "timed-out";
 
 /// Why a run did not start.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -299,6 +305,11 @@ impl RunReport {
 
     /// Whether a drift check found any stage that no longer matches what was
     /// applied to it.
+    /// Whether the operator stopped the run.
+    pub fn interrupted(&self) -> bool {
+        self.stages.iter().any(|s| s.reason == REASON_INTERRUPTED)
+    }
+
     pub fn drifted(&self) -> bool {
         self.stages
             .iter()
@@ -360,6 +371,11 @@ pub struct Options {
     /// The policy every stage of a plan or an apply is checked against
     /// before it is applied. `None` checks nothing.
     pub policy: Option<Policy>,
+    /// When a stage's tool is stopped before it finishes: a flag an
+    /// interrupt handler sets, a time limit, or neither. A stopped stage is
+    /// recorded as [`REASON_INTERRUPTED`] or [`REASON_TIMED_OUT`], the
+    /// stages after it as not run, and the lock is released as usual.
+    pub stop: Stop,
 }
 
 /// What an apply does when a stage fails.
@@ -392,6 +408,7 @@ impl Options {
             rollback_of: Resume::Last,
             policy: None,
             strict_secrets: false,
+            stop: Stop::default(),
         }
     }
 
@@ -677,11 +694,21 @@ pub fn run_selected(
         let items = rollback::items_of(&mut run, record);
         report.rollbacks = rollback::execute(&mut run, &mut journal, observer, items);
     } else if failed.is_some() && mode == Mode::Apply && options.on_failure == OnFailure::Rollback {
-        let items = std::mem::take(&mut run.touched)
-            .into_iter()
-            .map(|touched| rollback::Item::Ready(Box::new(touched)))
-            .collect();
-        report.rollbacks = rollback::execute(&mut run, &mut journal, observer, items);
+        // An operator who stopped the run asked for nothing more to happen;
+        // a rollback runs more tools. They can ask for one by name.
+        if report.interrupted() {
+            run.warnings.push(
+                "the run was interrupted, so nothing was rolled back; `meridian rollback` \
+                 puts back what it changed"
+                    .to_owned(),
+            );
+        } else {
+            let items = std::mem::take(&mut run.touched)
+                .into_iter()
+                .map(|touched| rollback::Item::Ready(Box::new(touched)))
+                .collect();
+            report.rollbacks = rollback::execute(&mut run, &mut journal, observer, items);
+        }
     }
 
     let failures = report
@@ -1340,7 +1367,7 @@ struct Compiled {
 }
 
 /// Why a stage did not compile, or cannot yet.
-enum Stop {
+enum NotCompiled {
     Failed {
         /// One of the `REASON_` constants.
         reason: &'static str,
@@ -1461,11 +1488,11 @@ impl Run<'_> {
             credential,
         } = match self.compile(stage, &secrets.names()) {
             Ok(compiled) => compiled,
-            Err(Stop::Failed { reason, why, host }) => {
+            Err(NotCompiled::Failed { reason, why, host }) => {
                 report.host = host;
                 return fail(report, reason, why);
             }
-            Err(Stop::Deferred { waiting_on, output }) => {
+            Err(NotCompiled::Deferred { waiting_on, output }) => {
                 report.outcome = Outcome::Deferred { waiting_on, output };
                 return report;
             }
@@ -1489,8 +1516,8 @@ impl Run<'_> {
         if let Some(document) = stage.in_bundle(self.bundle) {
             match self.imports_of(document) {
                 Ok(imports) => inputs.extend(imports),
-                Err(Stop::Failed { reason, why, .. }) => return fail(report, reason, why),
-                Err(Stop::Deferred { waiting_on, output }) => {
+                Err(NotCompiled::Failed { reason, why, .. }) => return fail(report, reason, why),
+                Err(NotCompiled::Deferred { waiting_on, output }) => {
                     report.outcome = Outcome::Deferred { waiting_on, output };
                     return report;
                 }
@@ -1586,7 +1613,12 @@ impl Run<'_> {
                 Some(decisions) => decisions,
                 None => {
                     if operations.plan {
-                        match target.plan(&context, &emitted.artifact, &mut log) {
+                        match target.plan_with(
+                            &context,
+                            &emitted.artifact,
+                            &mut log,
+                            &self.options.stop,
+                        ) {
                             Ok(plan) => planned = Some(plan),
                             // What cannot be previewed yet, because an
                             // earlier stage has to be applied first, is
@@ -1617,18 +1649,29 @@ impl Run<'_> {
             return report;
         }
 
+        // An interrupt that arrived while the stage was compiling stops it
+        // here, before a tool is started that would only be stopped again.
+        if self.interrupted() && self.mode != Mode::Compile {
+            return fail(
+                report,
+                REASON_INTERRUPTED,
+                "interrupted: the run was stopped before the tool was started".to_owned(),
+            );
+        }
+        let stop = &self.options.stop;
+
         let plan_now = match planned.take() {
             Some(plan) if self.mode == Mode::Plan => Some(Ok(plan)),
             _ => None,
         };
         match self.mode {
             Mode::Plan => match plan_now
-                .unwrap_or_else(|| target.plan(&context, &emitted.artifact, &mut log))
+                .unwrap_or_else(|| target.plan_with(&context, &emitted.artifact, &mut log, stop))
             {
                 Ok(plan) => report.outcome = Outcome::Planned(plan),
                 Err(e) => return fail(report, reason_of(&e), self.describe(e)),
             },
-            Mode::Drift => match target.plan(&context, &emitted.artifact, &mut log) {
+            Mode::Drift => match target.plan_with(&context, &emitted.artifact, &mut log, stop) {
                 Ok(plan) => {
                     let last = last.unwrap_or_default();
                     let same = last.applied && last.artifact_hash == hash;
@@ -1663,7 +1706,7 @@ impl Run<'_> {
                     attempted: hash.clone(),
                     masker: Masker::new(),
                 });
-                let outcome = target.apply(&context, &emitted.artifact, &mut log);
+                let outcome = target.apply_with(&context, &emitted.artifact, &mut log, stop);
                 match outcome {
                     Ok(mut applied) => {
                         // A tool that hands a sensitive value straight back
@@ -1685,8 +1728,14 @@ impl Run<'_> {
                     }
                     Err(e) => {
                         self.record(&id, stage.target(), &hash, false);
-                        if let RunFailure::Tool(tool) = &e {
-                            report.done_before_failing = tool.changes.clone();
+                        match &e {
+                            RunFailure::Tool(tool) => {
+                                report.done_before_failing = tool.changes.clone();
+                            }
+                            RunFailure::Stopped(stopped) => {
+                                report.done_before_failing = stopped.changes.clone();
+                            }
+                            RunFailure::Plugin(_) => {}
                         }
                         return fail(report, reason_of(&e), self.describe(e));
                     }
@@ -1851,9 +1900,9 @@ impl Run<'_> {
         &mut self,
         stage: Stage<'_>,
         declared_secrets: &[(String, SecretRef)],
-    ) -> Result<Compiled, Stop> {
+    ) -> Result<Compiled, NotCompiled> {
         let id = stage.id();
-        let refuse = |reason: &'static str, why: String| Stop::Failed {
+        let refuse = |reason: &'static str, why: String| NotCompiled::Failed {
             reason,
             why,
             host: String::new(),
@@ -1930,13 +1979,13 @@ impl Run<'_> {
                     Ok(found) => found,
                     Err(Halt::Failed(why)) => return Err(refuse(REASON_COMPILE_REFUSED, why)),
                     Err(Halt::Deferred { waiting_on, output }) => {
-                        return Err(Stop::Deferred { waiting_on, output })
+                        return Err(NotCompiled::Deferred { waiting_on, output })
                     }
                 };
                 match ResourceGraph::build(doc, &host) {
                     Ok(graph) => (graph, host, inputs),
                     Err(e) => {
-                        return Err(Stop::Failed {
+                        return Err(NotCompiled::Failed {
                             reason: REASON_COMPILE_REFUSED,
                             why: e.to_string(),
                             host,
@@ -1952,8 +2001,11 @@ impl Run<'_> {
         // write a reference the operator recognises. Only a target that
         // takes secrets is read with any (see `read`).
         name_secrets(&mut graph, declared_secrets);
-        let failed =
-            |reason: &'static str, why: String, host: String| Stop::Failed { reason, why, host };
+        let failed = |reason: &'static str, why: String, host: String| NotCompiled::Failed {
+            reason,
+            why,
+            host,
+        };
         match target.emit(&graph, &options.data) {
             Ok(emitted) => Ok(Compiled {
                 graph,
@@ -1969,7 +2021,7 @@ impl Run<'_> {
 
     /// What a document compiles to: what this run already compiled it to,
     /// or, for a document the run does not include, a compile made now.
-    fn artifact_of(&mut self, source: &Document) -> Result<Artifact, Stop> {
+    fn artifact_of(&mut self, source: &Document) -> Result<Artifact, NotCompiled> {
         let stage = match source {
             Document::Infrastructure(doc) => Stage::Infrastructure(doc),
             Document::ResourceSet(doc) => Stage::ResourceSet(doc),
@@ -1985,14 +2037,14 @@ impl Run<'_> {
                 document, secrets, ..
             } => (document, secrets),
             Read::LeftOut { condition } => {
-                return Err(Stop::Failed {
+                return Err(NotCompiled::Failed {
                     reason: REASON_COMPILE_REFUSED,
                     why: format!("its when ({condition}) is false, so it compiles to nothing"),
                     host: String::new(),
                 })
             }
             Read::Failed(why) => {
-                return Err(Stop::Failed {
+                return Err(NotCompiled::Failed {
                     reason: REASON_COMPILE_REFUSED,
                     why,
                     host: String::new(),
@@ -2011,9 +2063,9 @@ impl Run<'_> {
     /// compiles. An output is known once its document has been applied, in
     /// this run or before; until then the stage waits, as a ResourceSet
     /// waits on a host.
-    fn imports_of(&mut self, document: &Document) -> Result<Data, Stop> {
+    fn imports_of(&mut self, document: &Document) -> Result<Data, NotCompiled> {
         let bundle = self.bundle;
-        let refuse = |why: String| Stop::Failed {
+        let refuse = |why: String| NotCompiled::Failed {
             reason: REASON_COMPILE_REFUSED,
             why,
             host: String::new(),
@@ -2030,7 +2082,7 @@ impl Run<'_> {
             let value = if import.from == meridian_ir::IMPORT_FROM_ARTIFACT {
                 let artifact = match self.artifact_of(source) {
                     Ok(artifact) => artifact,
-                    Err(Stop::Failed { why, .. }) => {
+                    Err(NotCompiled::Failed { why, .. }) => {
                         return Err(refuse(format!(
                             "import {:?} is a file {} {:?} compiles to, and that document did \
                              not compile: {why}",
@@ -2063,7 +2115,7 @@ impl Run<'_> {
                     self.read_outputs(&from);
                 }
                 let Some(outputs) = self.outputs.get(&from.name) else {
-                    return Err(Stop::Deferred {
+                    return Err(NotCompiled::Deferred {
                         waiting_on: from,
                         output: import.output.clone(),
                     });
@@ -2361,6 +2413,15 @@ impl Run<'_> {
     fn describe(&self, failure: RunFailure) -> String {
         self.masker.mask(&mask(&failure.to_string(), &self.secrets))
     }
+
+    /// Whether the operator has asked for the run to stop.
+    fn interrupted(&self) -> bool {
+        self.options
+            .stop
+            .when
+            .as_ref()
+            .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst))
+    }
 }
 
 /// What a denied stage says.
@@ -2379,6 +2440,10 @@ fn reason_of(failure: &RunFailure) -> &'static str {
     match failure {
         RunFailure::Tool(_) => REASON_TOOL_FAILED,
         RunFailure::Plugin(_) => REASON_PLUGIN_FAILED,
+        RunFailure::Stopped(stopped) => match stopped.cause {
+            StopCause::Interrupted => REASON_INTERRUPTED,
+            StopCause::TimedOut(_) => REASON_TIMED_OUT,
+        },
     }
 }
 

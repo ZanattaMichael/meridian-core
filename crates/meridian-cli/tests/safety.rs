@@ -316,6 +316,113 @@ fn a_locked_state_refuses_a_run_until_the_lock_is_removed_by_name() {
 }
 
 #[test]
+fn a_stage_timeout_stops_a_hanging_tool_and_fails_the_run_as_timed_out() {
+    let dir = scratch("stage-timeout", "HANG welcome");
+    let out = meridian(&dir, &["apply", "site.yaml", "--stage-timeout", "1s"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let shown = stdout(&out);
+    assert!(
+        shown.contains("FAILED: timed out after 1s (was running `fake-tool apply --password=***`)"),
+        "{shown}"
+    );
+    assert!(shown.contains("stopped while waiting"), "{shown}");
+    assert!(
+        stderr(&out).contains("continues from the stage that failed"),
+        "{}",
+        stderr(&out)
+    );
+
+    let run = last_run(&dir);
+    let status = stdout(&meridian(&dir, &["status"]));
+    assert!(status.contains("failed (timed-out)"), "{status}");
+    assert!(status.contains("not locked"), "{status}");
+    let record =
+        fs::read_to_string(dir.join(".meridian/runs").join(&run).join("run.json")).unwrap();
+    assert!(record.contains("\"reason\":\"timed-out\""), "{record}");
+    assert!(record.contains("--stage-timeout 1s"), "{record}");
+
+    // The limit is for a tool that hangs; one that finishes is left alone.
+    write(&dir, "welcome");
+    let resumed = meridian(
+        &dir,
+        &["apply", "site.yaml", "--resume", "--stage-timeout", "1m"],
+    );
+    assert!(resumed.status.success(), "{}", stderr(&resumed));
+}
+
+#[test]
+fn ctrl_c_stops_the_run_records_it_as_interrupted_and_releases_the_lock() {
+    use std::process::Stdio;
+    let dir = scratch("ctrl-c", "HANG welcome");
+    let child = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .args(["apply", "site.yaml", "--on-failure", "rollback"])
+        .current_dir(&dir)
+        .env("MERIDIAN_PLUGIN_DIR", plugin_dirs())
+        .env_remove("MERIDIAN_STATE_DIR")
+        .env_remove("MERIDIAN_BACKEND")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("meridian starts");
+    // Wait for the second stage's tool to be waiting, which it says.
+    let runs = dir.join(".meridian/runs");
+    let waited = (0..300).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        fs::read_dir(&runs).ok().is_some_and(|entries| {
+            entries.flatten().any(|run| {
+                fs::read_to_string(run.path().join("run.json"))
+                    .is_ok_and(|text| text.contains("\"name\":\"web\""))
+            })
+        })
+    });
+    assert!(waited, "the run never reached its second stage");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    let sent = Command::new("kill")
+        .args(["-INT", &child.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(sent.success());
+    let out = child.wait_with_output().unwrap();
+    // The exit status a shell gives a command ended by Ctrl-C.
+    assert_eq!(out.status.code(), Some(130), "{}", stderr(&out));
+    let shown = stdout(&out);
+    assert!(
+        shown.contains("FAILED: interrupted: the run was stopped (was running `fake-tool apply"),
+        "{shown}"
+    );
+    let said = stderr(&out);
+    assert!(
+        said.contains("stopping: waiting for the tool to stop"),
+        "{said}"
+    );
+    assert!(
+        said.contains("was interrupted. `meridian apply --resume site.yaml`"),
+        "{said}"
+    );
+    assert!(said.contains("nothing was rolled back"), "{said}");
+
+    let run = last_run(&dir);
+    let status = stdout(&meridian(&dir, &["status"]));
+    assert!(status.contains("failed (interrupted)"), "{status}");
+    assert!(status.contains("not locked"), "{status}");
+    let record =
+        fs::read_to_string(dir.join(".meridian/runs").join(&run).join("run.json")).unwrap();
+    assert!(record.contains("\"status\":\"failed\""), "{record}");
+    assert!(record.contains("\"reason\":\"interrupted\""), "{record}");
+
+    // Resumed like any failed run, with no unlock needed.
+    write(&dir, "welcome");
+    let resumed = meridian(&dir, &["apply", "site.yaml", "--resume"]);
+    assert!(resumed.status.success(), "{}", stderr(&resumed));
+    assert!(
+        stdout(&resumed).contains(&format!("already applied by run {run}")),
+        "{}",
+        stdout(&resumed)
+    );
+}
+
+#[test]
 fn a_run_killed_mid_way_shows_as_interrupted_and_can_be_resumed() {
     let dir = scratch("interrupted", "FAIL welcome");
     assert_eq!(

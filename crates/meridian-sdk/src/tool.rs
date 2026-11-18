@@ -10,8 +10,9 @@ use std::collections::VecDeque;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::{Artifact, Log, RunError, SecretValue};
 
@@ -252,6 +253,7 @@ impl Tool {
         for (key, value) in &self.env {
             command.env(key, value);
         }
+        own_process_group(&mut command);
 
         let mut child = spawn_when_ready(&mut command).map_err(|err| RunError {
             msg: if err.kind() == std::io::ErrorKind::NotFound {
@@ -272,7 +274,10 @@ impl Tool {
         let tail = Mutex::new(Tail::default());
         let relay_stdout = self.relay_stdout;
 
-        let (out, err) = std::thread::scope(|scope| {
+        // Read until the pipes close, and meanwhile watch for the process
+        // to end or for the host to ask for the run to stop. A stopped tool
+        // closes its pipes as it dies, so the readers end too.
+        let (out, err, waited) = std::thread::scope(|scope| {
             if let (Some(mut pipe), Some(input)) = (stdin, self.stdin.as_ref()) {
                 scope.spawn(move || {
                     // A tool that exits without reading its input is not this
@@ -297,23 +302,43 @@ impl Tool {
                     tail.lock().expect("no panic holds the tail").push(line);
                 })
             });
+            let waited = wait_or_stop(&mut child, log);
             (
                 out.join().unwrap_or_default(),
                 err.join().unwrap_or_default(),
+                waited,
             )
         });
+        let tail = tail.into_inner().expect("no panic holds the tail").text();
 
-        let status = child.wait().map_err(|err| RunError {
-            msg: format!("could not wait for {}: {err}", self.program),
-            command: self.command_line(),
-            ..RunError::default()
-        })?;
+        let status = match waited {
+            Waited::Ended(status) => status,
+            Waited::Stopped(status) => {
+                return Err(RunError {
+                    msg: format!(
+                        "{} was stopped before it finished, because the run was cancelled",
+                        self.program
+                    ),
+                    command: self.command_line(),
+                    exit_code: status.and_then(|s| s.code()),
+                    output: tail,
+                    changes: Vec::new(),
+                });
+            }
+            Waited::Failed(err) => {
+                return Err(RunError {
+                    msg: format!("could not wait for {}: {err}", self.program),
+                    command: self.command_line(),
+                    ..RunError::default()
+                })
+            }
+        };
 
         Ok(Finished {
             code: status.code(),
             stdout: out,
             stderr: err,
-            tail: tail.into_inner().expect("no panic holds the tail").text(),
+            tail,
             command: self.command_line(),
         })
     }
@@ -328,6 +353,99 @@ impl Tool {
             Err(finished.into_error(what))
         }
     }
+}
+
+/// How often a running tool is looked at, for its exit and for a request to
+/// stop. Short enough that a stop feels immediate, long enough to cost
+/// nothing.
+const POLL: Duration = Duration::from_millis(50);
+
+/// How long a tool that was asked to stop has to exit on its own before it is
+/// killed outright. Long enough for a tool to release what it holds, short
+/// enough that an operator who pressed Ctrl-C is not left waiting.
+const STOP_GRACE: Duration = Duration::from_secs(10);
+
+/// How a wait for the tool ended.
+enum Waited {
+    /// The tool ran to its end.
+    Ended(std::process::ExitStatus),
+    /// The run was cancelled and the tool was stopped. The status is how it
+    /// died, when that could be read.
+    Stopped(Option<std::process::ExitStatus>),
+    Failed(std::io::Error),
+}
+
+/// Waits for the tool to end, or stops it once the host asks for the run to
+/// stop.
+fn wait_or_stop(child: &mut Child, log: &dyn Log) -> Waited {
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Waited::Ended(status),
+            Ok(None) => {}
+            Err(err) => return Waited::Failed(err),
+        }
+        if log.cancelled() {
+            return Waited::Stopped(stop(child));
+        }
+        std::thread::sleep(POLL);
+    }
+}
+
+/// Stops a tool and everything it started: a polite request first, then,
+/// after [`STOP_GRACE`], by force. Returns how it ended, when it did.
+fn stop(child: &mut Child) -> Option<std::process::ExitStatus> {
+    signal_group(child, false);
+    let deadline = Instant::now() + STOP_GRACE;
+    while Instant::now() < deadline {
+        if let Ok(Some(status)) = child.try_wait() {
+            return Some(status);
+        }
+        std::thread::sleep(POLL);
+    }
+    signal_group(child, true);
+    child.wait().ok()
+}
+
+/// Puts the tool in a process group of its own, so that it and every process
+/// it starts can be stopped together, and so that a Ctrl-C meant for
+/// `meridian` reaches the tool only as the deliberate stop that follows.
+#[cfg(unix)]
+fn own_process_group(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    command.process_group(0);
+}
+
+/// Windows has no process groups a parent can signal; the tool is stopped
+/// directly, and a child it started that ignores its parent's death is left
+/// to the operator.
+#[cfg(not(unix))]
+fn own_process_group(_command: &mut Command) {}
+
+/// Sends the tool's process group `SIGTERM`, or `SIGKILL` with `force`.
+///
+/// Through the `kill` command rather than a system call, so that this crate
+/// stays free of `unsafe`; stopping a tool is rare enough that one more
+/// process is nothing.
+#[cfg(unix)]
+fn signal_group(child: &mut Child, force: bool) {
+    let signal = if force { "-KILL" } else { "-TERM" };
+    let group = format!("-{}", child.id());
+    let sent = Command::new("kill")
+        .args([signal, "--", &group])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    if !sent {
+        // No `kill`, or the group is gone: stop the process itself.
+        let _ = child.kill();
+    }
+}
+
+#[cfg(not(unix))]
+fn signal_group(child: &mut Child, _force: bool) {
+    let _ = child.kill();
 }
 
 /// A tool that ran to the end.
@@ -568,6 +686,64 @@ mod tests {
         assert!(!format!("{tool:?}").contains("hunter2"));
         let finished = tool.run(&NoLog).unwrap();
         assert_eq!(finished.stdout, "hunter2\n");
+    }
+
+    /// A host that asks for the run to stop as soon as the tool has said
+    /// anything.
+    #[cfg(unix)]
+    #[derive(Default)]
+    struct StopAfterFirstLine(Mutex<Vec<LogLine>>);
+
+    #[cfg(unix)]
+    impl Log for StopAfterFirstLine {
+        fn line(&self, line: LogLine) {
+            self.0.lock().unwrap().push(line);
+        }
+
+        fn cancelled(&self) -> bool {
+            !self.0.lock().unwrap().is_empty()
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cancelled_run_stops_the_tool_and_what_it_started() {
+        // The shell starts a child and says which, then waits for it. Both
+        // must be gone once the run is stopped.
+        let log = StopAfterFirstLine::default();
+        let started = Instant::now();
+        let err = Tool::new("sh")
+            .args(["-c", "sleep 300 & echo $! >&2; wait"])
+            .run(&log)
+            .expect_err("a cancelled run is not a finished one");
+        assert!(
+            started.elapsed() < Duration::from_secs(60),
+            "the tool was not stopped: {:?}",
+            started.elapsed()
+        );
+        assert_eq!(
+            err.msg,
+            "sh was stopped before it finished, because the run was cancelled"
+        );
+        assert_eq!(err.command, "sh -c 'sleep 300 & echo $! >&2; wait'");
+        let pid: i32 = err
+            .output
+            .trim()
+            .parse()
+            .expect("the child's pid was printed");
+        let gone = (0..100).any(|_| {
+            // Signal 0 checks for the process and sends nothing.
+            let alive = Command::new("kill")
+                .args(["-0", &pid.to_string()])
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success());
+            if alive {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            !alive
+        });
+        assert!(gone, "the tool's child sleep {pid} is still running");
     }
 
     #[cfg(unix)]

@@ -609,6 +609,19 @@ service Runner {
   // Outputs reports the values the last apply produced, read from the tool's
   // own state, without applying anything.
   rpc Outputs(OutputsRequest) returns (OutputsResponse);
+  // Cancel asks the plugin to stop the Plan or Apply it is running: the SDK
+  // stops the tool's process and the run's stream ends with a RunError that
+  // carries what the tool had done so far. The stream is not closed by the
+  // host, so the plugin's answer is heard. Added after protocol 2 was first
+  // spoken; a host treats "unimplemented" as a plugin that cannot be asked.
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+}
+
+message CancelRequest {}
+
+message CancelResponse {
+  // Whether a Plan or Apply was running to be stopped.
+  bool was_running = 1;
 }
 
 // ImportFormat is one kind of existing configuration a plugin can read, such

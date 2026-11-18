@@ -83,7 +83,7 @@ version is still spoken, and nobody has to upgrade both at once.
 | Protocol | Added | Spoken by this build |
 |---|---|---|
 | 1 | `Emitter`: `Describe` and `Emit`. Compile only | no |
-| 2 | The plugin's category and operations in `Describe`; the `Runner` service (plan, apply, outputs) | yes |
+| 2 | The plugin's category and operations in `Describe`; the `Runner` service (plan, apply, outputs). Later additions within 2, each ignored by a side that predates it: `Describe` fields up to `settings`; `Runner.Cancel`, which stops a plan or apply (a plugin without it cannot be stopped, and `meridian` says so) | yes |
 
 When there is no version in common the plugin is not loaded, and the message
 says which side is behind:
