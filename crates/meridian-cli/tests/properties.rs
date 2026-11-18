@@ -880,13 +880,9 @@ fn model() -> impl Strategy<Value = Model> {
         any::<bool>().prop_map(Value::Bool),
         (-50i64..50).prop_map(Value::Int),
         (-50i64..50).prop_map(|n| Value::Float(n as f64 + 0.5)),
-        // Text that opens an interpolation is refused in a condition, which
-        // `tests/interpolation.rs` covers; here it would only be noise.
-        prop_oneof!["[a-z]{0,5}", "[ -~]{0,8}"]
-            .prop_filter("opens an interpolation", |text| {
-                !text.contains(INTERPOLATION)
-            })
-            .prop_map(Value::String),
+        // Any printable text, the opening of an interpolation included: in
+        // quotes in a bare condition it is text like any other.
+        prop_oneof!["[a-z]{0,5}", "[ -~]{0,8}"].prop_map(Value::String),
     ];
     let leaf = prop_oneof![
         3 => literal.prop_map(Model::Literal),
@@ -1028,6 +1024,49 @@ fn same_scalar(a: &Value, b: &Value) -> bool {
     match (number(a), number(b)) {
         (Some(x), Some(y)) => x == y,
         _ => a == b,
+    }
+}
+
+/// The case the generator found, fixed in place: quoted text that holds the
+/// opening of an interpolation, in a bare condition, is text. It was once
+/// taken for an interpolation nobody closed, and the condition refused.
+#[test]
+fn quoted_text_that_opens_an_interpolation_is_text_in_a_bare_condition() {
+    let data: BTreeMap<String, Value> = [
+        ("motd".to_owned(), Value::String(INTERPOLATION.to_owned())),
+        ("plain".to_owned(), Value::String("x".to_owned())),
+    ]
+    .into();
+    let decide = |text: String| {
+        Condition::parse(&text)
+            .unwrap_or_else(|e| panic!("{text:?} does not parse: {e}"))
+            .evaluate(&data)
+    };
+    // As it was generated: nothing here is true or false, so it is an
+    // error, and one from deciding it, not from reading it.
+    let generated = format!("null && (null || null && '{INTERPOLATION}')");
+    assert!(Condition::parse(&generated).is_ok(), "{generated}");
+    assert!(decide(generated).is_err());
+    for (text, expected) in [
+        (format!("data.motd == '{INTERPOLATION}'"), true),
+        (format!("data.motd != '{INTERPOLATION}'"), false),
+        (format!("data.plain == '{INTERPOLATION}'"), false),
+        (
+            format!("'{INTERPOLATION}' == '{INTERPOLATION}' && data.plain == 'x'"),
+            true,
+        ),
+        (
+            format!("data.plain == 'x' || data.motd == 'a {INTERPOLATION} b'"),
+            true,
+        ),
+        (format!("!(data.motd == \"{INTERPOLATION}\")"), false),
+        // Closed as well: still text, and nothing in it is worked out.
+        (
+            format!("data.motd == '{INTERPOLATION} data.plain }}}}'"),
+            false,
+        ),
+    ] {
+        assert_eq!(decide(text.clone()), Ok(expected), "{text}");
     }
 }
 

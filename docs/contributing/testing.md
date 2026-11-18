@@ -128,6 +128,11 @@ What these tests have found so far, each fixed with a test of its own:
 - A document nested a few hundred levels deep could overflow the stack of a
   thread with a small one. The limit is now 64 levels, in YAML and in JSON, and
   holds on a 1 MiB stack.
+- A condition with quoted text that holds the opening of an interpolation,
+  such as `data.motd != '${{'`, was taken for an interpolation nobody closed
+  and refused. It showed up as a test that failed about once in a few
+  thousand runs. In a bare condition that text is now text, and the case is a
+  fixed test beside the property.
 
 ### Placement: what data supplies is text
 
@@ -197,6 +202,12 @@ and name it. With no password, every row must stop the same way. And after
 `plan`, `apply` and `plan` again, the password must be in nothing printed and
 in no file the run left behind, the state directory included. To cover a new
 place, add a `Place`.
+
+One more test there is a workflow: three documents that each declare the same
+environment variable as a secret. The first stage takes the variable out of
+Meridian's environment so that no tool inherits it, and every later stage must
+still be given the secret. Writing the table found that the second stage was
+not, and stopped with "is not set".
 
 `secrets.rs` covers the providers and what each command does. The two examples
 that use secrets are tested in `examples.rs`: one is planned and applied for

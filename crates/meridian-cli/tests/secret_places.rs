@@ -470,3 +470,139 @@ fn a_secret_that_is_not_there_stops_every_place_the_same_way() {
         assert!(!text.contains("+ create"), "{}:\n{text}", place.what);
     }
 }
+
+/// Two documents of one workflow that read the same environment variable.
+/// The first stage takes the variable out of the environment so that no
+/// tool inherits it, and the second must still be able to read the secret.
+const SHARED: &str = r#"apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: network
+spec:
+  target: fake
+  secrets:
+    - name: password
+      from: env
+      key: PLACES_PASSWORD
+  resources:
+    - id: vm
+      type: file
+      params:
+        content: "10.0.0.5\n"
+    - id: hardened
+      type: file
+      when: secret.password != 'changeme'
+      params:
+        content: "hardened\n"
+  outputs:
+    - name: address
+      value: ${vm.content}
+---
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: site
+spec:
+  target: fake
+  targetHost:
+    from: inline
+    host: web01
+  secrets:
+    # The same variable, under another name.
+    - name: db_password
+      from: env
+      key: PLACES_PASSWORD
+  conditions:
+    strong: secret.db_password != 'changeme'
+  resources:
+    - id: motd
+      type: file
+      params:
+        content: "welcome\n"
+    - id: strict
+      type: file
+      when: cond.strong
+      params:
+        content: "strict\n"
+---
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: audit
+spec:
+  target: fake
+  # A third stage, left out or kept by the same secret.
+  when: secret.password != 'changeme'
+  targetHost:
+    from: inline
+    host: audit01
+  secrets:
+    - name: password
+      from: env
+      key: PLACES_PASSWORD
+  resources:
+    - id: log
+      type: file
+      params:
+        content: "audit\n"
+"#;
+
+#[test]
+fn every_stage_of_a_workflow_can_read_the_same_environment_secret() {
+    let dir = scratch(400);
+    fs::write(dir.join("site.yaml"), SHARED).unwrap();
+
+    for command in ["plan", "apply"] {
+        let strong = meridian(&dir, command, Some(STRONG));
+        let text = said(&strong);
+        assert!(strong.status.success(), "{command}:\n{text}");
+        assert!(!text.contains("is not set"), "{command}:\n{text}");
+        assert!(!text.contains(STRONG), "{command}:\n{text}");
+        if command == "plan" {
+            for created in [
+                "files/vm",
+                "files/hardened",
+                "files/motd",
+                "files/strict",
+                "files/log",
+            ] {
+                assert!(
+                    text.contains(&format!("+ create {created}")),
+                    "no {created} in:\n{text}"
+                );
+            }
+        }
+    }
+    for (path, bytes) in left_behind(&dir) {
+        assert!(
+            !holds(&bytes, STRONG),
+            "{} holds the secret",
+            path.display()
+        );
+    }
+
+    // The other answer reaches every stage as well.
+    let dir = scratch(401);
+    fs::write(dir.join("site.yaml"), SHARED).unwrap();
+    let weak = meridian(&dir, "plan", Some(DEFAULT));
+    let text = said(&weak);
+    assert!(weak.status.success(), "{text}");
+    for expected in [
+        "resource \"hardened\": secret.password != 'changeme' is false",
+        "resource \"strict\": cond.strong is false",
+        "skipped: its when (secret.password != 'changeme') is false",
+        "+ create files/vm",
+        "+ create files/motd",
+    ] {
+        assert!(text.contains(expected), "no {expected:?} in:\n{text}");
+    }
+
+    // With no variable at all, the first stage that needs it stops the run.
+    let missing = meridian(&dir, "plan", None);
+    let text = said(&missing);
+    assert_eq!(missing.status.code(), Some(1), "{text}");
+    assert!(
+        text.contains("the environment variable PLACES_PASSWORD is not set"),
+        "{text}"
+    );
+}
