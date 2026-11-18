@@ -422,9 +422,11 @@ The compiled program holds the key and never the value. Pulumi keeps a secret
 configuration value as a secret wherever it is handed on as it is: the resource input it
 becomes, the output property of the same name and a stack output of either are encrypted
 in the state and printed as `[secret]`. What a provider makes *from* it is not followed:
-a name built from a secret prefix is an ordinary output unless the resource names it in
-`resourceOptions.additionalSecretOutputs` or the stack output wraps it in `fn::secret`.
-A document that hands Pulumi a secret should say which outputs the secret shapes.
+an output property built from a secret input is an ordinary output unless the resource
+names it in `resourceOptions.additionalSecretOutputs` or the stack output wraps it in
+`fn::secret`, and a resource's ID is never a secret, so a secret should not shape one: a
+`RandomPet` whose prefix is a secret has its name in the open in the state. A document
+that hands Pulumi a secret should say which outputs the secret shapes.
 
 **How the value reaches the tool.** When a stage runs, after the stack is selected and
 before anything else, the runner runs `pulumi config set --secret
@@ -452,11 +454,10 @@ declaration is written into the program as it stands.
 
 The handover is tested against a stand-in `pulumi` that keeps what it reads on standard
 input, its arguments and its environment (`plugins/pulumi/tests/run.rs`), and against
-the real `pulumi` in CI (`plugins/pulumi/tests/real.rs`), where a secret is a pet's
-prefix: the prefix comes back as a secret output, the name made from it is a secret
-because the document asks for it, the value is in nothing Pulumi printed and in no file
-in the work directory in the open, and the settings file no longer names the key when
-the run is over.
+the real `pulumi` in CI (`plugins/pulumi/tests/real.rs`), where a secret is a keeper of
+a random string: the keepers come back as a secret output holding the value, the string
+does not, the value is in nothing Pulumi printed and in no file in the work directory in
+the open, and the settings file no longer names the key when the run is over.
 
 ## What is refused
 

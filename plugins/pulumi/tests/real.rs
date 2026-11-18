@@ -21,7 +21,7 @@ use meridian_plugin_testkit::{
 };
 use meridian_sdk::{
     Artifact, ChangeAction, Data, Emitter, Output, ParamKind, Plan, RunContext, Runner,
-    SchemaRequest, SchemaSource, SecretRef, Value,
+    SchemaRequest, SchemaSource, Value,
 };
 use meridian_target_pulumi::{Pulumi, PulumiRunner, PulumiSchemas};
 
@@ -353,19 +353,30 @@ fn a_secret_reaches_the_program_as_secret_configuration_and_is_in_nothing_kept_i
     }
     let dir = scratch(TMP, "real-secret");
     let runner = runner();
-    // The secret is a pet's prefix. Pulumi keeps the input it was given as
-    // a secret, and so the output of the same name; the name it makes from
-    // the prefix is a secret only because the document says so, with
-    // `additionalSecretOutputs`, as Pulumi does not follow a value through
-    // a provider.
-    let document = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: pets\nspec:\n  target: pulumi\n  resources:\n    - id: pet\n      type: random:index:RandomPet\n      params:\n        prefix: placeholder\n        length: 1\n        resourceOptions:\n          additionalSecretOutputs: [id]\n  outputs:\n    - name: pet_prefix\n      value: ${pet.prefix}\n    - name: pet_name\n      value: ${pet.id}\n    - name: pet_length\n      value: ${pet.length}\n";
+    // The secret is a keeper of a random string. Pulumi keeps the input it
+    // was given as a secret, and so the output of the same name, even
+    // inside a map; the string itself is nothing secret. A resource whose
+    // ID is made from the secret, such as a pet with a secret prefix,
+    // would put it in the open, as Pulumi never keeps an ID secret.
+    let document = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: pets\nspec:\n  target: pulumi\n  resources:\n    - id: tag\n      type: random:index:RandomString\n      params:\n        length: 8\n        special: false\n        keepers:\n          token: placeholder\n  outputs:\n    - name: keepers\n      value: ${tag.keepers}\n    - name: tag\n      value: ${tag.result}\n";
     let mut graph = graph_from_text("infra.yaml", document, "pulumi");
-    secret_in_param(&mut graph, "pet", "prefix", "token");
+    // The secret sits inside the keepers map, so the helper's top-level
+    // slot is moved under `token`.
+    let slot = secret_in_param(&mut graph, "tag", "keepers", "token");
+    let tag = graph.resources.iter_mut().find(|r| r.id == "tag").unwrap();
+    tag.params.insert(
+        "keepers".to_owned(),
+        Value::Map(
+            [("token".to_owned(), Value::Secret(slot))]
+                .into_iter()
+                .collect(),
+        ),
+    );
     let artifact = Pulumi.emit(&graph, &Data::new()).unwrap().artifact;
     assert!(!artifact.files["Pulumi.yaml"].contains(SECRET));
 
     let mut context = context(&dir, &[]);
-    context.secrets = secrets(&[(SecretRef::new(1), "token", SECRET)]);
+    context.secrets = secrets(&[(slot, "token", SECRET)]);
     let log = KeptLog::default();
     let fail = |what: &str, err: meridian_sdk::RunError| -> ! {
         panic!("{what}: {err}\n--- log ---\n{}", log.text().join("\n"))
@@ -373,23 +384,25 @@ fn a_secret_reaches_the_program_as_secret_configuration_and_is_in_nothing_kept_i
     let plan = runner
         .plan(&context, &artifact, &log)
         .unwrap_or_else(|e| fail("the plan", e));
-    assert_eq!(changes(&plan), ["create pet"]);
+    assert_eq!(changes(&plan), ["create tag"]);
     let applied = runner
         .apply(&context, &artifact, &log)
         .unwrap_or_else(|e| fail("the apply", e));
     // The program was given the value: it comes back as the secret output
-    // of the same name, and the name made from it starts with it. The
-    // length is nothing secret, so the masking tells the two apart.
-    let pet_prefix = output(&applied.outputs, "pet_prefix");
-    assert!(pet_prefix.sensitive, "the secret input is a secret output");
-    assert_eq!(text(pet_prefix), SECRET);
-    let pet_name = output(&applied.outputs, "pet_name");
-    assert!(pet_name.sensitive, "an output named secret is a secret");
-    assert!(
-        text(pet_name).starts_with(&format!("{SECRET}-")),
-        "the pet's name does not start with the prefix"
+    // of the same name. The string is nothing secret, so the masking tells
+    // the two apart.
+    let keepers = output(&applied.outputs, "keepers");
+    assert!(keepers.sensitive, "the secret input is a secret output");
+    let Value::Map(keepers) = &keepers.value else {
+        panic!("the keepers are not a map: {:?}", keepers.value);
+    };
+    assert_eq!(
+        keepers.get("token"),
+        Some(&Value::String(SECRET.to_owned()))
     );
-    assert!(!output(&applied.outputs, "pet_length").sensitive);
+    let tag = output(&applied.outputs, "tag");
+    assert!(!tag.sensitive);
+    assert_eq!(text(tag).len(), 8);
     // Nothing printed holds it, and nothing left in the open: the stack's
     // settings file no longer names the key, and the state holds the value
     // encrypted, as Pulumi keeps every secret.
