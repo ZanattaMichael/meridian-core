@@ -1,11 +1,7 @@
 # Outputs and hand-offs: `outputs`, `targetHost` and `imports`
 
-Resources inside a document are tied together by
-[`dependsOn`](dependson.md), [`notifies`](notifies.md) and
-[references](references.md). Documents are tied together by exactly one thing:
-a value one document has and another asks for. There are two ways to ask.
-[`targetHost`](#targethost) asks for the machine a ResourceSet configures.
-[`imports`](#imports) asks for any value, for the document's tool.
+Documents connect only through values. [`targetHost`](#targethost) takes the machine a
+ResourceSet configures. [`imports`](#imports) takes any value for the document's tool.
 
 ```mermaid
 flowchart LR
@@ -40,18 +36,9 @@ outputs:
 out.yaml:13:7: spec.outputs[1].name: duplicate output name "o" (first declared at out.yaml:12:7)
 ```
 
-**What an output is.** A promise that, once this document has been applied, its
-tool can report this value. It is not known before: an address does not exist
-until the machine does.
-
-**What it becomes.** The tool's own output where it has one (a Terraform
-`output`, a CloudFormation `Outputs` entry, a Bicep `output`). Where the tool
-has no such thing, the plugin reads the value back itself after the apply (a
-`docker inspect` path, a `kubectl get` path).
-
-**What can be read.** Whatever the tool can report about that resource after it
-exists. This is often more than a param may read, because a param is fixed
-before the apply and an output is read after it:
+An output is a value the tool reports after apply. It compiles to the tool's own output
+(a Terraform `output`, a CloudFormation `Outputs` entry, a Bicep `output`), or the plugin
+reads it back (`docker inspect`, `kubectl get`). It can read more than a param can:
 
 | Target | An output can read |
 |---|---|
@@ -64,30 +51,17 @@ before the apply and an output is read after it:
 | `docker` | a published port (`${app.port.8080}`), or a path into the container's inspection |
 | `kubernetes`, `helm` | any path into the live object, such as `${svc.status.loadBalancer.ingress[0].ip}`; `helm` also anything a template can read |
 
-**Strictness.**
-
-- An output with no value after an apply is an error, not an empty value. A
-  ResourceSet never gets an empty host.
-- Some values take time to exist (a load balancer's address). The Kubernetes
-  target waits for them, for a limited time.
-- A value the tool marks sensitive is shown as `(sensitive)` wherever Meridian
-  prints, and anything read from a Kubernetes Secret is treated as sensitive.
-
-**Where outputs are kept.** With the tool that owns them. After an apply they
-are shown and handed to the stages that asked. On a later run Meridian asks the
-tool again what its last apply produced, which is how a `plan` sees
-infrastructure that already exists. Meridian's own record under the state
-directory says only which document was applied and whether it worked.
-
-**Which targets have outputs.** The `outputs` column of the
-[capability matrix](../capability-matrix.md). Today: every infrastructure as
-code, containerization and container orchestration target. A ResourceSet has no
-`outputs` field, so configuration management targets produce none.
+- An output with no value after apply is an error.
+- The Kubernetes target waits, for a limited time, for values that take time to exist.
+- Sensitive values show as `(sensitive)`; anything from a Kubernetes Secret is sensitive.
+- Outputs stay with the tool. A later run asks the tool again.
+- Every infrastructure as code, containerization and container orchestration target has
+  outputs ([capability matrix](../capability-matrix.md)); configuration management targets
+  do not.
 
 ## `targetHost`
 
-Only in a ResourceSet: `spec.targetHost`, the machine the document configures.
-A ResourceSet cannot be compiled without one.
+Only in a ResourceSet, and required to compile.
 
 ### A machine that already exists
 
@@ -101,8 +75,6 @@ targetHost:
 |---|---|---|
 | `from` | yes | `inline` |
 | `host` | yes | a host name, an address, or `user@host`, as you would give it to the tool: letters, digits and `. - _ : @ [ ] %`, not starting with `-` |
-
-The document needs no other document. It compiles straight away.
 
 ### A machine another document creates
 
@@ -145,8 +117,7 @@ one workflow, and nowhere else.
 
 ### What the host is used for
 
-The plugin writes the host where its tool expects it, and the tool reaches the
-machine its own way, with its own credentials:
+The tool reaches the host with its own credentials:
 
 | Target | The host becomes |
 |---|---|
@@ -159,10 +130,8 @@ machine its own way, with its own credentials:
 
 ## `imports`
 
-In either kind of document: `spec.imports`, values handed to the document's
-tool from other documents of the workflow. This is how the machine a document
-creates is given the user-data another document compiles to, and how one
-Infrastructure document uses what another created.
+`spec.imports`, in either kind: values from other documents, handed to this document's
+tool. For example, user-data for a machine, or an id another document created.
 
 ```mermaid
 flowchart LR
@@ -228,16 +197,12 @@ spec:
 | Before it is known | the importing document waits only if the other document itself cannot compile yet | the importing document is **deferred**, as a ResourceSet waiting on a host is |
 | `plan` before anything is applied | planned, with the value | deferred |
 
-A file is imported as it compiles, not as it was last applied. If the other
-document has changed since its last apply, the import already carries the
-change, and the run applies the other document first.
+A file is imported as it compiles now; the run applies its document first.
 
 ### How the value arrives
 
-The value goes to the document's tool under the import's name. Meridian never
-splices it into the document or compiled files, so a secret imported into a
-Terraform document is not written into `main.tf.json`; it arrives as a
-Terraform variable.
+The value reaches the tool under the import's name, as a tool variable. It is never
+written into the compiled files.
 
 | Target | The import `user_data` arrives as | The document declares |
 |---|---|---|
@@ -248,28 +213,22 @@ Terraform variable.
 | `arm` | the template parameter `user_data` (`--parameters`) | a `parameter`; one Meridian is given no value for is left to `az` |
 | every other target | refused | |
 
-A string is passed as it is. A number, a boolean, a list or a map is passed as
-JSON.
+Strings pass as they are; other values as JSON.
 
-A target that has no way to hand its tool a value refuses a document that
-imports, when it is compiled:
+A target without inputs refuses an import at compile:
 
 ```
 the document imports "user_data", and target "ansible" has no way to hand a value from another document to its tool; remove spec.imports, or use a target that takes inputs
 ```
 
-The [capability matrix](../capability-matrix.md) has an `inputs` column, and
-`meridian plugins` lists `inputs` among what a plugin can do.
+See the `inputs` column of the [capability matrix](../capability-matrix.md).
 
-A ResourceSet whose host comes from an Infrastructure document is also handed
-every output of that document, under the output's name. An import of the same
-name takes its place.
+A ResourceSet whose host comes from an Infrastructure document also gets every output of
+that document by name, unless an import has the same name.
 
 ### Order
 
-A document runs after every document it imports from, and after the one its
-`targetHost` comes from. Nothing else changes the order, so a workflow without
-imports runs exactly as before.
+A document runs after every document it imports from and its `targetHost` source.
 
 ```mermaid
 flowchart LR
@@ -280,22 +239,15 @@ flowchart LR
   [selector](index.md#labels-and-selectors). A file imported from it is compiled
   for the purpose but nothing is applied; an output imported from it is read
   from its last apply.
-- Documents that wait on each other cannot be ordered. The common case: a
-  machine created with a bootstrap document's user-data, where that bootstrap
-  document's `targetHost` is the machine's address. Give the bootstrap document
-  an `inline` host instead: cloud-init runs on the machine itself and does not
-  need to reach it.
+- A cycle is refused. Common case: a bootstrap document whose `targetHost` is the machine
+  its user-data creates. Give it an `inline` host.
 
 ### Secrets
 
-- `sensitive: true` masks the value in everything Meridian prints, including
-  tool output, in the form the tool usually prints it.
-- An output its tool marks sensitive stays sensitive when it is imported,
-  without `sensitive: true`.
-- A value is never recorded. The [run's record](../state.md) names the steps
-  and never holds an import's value.
-- Mark the tool's own variable sensitive too (`sensitive: true` on a Terraform
-  `variable`), so the tool keeps it out of its plan.
+- `sensitive: true` masks the value in everything Meridian prints, tool output included.
+- A sensitive output stays sensitive when imported.
+- Values are never [recorded](../state.md).
+- Mark the tool's variable sensitive too (`sensitive: true` on a Terraform `variable`).
 
 ### Rules
 
@@ -317,8 +269,7 @@ flowchart LR
 | the file is one the other document compiles to | `plan`, `apply` | `import "user_data" is the file "userdata" of ResourceSet "bootstrap", which compiles to no file of that name (it compiles to: meta-data, user-data)` |
 | the output was produced | `apply` | `Infrastructure "network" did not produce the output "vpc_id" that import "vpc_id" needs (it produced: ...)` |
 
-A whole workflow, compiled by the tests on every change:
-[`examples/workflow/bootstrap-then-machine.yaml`](../../../examples/workflow/bootstrap-then-machine.yaml).
+Example: [`examples/workflow/bootstrap-then-machine.yaml`](../../../examples/workflow/bootstrap-then-machine.yaml).
 
 ## The life of a hand-off
 
@@ -356,16 +307,11 @@ site (ResourceSet, target ansible)
 
 ## What cannot be expressed yet
 
-- An import reaches a tool variable, on targets that have variables. It cannot
-  go straight into a param with `${...}`, and configuration management targets
-  such as Ansible cannot import yet.
-  Reading another document's output inside any value is part of the
+- An import reaches only a tool variable, not a param through `${...}`. Configuration
+  management targets cannot import. See the
   [language expansion](../../plans/language-expansion.md).
-- A ResourceSet compiles to files, and those can be imported; it has no
-  `outputs` of its own to import.
-- A ResourceSet configures one host. A fleet is several documents, or the
-  tool's own inventory outside Meridian.
+- A ResourceSet has no outputs; its compiled files can be imported.
+- A ResourceSet configures one host.
 
-The reasons for the two-stage shape are in
-[the two-stage architecture](../../concepts/two-stage-architecture.md), and a
-full walk through in [a two-stage workflow](../../quickstart/first-two-stage.md).
+See [the two-stage architecture](../../concepts/two-stage-architecture.md) and
+[a two-stage workflow](../../quickstart/first-two-stage.md).
