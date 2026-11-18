@@ -1,30 +1,18 @@
 # The MCP server
 
 `meridian mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
-server. An AI client (Claude Desktop, Claude Code, Cursor, VS Code) starts it,
-and the model calls its tools to look up what exists, draft a document, learn
-exactly what is wrong and what would be accepted, and correct it. It speaks the
-protocol on stdin and stdout, needs no network or account, and is the compiler:
-it accepts exactly what `meridian compile` accepts.
+server on stdin and stdout. A model uses its tools to look up types, draft a document,
+see what is wrong and fix it. It accepts exactly what `meridian compile` accepts.
 
-It is for models that have never seen a Meridian document. There is no body
-of public Meridian files for a model to have learned from, so an unaided
-model writes plausible, wrong YAML. With the server a small model does not
-need to know the language: it asks.
-
-- It is **read-only by default**. `compile` emits in memory and writes
-  nothing; `plan` is off unless the server is started with `--allow-plan`;
-  `apply`, `rollback` and `destroy` are not offered. A person applies.
-- It **never fetches a secret**. A document is compiled with no data, as the
-  [language server](language-server.md#errors-and-warnings) compiles it.
-- It makes **no outbound connection**, and a file argument is confined to
-  the directory the server was started in.
+- **Read-only by default.** `plan` needs `--allow-plan`; there is no `apply`, `rollback` or
+  `destroy`.
+- **No secrets fetched**; documents compile with no data.
+- **No outbound connections**; file arguments stay under the start directory.
 
 ## Setting up a client
 
-The command is `meridian mcp`. The `meridian-target-*` plugins must be beside
-the `meridian` binary or given with `--plugin-dir`. Start it in the project
-directory so it reads the tool schemas cached by `meridian schema sync`.
+Run `meridian mcp` in the project directory, with plugins beside `meridian` or in
+`--plugin-dir`.
 
 **Claude Code**
 
@@ -60,8 +48,7 @@ and any client that takes the common JSON shape:
 }
 ```
 
-To offer `plan`, add `"--allow-plan"` to the arguments; see
-[Safety](#safety) first.
+For `plan`, add `"--allow-plan"` ([Safety](#safety)).
 
 ### Options
 
@@ -72,16 +59,13 @@ To offer `plan`, add `"--allow-plan"` to the arguments; see
 | `--state-dir DIR` | where `meridian schema sync` cached the tool schemas, relative to the root; `.meridian` by default |
 | `--plugin-dir`, `--plugin-signatures`, `--trusted-key` | the plugin options every command takes |
 
-When no plugin is found the server still runs: documents are checked against
-the language only, `list_targets` is empty, and the server says so in its
-instructions to the client.
+With no plugins, documents are checked against the language only and `list_targets` is
+empty.
 
 ## The tools
 
-Designed for small models: few tools, flat arguments, short structured
-results, and every error carrying its own fix. Each result is returned both
-as structured content and as the same JSON in a text block, so a client that
-shows only text sees the same thing.
+Few tools, flat arguments, and a fix with every error. Results are structured content plus
+the same JSON as text.
 
 | Tool | What it does | Notes |
 |---|---|---|
@@ -98,15 +82,12 @@ shows only text sees the same thing.
 | `import` | turns a tool's own configuration into documents, with what could not be carried over | [`meridian import`](../reference/cli.md#import) on text; `fileName` tells the importer the format |
 | `plan` | asks the tool what applying a file would change | **off unless** `--allow-plan`; runs `meridian plan --output json` on the file and returns [its object](../reference/cli-json.md#compile-plan-apply-drift-rollback) |
 
-A document is given as text (`document`) or as a file under the root
-(`file`); a file may hold several documents separated by `---`.
+Give `document` (text) or `file` (under the root, may hold several documents).
 
 ### One shape for every diagnostic
 
-Small models fail on prose, so every tool that can refuse returns a list of
-the same object. The fields it shares with
-[`meridian lint --output json`](../reference/cli-json.md#lint) have the same
-names and meanings there.
+Every refusal is a list of one object shape, sharing fields with
+[`meridian lint --output json`](../reference/cli-json.md#lint).
 
 ```json
 {
@@ -135,64 +116,39 @@ names and meanings there.
 | `fix` | `{line, column, endLine, endColumn, replace}`: a replacement the linter knows is safe, with `fixable: true` |
 | `explain` | the `explain` call to make for more |
 
-Two codes are the server's own. `needs-data` (info): the document reads
-`data.<key>` or a secret in a condition or interpolation, so it was checked
-against the language only, as the language server does
-(see [decision 0003](../decisions/0003-editors-treat-every-when-as-true.md)).
-`import-source` says the importer could not read the source text.
+Server codes: `needs-data` (the document reads data or a secret, so only the language was
+checked; [decision 0003](../decisions/0003-editors-treat-every-when-as-true.md)) and
+`import-source` (the source could not be read).
 
 ### The prompt and the resources
 
-- The prompt `authoring-guide` is the loop to follow, in under a page: pick
-  a target, read an example, list and describe the types, draft, `validate`,
-  `compile`, fix from `accepted`, repeat, then `lint` and `format`. It takes
-  an optional `target` and `task`. Small models follow a stated procedure much
-  better than they infer one, so clients should attach it.
-- The resources are the [DSL reference](../reference/dsl/index.md) pages, the
+- The prompt `authoring-guide` (optional `target` and `task`) gives the loop: pick a
+  target, read an example, describe types, draft, `validate`, `compile`, fix, `lint`,
+  `format`. Attach it.
+- Resources: the [DSL reference](../reference/dsl/index.md), the
   [capability matrix](../reference/capability-matrix.md), the
-  [lint rules](../reference/lint.md) and every target's page, embedded in the
-  binary and served as `meridian://docs/<path>`, such as
-  `meridian://docs/reference/dsl/resources` and `meridian://docs/targets/ansible`.
+  [lint rules](../reference/lint.md) and target pages, as `meridian://docs/<path>`
+  (`meridian://docs/targets/ansible`).
 
 ## Safety
 
-- **Read-only.** `compile` runs the plugin's emitter in memory, the same call
-  the language server makes on each keystroke; nothing is written to `--out` or
-  the state directory. There are no `apply`, `rollback` or `destroy` tools.
-  `plan` is opt-in because it runs the real tool, takes the project's
-  [lock](../concepts/run-safety.md) and writes a run record. When allowed, it
-  runs the `meridian` binary with `--output json`, so the model sees exactly
-  what `meridian plan` prints.
-- **Secrets.** Documents are compiled with no data and no secret fetched: a
-  compile request reads no environment variable, opens no file and runs no
-  `exec` command. A document that reads a secret or data is checked against the
-  language and reported as `needs-data`. Values a model writes into a document
-  are its own; the `literal-secret` lint flags one that looks like a password.
-- **No outbound connections**, in keeping with the
-  [observability plan](../plans/observability.md#4-telemetry). The server
-  is a local process the client starts; it has no hosted mode.
-- **Paths.** `file` and `plan` arguments are resolved under the root and
-  refused outside it, through symbolic links too.
-- **Size.** A document argument is refused past 512,000 characters; lists are
-  paged; an emitted file, an example and a page are cut with a count of what
-  was left out.
+- **Read-only.** `compile` emits in memory. `plan` runs the real tool, takes the
+  [lock](../concepts/run-safety.md) and writes a run record, so it is opt-in; it runs
+  `meridian plan --output json`.
+- **Secrets.** A compile reads no environment, file or `exec`. The `literal-secret` lint
+  flags passwords a model writes.
+- **No outbound connections** ([observability plan](../plans/observability.md#4-telemetry)).
+- **Paths** are confined to the root, through symlinks too.
+- **Size.** Documents over 512,000 characters are refused; long results are paged or cut.
 
-The design and its alternatives are in
-[decision 0035](../decisions/0035-the-mcp-server-is-a-read-only-subcommand.md).
+See [decision 0035](../decisions/0035-the-mcp-server-is-a-read-only-subcommand.md).
 
 ## How we know it works
 
-The server is worth shipping if a small model does clearly better with it than
-without. That is measured, not assumed: a set of plain-language tasks sits under
-[`tools/mcp_eval/`](https://github.com/ZanattaMichael/meridian-core/tree/main/tools/mcp_eval),
-each with its target, the resource types a correct answer uses, and a compile
-check. `tools/mcp_eval/check.py` checks a directory of answers through the
-server itself, so it needs no model access and can score any client. Running
-the tasks needs the model, so it runs on demand, not in CI. Recorded results
-will go here: the share that compiled, the share that used the expected types,
-and the number of turns.
+Tasks in
+[`tools/mcp_eval/`](https://github.com/ZanattaMichael/meridian-core/tree/main/tools/mcp_eval)
+measure whether a small model does better with the server; `check.py` scores answers. They
+run on demand, not in CI. No results are recorded yet.
 
-The protocol itself is tested in CI: `crates/meridian-mcp/tests/protocol.rs`
-speaks to the server with real plugins loaded in process, and
-`crates/meridian-cli/tests/mcp.rs` starts `meridian mcp` as a client would and
-compiles and plans against a plugin binary.
+CI tests the protocol in `crates/meridian-mcp/tests/protocol.rs` and
+`crates/meridian-cli/tests/mcp.rs`.
