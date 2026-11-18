@@ -207,9 +207,18 @@ impl Emitter for Arm {
     }
 
     fn supported_resource_types(&self) -> Vec<String> {
-        ["<Namespace>/<type>", "deployment", "parameter"]
-            .map(str::to_owned)
-            .to_vec()
+        [
+            "<Namespace>/<type>",
+            "address",
+            "deployment",
+            "firewall",
+            "network",
+            "parameter",
+            "subnet",
+            "vm",
+        ]
+        .map(str::to_owned)
+        .to_vec()
     }
 
     /// Resource Manager cannot act on one resource because another changed,
@@ -242,7 +251,17 @@ impl Emitter for Arm {
         Category::InfrastructureAsCode
     }
 
+    /// The common infrastructure types, described for editors. Azure's own
+    /// types come from `meridian schema sync`.
+    fn resource_schemas(&self) -> Vec<meridian_sdk::ResourceSchema> {
+        meridian_target_bicep::common_schemas()
+    }
+
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        // The common types become Azure resources first, written the way a
+        // template writes them, so every later stage sees Azure types only.
+        let graph =
+            &meridian_target_bicep::lower_common(graph, meridian_target_bicep::Dialect::Arm, NAME)?;
         // A secret in a param is written as a reference to a securestring
         // parameter, which the runner gives its value from a private file.
         refuse_secret_in(graph, &["deployment", "parameter"], "the deployment's settings are the command line `az` is given and a parameter's declaration is written into the template")?;

@@ -89,7 +89,7 @@ would be a worse one. The resource's `type` is the tool's own type and its
 
 **Five common infrastructure types sit beside the native ones.** `network`,
 `subnet`, `firewall`, `address` and `vm` mean the same on every cloud, and
-`terraform` and `opentofu` (on AWS and Azure) and `bicep` turn each into the cloud's own
+`terraform` and `opentofu` (on AWS and Azure), `cloudformation`, `bicep` and `arm` turn each into the cloud's own
 resources. A document mixes them with native types; see
 [the common infrastructure types](../reference/dsl/common-infrastructure-types.md).
 

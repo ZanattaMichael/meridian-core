@@ -282,6 +282,7 @@ fn aws(r: &Resource, graph: &ResourceGraph, state: &mut State) -> Result<Expansi
     let id = r.id.as_str();
     Ok(match r.r#type.as_str() {
         "network" => Expansion {
+            order: Vec::new(),
             resources: vec![primary(
                 r,
                 "aws_vpc",
@@ -356,6 +357,7 @@ fn aws(r: &Resource, graph: &ResourceGraph, state: &mut State) -> Result<Expansi
                 resources.push(primary(r, "aws_subnet", body));
             }
             Expansion {
+                order: Vec::new(),
                 resources,
                 outputs: outputs(&[("id", format!("${{{id}.id}}"))]),
             }
@@ -420,6 +422,7 @@ fn aws(r: &Resource, graph: &ResourceGraph, state: &mut State) -> Result<Expansi
                 ));
             }
             Expansion {
+                order: Vec::new(),
                 resources,
                 outputs: outputs(&[("id", format!("${{{id}.id}}"))]),
             }
@@ -434,6 +437,7 @@ fn aws(r: &Resource, graph: &ResourceGraph, state: &mut State) -> Result<Expansi
                 ));
             }
             Expansion {
+                order: Vec::new(),
                 resources: vec![primary(
                     r,
                     "aws_eip",
@@ -551,6 +555,7 @@ fn aws_vm(r: &Resource) -> Result<Expansion, CompileError> {
         None => format!("${{{id}.public_ip}}"),
     };
     Ok(Expansion {
+        order: Vec::new(),
         resources,
         outputs: outputs(&[
             ("id", format!("${{{id}.id}}")),
@@ -643,6 +648,7 @@ fn azure(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError>
             );
             azure_tags(r, &mut body);
             Expansion {
+                order: Vec::new(),
                 resources: vec![primary(r, "azurerm_virtual_network", body)],
                 outputs: outputs(&[("id", format!("${{{id}.id}}"))]),
             }
@@ -679,6 +685,7 @@ fn azure(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError>
                 azure_place(r, graph, None)?,
             );
             Expansion {
+                order: Vec::new(),
                 resources: vec![primary(r, "azurerm_subnet", body)],
                 outputs: outputs(&[("id", format!("${{{id}.id}}"))]),
             }
@@ -718,6 +725,7 @@ fn azure(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError>
                 ));
             }
             Expansion {
+                order: Vec::new(),
                 resources,
                 outputs: outputs(&[("id", format!("${{{id}.id}}"))]),
             }
@@ -733,6 +741,7 @@ fn azure(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError>
             );
             azure_tags(r, &mut body);
             Expansion {
+                order: Vec::new(),
                 resources: vec![primary(r, "azurerm_public_ip", body)],
                 outputs: outputs(&[
                     ("address", format!("${{{id}.ip_address}}")),
@@ -911,6 +920,7 @@ fn azure_vm(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileErr
         reads.push(("publicAddress", format!("${{{address}.ip_address}}")));
     }
     Ok(Expansion {
+        order: Vec::new(),
         resources,
         outputs: outputs(&reads),
     })

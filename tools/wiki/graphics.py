@@ -697,24 +697,25 @@ def common_types() -> str:
     rows = [("network", "cidr"), ("subnet", "network, cidr, public"), ("firewall", "network, rules"), ("address", ""), ("vm", "subnet, size, image, sshKey")]
     for i, (name, params) in enumerate(rows):
         y = 60 + i * 80
-        p.append(card(40, y, 280, 64, f"type: {name}", [params] if params else ["a fixed public IP"], IAC, 16, 12.5, True))
+        p.append(card(40, y, 250, 64, f"type: {name}", [params] if params else ["a fixed public IP"], IAC, 16, 12.5, True))
     cols = [
         ("terraform · aws", ["aws_vpc", "aws_subnet + routes", "aws_security_group + rules", "aws_eip", "aws_instance + key, ami"]),
+        ("cloudformation", ["AWS::EC2::VPC", "AWS::EC2::Subnet + routes", "AWS::EC2::SecurityGroup", "AWS::EC2::EIP", "AWS::EC2::Instance + key"]),
         ("terraform · azure", ["azurerm_virtual_network", "azurerm_subnet", "azurerm_network_security_group", "azurerm_public_ip", "azurerm_linux_virtual_machine"]),
-        ("bicep", ["virtualNetworks", "virtualNetworks/subnets", "networkSecurityGroups", "publicIPAddresses", "virtualMachines + nic"]),
+        ("bicep · arm", ["virtualNetworks", "virtualNetworks/subnets", "networkSecurityGroups", "publicIPAddresses", "virtualMachines + nic"]),
     ]
     for c, (title, natives) in enumerate(cols):
-        x = 380 + c * 270
+        x = 340 + c * 215
         p.append(heading(x, 40, title, IAC))
         for i, native in enumerate(natives):
             y = 60 + i * 80
-            p.append(rect(x, y + 10, 255, 44, TILE, TILE_EDGE))
-            p.append(text(x + 12, y + 37, native, 11.5, 400, TEXT_SOFT, "start", mono=True))
+            p.append(rect(x, y + 10, 205, 44, TILE, TILE_EDGE))
+            p.append(text(x + 12, y + 37, native, 10, 400, TEXT_SOFT, "start", mono=True))
     for i in range(5):
         y = 92 + i * 80
-        p.append(flow(f"M320 {y}C350 {y} 350 {y} 380 {y}", IAC, delay=i * 0.35, seconds=2.4))
+        p.append(flow(f"M290 {y}C315 {y} 315 {y} 340 {y}", IAC, delay=i * 0.35, seconds=2.4))
     p.append(caption(W, H, "The same outputs on every cloud: id, privateAddress, publicAddress. What a cloud cannot express is refused, never dropped."))
-    return doc(W, H, "The common infrastructure types: network, subnet, firewall, address and vm written once, and the native resources Terraform for AWS, Terraform for Azure and Bicep compile each of them to", "".join(p))
+    return doc(W, H, "The common infrastructure types: network, subnet, firewall, address and vm written once, and the native resources Terraform for AWS, CloudFormation, Terraform for Azure, and Bicep and ARM compile each of them to", "".join(p))
 
 
 def schema_bundles() -> str:

@@ -1,0 +1,35 @@
+{
+  "location": "",
+  "mode": "Incremental",
+  "name": "web-arm",
+  "parameters": {},
+  "resourceGroup": "web-prod",
+  "resources": {
+    "net": {
+      "name": "net",
+      "type": "Microsoft.Network/virtualNetworks"
+    },
+    "vm": {
+      "name": "vm",
+      "type": "Microsoft.Compute/virtualMachines"
+    },
+    "vm_nic": {
+      "name": "vm-nic",
+      "type": "Microsoft.Network/networkInterfaces"
+    },
+    "web": {
+      "name": "[format('{0}/web', 'net')]",
+      "type": "Microsoft.Network/virtualNetworks/subnets"
+    },
+    "web_fw": {
+      "name": "web_fw",
+      "type": "Microsoft.Network/networkSecurityGroups"
+    },
+    "web_ip": {
+      "name": "web_ip",
+      "type": "Microsoft.Network/publicIPAddresses"
+    }
+  },
+  "scope": "resourceGroup",
+  "subscription": ""
+}
