@@ -11,12 +11,15 @@ on:
   pull_request:
     paths:
       - 'crates/meridian-module/**'
+      - 'crates/meridian-tooling/src/bundles.rs'
+      - 'crates/meridian-tooling/src/schemas.rs'
       - 'crates/meridian-signing/**'
       - 'crates/meridian-secret/**'
       - 'crates/meridian-cli/**'
       - 'crates/meridian-ir/**'
       - 'examples/modules/**'
       - 'tools/real_registry_test.sh'
+      - 'tools/real_schema_registry_test.sh'
       - 'Cargo.lock'
       - '.github/workflows/modules.yml'
 
@@ -64,3 +67,6 @@ jobs:
 
       - name: Publish, install, verify and compile
         run: tools/real_registry_test.sh "$PWD/target/debug/meridian"
+
+      - name: Publish a signed schema bundle and sync a project from it
+        run: tools/real_schema_registry_test.sh "$PWD/target/debug/meridian"

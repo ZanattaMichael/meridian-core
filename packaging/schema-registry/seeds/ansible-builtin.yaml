@@ -1,0 +1,14 @@
+# ansible-core's own modules. The job installs ansible-core at @VERSION@.
+apiVersion: meridian/v1
+kind: ResourceSet
+metadata:
+  name: seed
+spec:
+  target: ansible
+  targetHost:
+    from: inline
+    host: localhost
+  resources:
+    - id: seed
+      type: ansible.builtin.ping
+      params: {}

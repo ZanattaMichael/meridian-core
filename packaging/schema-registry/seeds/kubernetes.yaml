@@ -1,0 +1,18 @@
+# The cluster the job starts with kind, at the version being built. Every
+# kind its API server serves is listed; --all-types describes each.
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: seed
+spec:
+  target: kubernetes
+  resources:
+    - id: cluster
+      type: cluster
+      params:
+        context: kind-schemas
+    - id: seed
+      type: apps/v1/Deployment
+      params:
+        metadata:
+          name: seed

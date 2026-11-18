@@ -618,12 +618,43 @@ are completed and checked without the editor ever running a tool. `--target`
 syncs one target; `--check` changes nothing and exits `1` if any cache is
 missing or is not what the lock records; `--no-lock` leaves the lock alone.
 
+`--locked` uses only what the lock pins, and fails rather than choose
+anything new; `--all-types` describes every type of the providers, packages
+or cluster in use, not only the documents' types, for packing a bundle;
+`--prefer bundles|tool` says whether a project whose `meridian.yaml` names
+schema registries (`spec.schemas`) takes its schemas from their signed
+bundles first (the default) or always from the tools; `--schema-signatures
+off|warn|require` says how strict to be about a bundle's signature.
+
+`schema update` takes the same paths and chooses the schema bundles again,
+the newest that describe what the documents use, moving the lock to them.
+
 `schema status` shows what is cached for each target and how it stands
 against the lock, as text or with `--json` one object per line. `schema
 clean` removes the cache of the targets named, or of every target, and their
 records in the lock.
 
 Full description: [Tool schemas](../tooling/schema-sync.md).
+
+### `schema pack`, `schema sign`, `schema push`, `schema fetch`
+
+Make and move [schema bundles](../tooling/schema-bundles.md): one target's
+tool schemas at one set of pins, signed and published to an OCI registry so
+that other machines need no tool.
+
+```
+meridian schema pack terraform --name hashicorp-aws --version 5.60.0 [--prefix aws_]... [--key FILE] [--out FILE]
+meridian schema sign FILE --key FILE [--out FILE]
+meridian schema push FILE ghcr.io/acme/meridian-schemas [--credential NAME] [--insecure] [--no-index]
+meridian schema fetch oci://ghcr.io/acme/meridian-schemas/terraform/hashicorp-aws:5.60.0 [PATHS]... [--no-lock]
+```
+
+| Command | Does |
+|---|---|
+| `pack` | writes the target's cache as a bundle archive (default `.meridian/schemas/packed/<target>-<name>-<version>.tar.gz`); `--prefix` keeps only types whose names start with the text; `--key` signs it |
+| `sign` | signs a packed bundle, writing it again with `meridian.sig` inside |
+| `push` | publishes it to `<registry>/<target>/<name>:<version>` (or a `file://DIR` registry) and lists it in the registry's index; a version is published once |
+| `fetch` | writes a target's cache from one bundle, by `oci://` reference or file, checks its signature by `--schema-signatures` or `spec.schemas.signatures`, and records it in the lock |
 
 ### `lsp`
 

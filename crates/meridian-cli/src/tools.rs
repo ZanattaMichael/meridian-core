@@ -15,6 +15,7 @@ use meridian_tooling::schemas::{self, Cached, Freshness, Store};
 use meridian_tooling::{fmt, jsonschema, lint};
 
 use crate::output::{body, emit, json_output};
+use crate::schema_bundles::{self, BundleNaming, FromBundles, Resolve};
 use crate::{apply_sets, count, read_data, registry, trusted_keys, Failure, PluginDirs};
 
 #[derive(Args)]
@@ -91,27 +92,111 @@ pub struct SchemaArgs {
     state_dir: PathBuf,
 }
 
+/// Where `sync` takes a target's schemas from first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum Prefer {
+    /// Signed schema bundles from the registries spec.schemas names, and the
+    /// tool only for a target no bundle set describes
+    Bundles,
+    /// The installed tool, always
+    Tool,
+}
+
+#[derive(Args)]
+pub struct SyncOptions {
+    /// Files to read, or directories to search for Meridian documents
+    #[arg(required = true)]
+    paths: Vec<PathBuf>,
+    #[command(flatten)]
+    plugins: PluginDirs,
+    /// Sync this target only
+    #[arg(long, value_name = "TARGET")]
+    target: Option<String>,
+    /// A YAML or JSON file of values that `when` conditions read
+    #[arg(long, value_name = "FILE")]
+    data: Vec<PathBuf>,
+    /// One value for `when` conditions, as in `--set env=prod`
+    #[arg(long, value_name = "KEY=VALUE")]
+    set: Vec<String>,
+    /// Where the cache is written: `<DIR>/schemas/<target>.json`
+    #[arg(
+        long,
+        value_name = "DIR",
+        env = "MERIDIAN_STATE_DIR",
+        default_value = ".meridian"
+    )]
+    state_dir: PathBuf,
+    /// Leave meridian.lock alone
+    #[arg(long)]
+    no_lock: bool,
+    /// Where to take schemas from first: bundles (from the registries
+    /// spec.schemas in meridian.yaml names, falling back to the tool) or
+    /// tool. Without a registry named, bundles means the tool
+    #[arg(
+        long,
+        value_enum,
+        default_value = "bundles",
+        env = "MERIDIAN_SCHEMA_PREFER"
+    )]
+    prefer: Prefer,
+    /// What to do about schema bundle signatures: off, warn or require.
+    /// Defaults to spec.schemas.signatures in meridian.yaml, else off
+    #[arg(long, value_name = "POLICY", env = "MERIDIAN_SCHEMA_SIGNATURES")]
+    schema_signatures: Option<SignaturePolicy>,
+}
+
 #[derive(Subcommand)]
 pub enum SchemaCommand {
-    /// Ask each target's installed tool for the schemas of the resource
-    /// types the documents use, and cache them under the state directory
-    /// for editors, lint and the JSON Schema
+    /// Get the schemas of the resource types the documents use, from signed
+    /// schema bundles or by asking each target's installed tool, and cache
+    /// them under the state directory for editors, lint and the JSON Schema
     Sync {
-        /// Files to read, or directories to search for Meridian documents
-        #[arg(required = true)]
-        paths: Vec<PathBuf>,
         #[command(flatten)]
-        plugins: PluginDirs,
-        /// Sync this target only
-        #[arg(long, value_name = "TARGET")]
-        target: Option<String>,
-        /// A YAML or JSON file of values that `when` conditions read
+        options: SyncOptions,
+        /// Change nothing; fail if any cache is missing or is not what
+        /// meridian.lock records. For CI
+        #[arg(long, conflicts_with = "locked")]
+        check: bool,
+        /// Use only what meridian.lock pins: the bundles it names, or for a
+        /// target synced from its tool, the same tool and pins. For CI
+        #[arg(long)]
+        locked: bool,
+        /// Describe every type of the providers, packages or cluster the
+        /// documents use, not only the types they write. For building a
+        /// schema bundle with `meridian schema pack`; the cache can be large
+        #[arg(long)]
+        all_types: bool,
+    },
+    /// Choose the schema bundles again, the newest that describe what the
+    /// documents use, and move meridian.lock to them
+    Update {
+        #[command(flatten)]
+        options: SyncOptions,
+    },
+    /// Pack one target's cache, as `schema sync` wrote it, into a schema
+    /// bundle: an archive a registry stores, optionally signed
+    Pack {
+        /// The target whose cache to pack
+        target: String,
+        /// The bundle's name within the target, such as hashicorp-aws
+        #[arg(long, value_name = "NAME")]
+        name: String,
+        /// The bundle's version, such as 5.60.0 or 2026-11-18
+        #[arg(long, value_name = "VERSION")]
+        version: String,
+        /// The file to write. Defaults to
+        /// `<DIR>/schemas/packed/<target>-<name>-<version>.tar.gz`
+        #[arg(short, long, value_name = "FILE")]
+        out: Option<PathBuf>,
+        /// Sign the bundle with this secret key, from `meridian signing
+        /// keygen`
         #[arg(long, value_name = "FILE")]
-        data: Vec<PathBuf>,
-        /// One value for `when` conditions, as in `--set env=prod`
-        #[arg(long, value_name = "KEY=VALUE")]
-        set: Vec<String>,
-        /// Where the cache is written: `<DIR>/schemas/<target>.json`
+        key: Option<PathBuf>,
+        /// Pack only the types whose names start with this, such as
+        /// community.general. for one Ansible collection; may be given more
+        /// than once
+        #[arg(long, value_name = "TEXT")]
+        prefix: Vec<String>,
         #[arg(
             long,
             value_name = "DIR",
@@ -119,13 +204,62 @@ pub enum SchemaCommand {
             default_value = ".meridian"
         )]
         state_dir: PathBuf,
-        /// Change nothing; fail if any cache is missing or is not what
-        /// meridian.lock records. For CI
+    },
+    /// Sign a packed schema bundle, writing it again with its signature in
+    /// it. For a publisher whose build and signing are separate steps
+    Sign {
+        /// The file `meridian schema pack` wrote
+        file: PathBuf,
+        /// The secret key to sign with, from `meridian signing keygen`
+        #[arg(long, value_name = "FILE")]
+        key: PathBuf,
+        /// Where to write the signed bundle. Defaults to the file itself
+        #[arg(short, long, value_name = "FILE")]
+        out: Option<PathBuf>,
+    },
+    /// Publish a packed schema bundle to a registry, under
+    /// `<registry>/<target>/<name>:<version>`, and list it in the
+    /// registry's index
+    Push {
+        /// The file `meridian schema pack` wrote
+        file: PathBuf,
+        /// The registry: an OCI repository prefix such as
+        /// ghcr.io/acme/meridian-schemas (oci:// optional), or file://DIR
+        registry: String,
+        /// Log in with this credential from spec.credentials in
+        /// meridian.yaml, instead of a login from the Docker configuration
+        #[arg(long, value_name = "NAME")]
+        credential: Option<String>,
+        /// Talk plain HTTP. For a registry on a trusted network only
         #[arg(long)]
-        check: bool,
+        insecure: bool,
+        /// Publish the bundle and leave the registry's index alone
+        #[arg(long)]
+        no_index: bool,
+    },
+    /// Fetch one schema bundle and write the cache from it, as sync would,
+    /// without asking any tool
+    Fetch {
+        /// oci://REGISTRY/<target>/<name>:<version>, or a packed bundle as
+        /// file://PATH or a path
+        reference: String,
+        /// Documents whose types to describe in full, every other type of
+        /// the bundle by name. Without any, every type is described in full
+        paths: Vec<PathBuf>,
+        #[arg(
+            long,
+            value_name = "DIR",
+            env = "MERIDIAN_STATE_DIR",
+            default_value = ".meridian"
+        )]
+        state_dir: PathBuf,
         /// Leave meridian.lock alone
         #[arg(long)]
         no_lock: bool,
+        /// What to do about the bundle's signature: off, warn or require.
+        /// Defaults to spec.schemas.signatures in meridian.yaml, else off
+        #[arg(long, value_name = "POLICY", env = "MERIDIAN_SCHEMA_SIGNATURES")]
+        schema_signatures: Option<SignaturePolicy>,
     },
     /// Show what is cached for each target and how it stands against
     /// meridian.lock
@@ -520,25 +654,93 @@ pub fn lint(args: &LintArgs) -> Result<(), Failure> {
 pub fn schema(args: &SchemaArgs) -> Result<(), Failure> {
     match &args.command {
         Some(SchemaCommand::Sync {
-            paths,
-            plugins,
-            target,
-            data,
-            set,
-            state_dir,
+            options,
             check,
-            no_lock,
+            locked,
+            all_types,
         }) => {
             return schema_sync(&SyncArgs {
-                paths,
-                plugins,
-                target: target.as_deref(),
-                data,
-                set,
-                state_dir,
+                options,
                 check: *check,
-                lock: !*no_lock,
+                resolve: if *locked {
+                    Resolve::Locked
+                } else {
+                    Resolve::Keep
+                },
+                all_types: *all_types,
             })
+        }
+        Some(SchemaCommand::Update { options }) => {
+            return schema_sync(&SyncArgs {
+                options,
+                check: false,
+                resolve: Resolve::Update,
+                all_types: false,
+            })
+        }
+        Some(SchemaCommand::Pack {
+            target,
+            name,
+            version,
+            out,
+            key,
+            prefix,
+            state_dir,
+        }) => {
+            return schema_bundles::pack(
+                state_dir,
+                target,
+                &BundleNaming { name, version },
+                prefix,
+                out.as_deref(),
+                key.as_deref(),
+            )
+        }
+        Some(SchemaCommand::Sign { file, key, out }) => {
+            return schema_bundles::sign(file, key, out.as_deref())
+        }
+        Some(SchemaCommand::Push {
+            file,
+            registry,
+            credential,
+            insecure,
+            no_index,
+        }) => {
+            return schema_bundles::push(
+                file,
+                registry,
+                credential.as_deref(),
+                *insecure,
+                !no_index,
+            )
+        }
+        Some(SchemaCommand::Fetch {
+            reference,
+            paths,
+            state_dir,
+            no_lock,
+            schema_signatures,
+        }) => {
+            let wanted = if paths.is_empty() {
+                None
+            } else {
+                let files = gather(paths)?;
+                let by_target = graphs_by_target(&files, None)?;
+                Some(
+                    by_target
+                        .values()
+                        .flatten()
+                        .flat_map(|g| g.resources.iter().map(|r| r.r#type.clone()))
+                        .collect(),
+                )
+            };
+            return schema_bundles::fetch(
+                state_dir,
+                reference,
+                wanted,
+                *schema_signatures,
+                !no_lock,
+            );
         }
         Some(SchemaCommand::Status {
             plugins,
@@ -673,14 +875,10 @@ pub fn mcp(args: &McpArgs) -> Result<(), Failure> {
 }
 
 struct SyncArgs<'a> {
-    paths: &'a [PathBuf],
-    plugins: &'a PluginDirs,
-    target: Option<&'a str>,
-    data: &'a [PathBuf],
-    set: &'a [String],
-    state_dir: &'a Path,
+    options: &'a SyncOptions,
     check: bool,
-    lock: bool,
+    resolve: Resolve,
+    all_types: bool,
 }
 
 /// Compiles every document in the files to the tree its target would get,
@@ -753,25 +951,50 @@ fn graphs_by_target(
 }
 
 fn schema_sync(args: &SyncArgs<'_>) -> Result<(), Failure> {
-    let files = gather(args.paths)?;
+    let opts = args.options;
+    let files = gather(&opts.paths)?;
     if files.is_empty() {
         return Err(Failure::Message(
             "no Meridian documents were found in the paths given".to_owned(),
         ));
     }
-    let data = if args.data.is_empty() && args.set.is_empty() {
+    let data = if opts.data.is_empty() && opts.set.is_empty() {
         None
     } else {
-        let mut data = read_data(args.data, args.state_dir)?;
-        apply_sets(&mut data, args.set)?;
+        let mut data = read_data(&opts.data, &opts.state_dir)?;
+        apply_sets(&mut data, &opts.set)?;
         Some(data)
     };
     let by_target = graphs_by_target(&files, data.as_ref())?;
-    let registry: Registry = registry(args.plugins)?;
-    let store = Store::new(args.state_dir);
+    let registry: Registry = registry(&opts.plugins)?;
+    let catalog = Catalog::from_registry(&registry);
+    let store = Store::new(&opts.state_dir);
     let project = Path::new(".");
-    let mut lock = if args.lock || args.check {
+    let lock_wanted = !opts.no_lock || args.check || args.resolve == Resolve::Locked;
+    let mut lock = if lock_wanted {
         meridian_module::Lock::load(project).map_err(|e| Failure::Message(e.to_string()))?
+    } else {
+        None
+    };
+    if args.resolve == Resolve::Locked && lock.is_none() {
+        return Err(Failure::Message(format!(
+            "there is no {} to hold to; run `meridian schema sync` and commit it",
+            meridian_module::LOCK_FILE
+        )));
+    }
+    // Bundles are looked for only when asked and when there is somewhere to
+    // look: a registry the project names, or a bundle the lock pins.
+    let manifest = if args.check || opts.prefer == Prefer::Tool {
+        None
+    } else {
+        schema_bundles::project_manifest(project)?
+    };
+    let bundle_registries = schema_bundles::registries(project, manifest.as_ref())?;
+    let trust = if opts.prefer == Prefer::Bundles && !args.check {
+        Some(schema_bundles::verification(
+            opts.schema_signatures,
+            manifest.as_ref(),
+        )?)
     } else {
         None
     };
@@ -780,7 +1003,7 @@ fn schema_sync(args: &SyncArgs<'_>) -> Result<(), Failure> {
     let mut synced = 0;
     let mut stale = 0;
     let mut wanted: Vec<&String> = by_target.keys().collect();
-    if let Some(only) = args.target {
+    if let Some(only) = &opts.target {
         if !by_target.contains_key(only) {
             return Err(Failure::Message(format!(
                 "no document in the paths given uses target {only:?} (they use: {})",
@@ -795,7 +1018,7 @@ fn schema_sync(args: &SyncArgs<'_>) -> Result<(), Failure> {
                 }
             )));
         }
-        wanted.retain(|t| t.as_str() == only);
+        wanted.retain(|t| *t == only);
     }
     for name in wanted {
         let graphs = &by_target[name];
@@ -805,13 +1028,12 @@ fn schema_sync(args: &SyncArgs<'_>) -> Result<(), Failure> {
             );
             continue;
         };
-        if !target.info().exports_schemas {
-            // Not a failure: the plugin describes what it describes.
-            println!("{name}: the plugin does not export its tool's schemas");
-            continue;
-        }
         let types: usize = graphs.iter().map(|g| g.resources.len()).sum();
         if args.check {
+            if !target.info().exports_schemas {
+                println!("{name}: the plugin does not export its tool's schemas");
+                continue;
+            }
             let cached = store.load(name).map_err(Failure::Message)?;
             let integrity = store.integrity_of(name);
             let locked = lock.as_ref().and_then(|l| l.schemas_for(name));
@@ -830,6 +1052,80 @@ fn schema_sync(args: &SyncArgs<'_>) -> Result<(), Failure> {
             }
             continue;
         }
+
+        let locked = lock.as_ref().and_then(|l| l.schemas_for(name)).cloned();
+        if let Some(trust) = &trust {
+            let pinned = locked.as_ref().is_some_and(|l| !l.bundles.is_empty());
+            if !bundle_registries.is_empty() || pinned || args.resolve == Resolve::Locked {
+                let needed = schema_bundles::needed_types(graphs, |t| {
+                    catalog.target(name).is_some_and(|c| c.plugin_describes(t))
+                });
+                match schema_bundles::from_bundles(
+                    &store,
+                    name,
+                    &needed,
+                    &bundle_registries,
+                    locked.as_ref(),
+                    args.resolve,
+                    trust,
+                ) {
+                    Ok(FromBundles::Cached(cached, bundles, warnings)) => {
+                        for warning in warnings {
+                            eprintln!("warning: {warning}");
+                        }
+                        let integrity = store.save(&cached).map_err(Failure::Message)?;
+                        println!(
+                            "{name}: cached {} from {} in {}",
+                            count(cached.schemas.len(), "resource type"),
+                            if cached.bundles.len() == 1 {
+                                format!("the schema bundle {}", cached.bundles[0])
+                            } else {
+                                format!("the schema bundles {}", cached.bundles.join(", "))
+                            },
+                            store.path(name).display()
+                        );
+                        if !opts.no_lock {
+                            lock.get_or_insert_with(Default::default).set_schemas(
+                                schema_bundles::lock_entry(&cached, &integrity, bundles),
+                            );
+                        }
+                        synced += 1;
+                        continue;
+                    }
+                    Ok(FromBundles::UseTool(why)) => {
+                        if !target.info().exports_schemas {
+                            println!(
+                                "{name}: {why}, and the plugin does not export its tool's schemas"
+                            );
+                            continue;
+                        }
+                        if !bundle_registries.is_empty() || pinned {
+                            println!("{name}: {why}; asking the tool");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("error: {name}: {e}");
+                        failed += 1;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        if !target.info().exports_schemas {
+            // Not a failure: the plugin describes what it describes.
+            println!("{name}: the plugin does not export its tool's schemas");
+            continue;
+        }
+        if args.resolve == Resolve::Locked && locked.is_none() {
+            eprintln!(
+                "error: {name}: {} records nothing for it; run `meridian schema sync` without \
+                 --locked and commit the lock",
+                meridian_module::LOCK_FILE
+            );
+            failed += 1;
+            continue;
+        }
         println!(
             "{name}: asking the tool about {} in {}",
             count(types, "resource"),
@@ -841,11 +1137,54 @@ fn schema_sync(args: &SyncArgs<'_>) -> Result<(), Failure> {
         }
         let work_dir = std::fs::canonicalize(&work_dir).unwrap_or(work_dir);
         let request = meridian_sdk::SchemaRequest::new(work_dir, graphs.clone());
-        match target.export_schemas(&request) {
+        let mut exported = target.export_schemas(&request);
+        if args.all_types {
+            // The first answer names every type of the parts in use; asking
+            // again for all of them describes each in full.
+            if let Ok(first) = &exported {
+                let mut all: Vec<String> = request.types.clone();
+                all.extend(first.schemas.iter().map(|s| s.r#type.clone()));
+                all.sort();
+                all.dedup();
+                if all.len() > request.types.len() {
+                    println!(
+                        "{name}: asking the tool again to describe all {} in full",
+                        count(all.len(), "type")
+                    );
+                    let mut again = request.clone();
+                    again.types = all;
+                    exported = target.export_schemas(&again);
+                }
+            }
+        }
+        match exported {
             Ok(export) => {
                 let cached = Cached::from_export(name, export);
                 for note in &cached.notes {
                     eprintln!("  note: {note}");
+                }
+                if args.resolve == Resolve::Locked {
+                    if let Some(locked) = &locked {
+                        if locked.tool_version != cached.tool_version || locked.pins != cached.pins
+                        {
+                            eprintln!(
+                                "error: {name}: the tool answered from {}, and {} pins {}; \
+                                 install those versions, or sync without --locked and commit \
+                                 the lock",
+                                cached.versions(),
+                                meridian_module::LOCK_FILE,
+                                Cached {
+                                    tool: locked.tool.clone(),
+                                    tool_version: locked.tool_version.clone(),
+                                    pins: locked.pins.clone(),
+                                    ..Cached::default()
+                                }
+                                .versions()
+                            );
+                            failed += 1;
+                            continue;
+                        }
+                    }
                 }
                 let integrity = store.save(&cached).map_err(Failure::Message)?;
                 println!(
@@ -854,12 +1193,9 @@ fn schema_sync(args: &SyncArgs<'_>) -> Result<(), Failure> {
                     cached.versions(),
                     store.path(name).display()
                 );
-                if let Some(lock) = &mut lock {
-                    lock.set_schemas(cached.lock_entry(&integrity));
-                } else if args.lock {
-                    let mut fresh = meridian_module::Lock::default();
-                    fresh.set_schemas(cached.lock_entry(&integrity));
-                    lock = Some(fresh);
+                if !opts.no_lock {
+                    lock.get_or_insert_with(Default::default)
+                        .set_schemas(cached.lock_entry(&integrity));
                 }
                 synced += 1;
             }
@@ -892,7 +1228,7 @@ fn schema_sync(args: &SyncArgs<'_>) -> Result<(), Failure> {
         }
         return Ok(());
     }
-    if args.lock && synced > 0 {
+    if !opts.no_lock && synced > 0 {
         if let Some(lock) = &lock {
             let path = project.join(meridian_module::LOCK_FILE);
             std::fs::write(&path, lock.render())
@@ -965,12 +1301,17 @@ fn schema_status(plugins: &PluginDirs, state_dir: &Path, json: bool) -> Result<(
                         "syncedAt": c.synced_at,
                         "types": c.schemas.len(),
                         "file": store.path(name).display().to_string(),
+                        "bundles": c.bundles,
                     })),
                     "locked": locked.map(|l| serde_json::json!({
                         "tool": l.tool,
                         "toolVersion": l.tool_version,
                         "pins": l.pins,
                         "integrity": l.integrity,
+                        "bundles": l.bundles.iter().map(|b| serde_json::json!({
+                            "reference": b.reference,
+                            "digest": b.digest,
+                        })).collect::<Vec<_>>(),
                     })),
                     "state": state,
                 })
@@ -978,6 +1319,20 @@ fn schema_status(plugins: &PluginDirs, state_dir: &Path, json: bool) -> Result<(
             continue;
         }
         match &cached {
+            Some(c) if !c.bundles.is_empty() => {
+                let _ = writeln!(
+                    out,
+                    "{name}: {} from {}, fetched from the schema {} {}: {state}",
+                    count(c.schemas.len(), "resource type"),
+                    c.versions(),
+                    if c.bundles.len() == 1 {
+                        "bundle"
+                    } else {
+                        "bundles"
+                    },
+                    c.bundles.join(", ")
+                );
+            }
             Some(c) => {
                 let _ = writeln!(
                     out,

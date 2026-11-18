@@ -53,6 +53,10 @@ pub struct Cached {
     pub notes: Vec<String>,
     /// One per resource type, sorted by type.
     pub schemas: Vec<ResourceSchema>,
+    /// The schema bundles the cache was made from, as
+    /// `<target>/<name>:<version>`; empty when the tool wrote it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub bundles: Vec<String>,
 }
 
 impl Cached {
@@ -68,6 +72,7 @@ impl Cached {
             synced_at: now(),
             notes: export.notes,
             schemas: export.schemas,
+            bundles: Vec::new(),
         }
     }
 
@@ -95,6 +100,7 @@ impl Cached {
             tool_version: self.tool_version.clone(),
             pins: self.pins.clone(),
             integrity: integrity.to_owned(),
+            bundles: Vec::new(),
         }
     }
 }
