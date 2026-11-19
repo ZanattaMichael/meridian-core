@@ -28,6 +28,7 @@ on:
       - '.github/actions/setup-rust/**'
       - '.github/workflows/podman.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths: *paths
 
 permissions:
@@ -40,6 +41,7 @@ concurrency:
 
 jobs:
   real:
+    if: github.event.pull_request.draft != true
     name: real podman and systemd
     runs-on: ubuntu-24.04
     timeout-minutes: 30

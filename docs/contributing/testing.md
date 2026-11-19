@@ -259,3 +259,7 @@ concurrency:
 A plugin's real-tool workflow runs, on pull requests and on `main`, only when the change touches a path it builds from: the plugin, the workspace crates it depends on (from `cargo metadata`), its examples, `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.github/actions/setup-rust` or the workflow itself. `push` and `pull_request` share one list through a YAML anchor (`&paths`, `*paths`).
 
 When a plugin gains a dependency on another workspace crate, add that crate to its workflow's list.
+
+## Draft pull requests
+
+On a draft pull request the real-tool workflows (each plugin's, `azure`, `opa`, `modules`, `vertical slice`) start but skip every job (`if: github.event.pull_request.draft != true`). Marking the pull request ready for review runs them (`ready_for_review` is in their `types`). `rust`, `docs`, `coverage` and the other core workflows run on drafts as before. Mark a pull request ready before asking for a merge, so its real-tool results exist.

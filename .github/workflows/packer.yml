@@ -56,6 +56,7 @@ on:
       - 'rust-toolchain.toml'
       - '.github/actions/setup-rust/**'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths: *paths
 
 permissions:
@@ -72,6 +73,7 @@ env:
 
 jobs:
   real-packer:
+    if: github.event.pull_request.draft != true
     name: validate and build with packer
     runs-on: ubuntu-latest
     timeout-minutes: 30

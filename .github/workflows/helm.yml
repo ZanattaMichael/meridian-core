@@ -29,6 +29,7 @@ on:
       - 'rust-toolchain.toml'
       - '.github/actions/setup-rust/**'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths: *paths
 
 permissions:
@@ -41,6 +42,7 @@ concurrency:
 
 jobs:
   real-tools:
+    if: github.event.pull_request.draft != true
     name: real helm, kustomize and a kind cluster
     runs-on: ubuntu-latest
     timeout-minutes: 30

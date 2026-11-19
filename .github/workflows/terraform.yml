@@ -31,6 +31,7 @@ on:
       - 'rust-toolchain.toml'
       - '.github/actions/setup-rust/**'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths: *paths
 
 permissions:
@@ -43,6 +44,7 @@ concurrency:
 
 jobs:
   terraform:
+    if: github.event.pull_request.draft != true
     name: plan and apply with terraform
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -70,6 +72,7 @@ jobs:
         run: cargo test -p meridian-target-terraform --locked --test real -- --ignored --nocapture
 
   tofu:
+    if: github.event.pull_request.draft != true
     name: the same tests with tofu
     runs-on: ubuntu-latest
     timeout-minutes: 30

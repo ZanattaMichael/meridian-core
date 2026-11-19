@@ -16,6 +16,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'examples/workflow/vertical-slice*'
       - 'plugins/kubernetes/**'
@@ -36,6 +37,7 @@ concurrency:
 
 jobs:
   slice:
+    if: github.event.pull_request.draft != true
     name: kubectl, terraform and ansible, end to end
     runs-on: ubuntu-latest
     timeout-minutes: 40

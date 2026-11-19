@@ -71,6 +71,7 @@ on:
       - 'rust-toolchain.toml'
       - '.github/actions/setup-rust/**'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths: *paths
 
 permissions:
@@ -86,6 +87,7 @@ env:
 
 jobs:
   linux:
+    if: github.event.pull_request.draft != true
     name: real DscPipelineRunner and DSC v3 on Linux
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -134,6 +136,7 @@ jobs:
         run: cargo test -p meridian-target-dsc --locked --test real -- --ignored --nocapture --test-threads=1
 
   windows-runner:
+    if: github.event.pull_request.draft != true
     name: the plugin's runner on Windows, DSC v2 and v3
     runs-on: windows-latest
     timeout-minutes: 45
@@ -187,6 +190,7 @@ jobs:
         run: cargo test -p meridian-target-dsc --locked --test real -- --ignored --nocapture --test-threads=1
 
   compile:
+    if: github.event.pull_request.draft != true
     name: compile the Windows documents
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -211,6 +215,7 @@ jobs:
           retention-days: 3
 
   windows:
+    if: github.event.pull_request.draft != true
     name: real Windows resources through DSC v2 and v3
     needs: compile
     runs-on: windows-latest

@@ -40,6 +40,7 @@ on:
       - 'rust-toolchain.toml'
       - '.github/actions/setup-rust/**'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths: *paths
 
 permissions:
@@ -56,6 +57,7 @@ env:
 
 jobs:
   offline:
+    if: github.event.pull_request.draft != true
     name: real bicep compiler, no account
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -83,6 +85,7 @@ jobs:
         run: cargo test -p meridian-target-arm --locked --test real -- --ignored --nocapture
 
   subscription:
+    if: github.event.pull_request.draft != true
     name: what-if and deploy in a real subscription
     # Runs only when the repository names a resource group to use, and never
     # for a pull request from a fork, which cannot sign in.
