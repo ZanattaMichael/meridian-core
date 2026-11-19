@@ -43,6 +43,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "meridian secret set hands the bytes to the kernel keyring, or to secret-tool on its \
          standard input",
     ),
+    (
+        "crates/meridian-target-fake/src/lib.rs",
+        "the test target prints a secret in its debug output, so a test can show the host masks it",
+    ),
 ];
 
 fn workspace() -> PathBuf {

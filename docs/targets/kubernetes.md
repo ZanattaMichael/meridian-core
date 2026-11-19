@@ -218,3 +218,5 @@ Objects in a namespace the document creates cannot be dry-run first; that plan i
 CI tests a real `kubectl` and [kind](https://kind.sigs.k8s.io) cluster: plan, apply,
 in-sync, notify restart and a refused manifest. Managed clusters and admission webhooks are
 untested. See [Real-tool tests](../contributing/real-tool-tests.md).
+
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `-v=4`, `-v=6` or `-v=8` to `kubectl`.

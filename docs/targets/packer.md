@@ -322,6 +322,8 @@ Packer runs in the work directory under `--state-dir`, so use absolute paths in 
 
 A failure reports the step, command, exit status and Packer's output tail.
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) sets `PACKER_LOG=1` at every level.
+
 ## Secrets
 
 A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) reaches Packer only as a

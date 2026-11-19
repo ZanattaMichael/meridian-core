@@ -417,6 +417,8 @@ Each names the resource, line and rule:
 | a warning about `/etc/puppetlabs` or the home directory | Puppet writes settings and a cache under its confdir and vardir | point them at a scratch directory with `MERIDIAN_PUPPET_ARGS="--confdir ... --vardir ... --codedir ..."` |
 | Bolt asks for a host key or a password | Bolt's own inventory and transport settings apply | put them in `MERIDIAN_PUPPET_ARGS` or Bolt's inventory file |
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `--evaltrace`, `--debug`, or `--debug --trace` to `puppet apply`. Runs through Bolt get none.
+
 ## How it is tested
 
 - **Golden files** in `plugins/puppet/testdata/`, refusals included.

@@ -284,6 +284,7 @@ schemas from the transform stage's own tables; `schema_conformance.rs` checks th
 | `credential` | the credential the host is reached as, with the values of its secret fields, for a target that declared `credentials`; `None` when the document names none. See [Credentials](#credentials) |
 | `save_plan` | on a plan: the operator asked for a saved plan (`plan --out`), and the host will keep what `Plan::saved` returns; see [Saved plans](#saved-plans) |
 | `saved_plan` | on an apply: the plan this runner saved when the plan was taken, handed back by `apply --plan`; `None` when there is none |
+| `debug_level` | the [`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) level, `0` to `3`; see [Debug output](#debug-output) |
 
 Implement up to three operations, declared in `operations()`.
 
@@ -333,6 +334,31 @@ In `apply`, when `context.saved_plan` is `Some`, apply exactly that.
 
 - **Save nothing holding a value** (Terraform saves none when `context.secrets` is set).
 - **Report what the tool did**, not what the saved bytes say.
+
+### Debug output
+
+Declare what each `--tool-debug` level adds to the tool, return it from
+`Runner::debug_levels`, and apply it where the tool is built:
+
+```rust
+pub const DEBUG: &[DebugLevel] = &[
+    DebugLevel::args(&["-v"]),
+    DebugLevel::args(&["-vvv"]),
+    DebugLevel::env(&[("MYTOOL_LOG", "trace")]),
+];
+
+fn debug_levels(&self) -> &'static [DebugLevel] {
+    DEBUG
+}
+
+// in plan and apply:
+Tool::new(&self.program).debug(debug::pick(DEBUG, context.debug_level))
+```
+
+`pick` gives `None` at level 0 and the last entry for a level above it. The table is what
+`meridian plugins` and the capability matrix show. Leave it empty when the switch would write
+to a stream the runner parses; the host then warns. Test the command at each level and that
+level 0 adds nothing.
 
 ### Settings
 

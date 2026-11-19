@@ -17,6 +17,10 @@ use meridian_sdk::{settings, Setting};
 
 use crate::{STACK_PATH, TEMPLATE_PATH};
 
+/// What `--tool-debug` adds to the tool, level 1 first. A flag of Meridian's own `aws` calls; CloudFormation has no log to raise.
+pub const DEBUG: &[meridian_sdk::debug::DebugLevel] =
+    &[meridian_sdk::debug::DebugLevel::args(&["--debug"])];
+
 /// Names the program to run, when it is not `aws` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_AWS";
 /// Extra arguments for every call, split like a shell command line:
@@ -157,6 +161,7 @@ impl CloudFormationRunner {
             .arg("cloudformation")
             .args(operation.split(' '))
             .args(["--stack-name", &stack.name])
+            .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level))
             .dir(&context.work_dir)
             .env("AWS_PAGER", "")
             .capture_stdout();
@@ -413,6 +418,10 @@ fn read_changes(description: &Value, resources: &BTreeMap<String, String>) -> Ve
 }
 
 impl Runner for CloudFormationRunner {
+    fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
+        DEBUG
+    }
+
     fn settings(&self) -> Vec<Setting> {
         settings()
     }

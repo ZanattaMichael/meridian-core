@@ -259,6 +259,8 @@ variables file passed as `-var-file`, removed after planning; the plan file is r
 use. A [saved plan](../operations/pull-requests.md) keeps no plan file for such a stage, so
 apply plans again. State holds the arguments, so use a `backend` that protects it.
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) sets `TF_LOG` to `INFO`, `DEBUG` or `TRACE` on every `terraform` call; the log goes to standard error, beside the JSON.
+
 ## Editor schemas
 
 `meridian schema sync` writes a configuration requiring the documents' providers (each

@@ -1,6 +1,7 @@
 //! The half that runs a compiled configuration through DscPipelineRunner. It
 //! sits outside the compile chain: nothing here is reached by a compile.
 
+use meridian_sdk::debug::DebugLevel;
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, Operations, Plan, RunContext,
@@ -9,6 +10,17 @@ use meridian_sdk::{
 use meridian_sdk::{settings, Setting};
 
 use crate::DATUM_PATH;
+
+/// What `--tool-debug` sets in the PowerShell that runs DscPipelineRunner,
+/// level 1 first. PowerShell writes the verbose and debug streams to its
+/// output, beside the runner's own lines.
+pub const DEBUG: &[DebugLevel] = &[
+    DebugLevel::args(&["$VerbosePreference = 'Continue'"]),
+    DebugLevel::args(&[
+        "$VerbosePreference = 'Continue'",
+        "$DebugPreference = 'Continue'",
+    ]),
+];
 
 /// Names the PowerShell program, when it is not `pwsh` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_PWSH";
@@ -110,8 +122,13 @@ impl DscRunner {
         script: &str,
         log: &dyn Log,
     ) -> Result<meridian_sdk::tool::Finished, RunError> {
+        // A debug level is PowerShell's own preferences, set before the
+        // module is loaded, so every verbose and debug line it writes shows.
+        let preferences: String = meridian_sdk::debug::pick(DEBUG, context.debug_level)
+            .map(|level| level.args.iter().map(|s| format!("{s}; ")).collect())
+            .unwrap_or_default();
         let script = format!(
-            "$ErrorActionPreference = 'Stop'; $module = @(Import-Module {module} -PassThru)[0]; {script}",
+            "$ErrorActionPreference = 'Stop'; {preferences}$module = @(Import-Module {module} -PassThru)[0]; {script}",
             module = quote(&self.module),
         );
         Tool::new(&self.program)
@@ -291,6 +308,10 @@ fn drifted_in_set(outcomes: &[Outcome]) -> Vec<Change> {
 }
 
 impl Runner for DscRunner {
+    fn debug_levels(&self) -> &'static [DebugLevel] {
+        DEBUG
+    }
+
     fn settings(&self) -> Vec<Setting> {
         settings()
     }

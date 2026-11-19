@@ -19,6 +19,12 @@ use meridian_sdk::{settings, Setting};
 
 use crate::{secret_variable, COMPOSE_PATH, PROJECT_PATH};
 
+/// What `--tool-debug` adds to the tool, level 1 first. A flag of `docker` itself, before the command.
+pub const DEBUG: &[meridian_sdk::debug::DebugLevel] = &[meridian_sdk::debug::DebugLevel::args(&[
+    "--log-level",
+    "debug",
+])];
+
 /// The secrets of a run, written for Compose: one private `.env` file,
 /// given to every `docker compose` call of the stage with `--env-file` and
 /// removed when the stage is over. Compose reads it for its interpolation
@@ -170,7 +176,9 @@ impl DockerRunner {
 
     /// `docker`, aimed at the project's daemon.
     fn docker(&self, context: &RunContext, project: &Project) -> Tool {
-        let mut tool = Tool::new(&self.program).dir(&context.work_dir);
+        let mut tool = Tool::new(&self.program)
+            .dir(&context.work_dir)
+            .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level));
         if !project.host.is_empty() {
             tool = tool.args(["--host", &project.host]);
         }
@@ -612,6 +620,10 @@ pub(crate) fn diff(desired: &Desired, actual: &Actual) -> Plan {
 }
 
 impl Runner for DockerRunner {
+    fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
+        DEBUG
+    }
+
     fn settings(&self) -> Vec<Setting> {
         settings()
     }

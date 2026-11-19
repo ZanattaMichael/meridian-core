@@ -143,6 +143,11 @@ async fn serve_async(plugin: Plugin) -> Result<(), ServeError> {
             .runner
             .as_ref()
             .is_some_and(|r| r.reads_identifiers()),
+        debug_levels: plugin
+            .runner
+            .as_ref()
+            .map(|r| r.debug_levels().iter().map(|l| l.describe()).collect())
+            .unwrap_or_default(),
         settings: plugin
             .runner
             .as_ref()
@@ -220,6 +225,8 @@ struct EmitterHandler {
     saves_plans: bool,
     /// Whether the runner reads its tool's identifiers.
     reads_identifiers: bool,
+    /// What each debug level does to the tool.
+    debug_levels: Vec<String>,
     /// What the runner can be configured with, for the host to list.
     settings: Vec<crate::Setting>,
     /// Kept only to describe it: importing is served by its own handler.
@@ -257,6 +264,7 @@ impl EmitterService for EmitterHandler {
             accepts_inputs: self.accepts_inputs,
             saves_plans: self.saves_plans,
             reads_identifiers: self.reads_identifiers,
+            debug_levels: self.debug_levels.clone(),
             import_formats: wire::import_formats_to_wire(
                 self.importer
                     .as_ref()

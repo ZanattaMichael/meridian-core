@@ -269,3 +269,41 @@ fn a_plan_that_handed_over_a_secret_saves_nothing() {
     assert!(plan.saved.is_none());
     assert!(!dir.join("work").join("meridian.tfplan").exists());
 }
+
+#[test]
+fn a_debug_level_sets_tf_log_on_every_call_and_level_0_sets_nothing() {
+    for (level, expected) in [
+        (0, ""),
+        (1, "INFO"),
+        (2, "DEBUG"),
+        (3, "TRACE"),
+        (7, "TRACE"),
+    ] {
+        let dir = scratch(TMP, &format!("debug-{level}"));
+        let program = stand_in(
+            &dir,
+            "terraform",
+            &format!(
+                "echo \"$1 ${{TF_LOG:-}}\" >> \"{dir}/logs\"\ncase \"$1\" in\n{HAPPY}\nesac",
+                dir = dir.display()
+            ),
+        );
+        let runner = TerraformRunner {
+            program: program.to_str().unwrap().to_owned(),
+            extra_args: Vec::new(),
+        };
+        let context = RunContext {
+            debug_level: level,
+            ..context(&dir)
+        };
+        runner
+            .plan(&context, &compiled(), &KeptLog::default())
+            .unwrap();
+        let seen = fs::read_to_string(dir.join("logs")).unwrap();
+        for line in seen.lines() {
+            let (_, value) = line.split_once(' ').unwrap();
+            assert_eq!(value, expected, "level {level}: {seen}");
+        }
+        assert_eq!(seen.lines().count(), 3, "{seen}");
+    }
+}

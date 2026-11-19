@@ -328,6 +328,8 @@ Each names the resource, line and rule:
 | `the stack did not reach a complete state` | a resource failed and CloudFormation rolled the deployment back | read the stack's events in the console or with `describe-stack-events` |
 | a stack is stuck in `REVIEW_IN_PROGRESS` | a plan was interrupted before it could discard its change set | the next plan reuses it as a new stack; or delete the stack yourself |
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `--debug` to `aws` at every level.
+
 ## How it is tested
 
 - **Golden files** in `plugins/cloudformation/testdata/`, refusals included.

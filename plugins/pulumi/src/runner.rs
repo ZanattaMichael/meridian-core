@@ -13,6 +13,13 @@ use meridian_sdk::{
 use crate::{PROGRAM_PATH, STACK_PATH};
 use meridian_sdk::{settings, Setting};
 
+/// What `--tool-debug` adds to the tool, level 1 first. Pulumi's log goes to standard error.
+pub const DEBUG: &[meridian_sdk::debug::DebugLevel] = &[
+    meridian_sdk::debug::DebugLevel::args(&["-v=3", "--logtostderr"]),
+    meridian_sdk::debug::DebugLevel::args(&["-v=6", "--logtostderr"]),
+    meridian_sdk::debug::DebugLevel::args(&["-v=9", "--logtostderr"]),
+];
+
 /// Where Pulumi's own saved plan is written while a run uses it. Pulumi
 /// calls these update plans; they are behind `PULUMI_EXPERIMENTAL`.
 const PLAN_FILE: &str = "meridian.plan.json";
@@ -129,7 +136,8 @@ impl PulumiRunner {
     fn pulumi(&self, context: &RunContext, stack: &Stack) -> Tool {
         let mut tool = Tool::new(&self.program)
             .dir(&context.work_dir)
-            .env("PULUMI_SKIP_UPDATE_CHECK", "true");
+            .env("PULUMI_SKIP_UPDATE_CHECK", "true")
+            .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level));
         if stack.backend.is_empty() && !self.backend_chosen {
             // Nobody said where state lives, so it lives with the project,
             // as Terraform's does: no account and no login are needed.
@@ -330,6 +338,10 @@ impl PulumiRunner {
 }
 
 impl Runner for PulumiRunner {
+    fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
+        DEBUG
+    }
+
     fn settings(&self) -> Vec<Setting> {
         settings()
     }

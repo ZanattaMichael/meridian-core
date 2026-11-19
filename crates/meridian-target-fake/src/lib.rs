@@ -39,6 +39,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
+use meridian_sdk::debug::DebugLevel;
 use meridian_sdk::{
     canonical_map, decode_map, serve, Adoption, Applied, Artifact, Capabilities, Category, Change,
     ChangeAction, CompileError, Data, DocumentKind, Emitted, Emitter, ImportError, ImportFormat,
@@ -221,6 +222,26 @@ pub fn greeting() -> String {
 /// file only the user can read, and records in the work directory what was
 /// handed over and how, never a value. The file lives as long as the
 /// returned value.
+/// What `--tool-debug` does to the fake tool. At any level it prints what
+/// a careless tool's trace would: every secret it was handed, in the clear,
+/// for the host to mask.
+pub const DEBUG: &[DebugLevel] = &[
+    DebugLevel::env(&[("FAKE_DEBUG", "1")]),
+    DebugLevel::env(&[("FAKE_DEBUG", "2")]),
+    DebugLevel::env(&[("FAKE_DEBUG", "3")]),
+];
+
+fn debug_output(context: &RunContext, log: &dyn Log) {
+    let Some(level) = meridian_sdk::debug::pick(DEBUG, context.debug_level) else {
+        return;
+    };
+    log.err(&format!("fake-tool debug: {}", level.describe()));
+    for (name, value) in context.secrets.iter() {
+        let text = value.expose(|bytes| String::from_utf8_lossy(bytes).into_owned());
+        log.err(&format!("fake-tool debug: secret {name} is {text}"));
+    }
+}
+
 fn hand_over_secrets(
     context: &RunContext,
     log: &dyn Log,
@@ -451,6 +472,10 @@ impl Runner for FakeRunner {
         self.operations
     }
 
+    fn debug_levels(&self) -> &'static [DebugLevel] {
+        DEBUG
+    }
+
     fn settings(&self) -> Vec<meridian_sdk::Setting> {
         settings()
     }
@@ -472,6 +497,7 @@ impl Runner for FakeRunner {
         let state = read_state(&context.work_dir)?;
         let _secrets = hand_over_secrets(context, log)?;
         let _credential = hand_over_credential(context, log)?;
+        debug_output(context, log);
         log.out(&format!(
             "comparing {} files for {} on {}",
             artifact.files.len(),
@@ -512,6 +538,7 @@ impl Runner for FakeRunner {
         let mut state = read_state(&context.work_dir)?;
         let _secrets = hand_over_secrets(context, log)?;
         let _credential = hand_over_credential(context, log)?;
+        debug_output(context, log);
         // A saved plan is applied as the tool would apply its own: for the
         // files it was taken for and no others, and what was handed over is
         // recorded where a host test can read it. The record holds no value.

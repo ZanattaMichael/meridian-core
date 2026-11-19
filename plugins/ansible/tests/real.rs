@@ -536,3 +536,26 @@ fn the_modules_schemas_are_exported_for_an_editor() {
         export.notes
     );
 }
+
+#[ignore = "needs a real ansible-playbook; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_debug_level_brings_ansibles_own_verbose_output_and_changes_no_result() {
+    let Some(runner) = ansible() else { return };
+    let dir = scratch(TMP, "real-debug");
+    let artifact = site(&dir, "port = 80\\n", "0640");
+    let quiet = plan(&runner, &dir, &artifact);
+
+    // Level 2 is `-vvv`: Ansible says how it reaches each host.
+    let log = KeptLog::default();
+    let context = RunContext {
+        debug_level: 2,
+        ..context(&dir)
+    };
+    let loud = runner
+        .plan(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    let text = log.text().join("\n");
+    assert!(text.contains("ESTABLISH LOCAL CONNECTION"), "{text}");
+    assert_eq!(changes(&loud.changes), changes(&quiet.changes));
+    assert_eq!(loud.unknown, quiet.unknown);
+}

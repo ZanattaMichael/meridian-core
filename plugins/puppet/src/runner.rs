@@ -18,6 +18,13 @@ use meridian_sdk::{settings, Setting};
 
 use crate::{MANIFEST_PATH, SITE_PATH};
 
+/// What `--tool-debug` adds to the tool, level 1 first. Given to `puppet apply` on this machine; a Bolt run is unchanged.
+pub const DEBUG: &[meridian_sdk::debug::DebugLevel] = &[
+    meridian_sdk::debug::DebugLevel::args(&["--evaltrace"]),
+    meridian_sdk::debug::DebugLevel::args(&["--debug"]),
+    meridian_sdk::debug::DebugLevel::args(&["--debug", "--trace"]),
+];
+
 /// Names the `puppet` program, when it is not on `PATH`.
 pub const PUPPET_VARIABLE: &str = "MERIDIAN_PUPPET";
 /// Names the `bolt` program, when it is not on `PATH`.
@@ -182,6 +189,7 @@ impl PuppetRunner {
     ) -> Result<Report, RunError> {
         let mut tool = Tool::new(&self.puppet)
             .args(["apply", "--detailed-exitcodes", "--color=false"])
+            .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level))
             .dir(&context.work_dir);
         if noop {
             tool = tool.arg("--noop");
@@ -355,6 +363,10 @@ fn hiera_files(context: &RunContext) -> Result<Option<HieraFiles>, RunError> {
 }
 
 impl Runner for PuppetRunner {
+    fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
+        DEBUG
+    }
+
     fn settings(&self) -> Vec<Setting> {
         settings()
     }

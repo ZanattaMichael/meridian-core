@@ -16,6 +16,13 @@ use meridian_sdk::{
 };
 use meridian_sdk::{settings, Setting};
 
+/// What `--tool-debug` adds to the tool, level 1 first. Given to `chef-client` on this machine; a `chef-run` to another host is unchanged.
+pub const DEBUG: &[meridian_sdk::debug::DebugLevel] = &[
+    meridian_sdk::debug::DebugLevel::args(&["-l", "info"]),
+    meridian_sdk::debug::DebugLevel::args(&["-l", "debug"]),
+    meridian_sdk::debug::DebugLevel::args(&["-l", "trace"]),
+];
+
 /// Names the `chef-client` program, when it is not on `PATH`. Cinc's
 /// `cinc-client` takes the same arguments.
 pub const CLIENT_VARIABLE: &str = "MERIDIAN_CHEF_CLIENT";
@@ -158,6 +165,7 @@ impl ChefRunner {
             // directory does.
             .args(["--local-mode", "--no-color", "--force-formatter"])
             .args(["--override-runlist", &format!("recipe[{cookbook}]")])
+            .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level))
             .dir(&context.work_dir);
         if let Some(attributes) = &attributes {
             // The attributes file is read as the node's JSON attributes, and
@@ -278,6 +286,10 @@ fn read_report(stdout: &str) -> Vec<Change> {
 }
 
 impl Runner for ChefRunner {
+    fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
+        DEBUG
+    }
+
     fn settings(&self) -> Vec<Setting> {
         settings()
     }

@@ -644,6 +644,8 @@ The handover is tested two ways:
   secret and checks the value appears in the file and nowhere in Salt's output or
   the plugin's
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `-l info`, `-l debug` or `-l trace` to `salt-call` and `salt-ssh`.
+
 ## Credentials
 
 `targetHost.credential` names the [credential](../reference/dsl/credentials.md) the host is

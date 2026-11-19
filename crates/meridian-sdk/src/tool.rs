@@ -185,6 +185,19 @@ impl Tool {
         self
     }
 
+    /// Adds what a debug level asks of the tool: its arguments, here, and its
+    /// environment. `None`, a run that asked for no debug output, adds
+    /// nothing. See [`crate::debug`].
+    pub fn debug(mut self, level: Option<&crate::debug::DebugLevel>) -> Self {
+        if let Some(level) = level {
+            self = self.args(level.args.iter().copied());
+            for (key, value) in level.env {
+                self = self.env(*key, *value);
+            }
+        }
+        self
+    }
+
     /// Text written to the tool's standard input, which is otherwise closed.
     pub fn stdin(mut self, text: impl Into<String>) -> Self {
         self.stdin = Some(Stdin::Text(text.into()));

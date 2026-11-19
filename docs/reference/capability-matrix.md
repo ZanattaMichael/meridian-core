@@ -65,3 +65,31 @@ compiled, with the reason. Each target's own page says how it does what it can.
 | [puppet](../targets/puppet.md) | configuration-management | `‹module›::‹type›`, `‹type›`, `exec`, `file`, `group`, `package`, `service`, `user` | native | no | yes | no | yes | no | no | yes | yes | converge | no | yes |
 | [salt](../targets/salt.md) | configuration-management | `‹module›.‹function›`, `exec`, `file`, `group`, `package`, `service`, `user` | native | yes | yes | no | yes | no | no | yes | yes | converge | no | yes |
 | [terraform](../targets/terraform.md) | infrastructure-as-code | `‹provider›_‹type›`, `address`, `backend`, `data.‹type›`, `firewall`, `local`, `module`, `network`, `provider`, `subnet`, `variable`, `vm` | synthetic | no | yes | yes | yes | yes | yes | yes | no | import | Terraform configuration files; Terraform configuration files in the JSON syntax | yes |
+
+## `--tool-debug`
+
+What each level of [`--tool-debug`](cli.md#asking-a-tool-for-more-output)
+adds to the target's tool. A level above the last one a target has uses its
+last; *none* means the target has no debug output and the flag is warned
+about.
+
+| Target | 1 | 2 | 3 |
+|---|---|---|---|
+| [ansible](../targets/ansible.md) | `-v` | `-vvv` | `-vvvv` |
+| [arm](../targets/arm.md) | `--verbose` | `--debug` | as 2 |
+| [bicep](../targets/bicep.md) | `--verbose` | `--debug` | as 2 |
+| [chef](../targets/chef.md) | `-l info` | `-l debug` | `-l trace` |
+| [cloud-init](../targets/cloud-init.md) | `--debug` | as 1 | as 1 |
+| [cloudformation](../targets/cloudformation.md) | `--debug` | as 1 | as 1 |
+| [docker](../targets/docker.md) | `--log-level debug` | as 1 | as 1 |
+| [dsc](../targets/dsc.md) | `$VerbosePreference = 'Continue'` | `$VerbosePreference = 'Continue' $DebugPreference = 'Continue'` | as 2 |
+| [helm](../targets/helm.md) | `--debug` | as 1 | as 1 |
+| [kubernetes](../targets/kubernetes.md) | `-v=4` | `-v=6` | `-v=8` |
+| [opentofu](../targets/opentofu.md) | `TF_LOG=INFO` | `TF_LOG=DEBUG` | `TF_LOG=TRACE` |
+| [openvox](../targets/openvox.md) | `--evaltrace` | `--debug` | `--debug --trace` |
+| [packer](../targets/packer.md) | `PACKER_LOG=1` | as 1 | as 1 |
+| [podman](../targets/podman.md) | none | none | none |
+| [pulumi](../targets/pulumi.md) | `-v=3 --logtostderr` | `-v=6 --logtostderr` | `-v=9 --logtostderr` |
+| [puppet](../targets/puppet.md) | `--evaltrace` | `--debug` | `--debug --trace` |
+| [salt](../targets/salt.md) | `-l info` | `-l debug` | `-l trace` |
+| [terraform](../targets/terraform.md) | `TF_LOG=INFO` | `TF_LOG=DEBUG` | `TF_LOG=TRACE` |

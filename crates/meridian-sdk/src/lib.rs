@@ -45,6 +45,7 @@
 
 pub mod agent;
 mod credential;
+pub mod debug;
 pub mod expr;
 pub mod fetch;
 mod import;
