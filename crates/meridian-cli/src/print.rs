@@ -436,6 +436,13 @@ impl Printer<'_> {
                 out,
                 "  already applied by run {applied_in}, and unchanged since; left alone"
             )?,
+            Outcome::Destroyed { changes } => {
+                for change in changes {
+                    writeln!(out, "  {}", change_line(change))?;
+                }
+                writeln!(out, "  destroyed {}", count(changes.len(), "resource"))?;
+            }
+            Outcome::Kept(kept) => writeln!(out, "  kept: {}", kept.why(&report.target))?,
             Outcome::LeftOut { condition } => {
                 writeln!(out, "  skipped: its when ({condition}) is false")?
             }

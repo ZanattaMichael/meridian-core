@@ -80,7 +80,7 @@ the same JSON as text.
 | `format` | the document in the standard layout | [`meridian fmt`](formatter.md) |
 | `explain` | what a rule means, why the target refuses it, and what to write instead | the lint rules explain themselves; the compiler's shared rules are described in the server; a target's own rule is named as such |
 | `import` | turns a tool's own configuration into documents, with what could not be carried over | [`meridian import`](../reference/cli.md#import) on text; `fileName` tells the importer the format |
-| `plan` | asks the tool what applying a file would change | **off unless** `--allow-plan`; runs `meridian plan --output json` on the file and returns [its object](../reference/cli-json.md#compile-plan-apply-drift-rollback) |
+| `plan` | asks the tool what applying a file would change | **off unless** `--allow-plan`; runs `meridian plan --output json` on the file and returns [its object](../reference/cli-json.md#compile-plan-apply-drift-rollback-destroy) |
 
 Give `document` (text) or `file` (under the root, may hold several documents).
 

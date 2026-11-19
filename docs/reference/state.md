@@ -161,7 +161,7 @@ An artifact's hash covers every file's path and content, so it is reproducible.
 | Field | Value |
 |---|---|
 | `id` | the run's id: the second it started, and four characters that order and separate runs within that second |
-| `mode` | `plan`, `apply`, `drift` or `rollback` |
+| `mode` | `plan`, `apply`, `drift`, `rollback` or `destroy` |
 | `status` | `running`, `succeeded` or `failed`. A run that was stopped with Ctrl-C or by a time limit is `failed`, with a step whose `reason` says which; a run that was killed stays `running` |
 | `resumes` | the run this one continued, when it was started with `--resume` |
 | `selector` | the `-l` selection, when there was one |
@@ -229,7 +229,7 @@ These words are never reused. See also
 | `run.started` | the run begins | `mode`, `command`, `resumes`, `rollsBack` (the run a `rollback` puts back), `plan` (the run that took the saved plan an `apply --plan` carries out), `toolDebug` (the [`--tool-debug`](cli.md#asking-a-tool-for-more-output) level, 0 when off) |
 | `step.started` | a step begins | `kind` |
 | `resource.planned` | one line of a plan, or of a drift check | `kind`, `resource`, `action` |
-| `resource.changed` | one thing an apply or a rollback changed, including what a failed apply had done before it failed | `kind`, `resource`, `action` |
+| `resource.changed` | one thing an apply, a rollback or a destroy changed, including what a failed one had done before it failed | `kind`, `resource`, `action` |
 | `output.produced` | an apply produced an output | `kind`, `name`, `sensitive`. Never the value |
 | `policy.passed` | the run's [policy](policy.md) allowed the step | `kind`, `denials` (0), `warnings`, `asked`. Counts, never the messages |
 | `policy.denied` | the policy denied the step, or could not be asked | `kind`, `denials`, `warnings`, `asked`: `false` when the engine could not be asked |
@@ -238,7 +238,7 @@ These words are never reused. See also
 | `analysis.failed` | a finding reaches `--fail-on`, or the analyzer could not look | the same; `asked` is `false` when it could not look |
 | `step.succeeded` | the step did what was asked | `kind`, `artifact`, `changes`; a plan also has `unknown` |
 | `step.failed` | the step failed | `kind`, `reason`, `artifact`, `changes` |
-| `step.skipped` | the step was not run | `kind`, `reason`: `already-applied` (with `artifact`, `appliedIn`) `earlier-step-failed` (with `becauseOf`), or `when-false`: the document's own `spec.when` left it out. The condition is not recorded |
+| `step.skipped` | the step was not run | `kind`, `reason`: `already-applied` (with `artifact`, `appliedIn`) `earlier-step-failed` (with `becauseOf`), `when-false`: the document's own `spec.when` left it out (the condition is not recorded), or for a destroy `cannot-destroy` or `never-applied` |
 | `step.deferred` | the step waits on an output | `kind`, `waitingOn`, `output` |
 | `drift.none` | a drift check found the step in sync | `kind`, `artifact`, `changes` (0) |
 | `drift.detected` | a drift check found the step drifted | `kind`, `artifact`, `changes` |

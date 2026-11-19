@@ -71,3 +71,4 @@ page it affects. The pull request template asks for it.
 | [Tool output is kept, masked, on the machine that ran it, and never in the record](0044-tool-output-is-kept-masked-on-the-machine-that-ran.md) | Runs | proposed |
 | [A `--tool-debug` level is mapped by each target to its tool's own switch](0046-a-tool-debug-level-is-mapped-by-each-target-to-its-own-switch.md) | Runs | proposed |
 | [Credentials come from providers, and passwords only on request](0047-credentials-come-from-providers-and-passwords-only-on-request.md) | Secrets | accepted |
+| [`destroy` is an optional plugin operation, run last stage first](0048-destroy-is-an-optional-plugin-operation-run-last-stage-first.md) | Orchestrator | proposed |

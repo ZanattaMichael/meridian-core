@@ -34,6 +34,7 @@
                 "plan",
                 "apply",
                 "outputs",
+                "destroy",
                 "inputs",
                 "import",
                 "schemas"

@@ -90,6 +90,9 @@ pub(crate) fn abilities(info: &meridian_plugin_host::Info) -> Vec<&'static str> 
     if info.operations.outputs {
         can.push("outputs");
     }
+    if info.destroys {
+        can.push("destroy");
+    }
     if info.accepts_inputs {
         can.push("inputs");
     }

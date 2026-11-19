@@ -280,6 +280,29 @@ fn compile_drift_status_runs_and_a_failed_apply_as_json() {
 }
 
 #[test]
+fn destroy_and_its_preview_as_json() {
+    let dir = scratch("destroy", WORKFLOW);
+    assert!(meridian(&dir, &["apply", "site.yaml"]).status.success());
+
+    let preview = meridian(&dir, &["plan", "--destroy", "site.yaml"]);
+    assert!(preview.status.success(), "{}", stderr(&preview));
+    let value = run(&preview, "plan");
+    assert_eq!(statuses(&value), ["planned", "planned"]);
+    assert_eq!(value["stages"][0]["name"], "web");
+    assert_eq!(value["stages"][0]["changes"][0]["action"], "delete");
+
+    let destroyed = meridian(&dir, &["destroy", "--yes", "site.yaml"]);
+    assert!(destroyed.status.success(), "{}", stderr(&destroyed));
+    let value = run(&destroyed, "destroy");
+    assert_eq!(statuses(&value), ["destroyed", "destroyed"]);
+
+    let again = meridian(&dir, &["destroy", "--yes", "site.yaml"]);
+    let value = run(&again, "destroy");
+    assert_eq!(statuses(&value), ["kept", "kept"]);
+    assert_eq!(value["stages"][0]["kept"], "never-applied");
+}
+
+#[test]
 fn validate_lint_fmt_plugins_version_and_migrate_as_json() {
     let dir = scratch("tools", WORKFLOW);
 

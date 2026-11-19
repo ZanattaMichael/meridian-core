@@ -20,6 +20,10 @@
 //! tool names a file in `FAKE_SECRET_SINK`, and the tool copies the private
 //! file there. `FAKE_SECRETS=none` makes it a target that takes no secret.
 //!
+//! It destroys: each file the state holds is removed, and an applied file
+//! holding `LOCKED` fails the destroy there. `FAKE_DESTROY=off` makes it a
+//! target that cannot destroy.
+//!
 //! It imports as well. Its tool's "existing configuration" is a `*.fake`
 //! file of `name = content` lines, each of which becomes a `file` resource.
 //! A line that starts with `?` is something the importer does not
@@ -425,6 +429,19 @@ fn diff(state: &BTreeMap<String, Value>, artifact: &Artifact) -> Vec<Change> {
     changes
 }
 
+/// A delete for every file the state holds, as a destroy removes them.
+fn removals(state: &BTreeMap<String, Value>) -> Vec<Change> {
+    state
+        .keys()
+        .filter(|path| !path.starts_with(ADOPT_DIR))
+        .map(|path| Change {
+            resource: path.clone(),
+            action: ChangeAction::Delete,
+            summary: String::new(),
+        })
+        .collect()
+}
+
 fn outputs_of(state: &BTreeMap<String, Value>, context: &RunContext) -> Vec<Output> {
     let mut outputs = vec![
         Output {
@@ -658,6 +675,73 @@ impl Runner for FakeRunner {
             return Err(RunError::new("nothing has been applied yet"));
         }
         Ok(outputs_of(&state, context))
+    }
+
+    /// `FAKE_DESTROY=off` stands it in for a plugin that cannot destroy.
+    fn destroys(&self) -> bool {
+        std::env::var("FAKE_DESTROY").as_deref() != Ok("off")
+    }
+
+    /// A delete for each file the state holds.
+    fn plan_destroy(
+        &self,
+        context: &RunContext,
+        _artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Plan, RunError> {
+        let state = read_state(&context.work_dir)?;
+        log.out(&format!("{} files to remove", state.len()));
+        Ok(Plan {
+            changes: removals(&state),
+            unknown: false,
+            saved: None,
+        })
+    }
+
+    /// Removes each file the state holds and empties the state. A file whose
+    /// applied content holds `LOCKED` fails the destroy there, and `HANG`
+    /// waits to be stopped, each with what was removed before it.
+    fn destroy(
+        &self,
+        context: &RunContext,
+        _artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Vec<Change>, RunError> {
+        let mut state = read_state(&context.work_dir)?;
+        let save = |state: &BTreeMap<String, Value>| {
+            fs::write(context.work_dir.join("state.json"), canonical_map(state))
+                .map_err(|e| RunError::new(format!("writing the state file: {e}")))
+        };
+        let mut done = Vec::new();
+        for change in removals(&state) {
+            let applied = match state.get(&change.resource) {
+                Some(Value::String(text)) => text.clone(),
+                _ => String::new(),
+            };
+            log.out(&format!("delete {}", change.resource));
+            if applied.contains("LOCKED") {
+                save(&state)?;
+                return Err(RunError {
+                    msg: format!("could not remove {}", change.resource),
+                    command: "fake-tool destroy".to_owned(),
+                    exit_code: Some(4),
+                    output: "file is locked\n".to_owned(),
+                    changes: done,
+                });
+            }
+            if applied.contains("HANG") {
+                save(&state)?;
+                if let Err(mut stopped) = hang(log) {
+                    stopped.changes = done;
+                    return Err(stopped);
+                }
+            }
+            let _ = fs::remove_file(context.work_dir.join("current").join(&change.resource));
+            state.remove(&change.resource);
+            done.push(change);
+        }
+        save(&state)?;
+        Ok(done)
     }
 
     /// `FAKE_IDENTIFIERS=off` stands it in for a plugin that cannot report

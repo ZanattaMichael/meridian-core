@@ -926,6 +926,33 @@ pub fn apply_result_from_wire(r: pb::ApplyResult) -> Result<Result<Applied, RunE
     }))
 }
 
+pub fn destroy_result(outcome: Result<Vec<Change>, RunError>) -> pb::DestroyResult {
+    match outcome {
+        Ok(changes) => pb::DestroyResult {
+            changes: changes.into_iter().map(change_to_wire).collect(),
+            error: None,
+        },
+        Err(mut e) => pb::DestroyResult {
+            changes: std::mem::take(&mut e.changes)
+                .into_iter()
+                .map(change_to_wire)
+                .collect(),
+            error: Some(run_error_to_wire(e)),
+        },
+    }
+}
+
+/// The outer error is a malformed message; the inner one is the tool failing.
+pub fn destroy_result_from_wire(
+    r: pb::DestroyResult,
+) -> Result<Result<Vec<Change>, RunError>, String> {
+    let changes = changes_from_wire(r.changes)?;
+    if let Some(e) = r.error {
+        return Ok(Err(run_error_from_wire(e, changes)));
+    }
+    Ok(Ok(changes))
+}
+
 pub fn outputs_response(outcome: Result<Vec<Output>, RunError>) -> pb::OutputsResponse {
     match outcome {
         Ok(outputs) => pb::OutputsResponse {

@@ -279,8 +279,8 @@ pub struct RunError {
     pub exit_code: Option<i32>,
     /// The end of what the tool printed, enough to explain the failure.
     pub output: String,
-    /// What an apply had already done before it failed, as far as the tool
-    /// reported it. Always empty for a plan.
+    /// What an apply or a destroy had already done before it failed, as far
+    /// as the tool reported it. Always empty for a plan.
     pub changes: Vec<Change>,
 }
 
@@ -477,5 +477,39 @@ pub trait Runner: Send + Sync {
     fn identifiers(&self, context: &RunContext) -> Result<BTreeMap<String, String>, RunError> {
         let _ = context;
         Err(RunError::new("this plugin does not read identifiers"))
+    }
+
+    /// Whether [`Runner::destroy`] and [`Runner::plan_destroy`] are
+    /// answered. Say true only when `destroy` removes everything the tool
+    /// created for the artifact, as the tool's own destroy does. A target
+    /// whose tool keeps no record of what it made, as most configuration
+    /// management tools, says false, and `meridian destroy` leaves its
+    /// stages in place.
+    fn destroys(&self) -> bool {
+        false
+    }
+
+    /// Previews what `destroy` would remove. It must change nothing.
+    fn plan_destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Plan, RunError> {
+        let _ = (context, artifact, log);
+        Err(RunError::new("this plugin does not destroy"))
+    }
+
+    /// Removes everything the tool created for the artifact, and reports
+    /// what it removed. A failure carries what was removed before it in
+    /// [`RunError::changes`].
+    fn destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Vec<Change>, RunError> {
+        let _ = (context, artifact, log);
+        Err(RunError::new("this plugin does not destroy"))
     }
 }

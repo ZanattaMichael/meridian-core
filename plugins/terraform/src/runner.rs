@@ -90,13 +90,15 @@ impl TerraformRunner {
         CloudHandover::tell_if_any(cloud, tool)
     }
 
-    /// Writes the configuration, initialises the directory and saves a plan.
+    /// Writes the configuration, initialises the directory and saves a plan:
+    /// of the configuration, or with `destroy` of removing everything.
     fn prepare(
         &self,
         context: &RunContext,
         cloud: Option<&CloudHandover>,
         artifact: &Artifact,
         log: &dyn Log,
+        destroy: bool,
     ) -> Result<Vec<Change>, RunError> {
         if !artifact.files.contains_key(CONFIG_PATH) {
             return Err(RunError::new(format!(
@@ -129,6 +131,9 @@ impl TerraformRunner {
             .args(["plan", "-input=false", "-no-color"])
             .args(self.extra_args.iter().cloned())
             .arg(format!("-out={PLAN_FILE}"));
+        if destroy {
+            plan = plan.arg("-destroy");
+        }
         if let Some(file) = &secrets {
             plan = plan.arg(format!("-var-file={}", file.path().display()));
         }
@@ -247,7 +252,7 @@ impl Runner for TerraformRunner {
         // A cloud credential reaches the providers in the environment of
         // every call of the stage, and the files it needs live to the end.
         let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
-        let prepared = self.prepare(context, cloud.as_ref(), artifact, log);
+        let prepared = self.prepare(context, cloud.as_ref(), artifact, log, false);
         // The plan file is the tool's own saved plan, which `meridian plan
         // --out` keeps for the apply. It holds the value of every variable,
         // so when the run handed over a secret it is scrubbed instead of
@@ -285,7 +290,7 @@ impl Runner for TerraformRunner {
         let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
         let prepared = match &context.saved_plan {
             Some(saved) => self.restore(context, cloud.as_ref(), artifact, &saved.data, log),
-            None => self.prepare(context, cloud.as_ref(), artifact, log),
+            None => self.prepare(context, cloud.as_ref(), artifact, log, false),
         };
         let changes = match prepared {
             Ok(changes) => changes,
@@ -320,6 +325,53 @@ impl Runner for TerraformRunner {
         // and apply only. A backend that needs the cloud's login to read
         // the state is read right after the apply, inside it.
         self.read_outputs(context, None, &meridian_sdk::NoLog)
+    }
+
+    fn destroys(&self) -> bool {
+        true
+    }
+
+    fn plan_destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Plan, RunError> {
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let prepared = self.prepare(context, cloud.as_ref(), artifact, log, true);
+        self.scrub(context);
+        Ok(Plan {
+            changes: prepared?,
+            unknown: false,
+            saved: None,
+        })
+    }
+
+    /// Plans the destroy (`plan -destroy`) and applies that plan, so what
+    /// is removed is what was reported.
+    fn destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Vec<Change>, RunError> {
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let changes = match self.prepare(context, cloud.as_ref(), artifact, log, true) {
+            Ok(changes) => changes,
+            Err(e) => {
+                self.scrub(context);
+                return Err(e);
+            }
+        };
+        let destroyed = self
+            .tool(context, cloud.as_ref())
+            .args(["apply", "-input=false", "-no-color"])
+            .args(self.extra_args.iter().cloned())
+            .arg(PLAN_FILE)
+            .run_ok("terraform destroy failed", log);
+        self.scrub(context);
+        destroyed?;
+        Ok(changes)
     }
 
     fn reads_identifiers(&self) -> bool {

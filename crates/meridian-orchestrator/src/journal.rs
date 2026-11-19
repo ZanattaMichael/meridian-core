@@ -366,6 +366,27 @@ impl Journal {
                     ],
                 );
             }
+            Outcome::Destroyed { changes } => {
+                for change in changes {
+                    self.emit(observer, event::RESOURCE_CHANGED, at, resource(change));
+                }
+                step.changes = changes.len() as u64;
+                self.emit(
+                    observer,
+                    event::STEP_SUCCEEDED,
+                    at,
+                    vec![hash, ("changes", Value::Int(step.changes as i64))],
+                );
+            }
+            Outcome::Kept(kept) => {
+                step.status = StepStatus::Skipped;
+                self.emit(
+                    observer,
+                    event::STEP_SKIPPED,
+                    at,
+                    vec![("reason", Value::from(kept.as_str()))],
+                );
+            }
             Outcome::LeftOut { .. } => {
                 step.status = StepStatus::Skipped;
                 self.emit(

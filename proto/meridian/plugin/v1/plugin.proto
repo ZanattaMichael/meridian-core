@@ -386,6 +386,12 @@ message DescribeResponse {
   // first, as a person reads it: "TF_LOG=DEBUG", "-vvv". Empty when the
   // plugin has no debug output to give.
   repeated string debug_levels = 28;
+  // destroys is true when the plugin's Runner answers Destroy, and previews
+  // it when PlanRequest.destroy is set: it removes everything its tool
+  // created for an artifact. A plugin built before this field destroys
+  // nothing, and a stage of its target is left in place by `meridian
+  // destroy`.
+  bool destroys = 29;
 }
 
 // Setting is one thing an operator can configure about a runner.
@@ -672,6 +678,10 @@ message LogLine {
 message PlanRequest {
   RunContext context = 1;
   Artifact artifact = 2;
+  // destroy asks for a preview of Destroy instead of Apply: every change is
+  // a delete. The host sets it only for a plugin whose Describe says
+  // destroys.
+  bool destroy = 3;
 }
 
 // PlanResult is the preview. Either error is set, or changes is the complete
@@ -719,6 +729,25 @@ message ApplyEvent {
   }
 }
 
+message DestroyRequest {
+  RunContext context = 1;
+  Artifact artifact = 2;
+}
+
+// DestroyResult is what a destroy removed. When error is set, changes lists
+// what was removed before the failure, as far as the tool reported it.
+message DestroyResult {
+  repeated Change changes = 1;
+  RunError error = 2;
+}
+
+message DestroyEvent {
+  oneof event {
+    LogLine log = 1;
+    DestroyResult result = 2;
+  }
+}
+
 message OutputsRequest {
   RunContext context = 1;
 }
@@ -762,6 +791,10 @@ service Runner {
   // host, so the plugin's answer is heard. Added after protocol 2 was first
   // spoken; a host treats "unimplemented" as a plugin that cannot be asked.
   rpc Cancel(CancelRequest) returns (CancelResponse);
+  // Destroy removes everything the tool created for the artifact, as the
+  // tool's own destroy does. Asked only of a plugin whose Describe says
+  // destroys; Cancel stops it as it stops Apply.
+  rpc Destroy(DestroyRequest) returns (stream DestroyEvent);
 }
 
 message CancelRequest {}

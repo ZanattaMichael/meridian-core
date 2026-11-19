@@ -63,7 +63,8 @@ meridian lsp / meridian mcp                 # language server, MCP server
 
 - Runs are locked, recorded, resumable (`apply --resume`) and can roll back. `adopt` takes an
   existing thing under management ([adopting what exists](docs/reference/dsl/resources.md#adopting-what-exists));
-  `meridian retarget` moves a document to another tool ([retargeting](docs/operations/retargeting.md)).
+  `meridian retarget` moves a document to another tool ([retargeting](docs/operations/retargeting.md));
+  `meridian destroy` removes what was applied, last stage first ([destroying](docs/operations/destroying.md)).
   See [running safely](docs/concepts/run-safety.md) and [policy checks](docs/reference/policy.md).
 - `--analyze checkov,trivy` scans the compiled files and shows each finding at its document
   line ([analyzers](docs/reference/analyzers.md)).

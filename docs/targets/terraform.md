@@ -18,6 +18,7 @@ with `terraform`. OpenTofu's `tofu` takes the same commands.
 | `state: absent` | No. Terraform removes what the configuration no longer declares, so remove the resource from the document |
 | Plan | Yes: Terraform's own plan |
 | Outputs | Yes |
+| Destroy | Yes: `plan -destroy`, then that plan applied. See [Destroying](../operations/destroying.md) |
 
 ## What a document looks like
 
@@ -244,6 +245,7 @@ Round-trip test: [`web-vm/`](../../plugins/terraform/testdata/import/web-vm),
 |---|---|
 | Plan | `terraform init`, then `terraform plan -out=meridian.tfplan`, then `terraform show -json` to read it |
 | Apply | the same plan, then `terraform apply meridian.tfplan`, then `terraform output -json` |
+| Destroy | `terraform init`, `terraform plan -destroy -out=meridian.tfplan`, `terraform show -json`, then `terraform apply meridian.tfplan`; `plan --destroy` stops after `show` |
 | `MERIDIAN_TERRAFORM` | the program to run, when it is not `terraform` on `PATH`; set it to `tofu` for OpenTofu |
 | `MERIDIAN_TERRAFORM_ARGS` | arguments added to `init`, `plan` and `apply`, split like a shell command line (quotes hold a word together): `-parallelism=4`, `-lock-timeout=30s`. The calls that read the saved plan and the outputs get none |
 

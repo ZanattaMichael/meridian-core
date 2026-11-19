@@ -66,7 +66,7 @@ Command-line mistakes are text, exit `2`.
 
 ## The commands
 
-### `compile`, `plan`, `apply`, `drift`, `rollback`
+### `compile`, `plan`, `apply`, `drift`, `rollback`, `destroy`
 
 One run object. Schema: `schemas/output/run.schema.json`.
 
@@ -166,6 +166,8 @@ not known is `null`) and `measures` (each with `name`, `value` and `unit`).
 | `deferred` | the stage needs an output that does not exist yet | `waitingOn` (`name` and `kind` of the stage), `waitingFor` (the output) |
 | `skipped` | a resumed run found it already applied from the same artifact | `appliedIn`, the run |
 | `drift` | what a drift check found | `drift`: `never-applied`, `in-sync`, `drifted`, `pending` or `unknown`; `changes`, the differences for `drifted` and `pending`; `lastApplyFailed` for `pending` |
+| `destroyed` | `destroy` removed what the tool made | `changes` |
+| `kept` | `destroy` or `plan --destroy` left the stage in place | `kept`: `cannot-destroy` or `never-applied` |
 | `left-out` | the document's own `spec.when` was false | `condition` |
 | `failed` | the stage failed and the run stopped here | `error`, the text; `changes`, what the tool had already done before failing; `reason`, the code |
 | `not-run` | an earlier stage failed | `becauseOf` (`name` and `kind`) |

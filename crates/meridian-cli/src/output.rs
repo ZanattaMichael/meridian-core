@@ -206,6 +206,8 @@ pub(crate) fn stage(stage: &StageReport, mode: Mode, out: Option<&Path>) -> Json
         Outcome::Deferred { .. } => "deferred",
         Outcome::Skipped { .. } => "skipped",
         Outcome::Drift(_) => "drift",
+        Outcome::Destroyed { .. } => "destroyed",
+        Outcome::Kept(_) => "kept",
         Outcome::LeftOut { .. } => "left-out",
         Outcome::Failed(_) => "failed",
         Outcome::NotRun { .. } => "not-run",
@@ -298,6 +300,12 @@ pub(crate) fn stage(stage: &StageReport, mode: Mode, out: Option<&Path>) -> Json
             if let Some(failed) = last_apply_failed {
                 object.insert("lastApplyFailed".to_owned(), Json::from(failed));
             }
+        }
+        Outcome::Destroyed { changes: made } => {
+            object.insert("changes".to_owned(), changes(made));
+        }
+        Outcome::Kept(kept) => {
+            object.insert("kept".to_owned(), Json::from(kept.as_str()));
         }
         Outcome::LeftOut { condition } => {
             object.insert("condition".to_owned(), Json::from(condition.as_str()));

@@ -239,7 +239,7 @@ def architecture() -> str:
     p.append(rect(L, proto_y, R - L, proto_h, TILE, LINE, 29))
     mid = (L + R) / 2
     p.append(text(mid, proto_y + 25, "one plugin program per target, spoken to over a private socket", 15, 600, WHITE))
-    p.append(text(mid, proto_y + 45, "Describe · Emit · Plan · Apply · Outputs · Identifiers · Import · ExportSchemas", 13, 400, TEXT_SOFT, mono=True))
+    p.append(text(mid, proto_y + 45, "Describe · Emit · Plan · Apply · Destroy · Outputs · Identifiers · Import · ExportSchemas", 13, 400, TEXT_SOFT, mono=True))
     p.append(flow(f"M{mid - 40:g} {core_y + core_h}L{mid - 40:g} {proto_y}", WHITE, delay=0.4))
     p.append(flow(f"M{mid + 40:g} {proto_y}L{mid + 40:g} {core_y + core_h}", LINE, delay=1.6))
     p.append(text(mid - 56, core_y + core_h + 22, "ordered resources, data, secrets", 12.5, 400, TEXT_SOFT, "end"))
@@ -450,7 +450,7 @@ def run_safety() -> str:
     W, H = 1200, 640
     p: list[str] = []
     cx = 170
-    p.append(card(40, 40, 260, 70, "meridian plan / apply", ["validate and compile take no lock"], WHITE, 16, 12.5, True))
+    p.append(card(40, 40, 260, 70, "plan / apply / destroy", ["validate and compile take no lock"], WHITE, 16, 12.5, True))
     # Lock.
     p.append(flow(f"M{cx} 110L{cx} 150", WHITE, delay=0))
     p.append(card(40, 150, 260, 70, "take the state lock", ["one run at a time per state"], LINE, 16, 12.5))
@@ -463,7 +463,7 @@ def run_safety() -> str:
     p.append(card(400, 260, 300, 70, "the run fails", ["nothing was applied"], RED, 15, 12.5))
     # Stages.
     p.append(flow(f"M{cx} 330L{cx} 370", WHITE, delay=0.8))
-    p.append(card(40, 370, 260, 70, "run the stages in order", ["Infrastructure, then ResourceSets"], WHITE, 16, 12.5))
+    p.append(card(40, 370, 260, 70, "run the stages in order", ["Infrastructure first; destroy, last first"], WHITE, 16, 12.5))
     # Record and state on the right.
     p.append(flow(f"M300 405L740 405", CON, delay=0.2, seconds=2.6))
     p.append(text(520, 396, "every change of state is an event", 12.5, 400, TEXT_SOFT))
@@ -492,10 +492,11 @@ def run_safety() -> str:
         "this run changed, last first",
     ], CM, 15, 12.5))
     # Drift, off to the side of the record.
-    p.append(rect(400, 40, 760, 90, TILE, LINE, 14, 1.2, "5 5"))
+    p.append(rect(400, 40, 760, 102, TILE, LINE, 14, 1.2, "5 5"))
     p.append(text(430, 68, "Afterwards", 15, 700, WHITE, "start"))
     p.append(lines(430, 92, [
         "meridian drift asks each tool whether what was applied is still what is there. meridian rollback puts a finished run back.",
+        "meridian destroy removes what each tool made, last stage first, and forgets the stage.",
         "Each tool owns its own state: Meridian's record says what Meridian did, never the truth about your infrastructure.",
     ], 12.5, TEXT_SOFT, "start"))
     p.append(caption(W, H, "A run can be repeated, shared, picked up where it stopped, or put back, because every step of it was recorded before the next began."))
