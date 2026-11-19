@@ -468,6 +468,13 @@ def run_safety() -> str:
     p.append(flow(f"M300 405L740 405", CON, delay=0.2, seconds=2.6))
     p.append(text(520, 396, "every change of state is an event", 12.5, 400, TEXT_SOFT))
     p.append(card(740, 340, 200, 128, "the record", ["runs/<id>/run.json", "runs/<id>/events.jsonl", "names things, holds", "no value and no secret"], CON, 16, 12.5, True))
+    # Kept beside the record, on this machine only.
+    p.append(flow("M720 405L720 250L740 250", CM, delay=0.6, seconds=2.4))
+    p.append(card(740, 190, 420, 120, "on this machine only, never sent", [
+        "runs/<id>/logs/: each step's tool output, masked;",
+        "meridian logs reads it, meridian bug-report packs it",
+        "history/: what a rollback applies again",
+    ], CM, 16, 12.5, True))
     p.append(card(960, 340, 200, 128, "the run-state", ["state.json", "which stage applied", "which artifact, by hash;", "outputs are read back"], CON, 16, 12.5, True))
     p.append(flow(f"M840 468L840 520", CON, delay=1, seconds=2))
     p.append(flow(f"M1060 468L1060 520", CON, delay=1.4, seconds=2))
@@ -492,7 +499,7 @@ def run_safety() -> str:
         "Each tool owns its own state: Meridian's record says what Meridian did, never the truth about your infrastructure.",
     ], 12.5, TEXT_SOFT, "start"))
     p.append(caption(W, H, "A run can be repeated, shared, picked up where it stopped, or put back, because every step of it was recorded before the next began."))
-    return doc(W, H, "Running safely: the lock, the policy check, the record of every event, the run-state, and what happens when a stage fails", "".join(p))
+    return doc(W, H, "Running safely: the lock, the policy check, the record of every event, the run-state, the tool logs kept on the machine, and what happens when a stage fails", "".join(p))
 
 
 def plugin_categories() -> str:
@@ -714,7 +721,7 @@ def common_types() -> str:
     for i in range(5):
         y = 92 + i * 80
         p.append(flow(f"M290 {y}C315 {y} 315 {y} 340 {y}", IAC, delay=i * 0.35, seconds=2.4))
-    p.append(caption(W, H, "The same outputs on every cloud: id, privateAddress, publicAddress. What a cloud cannot express is refused, never dropped."))
+    p.append(caption(W, H, "Pulumi makes the Terraform resources with its own type tokens. The same outputs everywhere: id, privateAddress, publicAddress."))
     return doc(W, H, "The common infrastructure types: network, subnet, firewall, address and vm written once, and the native resources Terraform for AWS, CloudFormation, Terraform for Azure, and Bicep and ARM compile each of them to", "".join(p))
 
 

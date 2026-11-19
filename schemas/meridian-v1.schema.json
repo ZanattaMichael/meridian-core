@@ -5721,8 +5721,13 @@
               "anyOf": [
                 {
                   "enum": [
+                    "address",
                     "config",
-                    "stack"
+                    "firewall",
+                    "network",
+                    "stack",
+                    "subnet",
+                    "vm"
                   ]
                 },
                 {
@@ -5732,6 +5737,475 @@
                   "pattern": "^invoke\\..+$"
                 }
               ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "address"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A fixed public IP address, which a vm takes with its `address` param. Reads on every target: `${id.address}`, `${id.id}`.",
+            "properties": {
+              "params": {
+                "properties": {
+                  "location": {
+                    "description": "Where the resource is placed, as an Azure location such as `westeurope`. Unless given: `spec.settings.location` on Terraform, the resource group's location on Bicep. Refused on AWS, where a resource is in the region its provider is configured for.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The resource's name in the cloud. The resource's id unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "tags": {
+                    "description": "Labels on the resource, as a mapping of text to text.",
+                    "type": [
+                      "object",
+                      "string"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "firewall"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A set of rules saying which traffic may reach, or leave, the machines it is attached to. Reads on every target: `${id.id}`.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "location": {
+                    "description": "Where the resource is placed, as an Azure location such as `westeurope`. Unless given: `spec.settings.location` on Terraform, the resource group's location on Bicep. Refused on AWS, where a resource is in the region its provider is configured for.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The resource's name in the cloud. The resource's id unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "network": {
+                    "description": "The network the firewall belongs to, as a reference: `${net}`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "rules": {
+                    "description": "The traffic allowed, one mapping per rule: `direction` (`in`, the default, or `out`), `protocol` (`tcp`, the default, `udp`, `icmp` or `any`), `port` (one port, `80`, or a range, `8000-9000`; left out for every port) and `cidr` (where the traffic comes from, or goes to; `0.0.0.0/0` for anywhere). Everything not allowed is refused. A firewall with no `out` rule lets everything out, which is every cloud's default.",
+                    "type": [
+                      "array",
+                      "string"
+                    ],
+                    "items": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "direction": {
+                              "description": "`in` (the default) or `out`.",
+                              "type": [
+                                "string",
+                                "number",
+                                "boolean"
+                              ],
+                              "enum": [
+                                "in",
+                                "out"
+                              ]
+                            },
+                            "protocol": {
+                              "description": "`tcp` unless given.",
+                              "type": [
+                                "string",
+                                "number",
+                                "boolean"
+                              ],
+                              "enum": [
+                                "any",
+                                "icmp",
+                                "tcp",
+                                "udp"
+                              ]
+                            },
+                            "port": {
+                              "description": "One port, or a range `from-to`; every port when left out.",
+                              "type": [
+                                "string",
+                                "number",
+                                "boolean"
+                              ]
+                            },
+                            "cidr": {
+                              "description": "Where the traffic comes from, or goes to.",
+                              "type": [
+                                "string",
+                                "number",
+                                "boolean"
+                              ]
+                            }
+                          },
+                          "additionalProperties": false,
+                          "required": [
+                            "cidr"
+                          ]
+                        },
+                        {
+                          "type": [
+                            "string",
+                            "number",
+                            "boolean"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "tags": {
+                    "description": "Labels on the resource, as a mapping of text to text.",
+                    "type": [
+                      "object",
+                      "string"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "network"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "network"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A private network with its own address range: a VPC, a virtual network. Reads on every target: `${id.id}`.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "cidr": {
+                    "description": "The network's address range, such as `10.0.0.0/16`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "location": {
+                    "description": "Where the resource is placed, as an Azure location such as `westeurope`. Unless given: `spec.settings.location` on Terraform, the resource group's location on Bicep. Refused on AWS, where a resource is in the region its provider is configured for.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The resource's name in the cloud. The resource's id unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "tags": {
+                    "description": "Labels on the resource, as a mapping of text to text.",
+                    "type": [
+                      "object",
+                      "string"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "cidr"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "subnet"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A range of addresses inside a network, where machines are placed. Reads on every target: `${id.id}`.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "cidr": {
+                    "description": "The subnet's address range, inside the network's, such as `10.0.1.0/24`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "location": {
+                    "description": "On AWS, the availability zone the subnet is in, such as `eu-west-1a`. Refused on Azure, where a subnet is wherever its network is.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The resource's name in the cloud. The resource's id unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "network": {
+                    "description": "The network the subnet is in, as a reference: `${net}`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "public": {
+                    "description": "Whether a machine in the subnet gets a public address of its own and can reach the internet. Off unless given.",
+                    "type": [
+                      "boolean",
+                      "string"
+                    ]
+                  },
+                  "tags": {
+                    "description": "Labels on the resource, as a mapping of text to text.",
+                    "type": [
+                      "object",
+                      "string"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "cidr",
+                  "network"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "vm"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A virtual machine in a subnet, from an image, of a size, reachable with a key. Reads on every target: `${id.id}`, `${id.privateAddress}`, `${id.publicAddress}`.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "address": {
+                    "description": "A fixed public address to attach, as a reference to an `address` resource: `${ip}`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "firewalls": {
+                    "description": "The firewalls that apply to the machine, as references: `[${web_fw}]`.",
+                    "type": [
+                      "array",
+                      "string"
+                    ]
+                  },
+                  "image": {
+                    "description": "What the machine boots: a mapping with `family` (`ubuntu` or `debian`) and `version` (`24.04`, `22.04`, `12`), which the target turns into the cloud's own image and shows in the compiled file; or the cloud's own image written as text, which is passed through.",
+                    "properties": {
+                      "family": {
+                        "description": "The operating system.",
+                        "type": [
+                          "string",
+                          "number",
+                          "boolean"
+                        ],
+                        "enum": [
+                          "debian",
+                          "ubuntu"
+                        ]
+                      },
+                      "version": {
+                        "description": "Its release.",
+                        "type": [
+                          "string",
+                          "number",
+                          "boolean"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "location": {
+                    "description": "Where the resource is placed, as an Azure location such as `westeurope`. Unless given: `spec.settings.location` on Terraform, the resource group's location on Bicep. Refused on AWS, where a resource is in the region its provider is configured for.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The resource's name in the cloud. The resource's id unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "size": {
+                    "description": "How big the machine is: a mapping with `cpus` and `memoryGb`, which the target turns into the smallest of the cloud's own sizes that has at least that and shows in the compiled file; or the cloud's own size written as text, which is passed through.",
+                    "properties": {
+                      "cpus": {
+                        "description": "How many processors.",
+                        "type": [
+                          "integer",
+                          "string"
+                        ]
+                      },
+                      "memoryGb": {
+                        "description": "How much memory, in gigabytes.",
+                        "type": [
+                          "number",
+                          "string"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "sshKey": {
+                    "description": "The public key that may log in, as text or as a secret.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "subnet": {
+                    "description": "The subnet the machine is in, as a reference: `${web}`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "tags": {
+                    "description": "Labels on the resource, as a mapping of text to text.",
+                    "type": [
+                      "object",
+                      "string"
+                    ]
+                  },
+                  "user": {
+                    "description": "The login the key is for. Where a cloud decides the login from the image, the param is refused rather than ignored.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "image",
+                  "size",
+                  "subnet"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
             }
           }
         }

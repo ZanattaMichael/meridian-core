@@ -24,15 +24,19 @@ targets do.
 |---|---|---|
 | `terraform` | AWS (`aws` provider), Azure (`azurerm` provider) | `spec.settings.cloud`, or the one cloud whose provider the document configures |
 | `opentofu` | AWS, Azure | the same as `terraform`: the two read the same providers, and compile a common resource to the same blocks |
+| `pulumi` | AWS (`aws` package), Azure (`azure-native` package) | `spec.settings.cloud`, or the one cloud whose package the document already uses, in a resource type or a `config` name such as `aws:region` |
 | `cloudformation` | AWS | always AWS, in the stack's region |
 | `bicep` | Azure | always Azure |
 | `arm` | Azure | always Azure: the same resources as Bicep, written as an ARM template |
 
-Other targets refuse them as `unsupported-resource-type`. Pulumi and GCP are next
-(issue 151).
+Other targets refuse them as `unsupported-resource-type`. GCP is next (issue 151).
 
-ARM writes the same resources as the Bicep column below, except the API version is
-`apiVersion` and a subnet is named `<network>/<subnet>` instead of taking a `parent`.
+Pulumi makes the Terraform column's resources with Pulumi's tokens and property names
+(`aws:ec2:Vpc` with `cidrBlock`); see the
+[Pulumi page](../../targets/pulumi.md#common-infrastructure-types). On Azure it uses
+`spec.settings.location`, else the resource group's location. ARM writes the same
+resources as the Bicep column below, except the API version is `apiVersion` and a subnet
+is named `<network>/<subnet>` instead of taking a `parent`.
 
 ## Beside the tool's own types
 
@@ -235,7 +239,7 @@ refused. Text, such as `t3.small`, is passed through.
 | `debian` | `"12"` | newest AMI owned by Debian (`136693071363`) named `debian-12-amd64-*` | `Debian` / `debian-12` / `12-gen2` |
 | `debian` | `"11"` | the same owner, `debian-11-amd64-*` | `Debian` / `debian-11` / `11-gen2` |
 
-Terraform and OpenTofu look up the AMI in the publisher's own account. CloudFormation reads the
+Terraform, OpenTofu and Pulumi look up the AMI in the publisher's own account. CloudFormation reads the
 vendor's public SSM parameter as `{{resolve:ssm:...}}`:
 `/aws/service/debian/release/<version>/latest/amd64` or
 `/aws/service/canonical/ubuntu/server/<version>/stable/current/amd64/hvm/ebs-gp3/ami-id`
@@ -257,7 +261,7 @@ A document that already uses one of these ids is refused as `duplicate-resource`
 
 ## Settings
 
-Terraform and OpenTofu read these [`spec.settings`](index.md#settings) keys:
+Terraform, OpenTofu and Pulumi read these [`spec.settings`](index.md#settings) keys:
 
 | Key | |
 |---|---|

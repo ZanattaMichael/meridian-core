@@ -40,6 +40,7 @@
 // A refusal carries its position and resource by value, as the SDK's does.
 #![allow(clippy::result_large_err)]
 
+mod common;
 mod emit;
 mod runner;
 mod schemas;
@@ -233,9 +234,14 @@ impl Emitter for Pulumi {
     fn supported_resource_types(&self) -> Vec<String> {
         [
             "<package>:<module>:<Type>",
+            "address",
             "config",
+            "firewall",
             "invoke.<function>",
+            "network",
             "stack",
+            "subnet",
+            "vm",
         ]
         .map(str::to_owned)
         .to_vec()
@@ -263,7 +269,23 @@ impl Emitter for Pulumi {
         Category::InfrastructureAsCode
     }
 
+    fn settings_keys(&self) -> Vec<String> {
+        common::SETTINGS_KEYS.map(str::to_owned).to_vec()
+    }
+
+    /// The common infrastructure types, described for editors. The
+    /// providers' own types come from `meridian schema sync`.
+    fn resource_schemas(&self) -> Vec<meridian_sdk::ResourceSchema> {
+        meridian_sdk::infra::common_type_names()
+            .into_iter()
+            .map(|name| meridian_sdk::infra::common_schema(name, &common::params(name)))
+            .collect()
+    }
+
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        // The common types become the aws or azure-native package's own
+        // resources first, so every later stage sees Pulumi types only.
+        let graph = &common::lower(graph)?;
         // A secret in a param is written as a reference to a secret
         // configuration value, which the runner sets from standard input.
         refuse_secret_in(graph, &["stack", "config"], "the stack's settings are the command line `pulumi` is given and a configuration value's declaration is written into the program")?;
