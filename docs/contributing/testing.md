@@ -253,3 +253,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 ```
+
+## Which changes run a plugin's workflow
+
+A plugin's real-tool workflow runs, on pull requests and on `main`, only when the change touches a path it builds from: the plugin, the workspace crates it depends on (from `cargo metadata`), its examples, `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.github/actions/setup-rust` or the workflow itself. `push` and `pull_request` share one list through a YAML anchor (`&paths`, `*paths`).
+
+When a plugin gains a dependency on another workspace crate, add that crate to its workflow's list.

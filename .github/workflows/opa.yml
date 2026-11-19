@@ -7,13 +7,30 @@ name: opa
 on:
   push:
     branches: [main]
-  pull_request:
-    paths:
-      - 'crates/**'
+    paths: &paths
+      - 'crates/meridian-ast/**'
+      - 'crates/meridian-expr/**'
+      - 'crates/meridian-graph/**'
+      - 'crates/meridian-import/**'
+      - 'crates/meridian-ir/**'
+      - 'crates/meridian-orchestrator/**'
+      - 'crates/meridian-plugin-host/**'
+      - 'crates/meridian-plugin-testkit/**'
+      - 'crates/meridian-policy-opa/**'
+      - 'crates/meridian-sdk/**'
+      - 'crates/meridian-secret/**'
+      - 'crates/meridian-signing/**'
+      - 'crates/meridian-target-fake/**'
+      - 'crates/meridian-value/**'
+      - 'crates/meridian-yaml/**'
       - 'examples/policy/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/opa.yml'
+      - 'rust-toolchain.toml'
+      - '.github/actions/setup-rust/**'
+  pull_request:
+    paths: *paths
 
 permissions:
   contents: read

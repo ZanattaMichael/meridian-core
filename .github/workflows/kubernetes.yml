@@ -7,14 +7,29 @@ name: kubernetes
 on:
   push:
     branches: [main]
-  pull_request:
-    paths:
+    paths: &paths
+      - 'crates/meridian-ast/**'
+      - 'crates/meridian-expr/**'
+      - 'crates/meridian-graph/**'
+      - 'crates/meridian-import/**'
+      - 'crates/meridian-ir/**'
+      - 'crates/meridian-plugin-host/**'
+      - 'crates/meridian-plugin-testkit/**'
+      - 'crates/meridian-sdk/**'
+      - 'crates/meridian-secret/**'
+      - 'crates/meridian-signing/**'
+      - 'crates/meridian-target-fake/**'
+      - 'crates/meridian-value/**'
+      - 'crates/meridian-yaml/**'
       - 'plugins/kubernetes/**'
       - 'examples/kubernetes/**'
-      - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/kubernetes.yml'
+      - 'rust-toolchain.toml'
+      - '.github/actions/setup-rust/**'
+  pull_request:
+    paths: *paths
 
 permissions:
   contents: read

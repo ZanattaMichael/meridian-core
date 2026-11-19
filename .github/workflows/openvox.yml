@@ -3,7 +3,30 @@ name: openvox
 on:
   push:
     branches: [main]
+    paths: &paths
+      - 'crates/meridian-ast/**'
+      - 'crates/meridian-expr/**'
+      - 'crates/meridian-graph/**'
+      - 'crates/meridian-import/**'
+      - 'crates/meridian-ir/**'
+      - 'crates/meridian-plugin-host/**'
+      - 'crates/meridian-plugin-testkit/**'
+      - 'crates/meridian-sdk/**'
+      - 'crates/meridian-secret/**'
+      - 'crates/meridian-signing/**'
+      - 'crates/meridian-target-fake/**'
+      - 'crates/meridian-value/**'
+      - 'crates/meridian-yaml/**'
+      - 'plugins/openvox/**'
+      - 'plugins/puppet/**'
+      - 'examples/openvox/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/actions/setup-rust/**'
+      - '.github/workflows/openvox.yml'
   pull_request:
+    paths: *paths
 
 permissions:
   contents: read
