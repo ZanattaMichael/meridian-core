@@ -40,8 +40,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
-    holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
-    Resource, ResourceGraph, Value,
+    holds_secret, Artifact, Capabilities, Category, CloudTakes, CompileError, Data, Emitted,
+    Emitter, Position, Resource, ResourceGraph, Value,
 };
 use meridian_yaml::Yaml;
 
@@ -109,6 +109,32 @@ pub(crate) struct Template {
 }
 
 /// A refusal of one resource, stamped with this target.
+/// How `aws cloudformation` takes a cloud credential: the AWS CLI reads its
+/// login from the environment, as every AWS SDK does. CloudFormation is AWS
+/// only, so an `azure` or `gcp` credential is refused.
+pub(crate) const CLOUD_TAKES: CloudTakes = CloudTakes {
+    tool: "aws cloudformation",
+    providers: &["aws"],
+    azure_certificate: Err("unused"),
+    gcp_impersonation: Err("unused"),
+};
+
+/// Refuses a credential the tool cannot take, at compile, so that nothing
+/// is fetched for it.
+fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
+    let Some(credential) = &graph.credential else {
+        return Ok(());
+    };
+    meridian_sdk::check_cloud_credential(credential, &CLOUD_TAKES).map_err(|msg| CompileError {
+        target: NAME.to_owned(),
+        resource: String::new(),
+        rule: meridian_sdk::rules::UNSUPPORTED_CREDENTIAL.name.to_owned(),
+        hint: meridian_sdk::rules::UNSUPPORTED_CREDENTIAL.hint.to_owned(),
+        msg: format!("the credential {:?}: {msg}", credential.name),
+        pos: Position::default(),
+    })
+}
+
 pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
@@ -214,6 +240,7 @@ impl Emitter for CloudFormation {
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             secrets: true,
+            cloud_credentials: true,
             ..Capabilities::default()
         }
     }
@@ -232,6 +259,7 @@ impl Emitter for CloudFormation {
     }
 
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        check_credential(graph)?;
         // The common types become AWS resources first, so every later stage
         // sees CloudFormation types only.
         let graph = &common::lower(graph)?;

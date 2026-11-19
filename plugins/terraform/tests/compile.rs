@@ -250,6 +250,61 @@ fn a_secret_in_a_param_is_a_sensitive_variable_the_runner_hands_over() {
     assert!(!config.contains("(sensitive)"), "{config}");
 }
 
+/// The document's `spec` with a credential of `kind` holding `fields`
+/// (YAML on one line), named for a cloud endpoint.
+fn with_cloud_credential(kind: &str, fields: &str) -> String {
+    format!(
+        "  secrets:\n    - name: cloud_secret\n      from: env\n      key: CLOUD_SECRET\n  \
+         credentials:\n    - {{name: prod, type: {kind}, {fields}}}\n  \
+         endpoint: {{type: cloud, credential: prod}}\n  \
+         resources:\n    - id: logs\n      type: aws_s3_bucket\n      params: {{bucket: logs}}\n"
+    )
+}
+
+#[test]
+fn a_cloud_credential_the_providers_take_leaves_nothing_in_the_configuration() {
+    let compiled = config(&with_cloud_credential(
+        "aws",
+        "accessKeyId: AKIA1, secretAccessKey: \"${{ secret.cloud_secret }}\", region: eu-west-1",
+    ));
+    for part in ["AKIA1", "eu-west-1", "cloud_secret", "prod", "credential"] {
+        assert!(
+            !compiled.contains(part),
+            "{part} is in the configuration:\n{compiled}"
+        );
+    }
+    // Every provider, with what the environment can carry for it.
+    config(&with_cloud_credential(
+        "azure",
+        "clientId: c, tenantId: t, subscriptionId: s, certificate: \"${{ secret.cloud_secret }}\"",
+    ));
+    config(&with_cloud_credential(
+        "gcp",
+        "project: shop, impersonate: ci@shop.iam.gserviceaccount.com",
+    ));
+    config(&with_cloud_credential("aws", "from: ambient, profile: ci"));
+}
+
+#[test]
+fn a_credential_the_providers_cannot_take_is_refused_with_what_to_do_instead() {
+    let err = refusal(&with_cloud_credential(
+        "aws",
+        "roleArn: \"arn:aws:iam::123456789012:role/deploy\", region: eu-west-1",
+    ));
+    assert_eq!(err.rule, "unsupported-credential");
+    assert!(
+        err.msg
+            .starts_with("the credential \"prod\": terraform takes no roleArn from Meridian"),
+        "{}",
+        err.msg
+    );
+    assert!(
+        err.msg.contains("declare that profile instead"),
+        "{}",
+        err.msg
+    );
+}
+
 // ---- the common infrastructure types ------------------------------------
 
 #[test]

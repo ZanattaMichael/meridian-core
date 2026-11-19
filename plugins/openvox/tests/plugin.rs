@@ -90,6 +90,7 @@ fn the_binary_is_discovered_by_name_and_says_what_it_is() {
             runtime_condition: false,
             secrets: true,
             credentials: true,
+            cloud_credentials: false,
             adopt: meridian_sdk::Adoption::Converge,
         }
     );

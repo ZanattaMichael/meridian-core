@@ -646,7 +646,111 @@ fn validate_document(doc: &Document, errs: &mut ErrorList) {
     }
 
     validate_credentials(doc, &mut fail);
+    validate_endpoint(doc, errs);
     crate::resolve::check(doc, errs);
+}
+
+/// What is wrong with `spec.endpoint`, if the document has one: its type,
+/// the credential it names, and that the credential is of a type that
+/// reaches that kind of place.
+fn validate_endpoint(doc: &Document, errs: &mut ErrorList) {
+    let Some(endpoint) = doc.endpoint() else {
+        return;
+    };
+    let mut fail = |path: &str, msg: String| errs.push(Error::new(endpoint.pos.clone(), path, msg));
+    let takes = match endpoint.r#type.as_str() {
+        "" => {
+            fail("spec.endpoint.type", "missing required field".into());
+            return;
+        }
+        "host" => {
+            fail(
+                "spec.endpoint.type",
+                "a host is named in spec.targetHost, with its credential as \
+                 targetHost.credential; endpoint is for a cloud or a cluster"
+                    .into(),
+            );
+            return;
+        }
+        other => match endpoint_credential_types(other) {
+            Some(takes) => takes,
+            None => {
+                fail(
+                    "spec.endpoint.type",
+                    format!(
+                        "unknown endpoint type {other:?} (expected {})",
+                        ENDPOINT_TYPES.join(" or ")
+                    ),
+                );
+                return;
+            }
+        },
+    };
+    if endpoint.credential.is_empty() {
+        fail(
+            "spec.endpoint.credential",
+            format!(
+                "missing required field: the credential the {} is reached as, one of \
+                 spec.credentials",
+                endpoint.r#type
+            ),
+        );
+        return;
+    }
+    if meridian_expr::has_interpolation(&endpoint.credential) {
+        fail(
+            "spec.endpoint.credential",
+            "a credential is named as written, so that which identity reaches the \
+             endpoint can be read off the document; it is not interpolated"
+                .into(),
+        );
+        return;
+    }
+    if doc
+        .as_resource_set()
+        .and_then(|d| d.spec.target_host.as_ref())
+        .is_some_and(|th| !th.credential.is_empty())
+    {
+        fail(
+            "spec.endpoint.credential",
+            "the document already names a credential for its host in \
+             spec.targetHost.credential; a document is applied as one identity"
+                .into(),
+        );
+        return;
+    }
+    let Some(credential) = doc
+        .credentials()
+        .iter()
+        .find(|c| c.name == endpoint.credential)
+    else {
+        let declared: Vec<&str> = doc.credentials().iter().map(|c| c.name.as_str()).collect();
+        fail(
+            "spec.endpoint.credential",
+            format!(
+                "no credential named {:?} is declared in spec.credentials{}",
+                endpoint.credential,
+                if declared.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (declared: {})", declared.join(", "))
+                }
+            ),
+        );
+        return;
+    };
+    if !takes.contains(&credential.r#type.as_str()) && credential.kind().is_some() {
+        fail(
+            "spec.endpoint.credential",
+            format!(
+                "a {} takes {} credential; {:?} is {}",
+                endpoint.r#type,
+                describe_types(takes),
+                credential.name,
+                credential.r#type
+            ),
+        );
+    }
 }
 
 /// What is wrong with the credential a `targetHost` names, if it names one.
@@ -701,13 +805,34 @@ fn validate_host_credential(rs: &ResourceSet, th: &TargetHost, errs: &mut ErrorL
 /// The credential types a host is reached with.
 pub const HOST_CREDENTIAL_TYPES: &[&str] = &["ssh", "usernamePassword"];
 
+/// The credential types a cloud endpoint is reached with.
+pub const CLOUD_CREDENTIAL_TYPES: &[&str] = &["aws", "azure", "gcp"];
+
+/// The credential types a cluster endpoint is reached with.
+pub const CLUSTER_CREDENTIAL_TYPES: &[&str] = &["kubeconfig"];
+
+/// The endpoint types `spec.endpoint.type` takes, in the order they are
+/// listed to a reader.
+pub const ENDPOINT_TYPES: &[&str] = &[ENDPOINT_TYPE_CLOUD, ENDPOINT_TYPE_CLUSTER];
+
+/// The credential types an endpoint of `endpoint_type` is reached with, or
+/// `None` for a type the language does not have.
+pub fn endpoint_credential_types(endpoint_type: &str) -> Option<&'static [&'static str]> {
+    match endpoint_type {
+        ENDPOINT_TYPE_CLOUD => Some(CLOUD_CREDENTIAL_TYPES),
+        ENDPOINT_TYPE_CLUSTER => Some(CLUSTER_CREDENTIAL_TYPES),
+        _ => None,
+    }
+}
+
 /// Credential types as a sentence names them: `an ssh or usernamePassword`.
 fn describe_types(types: &[&str]) -> String {
-    format!(
-        "{} {}",
-        article(types.first().copied().unwrap_or("")),
-        types.join(" or ")
-    )
+    let list = match types {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [all @ .., last] => format!("{} or {last}", all.join(", ")),
+    };
+    format!("{} {list}", article(types.first().copied().unwrap_or("")))
 }
 
 /// `an` or `a`, by how a type's name is said: `an aws`, `an ssh`, `a

@@ -127,8 +127,9 @@ pub struct ResourceGraph {
     /// What the document promises to later stages, in declaration order.
     /// Only an Infrastructure document declares any.
     pub outputs: Vec<Output>,
-    /// The credential the host is reached with, when the document names one
-    /// in `targetHost.credential`. Resolved: its secret fields are slots.
+    /// The credential the document is applied as, when it names one: the
+    /// host's, in `targetHost.credential`, or the endpoint's, in
+    /// `endpoint.credential`. Resolved: its secret fields are slots.
     pub credential: Option<meridian_ir::Credential>,
     /// `spec.settings`: the tool's own settings for the whole document, which
     /// the target checks as it checks params. Empty when none are set.
@@ -137,6 +138,21 @@ pub struct ResourceGraph {
     resources: Vec<Resource>,
     by_id: HashMap<String, usize>,
     edges: Vec<Edge>,
+}
+
+/// The credential a document names for its host or its endpoint, from its
+/// declarations. Validation refuses a document that names both.
+fn named_credential(
+    declared: &[meridian_ir::Credential],
+    target_host: &Option<meridian_ir::TargetHost>,
+    endpoint: &Option<meridian_ir::Endpoint>,
+) -> Option<meridian_ir::Credential> {
+    let name = target_host
+        .as_ref()
+        .map(|th| th.credential.as_str())
+        .filter(|name| !name.is_empty())
+        .or_else(|| endpoint.as_ref().map(|e| e.credential.as_str()))?;
+    declared.iter().find(|c| c.name == name).cloned()
 }
 
 impl ResourceGraph {
@@ -161,13 +177,11 @@ impl ResourceGraph {
         )?;
         graph.target_version = rs.spec.target_version.clone();
         graph.settings = rs.spec.settings.clone();
-        graph.credential = rs
-            .spec
-            .target_host
-            .as_ref()
-            .filter(|th| !th.credential.is_empty())
-            .and_then(|th| rs.spec.credentials.iter().find(|c| c.name == th.credential))
-            .cloned();
+        graph.credential = named_credential(
+            &rs.spec.credentials,
+            &rs.spec.target_host,
+            &rs.spec.endpoint,
+        );
         Ok(graph)
     }
 
@@ -183,6 +197,7 @@ impl ResourceGraph {
         )?;
         graph.outputs = doc.spec.outputs.clone();
         graph.target_version = doc.spec.target_version.clone();
+        graph.credential = named_credential(&doc.spec.credentials, &None, &doc.spec.endpoint);
         graph.settings = doc.spec.settings.clone();
         Ok(graph)
     }

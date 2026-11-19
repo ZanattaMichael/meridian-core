@@ -52,8 +52,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
-    holds_secret, Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter,
-    Position, Resource, ResourceGraph, Value,
+    holds_secret, Adoption, Artifact, Capabilities, Category, CloudTakes, CompileError, Data,
+    Emitted, Emitter, Position, Resource, ResourceGraph, Value,
 };
 
 pub use emit::{PROGRAM_PATH, STACK_PATH};
@@ -167,6 +167,34 @@ impl Program {
 }
 
 /// A refusal of one resource, stamped with this target.
+/// How `pulumi` takes a cloud credential: the AWS, Azure and Google
+/// providers read their login from the same environment variables the
+/// Terraform providers do, a certificate and a service account key from a
+/// file the environment names, and an account to impersonate from the
+/// environment too. The program holds nothing of it.
+pub(crate) const CLOUD_TAKES: CloudTakes = CloudTakes {
+    tool: "pulumi",
+    providers: &["aws", "azure", "gcp"],
+    azure_certificate: Ok(()),
+    gcp_impersonation: Ok(()),
+};
+
+/// Refuses a credential the tool cannot take, at compile, so that nothing
+/// is fetched for it.
+fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
+    let Some(credential) = &graph.credential else {
+        return Ok(());
+    };
+    meridian_sdk::check_cloud_credential(credential, &CLOUD_TAKES).map_err(|msg| CompileError {
+        target: NAME.to_owned(),
+        resource: String::new(),
+        rule: meridian_sdk::rules::UNSUPPORTED_CREDENTIAL.name.to_owned(),
+        hint: meridian_sdk::rules::UNSUPPORTED_CREDENTIAL.hint.to_owned(),
+        msg: format!("the credential {:?}: {msg}", credential.name),
+        pos: Position::default(),
+    })
+}
+
 pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
@@ -260,6 +288,7 @@ impl Emitter for Pulumi {
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             secrets: true,
+            cloud_credentials: true,
             adopt: Adoption::Import,
             ..Capabilities::default()
         }
@@ -283,6 +312,7 @@ impl Emitter for Pulumi {
     }
 
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        check_credential(graph)?;
         // The common types become the aws or azure-native package's own
         // resources first, so every later stage sees Pulumi types only.
         let graph = &common::lower(graph)?;
