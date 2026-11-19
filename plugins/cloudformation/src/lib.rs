@@ -224,6 +224,7 @@ impl Emitter for CloudFormation {
             "<Vendor>::<Service>::<Type>",
             "address",
             "disk",
+            "dnsRecord",
             "firewall",
             "network",
             "objectStore",

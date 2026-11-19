@@ -4,6 +4,7 @@
   "resources": {
     "microsoft.compute/disks/store": "store",
     "microsoft.compute/virtualmachines/vm": "vm",
+    "microsoft.network/dnszones/a/example.com/www": "www",
     "microsoft.network/networkinterfaces/vm-nic": "vm_nic",
     "microsoft.network/networksecuritygroups/web_fw": "web_fw",
     "microsoft.network/publicipaddresses/web_ip": "web_ip",

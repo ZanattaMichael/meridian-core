@@ -1,7 +1,7 @@
 //! Conformance of the common infrastructure types: the same document through
 //! every target and cloud that maps them.
 //!
-//! The common types (`network`, `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore`) promise that a
+//! The common types (`network`, `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore`, `dnsRecord`) promise that a
 //! resource written once compiles for each infrastructure as code target
 //! that takes them, on each cloud it maps them to, "within what each cloud
 //! can do". This test writes that promise down cell by cell, the way
@@ -464,6 +464,30 @@ const CASES: &[Case] = &[
         Same,
         "    - id: files\n      type: objectStore\n      params: {versioning: \"yes\"}\n",
     ),
+    case(
+        "dnsRecord",
+        "an A record for an address",
+        Same,
+        "    - id: ip\n      type: address\n    - id: www\n      type: dnsRecord\n      params: {zone: example.com, name: www, type: A, values: [\"${ip.address}\"]}\n",
+    ),
+    case(
+        "dnsRecord",
+        "a TXT record at the zone, with a ttl",
+        Same,
+        "    - id: spf\n      type: dnsRecord\n      params: {zone: example.com, name: \"@\", type: TXT, ttl: 3600, values: [\"v=spf1 -all\"]}\n",
+    ),
+    case(
+        "dnsRecord",
+        "a CNAME with two values",
+        Same,
+        "    - id: www\n      type: dnsRecord\n      params: {zone: example.com, name: www, type: CNAME, values: [a.example.net, b.example.net]}\n",
+    ),
+    case(
+        "dnsRecord",
+        "an MX record",
+        Same,
+        "    - id: mx\n      type: dnsRecord\n      params: {zone: example.com, name: \"@\", type: MX, values: [\"10 mail.example.com\"]}\n",
+    ),
 ];
 
 fn document(column: &Column, name: &str, resources: &str) -> String {
@@ -490,7 +514,7 @@ const INTRODUCTION: &str = "\
 
 What happens to the same document on each target, and each cloud, that maps
 the [common infrastructure types](dsl/common-infrastructure-types.md)
-(`network`, `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore`). This page is generated:
+(`network`, `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore`, `dnsRecord`). This page is generated:
 `crates/meridian-cli/tests/infra_conformance.rs` compiles one small document
 per row for every column and writes down how each compile came out, and it
 fails when this page is out of date. So the page cannot drift from the code,

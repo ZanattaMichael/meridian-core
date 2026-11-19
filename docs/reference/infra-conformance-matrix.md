@@ -2,7 +2,7 @@
 
 What happens to the same document on each target, and each cloud, that maps
 the [common infrastructure types](dsl/common-infrastructure-types.md)
-(`network`, `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore`). This page is generated:
+(`network`, `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore`, `dnsRecord`). This page is generated:
 `crates/meridian-cli/tests/infra_conformance.rs` compiles one small document
 per row for every column and writes down how each compile came out, and it
 fails when this page is out of date. So the page cannot drift from the code,
@@ -114,4 +114,13 @@ The configuration management types have [their own matrix](conformance-matrix.md
 | a store with versioning | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | a location | no | `unsupported-param` | ok | ok | `unsupported-param` | ok | ok | `unsupported-param` | ok | `unsupported-param` | ok | ok |
 | versioning that is not true or false | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+
+## `dnsRecord`
+
+| Document | same | terraform (aws) | terraform (azure) | terraform (gcp) | opentofu (aws) | opentofu (azure) | opentofu (gcp) | pulumi (aws) | pulumi (azure) | cloudformation | bicep | arm |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| an A record for an address | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| a TXT record at the zone, with a ttl | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| a CNAME with two values | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+| an MX record | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
 

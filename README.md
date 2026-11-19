@@ -38,14 +38,14 @@ and apply it. If a tool cannot do what a document asks, the compile fails and sa
 - [Capability matrix](docs/reference/capability-matrix.md): what each target can express.
 - [Quickstart](docs/quickstart/install.md), and an example per target in [`examples/`](examples).
 - [Common infrastructure types](docs/reference/dsl/common-infrastructure-types.md): `network`,
-  `subnet`, `firewall`, `address`, `vm`, `disk` and `objectStore` compile for Terraform and OpenTofu (AWS, Azure, Google Cloud), Pulumi (AWS, Azure),
+  `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore` and `dnsRecord` compile for Terraform and OpenTofu (AWS, Azure, Google Cloud), Pulumi (AWS, Azure),
   CloudFormation, Bicep and ARM.
 - [`meridian import`](docs/operations/importing.md) converts existing Terraform, OpenTofu,
   Ansible, Compose, Kubernetes and DSC configuration.
 - [How it fits together](docs/reference/dsl/how-it-fits-together.md) follows one document
   from file to running tool.
 
-<p align="center"><img src="docs/graphics/meridian-common-types.svg" alt="The common infrastructure types: network, subnet, firewall, address, vm, disk and objectStore written once, and what Terraform for AWS, CloudFormation, Terraform for Azure, Bicep and ARM compile each to" width="100%"></p>
+<p align="center"><img src="docs/graphics/meridian-common-types.svg" alt="The common infrastructure types: network, subnet, firewall, address, vm, disk, objectStore and dnsRecord written once, and what Terraform for AWS, CloudFormation, Terraform for Azure, Bicep and ARM compile each to" width="100%"></p>
 
 ## Commands
 
@@ -65,6 +65,7 @@ meridian lsp / meridian mcp                 # language server, MCP server
   existing thing under management ([adopting what exists](docs/reference/dsl/resources.md#adopting-what-exists));
   `meridian retarget` moves a document to another tool ([retargeting](docs/operations/retargeting.md));
   `meridian destroy` removes what was applied, last stage first ([destroying](docs/operations/destroying.md)).
+  `meridian diagnose` says what broke, where, and what to run next ([troubleshooting](docs/operations/troubleshooting.md)).
   See [running safely](docs/concepts/run-safety.md) and [policy checks](docs/reference/policy.md).
 - `--analyze checkov,trivy` scans the compiled files and shows each finding at its document
   line ([analyzers](docs/reference/analyzers.md)).

@@ -2363,6 +2363,7 @@
                     "address",
                     "deployment",
                     "disk",
+                    "dnsRecord",
                     "firewall",
                     "network",
                     "objectStore",
@@ -2489,6 +2490,80 @@
                 "additionalProperties": false,
                 "required": [
                   "sizeGb"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "dnsRecord"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A record in a DNS zone the cloud already hosts: A, AAAA, CNAME or TXT. Reads on every target: `${id.id}`.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "name": {
+                    "description": "The record's name inside the zone, such as `www`; `@` for the zone itself.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "ttl": {
+                    "description": "How long, in seconds, a resolver may keep the answer. 300 unless given.",
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "type": {
+                    "description": "`A`, `AAAA`, `CNAME` or `TXT`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "values": {
+                    "description": "The answers, as text: addresses for A and AAAA (`[\"${ip.address}\"]`), one host name for CNAME, strings for TXT.",
+                    "type": [
+                      "array",
+                      "string"
+                    ]
+                  },
+                  "zone": {
+                    "description": "The zone the record goes in, which must exist: its domain (`example.com`) on AWS and Azure, its managed zone name on Google Cloud.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "type",
+                  "values",
+                  "zone"
                 ]
               },
               "state": {
@@ -2992,6 +3067,7 @@
                     "address",
                     "deployment",
                     "disk",
+                    "dnsRecord",
                     "firewall",
                     "network",
                     "objectStore",
@@ -3117,6 +3193,80 @@
                 "additionalProperties": false,
                 "required": [
                   "sizeGb"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "dnsRecord"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A record in a DNS zone the cloud already hosts: A, AAAA, CNAME or TXT. Reads on every target: `${id.id}`.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "name": {
+                    "description": "The record's name inside the zone, such as `www`; `@` for the zone itself.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "ttl": {
+                    "description": "How long, in seconds, a resolver may keep the answer. 300 unless given.",
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "type": {
+                    "description": "`A`, `AAAA`, `CNAME` or `TXT`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "values": {
+                    "description": "The answers, as text: addresses for A and AAAA (`[\"${ip.address}\"]`), one host name for CNAME, strings for TXT.",
+                    "type": [
+                      "array",
+                      "string"
+                    ]
+                  },
+                  "zone": {
+                    "description": "The zone the record goes in, which must exist: its domain (`example.com`) on AWS and Azure, its managed zone name on Google Cloud.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "type",
+                  "values",
+                  "zone"
                 ]
               },
               "state": {
@@ -4460,6 +4610,7 @@
                   "enum": [
                     "address",
                     "disk",
+                    "dnsRecord",
                     "firewall",
                     "network",
                     "objectStore",
@@ -4586,6 +4737,80 @@
                 "additionalProperties": false,
                 "required": [
                   "sizeGb"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "dnsRecord"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A record in a DNS zone the cloud already hosts: A, AAAA, CNAME or TXT. Reads on every target: `${id.id}`.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "name": {
+                    "description": "The record's name inside the zone, such as `www`; `@` for the zone itself.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "ttl": {
+                    "description": "How long, in seconds, a resolver may keep the answer. 300 unless given.",
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "type": {
+                    "description": "`A`, `AAAA`, `CNAME` or `TXT`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "values": {
+                    "description": "The answers, as text: addresses for A and AAAA (`[\"${ip.address}\"]`), one host name for CNAME, strings for TXT.",
+                    "type": [
+                      "array",
+                      "string"
+                    ]
+                  },
+                  "zone": {
+                    "description": "The zone the record goes in, which must exist: its domain (`example.com`) on AWS and Azure, its managed zone name on Google Cloud.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "type",
+                  "values",
+                  "zone"
                 ]
               },
               "state": {
@@ -5190,6 +5415,7 @@
                     "address",
                     "backend",
                     "disk",
+                    "dnsRecord",
                     "encryption",
                     "firewall",
                     "local",
@@ -5326,6 +5552,80 @@
                 "additionalProperties": false,
                 "required": [
                   "sizeGb"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "dnsRecord"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A record in a DNS zone the cloud already hosts: A, AAAA, CNAME or TXT. Reads on every target: `${id.id}`.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "name": {
+                    "description": "The record's name inside the zone, such as `www`; `@` for the zone itself.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "ttl": {
+                    "description": "How long, in seconds, a resolver may keep the answer. 300 unless given.",
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "type": {
+                    "description": "`A`, `AAAA`, `CNAME` or `TXT`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "values": {
+                    "description": "The answers, as text: addresses for A and AAAA (`[\"${ip.address}\"]`), one host name for CNAME, strings for TXT.",
+                    "type": [
+                      "array",
+                      "string"
+                    ]
+                  },
+                  "zone": {
+                    "description": "The zone the record goes in, which must exist: its domain (`example.com`) on AWS and Azure, its managed zone name on Google Cloud.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "type",
+                  "values",
+                  "zone"
                 ]
               },
               "state": {
@@ -6290,6 +6590,7 @@
                     "address",
                     "config",
                     "disk",
+                    "dnsRecord",
                     "firewall",
                     "network",
                     "objectStore",
@@ -6419,6 +6720,80 @@
                 "additionalProperties": false,
                 "required": [
                   "sizeGb"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "dnsRecord"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A record in a DNS zone the cloud already hosts: A, AAAA, CNAME or TXT. Reads on every target: `${id.id}`.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "name": {
+                    "description": "The record's name inside the zone, such as `www`; `@` for the zone itself.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "ttl": {
+                    "description": "How long, in seconds, a resolver may keep the answer. 300 unless given.",
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "type": {
+                    "description": "`A`, `AAAA`, `CNAME` or `TXT`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "values": {
+                    "description": "The answers, as text: addresses for A and AAAA (`[\"${ip.address}\"]`), one host name for CNAME, strings for TXT.",
+                    "type": [
+                      "array",
+                      "string"
+                    ]
+                  },
+                  "zone": {
+                    "description": "The zone the record goes in, which must exist: its domain (`example.com`) on AWS and Azure, its managed zone name on Google Cloud.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "type",
+                  "values",
+                  "zone"
                 ]
               },
               "state": {
@@ -7727,6 +8102,7 @@
                     "address",
                     "backend",
                     "disk",
+                    "dnsRecord",
                     "firewall",
                     "local",
                     "module",
@@ -7859,6 +8235,80 @@
                 "additionalProperties": false,
                 "required": [
                   "sizeGb"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "dnsRecord"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A record in a DNS zone the cloud already hosts: A, AAAA, CNAME or TXT. Reads on every target: `${id.id}`.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "name": {
+                    "description": "The record's name inside the zone, such as `www`; `@` for the zone itself.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "ttl": {
+                    "description": "How long, in seconds, a resolver may keep the answer. 300 unless given.",
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "type": {
+                    "description": "`A`, `AAAA`, `CNAME` or `TXT`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "values": {
+                    "description": "The answers, as text: addresses for A and AAAA (`[\"${ip.address}\"]`), one host name for CNAME, strings for TXT.",
+                    "type": [
+                      "array",
+                      "string"
+                    ]
+                  },
+                  "zone": {
+                    "description": "The zone the record goes in, which must exist: its domain (`example.com`) on AWS and Azure, its managed zone name on Google Cloud.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "type",
+                  "values",
+                  "zone"
                 ]
               },
               "state": {

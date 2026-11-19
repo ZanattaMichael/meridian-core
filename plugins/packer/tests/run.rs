@@ -202,14 +202,21 @@ fn a_failed_step_says_which_and_stops_there() {
     assert_eq!(err.exit_code, Some(1));
     assert!(err.output.contains("Unsupported argument"));
     assert!(err.command.ends_with("validate ."), "{}", err.command);
+    assert_eq!(err.failures[0].cause.as_str(), "invalid-config");
+    assert_eq!(err.failures[0].summary, "Unsupported argument");
     assert_eq!(calls(&dir).len(), 2, "nothing is built after the failure");
 
     let dir = scratch(TMP, "failed-build");
-    let cases = "init) ;;\nvalidate) ;;\nbuild) echo 'Build was halted.' >&2; exit 1 ;;";
+    let cases = "init) ;;\nvalidate) ;;\nbuild) echo \"==> Some builds didn't complete successfully and had errors:\"; echo '--> amazon-ebs.ubuntu: Script exited with non-zero exit status: 7. Allowed exit codes are: [0]'; exit 1 ;;";
     let err = runner(&dir, cases)
         .apply(&context(&dir), &compiled(), &KeptLog::default())
         .unwrap_err();
     assert_eq!(err.msg, "packer build failed");
+    let f = &err.failures[0];
+    assert_eq!(
+        (f.resource.as_str(), f.cause.as_str(), f.tool_code.as_str()),
+        ("ubuntu", "resource-failed", "rc=7")
+    );
     assert!(err.changes.is_empty(), "a failed build made no image");
 }
 

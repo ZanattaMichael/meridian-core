@@ -4,13 +4,14 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use meridian_sdk::tool::{write_artifact, Tool};
+use meridian_sdk::tool::{write_artifact, Finished, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
     RunContext, RunError, Runner, Value, Written,
 };
 use meridian_sdk::{settings, Setting};
 
+use crate::failures::{read_errors, same_kind};
 use crate::{secret_token, CLUSTER_PATH, MANIFESTS_PATH};
 
 /// What `--tool-debug` adds to the tool, level 1 first. kubectl logs to standard error.
@@ -132,6 +133,54 @@ impl Cluster {
                 .collect(),
             outputs,
         })
+    }
+}
+
+impl Cluster {
+    /// The id of the object kubectl named, or kubectl's name for it when
+    /// the document has no such object. With no name, the one object of
+    /// that kind.
+    fn resource_of(&self, kind: &str, name: &str) -> String {
+        let mut matching = self.objects.iter().filter(|(object, _)| {
+            let Some((declared, declared_name)) = object.split_once('/') else {
+                return false;
+            };
+            let declared = declared.split('.').next().unwrap_or_default();
+            same_kind(kind, declared) && (name.is_empty() || declared_name == name)
+        });
+        match (matching.next(), matching.next()) {
+            (Some((_, id)), None) => id.clone(),
+            _ if name.is_empty() => kind.to_owned(),
+            _ => format!("{kind}/{name}"),
+        }
+    }
+
+    /// The failure a finished `kubectl` call amounts to, with the objects
+    /// its errors name.
+    fn error(&self, finished: Finished, what: &str) -> RunError {
+        let failures = read_errors(&finished.stderr)
+            .into_iter()
+            .map(|found| {
+                let mut failure = found.failure;
+                if !found.kind.is_empty() {
+                    failure.resource = self.resource_of(&found.kind, &found.name);
+                }
+                failure
+            })
+            .collect();
+        let mut err = finished.into_error(what);
+        err.failures = failures;
+        err
+    }
+
+    /// `kubectl` run to its end, its failure carrying what it named.
+    fn run_ok(&self, tool: Tool, what: &str, log: &dyn Log) -> Result<Finished, RunError> {
+        let finished = tool.run(log)?;
+        if finished.success() {
+            Ok(finished)
+        } else {
+            Err(self.error(finished, what))
+        }
     }
 }
 
@@ -429,7 +478,7 @@ impl Runner for KubernetesRunner {
         };
         if !finished.success() {
             if !only_missing_new_namespaces(&finished.stdout, &finished.stderr) {
-                return Err(finished.into_error("kubectl could not preview the apply"));
+                return Err(cluster.error(finished, "kubectl could not preview the apply"));
             }
             log.out(
                 "some objects go in a namespace this document creates, so the cluster cannot \
@@ -450,9 +499,11 @@ impl Runner for KubernetesRunner {
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
         let cluster = self.prepare(context, artifact)?;
-        let finished = self
-            .apply_manifests(context, &cluster, artifact, &[])?
-            .run_ok("kubectl could not apply the manifests", log)?;
+        let finished = cluster.run_ok(
+            self.apply_manifests(context, &cluster, artifact, &[])?,
+            "kubectl could not apply the manifests",
+            log,
+        )?;
         let changes = read_report(&finished.stdout, &cluster);
         for change in &changes {
             log.out(&change.to_string());
@@ -486,15 +537,17 @@ impl Runner for KubernetesRunner {
     ) -> Result<Plan, RunError> {
         let cluster = self.prepare(context, artifact)?;
         log.out("asking the cluster what a delete would remove");
-        let finished = self
-            .with_manifests(
+        let finished = cluster.run_ok(
+            self.with_manifests(
                 context,
                 &cluster,
                 artifact,
                 "delete",
                 &["--ignore-not-found", "--dry-run=server"],
-            )?
-            .run_ok("kubectl could not preview the delete", log)?;
+            )?,
+            "kubectl could not preview the delete",
+            log,
+        )?;
         Ok(Plan {
             changes: read_deleted(&finished.stdout, &cluster),
             unknown: false,
@@ -511,15 +564,17 @@ impl Runner for KubernetesRunner {
         log: &dyn Log,
     ) -> Result<Vec<Change>, RunError> {
         let cluster = self.prepare(context, artifact)?;
-        let finished = self
-            .with_manifests(
+        let finished = cluster.run_ok(
+            self.with_manifests(
                 context,
                 &cluster,
                 artifact,
                 "delete",
                 &["--ignore-not-found", "--wait"],
-            )?
-            .run_ok("kubectl could not delete the objects", log)?;
+            )?,
+            "kubectl could not delete the objects",
+            log,
+        )?;
         let removed = read_deleted(&finished.stdout, &cluster);
         for change in &removed {
             log.out(&change.to_string());

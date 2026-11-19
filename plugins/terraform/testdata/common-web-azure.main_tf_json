@@ -13,6 +13,17 @@
     }
   },
   "resource": {
+    "azurerm_dns_a_record": {
+      "www": {
+        "name": "www",
+        "records": [
+          "${azurerm_public_ip.web_ip.ip_address}"
+        ],
+        "resource_group_name": "web-prod",
+        "ttl": 300,
+        "zone_name": "example.com"
+      }
+    },
     "azurerm_linux_virtual_machine": {
       "vm": {
         "admin_ssh_key": [

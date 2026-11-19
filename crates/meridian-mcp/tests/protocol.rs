@@ -181,6 +181,7 @@ fn every_tool_is_listed_with_a_schema() {
             "explain",
             "import",
             "plan",
+            "diagnose",
         ]
     );
     for tool in tools {

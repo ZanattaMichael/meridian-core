@@ -12,6 +12,7 @@ meridian status
 meridian runs
 meridian events   [RUN] [--type TYPE]
 meridian logs     [RUN] [--step NAME] [--endpoint ENDPOINT] [--stream STREAM] [--grep RE] [--tail N] [--all]
+meridian diagnose [RUN] [--step NAME] [--endpoint ENDPOINT] [--cause WORD]
 meridian bug-report [RUN] [--out FILE]
 meridian report   [RUN] [--format FORMAT] [--out FILE] [--from FILE]
 meridian unlock   <ID>
@@ -243,6 +244,13 @@ $ meridian logs
 
 A step whose output was not kept (`--no-logs`, another machine, or a step
 that ran no tool) is listed with `no tool output was kept on this machine`.
+
+### `diagnose`
+
+Says which step, machine and resource failed in a run (default: the last that failed),
+the cause, the steps not run because of it, and what to run next. Reads the record only:
+no tool, no plugin, no lock. Filters: `--step`, `--endpoint`, `--cause`. See
+[Troubleshooting a failed run](../operations/troubleshooting.md).
 
 ### `bug-report`
 

@@ -276,14 +276,29 @@ fn a_template_resource_manager_rejects_reports_its_reason() {
 fn a_deployment_that_fails_is_an_error_with_where_to_look() {
     let dir = scratch(TMP, "failed");
     let cases = format!(
-        "{}\ncreate) echo 'DeploymentFailed: quota exceeded' >&2; exit 1 ;;",
-        changes()
+        "{}\ncreate) echo 'DeploymentFailed: quota exceeded' >&2; exit 1 ;;\n{}",
+        changes(),
+        r#"group) echo '[{"properties":{"provisioningState":"Failed","statusCode":"Conflict","statusMessage":{"error":{"code":"QuotaExceeded","message":"quota exceeded in westeurope"}},"targetResource":{"id":"/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/net","resourceType":"Microsoft.Network/virtualNetworks","resourceName":"net"}}}]' ;;"#
     );
     let err = runner(&dir, &cases)
         .apply(&context(&dir), &compiled(GROUP), &KeptLog::default())
         .unwrap_err();
     assert!(err.msg.starts_with("the deployment failed"), "{}", err.msg);
     assert!(err.output.contains("quota exceeded"), "{}", err.output);
+    assert_eq!(err.failures.len(), 1, "{:?}", calls(&dir));
+    let f = &err.failures[0];
+    assert_eq!(
+        (f.cause.as_str(), f.tool_code.as_str(), f.summary.as_str()),
+        (
+            "resource-failed",
+            "QuotaExceeded",
+            "quota exceeded in westeurope"
+        )
+    );
+    assert!(calls(&dir)
+        .last()
+        .unwrap()
+        .starts_with("deployment operation group list"));
 }
 
 #[test]

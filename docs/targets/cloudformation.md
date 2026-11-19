@@ -171,7 +171,7 @@ references ([see](../reference/dsl/interpolation.md#a-tools-own-expressions)).
 
 ## Common infrastructure types
 
-`network`, `subnet`, `firewall`, `address`, `vm`, `disk` and `objectStore` are Meridian's own types,
+`network`, `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore` and `dnsRecord` are Meridian's own types,
 and this target turns each into CloudFormation's own
 ([the common infrastructure types](../reference/dsl/common-infrastructure-types.md)
 has every param and mapping). They are created in the stack's region, and
@@ -187,6 +187,7 @@ refusals and outputs.
 | `vm` | `AWS::EC2::Instance`, an `AWS::EC2::KeyPair` for `sshKey`, an `AWS::EC2::EIPAssociation` for `address` |
 | `disk` | `AWS::EC2::Volume` and an `AWS::EC2::VolumeAttachment` |
 | `objectStore` | `AWS::S3::Bucket` |
+| `dnsRecord` | `AWS::Route53::RecordSet` |
 
 An image given as `{family, version}` is read when the stack is deployed from
 the vendor's public Systems Manager parameter, as `{{resolve:ssm:...}}`.
@@ -382,6 +383,16 @@ Each names the resource, line and rule:
 | `duplicate-resource`, `duplicate-output` | two resources, or two outputs, that become the same logical id (`web_vm` and `WebVm`) | rename one |
 | `invalid-reference` | `${...}` that is not a resource of the document, one attribute of it, or a pseudo parameter | fix the reference |
 | `empty-document` | a document with no resources but the stack | add a resource, or delete the stack yourself |
+
+## Reading a failure
+
+When the stack does not reach a complete state, `aws cloudformation describe-stack-events`
+is read back to the stack's `User Initiated` event. Each resource with a `*_FAILED`
+status is a [resource failure](../reference/state.md#resource-failures): the logical id mapped to the document's id, the
+`ResourceStatusReason` as the summary and the status (`CREATE_FAILED`) as the tool code.
+A resource CloudFormation cancelled because another failed is `dependency-failed`; one
+refused for permissions `auth-failed`; any other `resource-failed`, or `unreachable`, `auth-failed`, `timed-out` or `reboot-required` when the message says so. A destroy
+reads them the same way.
 
 ## Troubleshooting
 

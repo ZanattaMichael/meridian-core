@@ -10,6 +10,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use meridian_sdk::failure::{Cause, Failure};
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
@@ -231,6 +232,28 @@ impl DockerRunner {
             .capture_stdout()
             .run_ok("docker could not list what the project has running", &NoLog)?
             .stdout)
+    }
+
+    /// What `docker inspect` says of each of the project's containers that
+    /// failed. Nothing when they cannot be listed or inspected.
+    fn container_failures(&self, context: &RunContext, project: &Project) -> Vec<Failure> {
+        let Ok(ids) = self.listing(context, project, &["ps", "--all"], "{{.ID}}") else {
+            return Vec::new();
+        };
+        let ids: Vec<&str> = ids.split_whitespace().collect();
+        if ids.is_empty() {
+            return Vec::new();
+        }
+        match self
+            .docker(context, project)
+            .arg("inspect")
+            .args(ids)
+            .capture_stdout()
+            .run(&NoLog)
+        {
+            Ok(inspected) if inspected.success() => read_container_failures(&inspected.stdout),
+            _ => Vec::new(),
+        }
     }
 
     /// Compares the compiled file with what Docker has.
@@ -631,6 +654,107 @@ pub(crate) fn diff(desired: &Desired, actual: &Actual) -> Plan {
     }
 }
 
+/// One failure per service whose container `docker inspect` shows broken:
+/// an error starting it, killed for memory, exited with a status other
+/// than 0, or unhealthy. A container created and never started waited on
+/// one of those, and is `dependency-failed`.
+fn read_container_failures(json: &str) -> Vec<Failure> {
+    let Ok(value) = decode_value(json.trim().as_bytes()) else {
+        return Vec::new();
+    };
+    let mut failures: Vec<Failure> = Vec::new();
+    for container in value.as_list().unwrap_or(&[]) {
+        let Some(container) = container.as_map() else {
+            continue;
+        };
+        let service = container
+            .get("Config")
+            .and_then(Value::as_map)
+            .and_then(|c| c.get("Labels"))
+            .and_then(Value::as_map)
+            .and_then(|l| l.get("com.docker.compose.service"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let Some(state) = container.get("State").and_then(Value::as_map) else {
+            continue;
+        };
+        let text = |key: &str| state.get(key).and_then(Value::as_str).unwrap_or_default();
+        let exit = match state.get("ExitCode") {
+            Some(Value::Int(n)) => *n,
+            Some(Value::Uint(n)) => i64::try_from(*n).unwrap_or(i64::MAX),
+            _ => 0,
+        };
+        let health = state.get("Health").and_then(Value::as_map);
+        let health_status = health
+            .and_then(|h| h.get("Status"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let failure = if !text("Error").is_empty() {
+            let error = text("Error");
+            Failure::new(
+                Cause::from_message(error).unwrap_or(Cause::ResourceFailed),
+                service,
+                error,
+            )
+        } else if state.get("OOMKilled") == Some(&Value::Bool(true)) {
+            Failure::new(Cause::ResourceFailed, service, "killed: out of memory").code("OOMKilled")
+        } else if matches!(text("Status"), "exited" | "dead") && exit != 0 {
+            Failure::new(
+                Cause::ResourceFailed,
+                service,
+                format!("the container exited with status {exit}"),
+            )
+            .code(format!("rc={exit}"))
+        } else if health_status == "unhealthy" {
+            let last = health
+                .and_then(|h| h.get("Log"))
+                .and_then(Value::as_list)
+                .and_then(|log| log.last())
+                .and_then(Value::as_map)
+                .and_then(|l| l.get("Output"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim();
+            let summary = if last.is_empty() {
+                "the health check failed".to_owned()
+            } else {
+                format!(
+                    "the health check failed: {}",
+                    last.lines().next().unwrap_or_default()
+                )
+            };
+            Failure::new(Cause::ResourceFailed, service, summary).code("unhealthy")
+        } else if text("Status") == "created" {
+            Failure::new(Cause::DependencyFailed, service, "created and not started")
+        } else {
+            continue;
+        };
+        if !failures.iter().any(|f| f.resource == failure.resource) {
+            failures.push(failure);
+        }
+    }
+    failures
+}
+
+/// What Compose said when no container got far enough to inspect: an image
+/// it could not pull is `dependency-missing`.
+fn compose_failures(output: &str) -> Vec<Failure> {
+    output
+        .lines()
+        .map(str::trim)
+        .find(|line| {
+            [
+                "pull access denied",
+                "manifest unknown",
+                "not found: manifest",
+            ]
+            .iter()
+            .any(|w| line.contains(w))
+        })
+        .map(|line| vec![Failure::new(Cause::DependencyMissing, "", line)])
+        .unwrap_or_default()
+}
+
 impl Runner for DockerRunner {
     fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
         DEBUG
@@ -685,11 +809,19 @@ impl Runner for DockerRunner {
                 up = up.args(["--wait-timeout", &project.wait_timeout.to_string()]);
             }
         }
-        up.args(self.extra_args.iter().cloned()).run_ok(
-            "docker compose could not bring the project up; what it printed says which service \
-             failed",
-            log,
-        )?;
+        up.args(self.extra_args.iter().cloned())
+            .run_ok(
+                "docker compose could not bring the project up; what it printed says which \
+                 service failed",
+                log,
+            )
+            .map_err(|mut e| {
+                e.failures = self.container_failures(context, &project);
+                if e.failures.is_empty() {
+                    e.failures = compose_failures(&e.output);
+                }
+                e
+            })?;
         drop(secrets);
         Ok(Applied {
             changes: plan.changes,
@@ -805,6 +937,42 @@ pub(crate) fn removals(desired: &Desired, actual: &Actual) -> Vec<Change> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_broken_container_is_its_services_failure() {
+        let inspected = r#"[
+            {"Config": {"Labels": {"com.docker.compose.service": "db"}}, "State": {"Status": "running", "ExitCode": 0, "Error": "", "Health": {"Status": "unhealthy", "Log": [{"Output": "pg_isready: no response\n"}]}}},
+            {"Config": {"Labels": {"com.docker.compose.service": "migrate"}}, "State": {"Status": "exited", "ExitCode": 3, "Error": "", "OOMKilled": false}},
+            {"Config": {"Labels": {"com.docker.compose.service": "web"}}, "State": {"Status": "created", "ExitCode": 0, "Error": ""}},
+            {"Config": {"Labels": {"com.docker.compose.service": "proxy"}}, "State": {"Status": "created", "ExitCode": 128, "Error": "Bind for 0.0.0.0:80 failed: port is already allocated"}},
+            {"Config": {"Labels": {"com.docker.compose.service": "cache"}}, "State": {"Status": "running", "ExitCode": 0, "Error": ""}}
+        ]"#;
+        let failures = read_container_failures(inspected);
+        let got: Vec<(&str, Cause, &str)> = failures
+            .iter()
+            .map(|f| (f.resource.as_str(), f.cause, f.tool_code.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("db", Cause::ResourceFailed, "unhealthy"),
+                ("migrate", Cause::ResourceFailed, "rc=3"),
+                ("web", Cause::DependencyFailed, ""),
+                ("proxy", Cause::ResourceFailed, ""),
+            ]
+        );
+        assert_eq!(
+            failures[0].summary,
+            "the health check failed: pg_isready: no response"
+        );
+        assert_eq!(
+            compose_failures(
+                " ✘ web Error pull access denied for nosuch, repository does not exist"
+            )[0]
+            .cause,
+            Cause::DependencyMissing
+        );
+    }
 
     fn service(name: &str, hash: &str) -> Service {
         Service {

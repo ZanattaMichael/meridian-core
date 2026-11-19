@@ -56,7 +56,7 @@ For `plan`, add `"--allow-plan"` ([Safety](#safety)).
 |---|---|
 | `--allow-plan` | offer the `plan` tool, which runs the real tool and takes the state lock. Also `MERIDIAN_MCP_ALLOW_PLAN=1` |
 | `--root DIR` | the directory file arguments are confined to; the current directory by default |
-| `--state-dir DIR` | where `meridian schema sync` cached the tool schemas, relative to the root; `.meridian` by default |
+| `--state-dir DIR` | where `meridian schema sync` cached the tool schemas, and where `diagnose` reads the runs, relative to the root; `.meridian` by default |
 | `--plugin-dir`, `--plugin-signatures`, `--trusted-key` | the plugin options every command takes |
 
 With no plugins, documents are checked against the language only and `list_targets` is
@@ -81,6 +81,7 @@ the same JSON as text.
 | `explain` | what a rule means, why the target refuses it, and what to write instead | the lint rules explain themselves; the compiler's shared rules are described in the server; a target's own rule is named as such |
 | `import` | turns a tool's own configuration into documents, with what could not be carried over | [`meridian import`](../reference/cli.md#import) on text; `fileName` tells the importer the format |
 | `plan` | asks the tool what applying a file would change | **off unless** `--allow-plan`; runs `meridian plan --output json` on the file and returns [its object](../reference/cli-json.md#compile-plan-apply-drift-rollback-destroy) |
+| `diagnose` | why the last failed run failed: each failed step's machine, resource, cause and next command, and the steps not run | runs `meridian diagnose --output json` ([object](../reference/cli-json.md#diagnose)); reads the run record under `--state-dir`; no tool, no lock |
 
 Give `document` (text) or `file` (under the root, may hold several documents).
 

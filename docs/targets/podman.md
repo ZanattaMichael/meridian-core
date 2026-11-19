@@ -391,6 +391,12 @@ If `installed.json` is lost, units of deleted resources stay on the host.
 
 A failed apply reports what it changed. Running it again is safe.
 
+Each unit that is not running when a start or restart fails is a [resource failure](../reference/state.md#resource-failures):
+the document's id for it, systemd's `Result` and the main process's exit status
+(`rc=3`, or `timeout`, `signal`, `core-dump`). `timeout` is `timed-out`; the rest are
+`resource-failed`. A host `ssh` cannot reach is `unreachable` (`auth-failed` for a
+refused key), tool code `rc=255`.
+
 ## Where it runs
 
 - An **Infrastructure** document runs on the machine running Meridian.

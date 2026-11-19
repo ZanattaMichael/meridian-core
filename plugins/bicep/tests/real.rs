@@ -168,6 +168,7 @@ fn the_common_types_are_bicep_the_real_compiler_builds() {
         [
             "Microsoft.Compute/disks",
             "Microsoft.Compute/virtualMachines",
+            "Microsoft.Network/dnsZones/A",
             "Microsoft.Network/networkInterfaces",
             "Microsoft.Network/networkSecurityGroups",
             "Microsoft.Network/publicIPAddresses",

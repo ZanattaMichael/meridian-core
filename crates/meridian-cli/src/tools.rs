@@ -851,6 +851,16 @@ pub fn mcp(args: &McpArgs) -> Result<(), Failure> {
     for note in server_notes {
         server = server.note(note);
     }
+    // `diagnose` only reads the record, so it is always offered.
+    let program = std::env::current_exe()
+        .map_err(|e| Failure::Message(format!("finding the meridian binary: {e}")))?;
+    server = server.allow_diagnose(meridian_mcp::PlanCommand {
+        program,
+        args: vec![
+            "--state-dir".to_owned(),
+            root.join(&args.state_dir).to_string_lossy().into_owned(),
+        ],
+    });
     if args.allow_plan {
         // `plan` is the command itself, with the plugin options it was
         // started with, so the result is the object `meridian plan --output

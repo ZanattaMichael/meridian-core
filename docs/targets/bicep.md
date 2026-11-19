@@ -146,7 +146,7 @@ A second is refused (`duplicate-resource`), as is `dependsOn` on it
 
 ## Common infrastructure types
 
-`network`, `subnet`, `firewall`, `address`, `vm`, `disk` and `objectStore` are Meridian's own types,
+`network`, `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore` and `dnsRecord` are Meridian's own types,
 and this target turns each into Azure's own resource types
 ([the common infrastructure types](../reference/dsl/common-infrastructure-types.md)
 has every param and mapping). They are mixed freely with Azure's own types and
@@ -162,6 +162,7 @@ resource gives one.
 | `vm` | `Microsoft.Compute/virtualMachines@2024-03-01` and a `Microsoft.Network/networkInterfaces@2023-09-01` named `<id>_nic` |
 | `disk` | `Microsoft.Compute/disks@2024-03-01`, listed in its vm's `dataDisks` |
 | `objectStore` | `Microsoft.Storage/storageAccounts@2023-05-01`, its `blobServices` and a container |
+| `dnsRecord` | `Microsoft.Network/dnsZones/<type>@2018-05-01` in the existing zone |
 
 The same document compiles with Terraform for Azure, with the same sizes and
 images; compare [`examples/common/web-bicep.yaml`](../../examples/common/web-bicep.yaml)
@@ -317,6 +318,21 @@ Each names the resource, line and rule:
 | `unsupported-action` | `notifies` on any resource | drop it; a deployment has no notifications |
 | `unsupported-dependency` | a `dependsOn` to or from the `deployment` resource | the deployment is not a resource of the file |
 | `empty-document` | a document with no resources but the deployment | add a resource |
+
+## Reading a failure
+
+When the deployment fails, `az deployment operation group list` is read. Each operation
+with `provisioningState: Failed` is a [resource failure](../reference/state.md#resource-failures):
+
+| From the operation | Becomes |
+|---|---|
+| `targetResource` | the resource, the document's id where it maps to one |
+| `statusMessage.error.message` | the summary |
+| `statusMessage.error.code`, else `statusCode` | the tool code, `StorageAccountAlreadyTaken` |
+| `Unauthorized`, `Forbidden`, `AuthorizationFailed` | `auth-failed` |
+| `InvalidTemplate...`, `BadRequest` | `invalid-config` |
+| a `...NotFound` code other than `ResourceNotFound` | `dependency-missing` |
+| anything else | `resource-failed`, or `unreachable`, `auth-failed`, `timed-out` or `reboot-required` when the message says so |
 
 ## Troubleshooting
 

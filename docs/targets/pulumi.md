@@ -201,7 +201,7 @@ A package-prefixed name is a provider setting, given with `name` and `value`:
 
 ## Common infrastructure types
 
-`network`, `subnet`, `firewall`, `address`, `vm`, `disk` and `objectStore` are Meridian's own types,
+`network`, `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore` and `dnsRecord` are Meridian's own types,
 and this target turns each into the `aws` or `azure-native` package's own
 ([the common infrastructure types](../reference/dsl/common-infrastructure-types.md)
 has every param and mapping). They make the same resources the Terraform
@@ -222,6 +222,7 @@ location goes to its resource group's.
 | `vm` | `aws:ec2:Instance`, an `aws:ec2:KeyPair`, an `invoke.aws:ec2:getAmi` lookup for an image by name, an `aws:ec2:EipAssociation` | `azure-native:compute:VirtualMachine` and an `azure-native:network:NetworkInterface` (`<id>_nic`) |
 | `disk` | `aws:ebs:Volume` and an `aws:ec2:VolumeAttachment` | `azure-native:compute:Disk`, listed in its vm's `dataDisks` |
 | `objectStore` | `aws:s3:BucketV2`, and `aws:s3:BucketVersioningV2` | `azure-native:storage:StorageAccount`, a `BlobContainer`, and `BlobServiceProperties` |
+| `dnsRecord` | `aws:route53:Record` and an `invoke.aws:route53:getZone` lookup | `azure-native:network:RecordSet` |
 
 Compare [`examples/common/web-pulumi-aws.yaml`](../../examples/common/web-pulumi-aws.yaml)
 and [`web-pulumi-azure.yaml`](../../examples/common/web-pulumi-azure.yaml) with
@@ -363,6 +364,14 @@ text), set the same-named `config`, are never logged, and are saved in the stack
 file.
 
 [`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `-v=3`, `-v=6` or `-v=9` with `--logtostderr` to every `pulumi` call.
+
+### Reading a failure
+
+When `pulumi up` or `pulumi destroy` fails, each resource with an `error:` in its
+`Diagnostics:` section is a [resource failure](../reference/state.md#resource-failures) on the URN's name, `resource-failed` or `unreachable`, `auth-failed`, `timed-out` or `reboot-required` when the message says so. The stack's own `update failed`
+is left to the step's error. A failed preview's `error` diagnostics, or what the program
+wrote to standard error when there are none, are `invalid-config`, on the resource where
+one is named.
 
 ## Secrets
 

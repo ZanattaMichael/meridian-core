@@ -297,6 +297,12 @@ Operator values and secure parameters are never logged.
 
 [`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `--verbose` to `az` at level 1 and `--debug` from level 2.
 
+### Reading a failure
+
+A failed deployment is read as on [Bicep](bicep.md#reading-a-failure), from
+`az deployment operation group list` (`sub` for a subscription deployment): one
+[resource failure](../reference/state.md#resource-failures) per failed operation, mapped to the document's id by type and name.
+
 ## Secrets
 
 A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) becomes a `securestring`
@@ -377,7 +383,7 @@ With two API versions of one type, the first is used.
 
 ## Common infrastructure types
 
-`network`, `subnet`, `firewall`, `address`, `vm`, `disk` and `objectStore` are Meridian's own types,
+`network`, `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore` and `dnsRecord` are Meridian's own types,
 and this target turns each into the same Azure resources the Bicep target
 does ([the common infrastructure types](../reference/dsl/common-infrastructure-types.md)
 has every param and mapping). They go to the deployment's resource group, at
@@ -392,6 +398,7 @@ has every param and mapping). They go to the deployment's resource group, at
 | `vm` | `Microsoft.Compute/virtualMachines` (API version `2024-03-01`) and a `Microsoft.Network/networkInterfaces` named `<id>_nic` |
 | `disk` | `Microsoft.Compute/disks` (API version `2024-03-01`), listed in its vm's `dataDisks` |
 | `objectStore` | `Microsoft.Storage/storageAccounts` (API version `2023-05-01`), its `blobServices` and a container |
+| `dnsRecord` | `Microsoft.Network/dnsZones/<type>` (API version `2018-05-01`) in the existing zone |
 
 The mapping is the Bicep plugin's, so the two targets cannot drift apart;
 compare [`examples/common/web-arm.yaml`](../../examples/common/web-arm.yaml)

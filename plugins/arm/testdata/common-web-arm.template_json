@@ -231,6 +231,22 @@
       "name": "[format('{0}/objects', format('{0}/default', 'files'))]",
       "properties": {},
       "type": "Microsoft.Storage/storageAccounts/blobServices/containers"
+    },
+    {
+      "apiVersion": "2018-05-01",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', 'web_ip')]"
+      ],
+      "name": "example.com/www",
+      "properties": {
+        "ARecords": [
+          {
+            "ipv4Address": "[reference(resourceId('Microsoft.Network/publicIPAddresses', 'web_ip'), '2023-09-01').ipAddress]"
+          }
+        ],
+        "TTL": 300
+      },
+      "type": "Microsoft.Network/dnsZones/A"
     }
   ]
 }

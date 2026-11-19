@@ -26,6 +26,7 @@
 
 mod common;
 mod emit;
+pub mod operations;
 mod runner;
 pub mod schemas;
 mod sort;
@@ -198,6 +199,7 @@ impl Emitter for Bicep {
             "address",
             "deployment",
             "disk",
+            "dnsRecord",
             "firewall",
             "network",
             "objectStore",

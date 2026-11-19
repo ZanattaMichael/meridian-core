@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
+use meridian_sdk::failure::{Cause, Failure};
 use meridian_sdk::tool::{write_artifact, Finished, Tool};
 use meridian_sdk::{
     agent_for, credential_for_this_machine, decode_value, AgentPrograms, Applied, Artifact, Change,
@@ -322,7 +323,18 @@ impl PodmanRunner {
     fn finished(&self, context: &RunContext, finished: Finished) -> Result<Finished, RunError> {
         // ssh keeps 255 for its own failures; the script never exits with it.
         if finished.code == Some(255) && !is_local(&context.host) {
-            return Err(finished.into_error(format!("could not reach {} over ssh", context.host)));
+            let said = finished.stderr.trim().to_owned();
+            let mut error =
+                finished.into_error(format!("could not reach {} over ssh", context.host));
+            error.failures.push(
+                Failure::new(
+                    Cause::from_message(&said).unwrap_or(Cause::Unreachable),
+                    "",
+                    said.lines().last().unwrap_or_default(),
+                )
+                .code("rc=255"),
+            );
+            return Err(error);
         }
         Ok(finished)
     }
@@ -542,6 +554,7 @@ impl Runner for PodmanRunner {
             )?;
             if !finished.success() {
                 let done = script::read_done(&finished.stdout);
+                let failed = script::read_failed(&finished.stdout);
                 let what = match finished.code {
                     Some(71) => "could not create the directory the units are installed in",
                     Some(72) => "could not write or remove a unit file",
@@ -551,6 +564,12 @@ impl Runner for PodmanRunner {
                     _ => "applying the units failed",
                 };
                 let mut error = finished.into_error(what);
+                error.failures = failed
+                    .iter()
+                    .map(|(service, result, status)| {
+                        unit_failure(&survey.meta, service, result, status)
+                    })
+                    .collect();
                 error.changes = survey
                     .changes
                     .iter()
@@ -933,6 +952,30 @@ fn write_installed(work_dir: &Path, installed: &[Installed]) -> Result<(), RunEr
 }
 
 /// One unit, as the compile recorded it for the runner.
+/// The failure of a unit systemd could not start, named by the document's
+/// id for it.
+fn unit_failure(meta: &Meta, service: &str, result: &str, status: &str) -> Failure {
+    let resource = meta
+        .units
+        .iter()
+        .find(|u| u.service == service)
+        .map_or(service, |u| u.id.as_str());
+    let cause = match result {
+        "timeout" => Cause::TimedOut,
+        _ => Cause::ResourceFailed,
+    };
+    let code = match (result, status) {
+        ("exit-code", status) if !status.is_empty() && status != "0" => format!("rc={status}"),
+        (result, _) => result.to_owned(),
+    };
+    Failure::new(
+        cause,
+        resource,
+        format!("{service} did not start: {result}; its journal is in the output"),
+    )
+    .code(code)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct MetaUnit {
     file: String,

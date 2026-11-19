@@ -452,6 +452,39 @@ fn aws(r: &Resource, graph: &ResourceGraph, state: &mut State) -> Result<Expansi
             }
         }
         "disk" => aws_disk(r, graph)?,
+        "dnsRecord" => {
+            let zone = param(r, "zone").unwrap_or(Value::Null);
+            let domain = zone.as_str().unwrap_or_default().to_owned();
+            let (kind, values) = infra::dns_record(r);
+            let records = if kind == "TXT" {
+                infra::quoted_txt(&values)
+            } else {
+                values
+            };
+            Expansion {
+                order: Vec::new(),
+                resources: vec![
+                    helper(
+                        r,
+                        "zone",
+                        "data.aws_route53_zone",
+                        map(vec![("name", zone)]),
+                    ),
+                    primary(
+                        r,
+                        "aws_route53_record",
+                        map(vec![
+                            ("zone_id", reference(&format!("{id}_zone"), "zone_id")),
+                            ("name", infra::dns_full_name(r, &domain)),
+                            ("type", Value::String(kind)),
+                            ("ttl", Value::Uint(infra::dns_ttl(r))),
+                            ("records", Value::List(records)),
+                        ]),
+                    ),
+                ],
+                outputs: outputs(&[("id", format!("${{{id}.id}}"))]),
+            }
+        }
         "objectStore" => {
             let mut resources = vec![primary(
                 r,
@@ -879,6 +912,51 @@ fn azure(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError>
             }
         }
         "disk" => azure_disk(r, graph)?,
+        "dnsRecord" => {
+            let (kind, values) = infra::dns_record(r);
+            let mut body = with(
+                map(vec![
+                    ("name", param(r, "name").unwrap_or(Value::Null)),
+                    ("zone_name", param(r, "zone").unwrap_or(Value::Null)),
+                    ("ttl", Value::Uint(infra::dns_ttl(r))),
+                ]),
+                azure_place(r, graph, None)?,
+            );
+            let r#type = match kind.as_str() {
+                "CNAME" => {
+                    body.insert(
+                        "record".to_owned(),
+                        values.into_iter().next().unwrap_or(Value::Null),
+                    );
+                    "azurerm_dns_cname_record"
+                }
+                "TXT" => {
+                    body.insert(
+                        "record".to_owned(),
+                        Value::List(
+                            values
+                                .into_iter()
+                                .map(|v| Value::Map(map(vec![("value", v)])))
+                                .collect(),
+                        ),
+                    );
+                    "azurerm_dns_txt_record"
+                }
+                "AAAA" => {
+                    body.insert("records".to_owned(), Value::List(values));
+                    "azurerm_dns_aaaa_record"
+                }
+                _ => {
+                    body.insert("records".to_owned(), Value::List(values));
+                    "azurerm_dns_a_record"
+                }
+            };
+            Expansion {
+                order: Vec::new(),
+                resources: vec![primary(r, r#type, body)],
+                outputs: outputs(&[("id", format!("${{{id}.id}}"))]),
+            }
+        }
         "objectStore" => {
             let mut body = with(
                 map(vec![
@@ -1254,6 +1332,41 @@ fn gcp(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError> {
             }
         }
         "disk" => gcp_disk(r, graph)?,
+        "dnsRecord" => {
+            let (kind, values) = infra::dns_record(r);
+            let rrdatas = if kind == "TXT" {
+                infra::quoted_txt(&values)
+            } else {
+                values
+            };
+            let zone = format!("{id}_zone");
+            Expansion {
+                order: Vec::new(),
+                resources: vec![
+                    helper(
+                        r,
+                        "zone",
+                        "data.google_dns_managed_zone",
+                        map(vec![("name", param(r, "zone").unwrap_or(Value::Null))]),
+                    ),
+                    primary(
+                        r,
+                        "google_dns_record_set",
+                        map(vec![
+                            ("managed_zone", reference(&zone, "name")),
+                            (
+                                "name",
+                                infra::dns_full_name(r, &format!("${{{zone}.dns_name}}")),
+                            ),
+                            ("type", Value::String(kind)),
+                            ("ttl", Value::Uint(infra::dns_ttl(r))),
+                            ("rrdatas", Value::List(rrdatas)),
+                        ]),
+                    ),
+                ],
+                outputs: own_id(),
+            }
+        }
         "objectStore" => {
             let mut body = map(vec![
                 ("name", gcp_name(r)),

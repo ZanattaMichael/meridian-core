@@ -212,6 +212,7 @@ impl Emitter for Arm {
             "address",
             "deployment",
             "disk",
+            "dnsRecord",
             "firewall",
             "network",
             "objectStore",

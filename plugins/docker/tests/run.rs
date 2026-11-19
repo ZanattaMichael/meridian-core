@@ -326,6 +326,28 @@ fn a_failed_up_keeps_what_compose_said() {
         err.msg
     );
     assert!(err.output.contains("pull access denied"), "{}", err.output);
+    assert_eq!(err.failures[0].cause.as_str(), "dependency-missing");
+}
+
+#[test]
+fn a_failed_up_names_the_service_whose_container_broke() {
+    let dir = scratch(TMP, "failed-container");
+    let cases = format!(
+        "{CONFIG}\n*\" up \"*) echo 'dependency failed to start: container web-db-1 is unhealthy' >&2; exit 1 ;;\n*\"--format {{{{.ID}}}}\"*) echo abc123 ;;\n\"inspect abc123\") echo '[{{\"Config\":{{\"Labels\":{{\"com.docker.compose.service\":\"db\"}}}},\"State\":{{\"Status\":\"running\",\"ExitCode\":0,\"Error\":\"\",\"Health\":{{\"Status\":\"unhealthy\",\"Log\":[]}}}}}}]' ;;"
+    );
+    let err = runner(&dir, &cases)
+        .apply(&context(&dir), &compiled(""), &KeptLog::default())
+        .unwrap_err();
+    assert_eq!(err.failures.len(), 1, "{:?}", calls(&dir));
+    let f = &err.failures[0];
+    assert_eq!(
+        (
+            f.resource.as_str(),
+            f.tool_code.as_str(),
+            f.summary.as_str()
+        ),
+        ("db", "unhealthy", "the health check failed")
+    );
 }
 
 #[test]

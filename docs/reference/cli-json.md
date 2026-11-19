@@ -249,6 +249,26 @@ The steps shown, after the filters, each with the lines kept. Schema:
 `file` is `null` when this machine kept no output for the step. `stream` is
 `stdout`, `stderr` or `meridian`.
 
+### `diagnose`
+
+The failed steps, one entry per machine or group of machines, and the steps not run.
+Schema: `schemas/output/diagnose.schema.json`.
+
+```json
+{ "command": "diagnose", "ok": true,
+  "run": { "id": "2026-11-17T09-14-03Z-0cc7", "mode": "apply", "status": "failed", "resumes": null, "steps": 3 },
+  "failed": [ { "name": "web", "kind": "ResourceSet", "target": "ansible", "endpoint": null, "reason": "tool-failed",
+                "entries": [ { "cause": "resource-failed", "endpoints": ["203.0.113.10"],
+                               "failures": [ { "endpoint": "203.0.113.10", "resource": "nginx_conf", "cause": "resource-failed",
+                                               "toolCode": null, "summary": "template: 'nginx_port' is undefined", "at": "site.yaml:42" } ],
+                               "next": ["meridian logs 2026-11-17T09-14-03Z-0cc7 --step web"] } ] } ],
+  "skipped": [ { "name": "app", "kind": "ResourceSet", "becauseOf": "web" } ],
+  "keptHere": true }
+```
+
+`run` is `null`, and `failed` empty, when no failed run is recorded. `summary` and `at` are
+`null` when this machine did not keep the run's failures (`keptHere: false`).
+
 ### `bug-report`
 
 The archive written. Schema: `schemas/output/bug-report.schema.json`.

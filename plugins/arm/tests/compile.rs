@@ -760,6 +760,7 @@ fn the_plugin_declares_what_it_is() {
             "address",
             "deployment",
             "disk",
+            "dnsRecord",
             "firewall",
             "network",
             "objectStore",

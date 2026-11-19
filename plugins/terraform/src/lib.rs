@@ -259,6 +259,7 @@ impl Emitter for Terraform {
             "backend",
             "data.<type>",
             "disk",
+            "dnsRecord",
             "firewall",
             "local",
             "module",

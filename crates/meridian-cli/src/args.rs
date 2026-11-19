@@ -170,6 +170,25 @@ pub(crate) enum Command {
         #[command(flatten)]
         state: State,
     },
+    /// Say what broke in a run, on which machine, and what to run next: by
+    /// default the last run that failed. Reads the record and what this
+    /// machine kept; runs no tool and takes no lock
+    Diagnose {
+        /// The run; the last failed one when not given
+        run: Option<String>,
+        /// Only the step of this document
+        #[arg(long, value_name = "NAME")]
+        step: Option<String>,
+        /// Only the failures on this machine
+        #[arg(long, value_name = "ENDPOINT")]
+        endpoint: Option<String>,
+        /// Only failures with this cause word, or steps with this reason,
+        /// such as unreachable or tool-failed
+        #[arg(long, value_name = "WORD")]
+        cause: Option<String>,
+        #[command(flatten)]
+        state: State,
+    },
     /// Write one archive of a run for a bug report: its record, its events,
     /// the tool output this machine kept, and the versions of meridian and
     /// of the plugins the run used. It sends nothing anywhere
@@ -390,6 +409,7 @@ impl Command {
             Command::Runs { .. } => "runs".to_owned(),
             Command::Events { .. } => "events".to_owned(),
             Command::Logs { .. } => "logs".to_owned(),
+            Command::Diagnose { .. } => "diagnose".to_owned(),
             Command::BugReport { .. } => "bug-report".to_owned(),
             Command::Report { .. } => "report".to_owned(),
             Command::Unlock { .. } => "unlock".to_owned(),

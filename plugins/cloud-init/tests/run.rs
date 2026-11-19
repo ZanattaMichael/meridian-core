@@ -209,6 +209,7 @@ fn user_data_cloud_init_rejects_never_becomes_the_seed() {
         };
         assert_eq!(err.msg, "cloud-init rejected the user-data");
         assert_eq!(err.exit_code, Some(1));
+        assert_eq!(err.failures[0].cause.as_str(), "invalid-config");
         assert!(
             err.output.contains("is not of type array"),
             "{}",
@@ -354,6 +355,11 @@ fn a_failed_first_boot_fails_the_apply_and_keeps_what_was_done() {
             .ends_with("web01.example.com cloud-init status --wait --long"),
         "{}",
         err.command
+    );
+    let f = &err.failures[0];
+    assert_eq!(
+        (f.resource.as_str(), f.endpoint.as_str(), f.cause.as_str()),
+        ("scripts_user", "web01.example.com", "resource-failed")
     );
     // The seed was written before the wait began.
     assert_eq!(err.changes.len(), 1);
