@@ -31,7 +31,7 @@ permissions:
 # One run at a time per ref: the record is carried between the jobs.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 env:
   MERIDIAN_PLUGIN_SIGNATURES: 'off'   # a build from source is unsigned; a release would be `require`

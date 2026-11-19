@@ -6,32 +6,42 @@ name: puppet
 on:
   push:
     branches: [main]
-    paths:
-      - plugins/puppet/**
-      - examples/puppet/**
-      - crates/meridian-sdk/**
-      - crates/meridian-plugin-testkit/**
-      - Cargo.lock
-      - .github/workflows/puppet.yml
+    paths: &paths
+      - 'crates/meridian-ast/**'
+      - 'crates/meridian-expr/**'
+      - 'crates/meridian-graph/**'
+      - 'crates/meridian-import/**'
+      - 'crates/meridian-ir/**'
+      - 'crates/meridian-plugin-host/**'
+      - 'crates/meridian-plugin-testkit/**'
+      - 'crates/meridian-sdk/**'
+      - 'crates/meridian-secret/**'
+      - 'crates/meridian-signing/**'
+      - 'crates/meridian-target-fake/**'
+      - 'crates/meridian-value/**'
+      - 'crates/meridian-yaml/**'
+      - 'plugins/puppet/**'
+      - 'examples/puppet/**'
+      - 'Cargo.lock'
+      - '.github/workflows/puppet.yml'
+      - 'Cargo.toml'
+      - 'rust-toolchain.toml'
+      - '.github/actions/setup-rust/**'
   pull_request:
-    paths:
-      - plugins/puppet/**
-      - examples/puppet/**
-      - crates/meridian-sdk/**
-      - crates/meridian-plugin-testkit/**
-      - Cargo.lock
-      - .github/workflows/puppet.yml
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: *paths
 
 permissions:
   contents: read
 
-# A newer push to the same pull request replaces the run in progress.
+# A newer run for the same branch or pull request cancels this one.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   real-tool:
+    if: github.event.pull_request.draft != true
     name: plan and apply with puppet
     runs-on: ubuntu-latest
     timeout-minutes: 30

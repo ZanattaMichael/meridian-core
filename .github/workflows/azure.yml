@@ -15,22 +15,39 @@ name: azure
 on:
   push:
     branches: [main]
-  pull_request:
-    paths:
-      - 'plugins/bicep/**'
+    paths: &paths
+      - 'crates/meridian-ast/**'
+      - 'crates/meridian-expr/**'
+      - 'crates/meridian-graph/**'
+      - 'crates/meridian-import/**'
+      - 'crates/meridian-ir/**'
+      - 'crates/meridian-plugin-host/**'
+      - 'crates/meridian-plugin-testkit/**'
+      - 'crates/meridian-sdk/**'
+      - 'crates/meridian-secret/**'
+      - 'crates/meridian-signing/**'
+      - 'crates/meridian-target-fake/**'
+      - 'crates/meridian-value/**'
+      - 'crates/meridian-yaml/**'
       - 'plugins/arm/**'
+      - 'plugins/bicep/**'
       - 'examples/bicep/**'
       - 'examples/common/**'
       - 'examples/arm/**'
-      - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/azure.yml'
+      - 'rust-toolchain.toml'
+      - '.github/actions/setup-rust/**'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: *paths
 
 permissions:
   contents: read
 
-# A newer push to the same pull request replaces the run in progress.
+# A newer push to the same pull request cancels this run. Runs on main are
+# never cancelled: the subscription job deploys real resources.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -40,6 +57,7 @@ env:
 
 jobs:
   offline:
+    if: github.event.pull_request.draft != true
     name: real bicep compiler, no account
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -67,6 +85,7 @@ jobs:
         run: cargo test -p meridian-target-arm --locked --test real -- --ignored --nocapture
 
   subscription:
+    if: github.event.pull_request.draft != true
     name: what-if and deploy in a real subscription
     # Runs only when the repository names a resource group to use, and never
     # for a pull request from a fork, which cannot sign in.

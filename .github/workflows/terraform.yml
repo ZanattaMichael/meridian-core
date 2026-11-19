@@ -8,26 +8,43 @@ name: terraform
 on:
   push:
     branches: [main]
-  pull_request:
-    paths:
+    paths: &paths
+      - 'crates/meridian-ast/**'
+      - 'crates/meridian-expr/**'
+      - 'crates/meridian-graph/**'
+      - 'crates/meridian-import/**'
+      - 'crates/meridian-ir/**'
+      - 'crates/meridian-plugin-host/**'
+      - 'crates/meridian-plugin-testkit/**'
+      - 'crates/meridian-sdk/**'
+      - 'crates/meridian-secret/**'
+      - 'crates/meridian-signing/**'
+      - 'crates/meridian-target-fake/**'
+      - 'crates/meridian-value/**'
+      - 'crates/meridian-yaml/**'
       - 'plugins/terraform/**'
       - 'examples/terraform/**'
       - 'examples/common/**'
-      - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/terraform.yml'
+      - 'rust-toolchain.toml'
+      - '.github/actions/setup-rust/**'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: *paths
 
 permissions:
   contents: read
 
-# A newer push to the same pull request replaces the run in progress.
+# A newer run for the same branch or pull request cancels this one.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   terraform:
+    if: github.event.pull_request.draft != true
     name: plan and apply with terraform
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -55,6 +72,7 @@ jobs:
         run: cargo test -p meridian-target-terraform --locked --test real -- --ignored --nocapture
 
   tofu:
+    if: github.event.pull_request.draft != true
     name: the same tests with tofu
     runs-on: ubuntu-latest
     timeout-minutes: 30

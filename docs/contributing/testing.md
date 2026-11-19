@@ -233,3 +233,33 @@ cargo llvm-cov --workspace --locked --html      # target/llvm-cov/html/index.htm
 ```
 
 Plugin `main.rs` files show as uncovered because they run in a separate process.
+
+## Superseded CI runs
+
+Every workflow has a `concurrency` group of workflow plus ref. A newer run for the same branch or pull request cancels the older one, on `main` too.
+
+| Workflow | Cancelled when superseded |
+|---|---|
+| `wiki` | pull requests only; a publish on `main` queues |
+| `azure` | pull requests only; the subscription job deploys real resources |
+| `release` | pull requests only; tag runs are never cancelled |
+| `cut release` | never; one at a time |
+| all others | always |
+
+A new workflow copies this block, unless it publishes or deploys:
+
+```yaml
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+## Which changes run a plugin's workflow
+
+A plugin's real-tool workflow runs, on pull requests and on `main`, only when the change touches a path it builds from: the plugin, the workspace crates it depends on (from `cargo metadata`), its examples, `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.github/actions/setup-rust` or the workflow itself. `push` and `pull_request` share one list through a YAML anchor (`&paths`, `*paths`).
+
+When a plugin gains a dependency on another workspace crate, add that crate to its workflow's list.
+
+## Draft pull requests
+
+On a draft pull request the real-tool workflows (each plugin's, `azure`, `opa`, `modules`, `vertical slice`) start but skip every job (`if: github.event.pull_request.draft != true`). Marking the pull request ready for review runs them (`ready_for_review` is in their `types`). `rust`, `docs`, `coverage` and the other core workflows run on drafts as before. Mark a pull request ready before asking for a merge, so its real-tool results exist.

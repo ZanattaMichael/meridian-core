@@ -9,6 +9,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'crates/meridian-module/**'
       - 'crates/meridian-tooling/src/bundles.rs'
@@ -26,13 +27,14 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same pull request replaces the run in progress.
+# A newer run for the same branch or pull request cancels this one.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   real:
+    if: github.event.pull_request.draft != true
     name: a real registry, with and without a login
     runs-on: ubuntu-latest
     timeout-minutes: 30
