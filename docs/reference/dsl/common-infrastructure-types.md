@@ -1,7 +1,7 @@
 # The common infrastructure types
 
-Seven resource types, `network`, `subnet`, `firewall`, `address`, `vm`, `disk` and
-`objectStore`, compile to each
+Eight resource types, `network`, `subnet`, `firewall`, `address`, `vm`, `disk`,
+`objectStore` and `dnsRecord`, compile to each
 cloud's own resources on the targets below.
 
 | Type | What it is |
@@ -13,13 +13,14 @@ cloud's own resources on the targets below.
 | [`vm`](#vm) | a virtual machine in a subnet, from an image, of a size, reachable with a key |
 | [`disk`](#disk) | a data disk, attached to a vm |
 | [`objectStore`](#objectstore) | a store of files reached over HTTPS |
+| [`dnsRecord`](#dnsrecord) | an A, AAAA, CNAME or TXT record in a zone the cloud already hosts |
 
 The vocabulary is defined once, in the SDK. A param outside it is refused. What a cloud
 cannot express is refused at compile time with what to write instead. The
 [infra conformance matrix](../infra-conformance-matrix.md) is generated from what the
 targets do.
 
-<p align="center"><img src="../../graphics/meridian-common-types.svg" alt="One document with network, subnet, firewall, address, vm, disk and objectStore on the left; four columns on the right showing what each becomes on Terraform for AWS, CloudFormation, Terraform for Azure, and Bicep and ARM" width="100%"></p>
+<p align="center"><img src="../../graphics/meridian-common-types.svg" alt="One document with network, subnet, firewall, address, vm, disk, objectStore and dnsRecord on the left; four columns on the right showing what each becomes on Terraform for AWS, CloudFormation, Terraform for Azure, and Bicep and ARM" width="100%"></p>
 
 ## Where they compile
 
@@ -119,6 +120,7 @@ Read as `${id.output}`; each target rewrites it to the tool's expression. A
 | `address` | `id`; `address`: the IP address |
 | `disk` | `id` |
 | `objectStore` | `id`: the bucket, or the Azure storage account |
+| `dnsRecord` | `id` |
 | `vm` | `id`; `privateAddress`: the address inside the network; `publicAddress`: the machine's address from the internet |
 
 `publicAddress` is the attached `address`. On AWS a vm in a public subnet has one
@@ -306,6 +308,27 @@ Pulumi writes the same with `aws:s3:BucketV2` and `aws:s3:BucketVersioningV2`, o
 `BlobServiceProperties` (`<id>_versioning`). Google Cloud: `google_storage_bucket` with
 uniform bucket-level access and `tags` as labels.
 
+## `dnsRecord`
+
+The zone is not created: it must already exist in the account, subscription or project.
+
+| Param | Kind | |
+|---|---|---|
+| `zone` | text, required | the zone's domain (`example.com`) on AWS and Azure; its managed zone name (`example-com`) on Google Cloud |
+| `name` | text, required | the name inside the zone (`www`); `@` for the zone itself |
+| `type` | text, required | `A`, `AAAA`, `CNAME` or `TXT` |
+| `values` | list of text, required | the answers. A CNAME takes one. A reference works: `["${vm.publicAddress}"]` |
+| `ttl` | whole number | seconds; 300 unless given |
+
+| Terraform, AWS | CloudFormation | Terraform, Azure | Bicep |
+|---|---|---|---|
+| `aws_route53_record`, with a `data.aws_route53_zone` lookup (`<id>_zone`) | `AWS::Route53::RecordSet` by `HostedZoneName` | `azurerm_dns_a_record`, `_aaaa_`, `_cname_` or `_txt_record` | `Microsoft.Network/dnsZones/<type>`, named `<zone>/<name>` |
+
+Pulumi writes `aws:route53:Record` with an `aws:route53:getZone` lookup, or
+`azure-native:network:RecordSet`. Google Cloud: `google_dns_record_set`, with a
+`data.google_dns_managed_zone` lookup (`<id>_zone`) that gives the domain. AWS and Google Cloud
+take TXT answers in double quotes; Meridian adds them.
+
 ## What a common type adds
 
 Some common resources become several tool resources. The main one keeps the id; the
@@ -319,6 +342,7 @@ others are named from it:
 | `<fw>_in_<n>`, `<fw>_out_<n>`, `<fw>_out_all`, `<fw>_rule_<n>`, `<fw>_out_deny` | a firewall's rules |
 | `<disk>_attachment` | AWS, Terraform on Azure, Google Cloud: a disk's attachment to its vm |
 | `<store>_versioning`, `<store>_objects`, `<store>_blobs` | an object store's versioning, its Azure container and blob service |
+| `<record>_zone` | AWS on Terraform and Pulumi, Google Cloud: the lookup of a DNS record's zone |
 
 A document that already uses one of these ids is refused as `duplicate-resource`.
 
@@ -342,7 +366,7 @@ CloudFormation needs none (the stack's region; a subnet's `location` is its zone
 |---|---|
 | `unsupported-param` | a param outside the vocabulary; or one this cloud cannot express (the message says why and what to write) |
 | `missing-param` | a required param is not given; on Azure, a vm with no `sshKey`, or a resource with no location on Terraform; on AWS, a disk with no `vm` and no `location` |
-| `invalid-param` | a param of the wrong kind, a reference param that is not one `${id}`, a size or image of the wrong shape, a firewall rule that breaks the rules above, a size bigger than the table, a disk `sizeGb` below 1, a twelfth disk on an AWS vm |
+| `invalid-param` | a param of the wrong kind, a reference param that is not one `${id}`, a size or image of the wrong shape, a firewall rule that breaks the rules above, a size bigger than the table, a disk `sizeGb` below 1, a twelfth disk on an AWS vm, a DNS record type other than the four, a CNAME with more than one value |
 | `invalid-reference` | a read of a promised output that this cloud cannot give, such as `publicAddress` of an Azure vm with no address |
 | `unsupported-state` | any state but `present` |
 | `missing-resource` | Terraform: the cloud cannot be told from the document; or Azure with no `resourceGroup` |
@@ -351,4 +375,5 @@ CloudFormation needs none (the stack's region; a subnet's `location` is its zone
 
 ## Why so few
 
-Each type maps one-to-one on every target. DNS records are next. See [decision 0040](../../decisions/0040-common-infrastructure-types-are-a-small-core-mapped-per-cloud.md).
+Each type maps one-to-one on every target. Load balancers, databases and managed Kubernetes
+wait until these have shown what works. See [decision 0040](../../decisions/0040-common-infrastructure-types-are-a-small-core-mapped-per-cloud.md).

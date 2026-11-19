@@ -19,6 +19,11 @@ variables:
         mostRecent: true
         owners:
           - "099720109477"
+  www_zone:
+    fn::invoke:
+      function: aws:route53:getZone
+      arguments:
+        name: example.com
 resources:
   net:
     type: aws:ec2:Vpc
@@ -146,6 +151,15 @@ resources:
       bucket: ${files.id}
       versioningConfiguration:
         status: Enabled
+  www:
+    type: aws:route53:Record
+    properties:
+      name: www.example.com
+      records:
+        - ${web_ip.publicIp}
+      ttl: 300
+      type: A
+      zoneId: ${www_zone.zoneId}
   logs:
     type: aws:s3:BucketV2
     properties:

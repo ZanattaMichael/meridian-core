@@ -22,6 +22,7 @@
     "WebIp": "web_ip",
     "WebRoutes": "web_routes",
     "WebRoutesInternet": "web_routes_internet",
-    "WebRoutesLink": "web_routes_link"
+    "WebRoutesLink": "web_routes_link",
+    "Www": "www"
   }
 }

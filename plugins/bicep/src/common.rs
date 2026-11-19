@@ -24,6 +24,8 @@ pub const NETWORK_API: &str = "2023-09-01";
 pub const COMPUTE_API: &str = "2024-03-01";
 /// The API version of the storage resources.
 pub const STORAGE_API: &str = "2023-05-01";
+/// The API version of the DNS resources.
+pub const DNS_API: &str = "2018-05-01";
 
 /// Azure sizes, smallest first: (size, processors, memory in GB). The same
 /// table the Terraform target uses on Azure, so a document picks the same
@@ -344,6 +346,77 @@ fn expand(azure: Azure, r: &Resource, graph: &ResourceGraph) -> Result<Expansion
                 ("id", azure.id(id)),
             ]),
         },
+        "dnsRecord" => {
+            let (kind, values) = infra::dns_record(r);
+            let text = |key: &str| {
+                r.params
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            let (key, answers) = match kind.as_str() {
+                "CNAME" => (
+                    "CNAMERecord",
+                    Value::Map(map(vec![(
+                        "cname",
+                        values.into_iter().next().unwrap_or(Value::Null),
+                    )])),
+                ),
+                "TXT" => (
+                    "TXTRecords",
+                    Value::List(
+                        values
+                            .into_iter()
+                            .map(|v| Value::Map(map(vec![("value", Value::List(vec![v]))])))
+                            .collect(),
+                    ),
+                ),
+                "AAAA" => (
+                    "AAAARecords",
+                    Value::List(
+                        values
+                            .into_iter()
+                            .map(|v| Value::Map(map(vec![("ipv6Address", v)])))
+                            .collect(),
+                    ),
+                ),
+                _ => (
+                    "ARecords",
+                    Value::List(
+                        values
+                            .into_iter()
+                            .map(|v| Value::Map(map(vec![("ipv4Address", v)])))
+                            .collect(),
+                    ),
+                ),
+            };
+            // The zone already exists, so the record is named under it as
+            // "<zone>/<name>" in both dialects.
+            Expansion {
+                order: Vec::new(),
+                resources: vec![azure.resource(
+                    r,
+                    None,
+                    &format!("Microsoft.Network/dnsZones/{kind}"),
+                    DNS_API,
+                    map(vec![
+                        (
+                            "name",
+                            Value::String(format!("{}/{}", text("zone"), text("name"))),
+                        ),
+                        (
+                            "properties",
+                            Value::Map(map(vec![
+                                ("TTL", Value::Uint(infra::dns_ttl(r))),
+                                (key, answers),
+                            ])),
+                        ),
+                    ]),
+                )],
+                outputs: own_id(),
+            }
+        }
         "objectStore" => {
             // A child is nested under its parent's symbol in Bicep, and
             // named "<parent>/<child>" in ARM, reading the parent's name so

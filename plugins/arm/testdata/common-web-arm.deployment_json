@@ -44,6 +44,10 @@
     "web_ip": {
       "name": "web_ip",
       "type": "Microsoft.Network/publicIPAddresses"
+    },
+    "www": {
+      "name": "example.com/www",
+      "type": "Microsoft.Network/dnsZones/A"
     }
   },
   "scope": "resourceGroup",

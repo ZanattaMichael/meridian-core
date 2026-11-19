@@ -212,7 +212,7 @@ arrives the same way under its name. Non-strings are passed as JSON.
 
 ## Common infrastructure types
 
-`network`, `subnet`, `firewall`, `address`, `vm`, `disk` and `objectStore` compile to the AWS, Azure or Google
+`network`, `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore` and `dnsRecord` compile to the AWS, Azure or Google
 provider's own resources exactly as on the
 [Terraform target](terraform.md#common-infrastructure-types), with the same
 `spec.settings` keys (`cloud`, `location`, `resourceGroup`), because both tools

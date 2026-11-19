@@ -62,6 +62,7 @@ fn the_plugin_says_what_it_is() {
             "address",
             "config",
             "disk",
+            "dnsRecord",
             "firewall",
             "invoke.<function>",
             "network",
