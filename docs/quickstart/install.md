@@ -3,7 +3,7 @@
 Meridian is the `meridian` command plus one plugin binary per target, in one directory.
 Releases are built for Linux, macOS and Windows, on x86-64 and arm64.
 
-> The Homebrew tap, Scoop bucket and winget package are not published yet.
+> The Homebrew tap, Scoop bucket and winget package are not public yet.
 > Use the install scripts, the container image, `cargo install`, or
 > [build from source](#build-from-source).
 
@@ -47,7 +47,8 @@ It installs into `%LOCALAPPDATA%\Meridian\bin` and adds that to your user `PATH`
 
 ## Homebrew
 
-Each release carries a Homebrew formula. Once the tap is published:
+A release carries a Homebrew formula, kept in the project's tap. Once the tap
+is public:
 
 ```
 brew install zanattamichael/meridian/meridian
@@ -55,12 +56,21 @@ brew install zanattamichael/meridian/meridian
 
 ## Scoop and winget
 
-Each release carries Scoop and winget manifests. Once they are published:
+A release carries a Scoop manifest, kept in the project's bucket, and winget
+manifests, submitted to winget's community repository. Once the bucket is
+public and the winget submission is merged:
 
 ```
+scoop bucket add meridian https://github.com/ZanattaMichael/scoop-meridian
 scoop install meridian
 winget install ZanattaMichael.Meridian
 ```
+
+Neither the archives nor the package-manager listings carry an Apple or
+Microsoft code signature. Installed these ways, or with the scripts above,
+that changes nothing. An archive downloaded in a browser is quarantined, and
+macOS or SmartScreen will warn before it runs; what a release does sign is
+under [Check what you downloaded](#check-what-you-downloaded).
 
 ## Container image
 
