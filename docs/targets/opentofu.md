@@ -18,6 +18,7 @@ with `tofu`.
 | `state: absent` | No. OpenTofu removes what the configuration no longer declares, so remove the resource from the document |
 | Plan | Yes: OpenTofu's own plan |
 | Outputs | Yes |
+| Destroy | Yes: `tofu plan -destroy`, then that plan applied. See [Destroying](../operations/destroying.md) |
 | Compiles to | `main.tofu.json`, which only OpenTofu reads |
 | Runs | `tofu`, version 1.8 or later; 1.11 or later for `ephemeral.<type>` |
 | Plugin binary | `meridian-target-opentofu` |

@@ -82,7 +82,7 @@ pub use plan::{file_hash, Asked, PlanFile, PlannedStage, PlannedStatus, PLAN_FIL
 pub use policy::{Decisions, Policy};
 pub use reason::{Reason, UnknownReason};
 pub use record::{RunRecord, RunStatus, StepRecord, StepStatus};
-pub use report::{Drift, Mode, Outcome, Refusal, RunReport, StageId, StageKind, StageReport};
+pub use report::{Drift, Kept, Mode, Outcome, Refusal, RunReport, StageId, StageKind, StageReport};
 pub use rollback::{RollbackOutcome, RollbackReport};
 pub use run::work_dir;
 pub use secrets::{check_declared, names_declared, places_declared, Declared};
@@ -167,7 +167,7 @@ pub fn run_selected(
     };
     let resume = match (&options.resume, mode) {
         (None, _) => None,
-        (Some(_), Mode::Compile | Mode::Plan | Mode::Drift | Mode::Rollback) => {
+        (Some(_), Mode::Compile | Mode::Plan | Mode::Drift | Mode::Rollback | Mode::Destroy) => {
             report.refused = Some(Refusal::Resume("only an apply can be resumed".to_owned()));
             return report;
         }
@@ -297,6 +297,13 @@ pub fn run_selected(
         Vec::new()
     } else {
         stages(bundle, selector, &options.data)
+    };
+    // A destroy takes down what depends on something before the thing it
+    // depends on: the reverse of the order things were made in.
+    let to_run = if mode == Mode::Destroy || (mode == Mode::Plan && options.destroy) {
+        to_run.into_iter().rev().collect()
+    } else {
+        to_run
     };
 
     // With a policy, an apply asks about every stage it can before it

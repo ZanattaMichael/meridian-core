@@ -69,6 +69,9 @@ pub struct Options {
     /// compiles to what was planned, or was applied since, and hand each
     /// tool the plan it saved. Only an apply takes one.
     pub from_plan: Option<Arc<crate::PlanFile>>,
+    /// Make a plan preview a [`Mode::Destroy`]: stages last first, each
+    /// tool asked what its destroy would remove.
+    pub destroy: bool,
 }
 
 /// What an apply does when a stage fails.
@@ -104,6 +107,7 @@ impl Options {
             stop: Stop::default(),
             save_plan: false,
             from_plan: None,
+            destroy: false,
         }
     }
 

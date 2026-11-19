@@ -236,6 +236,7 @@ impl Client {
             accepts_inputs: reply.accepts_inputs,
             saves_plans: reply.saves_plans,
             reads_identifiers: reply.reads_identifiers,
+            destroys: reply.destroys,
             import_formats: wire::import_formats_from_wire(reply.import_formats),
             exports_schemas: reply.exports_schemas,
             settings: wire::settings_from_wire(reply.settings),
@@ -453,10 +454,38 @@ impl Client {
         log: &mut dyn FnMut(LogLine),
         stop: &Stop,
     ) -> Result<Plan, RunFailure> {
-        let mut runner = self.runner("plan", self.info.operations.plan)?;
+        self.plan_for(context, artifact, log, stop, false)
+    }
+
+    /// Previews what destroying an artifact would remove, stopped early as
+    /// `stop` says. Asked only of a plugin that declared it destroys.
+    pub fn plan_destroy_with(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &mut dyn FnMut(LogLine),
+        stop: &Stop,
+    ) -> Result<Plan, RunFailure> {
+        self.plan_for(context, artifact, log, stop, true)
+    }
+
+    fn plan_for(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &mut dyn FnMut(LogLine),
+        stop: &Stop,
+        destroy: bool,
+    ) -> Result<Plan, RunFailure> {
+        let mut runner = if destroy {
+            self.runner("destroy", self.info.operations.plan && self.info.destroys)?
+        } else {
+            self.runner("plan", self.info.operations.plan)?
+        };
         let request = pb::PlanRequest {
             context: Some(wire::context_to_wire(context)),
             artifact: Some(wire::artifact_to_wire(artifact)),
+            destroy,
         };
         let run = self.runtime.block_on(async {
             let events = runner.plan(request).await?.into_inner();
@@ -544,6 +573,55 @@ impl Client {
             Some(stopped) => match run.result {
                 Ok(Some(result)) => match decode(result)? {
                     Ok(applied) => Ok(applied),
+                    Err(error) => Err(RunFailure::Stopped(stopped.with(error))),
+                },
+                _ => Err(RunFailure::Stopped(stopped)),
+            },
+        }
+    }
+
+    /// Removes everything the tool created for an artifact, stopped early as
+    /// `stop` says. A stopped or failed destroy reports what it had removed,
+    /// as far as the plugin could tell. Asked only of a plugin that declared
+    /// it destroys.
+    pub fn destroy_with(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &mut dyn FnMut(LogLine),
+        stop: &Stop,
+    ) -> Result<Vec<meridian_sdk::Change>, RunFailure> {
+        let mut runner = self.runner("destroy", self.info.destroys)?;
+        let request = pb::DestroyRequest {
+            context: Some(wire::context_to_wire(context)),
+            artifact: Some(wire::artifact_to_wire(artifact)),
+        };
+        let run = self.runtime.block_on(async {
+            let events = runner.destroy(request).await?.into_inner();
+            Ok::<_, tonic::Status>(
+                self.drive(events, stop, |event| match event.event {
+                    Some(pb::destroy_event::Event::Log(line)) => {
+                        log(wire::log_from_wire(line));
+                        None
+                    }
+                    Some(pb::destroy_event::Event::Result(r)) => Some(r),
+                    None => None,
+                })
+                .await,
+            )
+        });
+        let run = run.unwrap_or_else(|status| Driven {
+            result: Err(status),
+            stopped: None,
+        });
+        let decode = |result| {
+            wire::destroy_result_from_wire(result).map_err(|e| self.unreadable("destroying", e))
+        };
+        match run.stopped {
+            None => decode(self.finished("destroying", run.result)?)?.map_err(RunFailure::Tool),
+            Some(stopped) => match run.result {
+                Ok(Some(result)) => match decode(result)? {
+                    Ok(changes) => Ok(changes),
                     Err(error) => Err(RunFailure::Stopped(stopped.with(error))),
                 },
                 _ => Err(RunFailure::Stopped(stopped)),

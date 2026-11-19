@@ -115,6 +115,11 @@ impl RunState {
         self.stages.insert(stage_key(id), record);
     }
 
+    /// Forgets a stage, as after a destroy: it reads as never applied.
+    pub fn remove(&mut self, id: &StageId) {
+        self.stages.remove(&stage_key(id));
+    }
+
     pub fn to_json(&self) -> String {
         let map: BTreeMap<String, Value> = self
             .stages

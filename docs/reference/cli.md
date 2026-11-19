@@ -3,10 +3,11 @@
 ```
 meridian validate <files>...
 meridian compile  <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--out DIR]
-meridian plan     <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets] [--detailed-exitcode]
+meridian plan     <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets] [--detailed-exitcode] [--destroy]
 meridian apply    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets] [--resume | --resume=RUN] [--on-failure stop|rollback] [--stage-timeout DURATION]
 meridian drift    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE]
 meridian rollback <files>... [--run RUN]
+meridian destroy  <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--yes]
 meridian status
 meridian runs
 meridian events   [RUN] [--type TYPE]
@@ -84,13 +85,16 @@ A tool that cannot preview reports `unknown`. A plan takes the
 [state lock](../concepts/run-safety.md#one-run-at-a-time) and is recorded.
 
 `--detailed-exitcode`: `2` for changes (including `unknown` and deferred), `0` in sync, `1`
-on error ([run object](cli-json.md#compile-plan-apply-drift-rollback)).
+on error ([run object](cli-json.md#compile-plan-apply-drift-rollback-destroy)).
 
 `--policy` checks every stage ([policy](policy.md)); denials fail the stage and exit `1`,
 but planning continues.
 
 `--out FILE` (`-o`) [saves the plan](../operations/pull-requests.md) for `apply --plan`. Not
 written if any stage failed or was denied.
+
+`--destroy` previews [`destroy`](#destroy) instead: last stage first, every change a
+`- delete`. Not with `--out` or `--policy`.
 
 ### `apply`
 
@@ -152,6 +156,24 @@ Exit `2` on drift, `0` clean, `1` on error.
 Re-applies each stage of the last apply (or `--run RUN`) from its previous good artifact,
 last first. Pass the same files. A stage that cannot be put back is `NOT ROLLED BACK`, exit
 `1` ([cases](../concepts/run-safety.md#putting-a-run-back)).
+
+### `destroy`
+
+Removes what each stage's tool made, last stage first, and forgets the stage
+([destroying](../operations/destroying.md)). Asks `Type yes to destroy:` first; `--yes`
+(`-y`) skips the question and is required without a terminal or with `--output json`.
+
+```
+web (ResourceSet, target fake on 10.0.0.5)
+  - delete files/motd
+  destroyed 1 resource
+network (Infrastructure, target terraform)
+  - delete vm: aws_instance
+  destroyed 1 resource
+```
+
+A stage is `kept` when its target cannot destroy or it was never applied. Stops at the first
+failure; the failed stage stays recorded as applied, so `destroy` can be run again.
 
 ### `status`
 
@@ -558,11 +580,13 @@ meridian signing verify --trusted-key acme.pub meridian-target-acme
 | `--state-dir DIR` | `MERIDIAN_STATE_DIR` | `.meridian` | each tool's working files, fetched [modules](modules.md#where-modules-are-kept), and with the local backend Meridian's own record |
 | `--backend NAME` | `MERIDIAN_BACKEND` | `local` | where Meridian's own record (the lock, the run-state, the runs) is kept: `local`, or a [backend program](state.md#writing-a-backend) |
 | `--backend-config KEY=VALUE` | | | a setting for the backend; may be repeated |
-| `--lock-timeout DURATION` | | `0s` | `plan`, `apply`, `drift`, `rollback`: how long to wait for another run to release the lock, as in `30s`, `5m`, `1h`. By default a locked state is refused at once |
+| `--lock-timeout DURATION` | | `0s` | `plan`, `apply`, `drift`, `rollback`, `destroy`: how long to wait for another run to release the lock, as in `30s`, `5m`, `1h`. By default a locked state is refused at once |
 | `--resume`, `--resume=RUN` | | | `apply` only: continue the last apply, or the run named (joined with `=`) |
 | `--on-failure ACTION` | | `stop` | `apply` only: `stop` leaves what was applied in place; `rollback` puts back every stage the run changed |
-| `--stage-timeout DURATION` | | none | `plan`, `apply`, `drift`, `rollback`: stop a stage whose tool has run this long, as in `30m` or `2h`, and fail the run as `timed-out`. By default a tool may take as long as it takes |
+| `--stage-timeout DURATION` | | none | `plan`, `apply`, `drift`, `rollback`, `destroy`: stop a stage whose tool has run this long, as in `30m` or `2h`, and fail the run as `timed-out`. By default a tool may take as long as it takes |
 | `--run RUN` | | the last apply | `rollback` only: the apply to put back |
+| `--destroy` | | | `plan` only: preview `destroy` instead of `apply` |
+| `-y`, `--yes` | | | `destroy` only: destroy without asking |
 | `--policy PATH` | | no policy | `plan`, `apply`: a [policy](policy.md) file or directory every stage is checked against before anything is applied; may be repeated |
 | `--policy-engine NAME` | `MERIDIAN_POLICY_ENGINE` | `opa` | `plan`, `apply`: the program `meridian-policy-<NAME>` that reads the policies |
 | `--events json` | | | `compile`, `plan`, `apply`, `drift`, `rollback`: write every [event](state.md#events) to standard output as it happens, one JSON object per line. The report for people moves to standard error |
@@ -574,7 +598,7 @@ meridian signing verify --trusted-key acme.pub meridian-target-acme
 | `--log-limit SIZE` | | `10MiB` | `plan`, `apply`, `drift`, `rollback`: the most of one step's tool output kept, as in `512KiB` or a number of bytes. Past it the start and the end are kept, with a line saying how much was cut |
 | `--no-logs` | `MERIDIAN_NO_LOGS` | off | the same commands: keep no tool output in the state directory. It is still printed |
 | `--out DIR` | | | `compile` only: where to write the compiled files |
-| `-l SELECTOR`, `--selector SELECTOR` | | every document | `compile`, `plan`, `apply`: run only the documents whose `metadata.labels` match, as in `tier=web,env!=prod`. May be repeated; every requirement must hold. [Labels and selectors](dsl/index.md#labels-and-selectors) |
+| `-l SELECTOR`, `--selector SELECTOR` | | every document | `compile`, `plan`, `apply`, `destroy`: run only the documents whose `metadata.labels` match, as in `tier=web,env!=prod`. May be repeated; every requirement must hold. [Labels and selectors](dsl/index.md#labels-and-selectors) |
 | `--data FILE` | | no data | `compile`, `plan`, `apply`: a YAML or JSON mapping of values that [`when`](dsl/index.md#when-and-runtimewhen) conditions and [interpolations](dsl/interpolation.md) read as `data.<key>`. May be repeated; a later file's key replaces an earlier file's |
 | `--strict-secrets` | `MERIDIAN_STRICT_SECRETS` | off | `plan`, `apply`: stop a stage whose secret cannot be [locked in memory](#secrets), instead of warning once and going on |
 | `--set KEY=VALUE` | | | `compile`, `plan`, `apply`: one value for `when` conditions and interpolations, applied after every `--data` file, so it wins. `KEY` may be dotted to set one key inside a mapping (`region.name=eu-west-1`). The value is typed as YAML types it. May be repeated. See [giving the data](dsl/conditions.md#giving-the-data) |

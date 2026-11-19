@@ -74,6 +74,9 @@ pub struct Info {
     /// manages, which `meridian retarget` writes as `adopt`. A plugin built
     /// before the field says no.
     pub reads_identifiers: bool,
+    /// Whether the target removes what its tool created, for `meridian
+    /// destroy`. A plugin built before the field says no.
+    pub destroys: bool,
     /// The versions of its tool the target compiles for; empty when it does
     /// not say.
     pub target_versions: Vec<String>,

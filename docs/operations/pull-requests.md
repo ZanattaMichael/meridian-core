@@ -26,7 +26,7 @@ No file is written if any stage failed or was denied (exit `1`).
 
 `apply --plan FILE` takes its inputs from the file; any given on the command line must
 match. `--resume` is not allowed. With `--output json` both carry a `plan` object
-([see](../reference/cli-json.md#compile-plan-apply-drift-rollback)). A file applies once.
+([see](../reference/cli-json.md#compile-plan-apply-drift-rollback-destroy)). A file applies once.
 
 ## What `apply --plan` checks
 

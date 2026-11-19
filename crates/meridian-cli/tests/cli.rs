@@ -107,7 +107,7 @@ fn plugins_lists_what_each_plugin_is_and_can_do() {
     assert_eq!(
         text,
         format!(
-            "fake\n  category:  containerization\n  can:       compile, plan, apply, outputs, inputs, import, schemas\n  \
+            "fake\n  category:  containerization\n  can:       compile, plan, apply, outputs, destroy, inputs, import, schemas\n  \
              resources: file\n  versions:  1, 2.4\n  settings:  mode\n  imports:   Fake files (*.fake)\n  sdk:       0.1.0 (protocol 2)\n  binary:    {}\n  signature: not checked\n",
             binary.display()
         )

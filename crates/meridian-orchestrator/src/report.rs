@@ -19,6 +19,9 @@ pub enum Mode {
     /// again from the artifact of its last successful apply before that run,
     /// last stage first. Which apply is [`Options::rollback_of`].
     Rollback,
+    /// Remove what each stage's tool created, last stage first. A stage
+    /// whose target cannot destroy is left in place.
+    Destroy,
 }
 
 impl Mode {
@@ -30,6 +33,7 @@ impl Mode {
             Mode::Apply => "apply",
             Mode::Drift => "drift",
             Mode::Rollback => "rollback",
+            Mode::Destroy => "destroy",
         }
     }
 }
@@ -86,6 +90,11 @@ pub enum Outcome {
     Skipped { applied_in: String },
     /// What a drift check found.
     Drift(Drift),
+    /// The tool removed everything it had created for the stage.
+    Destroyed { changes: Vec<Change> },
+    /// A destroy, or its preview, left the stage in place. Nothing went
+    /// wrong.
+    Kept(Kept),
     /// The document's own `spec.when` was false, so it is not part of this
     /// run. Nothing went wrong, and nothing was compiled.
     LeftOut { condition: String },
@@ -93,6 +102,40 @@ pub enum Outcome {
     Failed(String),
     /// An earlier stage failed, so this one was not attempted.
     NotRun { because_of: StageId },
+}
+
+/// Why a destroy left a stage in place.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Kept {
+    /// The stage's target cannot destroy: its tool keeps no record of what
+    /// it made, or the target only compiles.
+    CannotDestroy,
+    /// The run-state has no apply of the stage, so there is nothing to
+    /// remove.
+    NeverApplied,
+}
+
+impl Kept {
+    /// The word the record and the JSON output use.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Kept::CannotDestroy => "cannot-destroy",
+            Kept::NeverApplied => "never-applied",
+        }
+    }
+
+    /// What a person is told.
+    pub fn why(&self, target: &str) -> String {
+        match self {
+            Kept::CannotDestroy => format!(
+                "target {target:?} cannot destroy; remove what it made with the tool, or \
+                 destroy the host it configured"
+            ),
+            Kept::NeverApplied => {
+                "never applied with this state, so there is nothing to destroy".to_owned()
+            }
+        }
+    }
 }
 
 /// Whether a stage still matches what was last applied to it.

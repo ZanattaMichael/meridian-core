@@ -516,3 +516,40 @@ fn the_common_types_are_configurations_the_real_providers_validate() {
         assert!(validated.contains("\"valid\": true"), "{name}: {validated}");
     }
 }
+
+#[ignore = "needs a real terraform; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_destroy_removes_what_the_apply_made_and_its_preview_changes_nothing() {
+    let Some(program) = terraform() else { return };
+    let dir = scratch(TMP, "real-destroy");
+    let client = start(&program);
+    let context = context(&dir, "destroyed");
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: destroyed\nspec:\n  target: terraform\n  resources:\n    - id: first\n      type: terraform_data\n      params:\n        input: one\n    - id: second\n      type: terraform_data\n      params:\n        input: two\n";
+    let artifact = compile(&client, "destroyed.yaml", text);
+    apply_ok("the apply", &client, &context, &artifact);
+    assert!(client.info().destroys);
+
+    let preview = client
+        .plan_destroy_with(&context, &artifact, &mut |_| {}, &Default::default())
+        .unwrap_or_else(|e| panic!("{}", explain("the destroy preview", &e, &[])));
+    let both = [
+        (ChangeAction::Delete, "first"),
+        (ChangeAction::Delete, "second"),
+    ];
+    assert_eq!(changes(&preview.changes), both);
+    let (plan, _) = plan_ok("the plan after the preview", &client, &context, &artifact);
+    assert!(plan.changes.is_empty(), "the preview changed something");
+
+    let removed = client
+        .destroy_with(&context, &artifact, &mut |_| {}, &Default::default())
+        .unwrap_or_else(|e| panic!("{}", explain("the destroy", &e, &[])));
+    assert_eq!(changes(&removed), both);
+    let (plan, _) = plan_ok("the plan after the destroy", &client, &context, &artifact);
+    assert_eq!(
+        changes(&plan.changes),
+        [
+            (ChangeAction::Create, "first"),
+            (ChangeAction::Create, "second")
+        ]
+    );
+}

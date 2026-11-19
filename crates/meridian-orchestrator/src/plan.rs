@@ -298,7 +298,11 @@ impl PlannedStage {
                     stage.id
                 ))
             }
-            Outcome::Applied { .. } | Outcome::Skipped { .. } | Outcome::Drift(_) => {
+            Outcome::Applied { .. }
+            | Outcome::Skipped { .. }
+            | Outcome::Drift(_)
+            | Outcome::Destroyed { .. }
+            | Outcome::Kept(_) => {
                 return Err(format!(
                     "{} was not planned; only a plan is saved",
                     stage.id
