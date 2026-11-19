@@ -396,6 +396,51 @@ impl Run<'_> {
                 return report;
             }
         }
+        // An inspection reads one resource of a target that can, on the
+        // step's own machine.
+        let mut inspecting = None;
+        if self.mode == Mode::Inspect {
+            let ask = options
+                .inspect
+                .as_ref()
+                .expect("an inspection runs only the step it names");
+            if !info.inspects {
+                return fail(
+                    report,
+                    Reason::NotSupported,
+                    format!(
+                        "target {:?} cannot read one resource ({}); {}",
+                        stage.target(),
+                        meridian_sdk::rules::UNSUPPORTED_INSPECT.name,
+                        meridian_sdk::rules::UNSUPPORTED_INSPECT.hint
+                    ),
+                );
+            }
+            let Some(declared) = graph.resources.iter().find(|r| r.id == ask.resource) else {
+                return fail(
+                    report,
+                    Reason::CompileRefused,
+                    format!(
+                        "{} declares {:?}, and its `when` leaves it out of this run, so there \
+                         is nothing to read",
+                        id.name, ask.resource
+                    ),
+                );
+            };
+            if !ask.endpoint.is_empty() && ask.endpoint != report.host {
+                let configures = if report.host.is_empty() {
+                    "no machine".to_owned()
+                } else {
+                    report.host.clone()
+                };
+                return fail(
+                    report,
+                    Reason::CompileRefused,
+                    format!("{} configures {configures}, not {}", id.name, ask.endpoint),
+                );
+            }
+            inspecting = Some((declared.clone(), ask.resource.clone()));
+        }
         if self.mode == Mode::Apply && !operations.apply {
             return fail(
                 report,
@@ -632,6 +677,23 @@ impl Run<'_> {
                             }
                             RunFailure::Plugin(_) => {}
                         }
+                        report.failures = self.failures(&e, &document);
+                        return fail(report, reason_of(&e), self.describe(e));
+                    }
+                }
+            }
+            Mode::Inspect => {
+                let (declared, resource) =
+                    inspecting.expect("an inspection found its resource above");
+                let endpoint = report.host.clone();
+                match target.inspect(&context, &emitted.artifact, &resource, &endpoint) {
+                    Ok(read) => {
+                        let masked = |text: &str| masker.mask(&mask(text, &sensitive));
+                        report.outcome = Outcome::Inspected(Box::new(inspect::compare(
+                            &declared, &endpoint, read, masked,
+                        )));
+                    }
+                    Err(e) => {
                         report.failures = self.failures(&e, &document);
                         return fail(report, reason_of(&e), self.describe(e));
                     }

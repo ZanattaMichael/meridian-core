@@ -261,13 +261,34 @@ Schema: `schemas/output/diagnose.schema.json`.
                 "entries": [ { "cause": "resource-failed", "endpoints": ["203.0.113.10"],
                                "failures": [ { "endpoint": "203.0.113.10", "resource": "nginx_conf", "cause": "resource-failed",
                                                "toolCode": null, "summary": "template: 'nginx_port' is undefined", "at": "site.yaml:42" } ],
-                               "next": ["meridian logs 2026-11-17T09-14-03Z-0cc7 --step web"] } ] } ],
+                               "next": ["meridian logs 2026-11-17T09-14-03Z-0cc7 --step web",
+                                        "meridian inspect nginx_conf site.yaml --step web"] } ] } ],
   "skipped": [ { "name": "app", "kind": "ResourceSet", "becauseOf": "web" } ],
   "keptHere": true }
 ```
 
 `run` is `null`, and `failed` empty, when no failed run is recorded. `summary` and `at` are
 `null` when this machine did not keep the run's failures (`keptHere: false`).
+
+### `inspect`
+
+One resource as its tool reads it now, beside what the document declares.
+Schema: `schemas/output/inspect.schema.json`.
+
+```json
+{ "command": "inspect", "ok": true,
+  "step": { "name": "web", "kind": "ResourceSet" }, "target": "fake",
+  "inspection": { "resource": "page", "type": "file", "endpoint": "web1",
+                  "found": true, "inDesiredState": false,
+                  "command": "fake-tool show files/page --on web1",
+                  "desired": { "content": "bye" }, "actual": { "content": "hello" },
+                  "differs": ["content"],
+                  "notCompared": [ { "param": "password", "why": "sensitive" } ] } }
+```
+
+`inDesiredState` is `null` when the tool cannot say. `desired` writes a secret as
+`"(sensitive)"`; `actual` masks every known secret value. `why` is `sensitive` or
+`not-reported`. `endpoint` is empty for an Infrastructure step.
 
 ### `bug-report`
 

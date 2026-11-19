@@ -80,6 +80,9 @@ pub struct Info {
     /// Whether the target removes what its tool created, for `meridian
     /// destroy`. A plugin built before the field says no.
     pub destroys: bool,
+    /// Whether the target reads one resource as it is now, for `meridian
+    /// inspect`. A plugin built before the field says no.
+    pub inspects: bool,
     /// The versions of its tool the target compiles for; empty when it does
     /// not say.
     pub target_versions: Vec<String>,

@@ -238,6 +238,7 @@ impl Client {
             reads_identifiers: reply.reads_identifiers,
             debug_levels: reply.debug_levels,
             destroys: reply.destroys,
+            inspects: reply.inspects,
             import_formats: wire::import_formats_from_wire(reply.import_formats),
             exports_schemas: reply.exports_schemas,
             settings: wire::settings_from_wire(reply.settings),
@@ -748,6 +749,33 @@ impl Client {
         let result = self.finished("reading identifiers", result)?;
         wire::identifiers_response_from_wire(result)
             .map_err(|e| self.unreadable("reading identifiers", e))?
+            .map_err(RunFailure::Tool)
+    }
+
+    /// Reads one resource of the artifact as it is now, on `endpoint`,
+    /// without changing anything. Asked only of a plugin that declared it
+    /// inspects.
+    pub fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunFailure> {
+        let mut runner = self.runner("inspect", self.info.inspects)?;
+        let request = pb::InspectRequest {
+            context: Some(wire::context_to_wire(context)),
+            artifact: Some(wire::artifact_to_wire(artifact)),
+            resource: resource.to_owned(),
+            endpoint: endpoint.to_owned(),
+        };
+        let result = self
+            .runtime
+            .block_on(runner.inspect(request))
+            .map(|r| Some(r.into_inner()));
+        let result = self.finished("inspecting", result)?;
+        wire::inspect_response_from_wire(result)
+            .map_err(|e| self.unreadable("inspecting", e))?
             .map_err(RunFailure::Tool)
     }
 

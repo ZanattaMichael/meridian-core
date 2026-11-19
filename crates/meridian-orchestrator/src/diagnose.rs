@@ -292,6 +292,22 @@ fn next(run: &RunRecord, step: &StepRecord, entry: &Entry) -> Vec<String> {
         }
         _ => {
             next.push(logs);
+            // A failure that names a resource can be read as it is now.
+            let resource = entry
+                .failures
+                .iter()
+                .map(|f| f.resource.as_str())
+                .find(|r| !r.is_empty());
+            if let (Some(resource), Some(files)) = (resource, files_of(&typed)) {
+                let mut inspect = format!(
+                    "meridian inspect {resource} {files} --step {}",
+                    step.id.name
+                );
+                if !step.endpoint.is_empty() {
+                    inspect.push_str(&format!(" --endpoint {}", step.endpoint));
+                }
+                next.push(inspect);
+            }
             let rerun = matches!(step.reason.as_str(), "tool-failed" | "timed-out");
             if rerun && !typed.is_empty() {
                 let mut again = format!(
@@ -458,6 +474,7 @@ mod tests {
             entries[0].next,
             [
                 "meridian logs 2026-11-18T09-14-03Z-0cc7 --step web",
+                "meridian inspect nginx_conf site.yaml --step web",
                 "meridian apply site.yaml --tool-debug --tool-debug-step web --resume=2026-11-18T09-14-03Z-0cc7",
             ]
         );

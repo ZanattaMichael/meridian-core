@@ -65,7 +65,8 @@ meridian lsp / meridian mcp                 # language server, MCP server
   existing thing under management ([adopting what exists](docs/reference/dsl/resources.md#adopting-what-exists));
   `meridian retarget` moves a document to another tool ([retargeting](docs/operations/retargeting.md));
   `meridian destroy` removes what was applied, last stage first ([destroying](docs/operations/destroying.md)).
-  `meridian diagnose` says what broke, where, and what to run next ([troubleshooting](docs/operations/troubleshooting.md)).
+  `meridian diagnose` says what broke, where, and what to run next ([troubleshooting](docs/operations/troubleshooting.md));
+  `meridian inspect` reads one resource as it is now, beside what the document declares.
   See [running safely](docs/concepts/run-safety.md) and [policy checks](docs/reference/policy.md).
 - `--analyze checkov,trivy` scans the compiled files and shows each finding at its document
   line ([analyzers](docs/reference/analyzers.md)).

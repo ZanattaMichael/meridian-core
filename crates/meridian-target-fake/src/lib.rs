@@ -24,6 +24,10 @@
 //! holding `LOCKED` fails the destroy there. `FAKE_DESTROY=off` makes it a
 //! target that cannot destroy.
 //!
+//! It inspects: a file's applied content is read from the state, with each
+//! secret reference resolved as its tool would show it. `FAKE_INSPECT=off`
+//! makes it a target that cannot.
+//!
 //! It imports as well. Its tool's "existing configuration" is a `*.fake`
 //! file of `name = content` lines, each of which becomes a `file` resource.
 //! A line that starts with `?` is something the importer does not
@@ -779,6 +783,51 @@ impl Runner for FakeRunner {
             .filter_map(|path| path.strip_prefix("files/"))
             .map(|id| (id.to_owned(), format!("fake-{id}")))
             .collect())
+    }
+
+    /// `FAKE_INSPECT=off` stands it in for a plugin that cannot read one
+    /// resource.
+    fn inspects(&self) -> bool {
+        std::env::var("FAKE_INSPECT").as_deref() != Ok("off")
+    }
+
+    /// A file's applied content, with each secret reference resolved as its
+    /// tool would show it, and whether it is the content the artifact
+    /// declares. Reads the state; writes nothing.
+    fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunError> {
+        let path = format!("files/{resource}");
+        let command = format!("fake-tool show {path} --on {endpoint}");
+        if artifact.files.values().any(|c| c.contains("FAIL")) {
+            let mut e = RunError::new(format!("fake-tool cannot read {path}"));
+            e.command = command;
+            return Err(e);
+        }
+        let state = read_state(&context.work_dir)?;
+        let Some(Value::String(applied)) = state.get(&path) else {
+            return Ok(meridian_sdk::Inspection {
+                found: false,
+                in_desired_state: Some(!artifact.files.contains_key(&path)),
+                command,
+                ..Default::default()
+            });
+        };
+        let mut shown = applied.clone();
+        for (name, value) in context.secrets.iter() {
+            let text = value.expose(|bytes| String::from_utf8_lossy(bytes).into_owned());
+            shown = shown.replace(&format!("<<secret {name}>>"), &text);
+        }
+        Ok(meridian_sdk::Inspection {
+            found: true,
+            actual: Data::from([("content".to_owned(), Value::String(shown))]),
+            in_desired_state: Some(artifact.files.get(&path) == Some(applied)),
+            command,
+        })
     }
 }
 

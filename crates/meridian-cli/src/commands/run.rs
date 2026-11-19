@@ -249,7 +249,7 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
         baseline,
         // Compiling keeps no record, so it needs no backend to be there.
         backend: match mode {
-            Mode::Compile => None,
+            Mode::Compile | Mode::Inspect => None,
             Mode::Plan | Mode::Apply | Mode::Drift | Mode::Rollback | Mode::Destroy => {
                 Some(backend(&workflow.state)?)
             }

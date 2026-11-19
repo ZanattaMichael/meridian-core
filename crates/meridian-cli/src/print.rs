@@ -443,6 +443,8 @@ impl Printer<'_> {
                 writeln!(out, "  destroyed {}", count(changes.len(), "resource"))?;
             }
             Outcome::Kept(kept) => writeln!(out, "  kept: {}", kept.why(&report.target))?,
+            // `meridian inspect` prints its own.
+            Outcome::Inspected(_) => {}
             Outcome::LeftOut { condition } => {
                 writeln!(out, "  skipped: its when ({condition}) is false")?
             }

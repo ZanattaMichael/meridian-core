@@ -264,6 +264,22 @@ pub struct Applied {
     pub outputs: Vec<Output>,
 }
 
+/// One resource as the tool reads it now: what [`Runner::inspect`] answers.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Inspection {
+    /// False when the tool has no such resource: never made, or removed.
+    pub found: bool,
+    /// Its properties now, keyed by the document's param names where the
+    /// plugin can map them and by the tool's own names otherwise.
+    pub actual: Data,
+    /// Whether the tool says the resource is as declared; `None` when it
+    /// cannot say.
+    pub in_desired_state: Option<bool>,
+    /// The native command run, as a person would type it, with no secret in
+    /// it.
+    pub command: String,
+}
+
 /// The tool failing: a non-zero exit, a rejected configuration, an unreachable
 /// node.
 ///
@@ -514,5 +530,24 @@ pub trait Runner: Send + Sync {
     ) -> Result<Vec<Change>, RunError> {
         let _ = (context, artifact, log);
         Err(RunError::new("this plugin does not destroy"))
+    }
+
+    /// Whether [`Runner::inspect`] is answered.
+    fn inspects(&self) -> bool {
+        false
+    }
+
+    /// Reads the resource `resource` of the artifact as it is now on
+    /// `endpoint`, the context's host unless the operator named another.
+    /// It must change nothing: no apply, no write to the tool's state.
+    fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        endpoint: &str,
+    ) -> Result<Inspection, RunError> {
+        let _ = (context, artifact, resource, endpoint);
+        Err(RunError::new("this plugin does not inspect"))
     }
 }
