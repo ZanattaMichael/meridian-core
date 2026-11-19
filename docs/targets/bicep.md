@@ -318,6 +318,21 @@ Each names the resource, line and rule:
 | `unsupported-dependency` | a `dependsOn` to or from the `deployment` resource | the deployment is not a resource of the file |
 | `empty-document` | a document with no resources but the deployment | add a resource |
 
+## Reading a failure
+
+When the deployment fails, `az deployment operation group list` is read. Each operation
+with `provisioningState: Failed` is a [resource failure](../reference/state.md#resource-failures):
+
+| From the operation | Becomes |
+|---|---|
+| `targetResource` | the resource, the document's id where it maps to one |
+| `statusMessage.error.message` | the summary |
+| `statusMessage.error.code`, else `statusCode` | the tool code, `StorageAccountAlreadyTaken` |
+| `Unauthorized`, `Forbidden`, `AuthorizationFailed` | `auth-failed` |
+| `InvalidTemplate...`, `BadRequest` | `invalid-config` |
+| a `...NotFound` code other than `ResourceNotFound` | `dependency-missing` |
+| anything else | `resource-failed`, or `unreachable`, `auth-failed`, `timed-out` or `reboot-required` when the message says so |
+
 ## Troubleshooting
 
 | What you see | Why | What to do |

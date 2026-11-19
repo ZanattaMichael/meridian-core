@@ -4,7 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use meridian_sdk::tool::{write_artifact, Tool};
+use meridian_sdk::failure::{Cause, Failure};
+use meridian_sdk::tool::{write_artifact, Finished, Tool};
 use meridian_sdk::{
     cloud_for, decode_value, Applied, Artifact, Change, ChangeAction, CloudHandover, Log,
     Operations, Output, Plan, RunContext, RunError, Runner, SavedPlan, Value,
@@ -310,7 +311,9 @@ impl PulumiRunner {
                 Ok(preview) if !preview.diagnostics.is_empty() => preview.diagnostics.join("\n"),
                 _ => tail(&preview.stdout).to_owned(),
             };
+            let failures = read_preview_failures(&preview.stdout);
             let mut err = preview.into_error("pulumi preview failed");
+            err.failures = failures;
             if !said.trim().is_empty() {
                 if !err.output.is_empty() && !err.output.ends_with('\n') {
                     err.output.push('\n');
@@ -468,7 +471,7 @@ impl Runner for PulumiRunner {
                 .args(["--plan", PLAN_FILE])
                 .env("PULUMI_EXPERIMENTAL", "true");
         }
-        let updated = Self::with_inputs(up, context).run_ok("pulumi up failed", log);
+        let updated = run_naming_failures(&Self::with_inputs(up, context), "pulumi up failed", log);
         self.forget_secrets(context, cloud, &stack, log);
         let _ = std::fs::remove_file(context.work_dir.join(PLAN_FILE));
         updated?;
@@ -556,11 +559,11 @@ impl Runner for PulumiRunner {
             }
         };
         log.out(&format!("stack {}: destroying its resources", stack.name));
-        let destroyed = self
+        let destroy = self
             .on_stack(context, cloud, &stack, &["destroy"])
             .args(self.extra_args.iter().cloned())
-            .args(["--yes", "--skip-preview"])
-            .run_ok("pulumi destroy failed", log);
+            .args(["--yes", "--skip-preview"]);
+        let destroyed = run_naming_failures(&destroy, "pulumi destroy failed", log);
         self.forget_secrets(context, cloud, &stack, log);
         destroyed?;
         Ok(removals)
@@ -665,6 +668,157 @@ fn tail(text: &str) -> &str {
 
 fn unreadable(what: &str, detail: impl std::fmt::Display) -> RunError {
     RunError::new(format!("pulumi's {what} could not be read: {detail}"))
+}
+
+/// Runs `pulumi up` or `pulumi destroy`; a failure carries the resources
+/// its `Diagnostics:` section names.
+fn run_naming_failures(tool: &Tool, what: &str, log: &dyn Log) -> Result<Finished, RunError> {
+    let finished = tool.run(log)?;
+    if finished.success() {
+        return Ok(finished);
+    }
+    let failures = read_diagnostics(&finished.stdout);
+    let mut err = finished.into_error(what);
+    err.failures = failures;
+    Err(err)
+}
+
+/// One failure per resource with an `error:` in the `Diagnostics:` section
+/// Pulumi prints at the end of an update:
+///
+/// ```text
+/// Diagnostics:
+///   aws:s3/bucket:Bucket (logs):
+///     error: creating S3 Bucket (shop-logs): BucketAlreadyExists
+/// ```
+///
+/// The stack's own entry (`update failed`) names no resource and is left to
+/// the step's error.
+fn read_diagnostics(stdout: &str) -> Vec<Failure> {
+    let mut failures: Vec<Failure> = Vec::new();
+    let mut inside = false;
+    // The resource being read, its type, and its error so far.
+    let mut current: Option<(String, String, String)> = None;
+    let mut in_error = false;
+    let mut flush = |current: &mut Option<(String, String, String)>| {
+        if let Some((name, kind, message)) = current.take() {
+            if kind != "pulumi:pulumi:Stack"
+                && !message.trim().is_empty()
+                && !failures.iter().any(|f| f.resource == name)
+            {
+                failures.push(diagnostic_failure(
+                    &name,
+                    &plain(&message),
+                    Cause::ResourceFailed,
+                ));
+            }
+        }
+    };
+    for line in stdout.lines() {
+        let line = line.trim_end();
+        if line == "Diagnostics:" {
+            inside = true;
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        if !line.is_empty() && !line.starts_with(' ') {
+            inside = false;
+            flush(&mut current);
+            continue;
+        }
+        if let Some(header) = line.strip_prefix("  ").filter(|h| !h.starts_with(' ')) {
+            flush(&mut current);
+            in_error = false;
+            current = header
+                .strip_suffix("):")
+                .and_then(|h| h.split_once(" ("))
+                .map(|(kind, name)| (name.to_owned(), kind.to_owned(), String::new()));
+            continue;
+        }
+        let Some((_, _, message)) = current.as_mut() else {
+            continue;
+        };
+        let Some(body) = line.strip_prefix("    ") else {
+            continue;
+        };
+        if let Some(said) = body.strip_prefix("error: ") {
+            in_error = true;
+            message.push_str(said);
+            message.push('\n');
+        } else if body.starts_with("warning: ") || body.starts_with("info: ") {
+            in_error = false;
+        } else if in_error {
+            message.push_str(body.trim_start());
+            message.push('\n');
+        }
+    }
+    flush(&mut current);
+    failures
+}
+
+/// One failure per resource an `error` diagnostic of `pulumi preview --json`
+/// is about: the program or a provider refused it before anything changed.
+fn read_preview_failures(json: &str) -> Vec<Failure> {
+    let Ok(preview) = decode_value(json.as_bytes()) else {
+        return Vec::new();
+    };
+    let diagnostics = preview
+        .as_map()
+        .and_then(|p| p.get("diagnostics"))
+        .and_then(Value::as_list)
+        .unwrap_or(&[]);
+    // A program that fails to load (a YAML program naming a type its
+    // provider lacks) says so on its standard error, which Pulumi passes on
+    // as `info#err`.
+    let has_error = diagnostics.iter().any(|d| {
+        d.as_map()
+            .and_then(|d| d.get("severity"))
+            .and_then(Value::as_str)
+            == Some("error")
+    });
+    let severity = if has_error { "error" } else { "info#err" };
+    let mut failures: Vec<Failure> = Vec::new();
+    for diagnostic in diagnostics {
+        let Some(diagnostic) = diagnostic.as_map() else {
+            continue;
+        };
+        let text = |key: &str| diagnostic.get(key).and_then(Value::as_str).unwrap_or("");
+        if text("severity") != severity {
+            continue;
+        }
+        let urn = text("urn");
+        let name = if urn_type(urn) == "pulumi:pulumi:Stack" {
+            ""
+        } else {
+            urn_name(urn)
+        };
+        if failures.iter().any(|f| f.resource == name) {
+            continue;
+        }
+        failures.push(diagnostic_failure(
+            name,
+            &plain(text("message")),
+            Cause::InvalidConfig,
+        ));
+    }
+    failures
+}
+
+fn diagnostic_failure(resource: &str, message: &str, otherwise: Cause) -> Failure {
+    let message = message.trim();
+    let summary = message
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or_default();
+    Failure::new(
+        Cause::from_message(message).unwrap_or(otherwise),
+        resource,
+        summary,
+    )
+    .detail(message)
 }
 
 /// What `pulumi preview --json` reported.
@@ -844,6 +998,65 @@ fn holds_mask(value: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_error_in_the_diagnostics_is_its_resources_failure() {
+        let stdout = "Updating (dev):\n\
+\x20    Type                 Name     Status\n\
+\x20+   pulumi:pulumi:Stack  web-dev  **failed**\n\
+\n\
+Diagnostics:\n\
+\x20 aws:s3/bucket:Bucket (logs):\n\
+\x20   warning: deprecated\n\
+\x20   error: creating S3 Bucket (shop-logs): BucketAlreadyExists\n\
+\x20   \tstatus code: 409\n\
+\n\
+\x20 pulumi:pulumi:Stack (web-dev):\n\
+\x20   error: update failed\n\
+\n\
+Resources:\n\
+\x20   1 unchanged\n";
+        let failures = read_diagnostics(stdout);
+        assert_eq!(failures.len(), 1, "{failures:?}");
+        assert_eq!(failures[0].resource, "logs");
+        assert_eq!(failures[0].cause, Cause::ResourceFailed);
+        assert_eq!(
+            failures[0].summary,
+            "creating S3 Bucket (shop-logs): BucketAlreadyExists"
+        );
+        assert!(
+            failures[0].detail.contains("status code: 409"),
+            "{:?}",
+            failures[0].detail
+        );
+    }
+
+    #[test]
+    fn a_program_that_fails_to_load_is_the_configurations() {
+        let preview = r#"{"steps":[],"diagnostics":[
+            {"urn":"urn:pulumi:dev::web::pulumi:pulumi:Stack::web-dev","message":"Error: unable to find resource type \"random:index:NoSuchThing\"","severity":"info#err"}]}"#;
+        let failures = read_preview_failures(preview);
+        assert_eq!(failures.len(), 1, "{failures:?}");
+        assert_eq!(failures[0].resource, "");
+        assert_eq!(failures[0].cause, Cause::InvalidConfig);
+    }
+
+    #[test]
+    fn an_error_in_a_preview_is_the_configurations() {
+        let preview = r#"{"steps":[],"diagnostics":[
+            {"urn":"urn:pulumi:dev::web::aws:s3/bucket:Bucket::logs","message":"aws:s3/bucket:Bucket resource 'logs' has a problem: unknown property \"nosuch\"","severity":"error"},
+            {"urn":"urn:pulumi:dev::web::pulumi:pulumi:Stack::web-dev","message":"preview failed","severity":"error"},
+            {"urn":"","message":"just a warning","severity":"warning"}]}"#;
+        let failures = read_preview_failures(preview);
+        let got: Vec<(&str, Cause)> = failures
+            .iter()
+            .map(|f| (f.resource.as_str(), f.cause))
+            .collect();
+        assert_eq!(
+            got,
+            [("logs", Cause::InvalidConfig), ("", Cause::InvalidConfig)]
+        );
+    }
 
     #[test]
     fn a_preview_is_read_into_changes() {

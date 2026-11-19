@@ -383,6 +383,16 @@ Each names the resource, line and rule:
 | `invalid-reference` | `${...}` that is not a resource of the document, one attribute of it, or a pseudo parameter | fix the reference |
 | `empty-document` | a document with no resources but the stack | add a resource, or delete the stack yourself |
 
+## Reading a failure
+
+When the stack does not reach a complete state, `aws cloudformation describe-stack-events`
+is read back to the stack's `User Initiated` event. Each resource with a `*_FAILED`
+status is a [resource failure](../reference/state.md#resource-failures): the logical id mapped to the document's id, the
+`ResourceStatusReason` as the summary and the status (`CREATE_FAILED`) as the tool code.
+A resource CloudFormation cancelled because another failed is `dependency-failed`; one
+refused for permissions `auth-failed`; any other `resource-failed`, or `unreachable`, `auth-failed`, `timed-out` or `reboot-required` when the message says so. A destroy
+reads them the same way.
+
 ## Troubleshooting
 
 | What you see | Why | What to do |

@@ -26,6 +26,7 @@
 
 mod common;
 mod emit;
+pub mod operations;
 mod runner;
 pub mod schemas;
 mod sort;

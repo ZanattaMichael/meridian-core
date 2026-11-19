@@ -4,6 +4,7 @@
 use std::fs;
 use std::path::Path;
 
+use meridian_sdk::failure::{Cause, Failure};
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
     cloud_for, decode_value, Applied, Artifact, Change, ChangeAction, CloudHandover, Log,
@@ -154,9 +155,11 @@ impl PackerRunner {
 
         self.tool(context, cloud)
             .args(["init", "."])
-            .run_ok("packer init failed", log)?;
+            .run_ok("packer init failed", log)
+            .map_err(|e| with_failure(e, Cause::DependencyMissing))?;
         self.reading(context, cloud, &["validate"], secrets)
-            .run_ok("packer validate failed", log)?;
+            .run_ok("packer validate failed", log)
+            .map_err(|e| with_failure(e, Cause::InvalidConfig))?;
         Ok(described)
     }
 }
@@ -221,7 +224,10 @@ impl Runner for PackerRunner {
             .reading(context, cloud, &["build", "-color=false"], secrets.as_ref())
             .run_ok("packer build failed", log);
         drop(secrets);
-        built?;
+        built.map_err(|mut e| {
+            e.failures = read_build_failures(&e.output, &described);
+            e
+        })?;
         let built = read_manifest(&context.work_dir)?;
         Ok(Applied {
             changes: described
@@ -245,6 +251,66 @@ impl Runner for PackerRunner {
         let described = read_described(&described)?;
         fill_outputs(&described, &read_manifest(&context.work_dir)?)
     }
+}
+
+/// The error of `packer init` or `packer validate` as one failure of the
+/// template as a whole, summarised by Packer's first `Error:` line.
+fn with_failure(mut error: RunError, cause: Cause) -> RunError {
+    let summary = error
+        .output
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("Error: "))
+        .unwrap_or_default()
+        .to_owned();
+    let cause = Cause::from_message(&summary).unwrap_or(cause);
+    error.failures.push(Failure::new(cause, "", summary));
+    error
+}
+
+/// The builds `packer build` lists as failed at its end:
+///
+/// ```text
+/// ==> Some builds didn't complete successfully and had errors:
+/// --> null.box: Script exited with non-zero exit status: 7. Allowed exit codes are: [0]
+/// ```
+///
+/// A build is named `<builder>.<source>`; the source is the document's id.
+fn read_build_failures(output: &str, described: &Described) -> Vec<Failure> {
+    let mut failures: Vec<Failure> = Vec::new();
+    for line in output.lines() {
+        let Some((build, message)) = line
+            .trim()
+            .strip_prefix("--> ")
+            .and_then(|rest| rest.split_once(": "))
+        else {
+            continue;
+        };
+        let resource = described
+            .sources
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .find(|id| build == *id || build.ends_with(&format!(".{id}")))
+            .unwrap_or(build);
+        if failures.iter().any(|f| f.resource == resource) {
+            continue;
+        }
+        let mut failure = Failure::new(
+            Cause::from_message(message).unwrap_or(Cause::ResourceFailed),
+            resource,
+            message,
+        );
+        // `exit status: 7` from a script, `exit code 7` from shell-local.
+        if let Some(code) = ["exit status: ", "exit code "]
+            .iter()
+            .find_map(|at| message.split_once(at))
+            .and_then(|(_, rest)| rest.split(|c: char| !c.is_ascii_digit()).next())
+            .filter(|code| !code.is_empty())
+        {
+            failure = failure.code(format!("rc={code}"));
+        }
+        failures.push(failure);
+    }
+    failures
 }
 
 fn created(id: &str, builder: &str) -> Change {

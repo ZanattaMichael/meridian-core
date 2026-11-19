@@ -297,6 +297,12 @@ Operator values and secure parameters are never logged.
 
 [`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `--verbose` to `az` at level 1 and `--debug` from level 2.
 
+### Reading a failure
+
+A failed deployment is read as on [Bicep](bicep.md#reading-a-failure), from
+`az deployment operation group list` (`sub` for a subscription deployment): one
+[resource failure](../reference/state.md#resource-failures) per failed operation, mapped to the document's id by type and name.
+
 ## Secrets
 
 A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) becomes a `securestring`

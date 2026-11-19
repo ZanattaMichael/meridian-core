@@ -16,6 +16,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use meridian_sdk::failure::{Cause, Failure};
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{settings, Setting};
 use meridian_sdk::{
@@ -184,7 +185,18 @@ impl CloudInitRunner {
                     error
                 })?;
             if !finished.success() {
-                return Err(finished.into_error("cloud-init rejected the user-data"));
+                let said = format!("{}\n{}", finished.stdout, finished.stderr);
+                let summary = said
+                    .lines()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty())
+                    .unwrap_or_default()
+                    .to_owned();
+                let mut error = finished.into_error("cloud-init rejected the user-data");
+                error
+                    .failures
+                    .push(Failure::new(Cause::InvalidConfig, "", summary));
+                return Err(error);
             }
         }
 
@@ -233,13 +245,76 @@ impl CloudInitRunner {
                 ));
                 Ok(())
             }
-            Some(1) => Err(finished.into_error(format!(
-                "cloud-init on {host} reports that the first boot failed"
-            ))),
-            Some(255) => Err(finished.into_error(format!("could not reach {host} over ssh"))),
+            Some(1) => {
+                let failures = read_boot_errors(&finished.stdout, host);
+                let mut error = finished.into_error(format!(
+                    "cloud-init on {host} reports that the first boot failed"
+                ));
+                error.failures = failures;
+                Err(error)
+            }
+            Some(255) => {
+                let said = finished.stderr.trim().to_owned();
+                let mut error = finished.into_error(format!("could not reach {host} over ssh"));
+                error.failures.push(
+                    Failure::new(
+                        Cause::from_message(&said).unwrap_or(Cause::Unreachable),
+                        "",
+                        said.lines().last().unwrap_or_default(),
+                    )
+                    .endpoint(host)
+                    .code("rc=255"),
+                );
+                Err(error)
+            }
             _ => Err(finished.into_error(format!("waiting for cloud-init on {host} failed"))),
         }
     }
+}
+
+/// The modules `cloud-init status --long` lists under `errors:`, one
+/// failure each on the host:
+///
+/// ```text
+/// errors:
+///     - ('scripts_user', RuntimeError('Runparts: 1 failures (part-001) in 1 attempted commands'))
+/// recoverable_errors:
+/// ```
+fn read_boot_errors(status: &str, host: &str) -> Vec<Failure> {
+    let mut failures: Vec<Failure> = Vec::new();
+    let mut in_errors = false;
+    for line in status.lines() {
+        let trimmed = line.trim();
+        if !line.starts_with(char::is_whitespace) && trimmed.ends_with(':') {
+            in_errors = trimmed == "errors:";
+            continue;
+        }
+        if !in_errors {
+            continue;
+        }
+        let Some(entry) = trimmed.strip_prefix("- (") else {
+            continue;
+        };
+        // `'module', Exception('why')`, or a plain message.
+        let (module, why) = match entry.strip_prefix('\'').and_then(|e| e.split_once("', ")) {
+            Some((module, why)) => (module, why.strip_suffix(')').unwrap_or(why)),
+            None => ("", entry.strip_suffix(')').unwrap_or(entry)),
+        };
+        let (code, message) = match why.split_once("('") {
+            Some((class, message)) => (class, message.strip_suffix("')").unwrap_or(message)),
+            None => ("", why),
+        };
+        failures.push(
+            Failure::new(
+                Cause::from_message(message).unwrap_or(Cause::ResourceFailed),
+                module,
+                message,
+            )
+            .endpoint(host)
+            .code(code),
+        );
+    }
+    failures
 }
 
 fn seed_dir(context: &RunContext) -> PathBuf {
@@ -347,5 +422,51 @@ impl Runner for CloudInitRunner {
             ));
         }
         Ok(seed_outputs(&seed))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_modules_the_long_status_lists_as_errors_are_failures_on_the_host() {
+        let status = "status: error
+extended_status: error - done
+detail:
+DataSourceNoCloud [seed=/dev/sr0]
+errors:
+\t- ('scripts_user', RuntimeError('Runparts: 1 failures (part-001) in 1 attempted commands'))
+\t- ('package_update_upgrade_install', ProcessExecutionError('Unexpected error while running command.'))
+recoverable_errors:
+WARNING:
+\t- Running module ssh_import_id failed
+";
+        let failures = read_boot_errors(status, "web01");
+        let got: Vec<(&str, &str, &str)> = failures
+            .iter()
+            .map(|f| {
+                (
+                    f.resource.as_str(),
+                    f.tool_code.as_str(),
+                    f.endpoint.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("scripts_user", "RuntimeError", "web01"),
+                (
+                    "package_update_upgrade_install",
+                    "ProcessExecutionError",
+                    "web01"
+                ),
+            ]
+        );
+        assert_eq!(
+            failures[0].summary,
+            "Runparts: 1 failures (part-001) in 1 attempted commands"
+        );
     }
 }

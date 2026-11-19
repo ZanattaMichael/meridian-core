@@ -295,6 +295,11 @@ fn what_pulumi_refuses_comes_back_as_its_own_words() {
         err.output.contains("NoSuchThing"),
         "the failure does not say what was wrong:\n{err}"
     );
+    assert!(
+        !err.failures.is_empty() && err.failures[0].cause.as_str() == "invalid-config",
+        "{:?}",
+        err.failures
+    );
 }
 
 #[ignore = "needs a real pulumi; see docs/contributing/real-tool-tests.md"]

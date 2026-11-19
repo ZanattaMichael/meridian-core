@@ -119,8 +119,41 @@ impl BicepRunner {
 
     /// One `az deployment group` call.
     fn az(&self, context: &RunContext, deployment: &Deployment, operation: &str) -> Tool {
+        self.az_on(context, deployment, &["deployment", "group", operation])
+    }
+
+    /// The error with the resources whose deployment operations failed.
+    /// Operations that cannot be listed add nothing.
+    fn with_failures(
+        &self,
+        mut error: RunError,
+        context: &RunContext,
+        deployment: &Deployment,
+    ) -> RunError {
+        let listed = self
+            .az_on(
+                context,
+                deployment,
+                &["deployment", "operation", "group", "list"],
+            )
+            .args(["--output", "json"])
+            .run(&NoLog);
+        if let Some(listed) = listed.ok().filter(|l| l.success()) {
+            error.failures =
+                crate::operations::failed_operations(&listed.stdout, |kind, name, id| {
+                    if id.is_empty() {
+                        deployment.resource(&format!("{kind}/{name}"))
+                    } else {
+                        deployment.resource(id)
+                    }
+                });
+        }
+        error
+    }
+
+    fn az_on(&self, context: &RunContext, deployment: &Deployment, command: &[&str]) -> Tool {
         let mut tool = Tool::new(&self.program)
-            .args(["deployment", "group", operation])
+            .args(command.iter().copied())
             .args(["--resource-group", &deployment.resource_group])
             .args(["--name", &deployment.name])
             .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level))
@@ -390,7 +423,7 @@ impl Runner for BicepRunner {
                 .args(["--output", "json"])
                 .run_ok("az could not complete the deployment", log);
         drop(secrets);
-        let finished = finished?;
+        let finished = finished.map_err(|e| self.with_failures(e, context, &deployment))?;
         Ok(Applied {
             changes: plan.changes,
             outputs: read_outputs(&finished.stdout)?,

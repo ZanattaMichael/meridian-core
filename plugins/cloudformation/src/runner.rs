@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use meridian_sdk::failure::{Cause, Failure};
 use meridian_sdk::tool::{write_artifact, Finished, Tool};
 use meridian_sdk::{
     canonical_map, cloud_for, decode_map, decode_value, Applied, Artifact, Change, ChangeAction,
@@ -176,6 +177,27 @@ impl CloudFormationRunner {
             tool = tool.args(["--region", &stack.region]);
         }
         CloudHandover::tell_if_any(cloud, tool.args(self.extra_args.iter().cloned()))
+    }
+
+    /// The error with the resources the stack's events say failed in its
+    /// last operation. Events that cannot be read add nothing.
+    fn with_failures(
+        &self,
+        mut error: RunError,
+        context: &RunContext,
+        cloud: Option<&CloudHandover>,
+        stack: &Stack,
+    ) -> RunError {
+        if let Ok(finished) = self
+            .aws(context, cloud, stack, "describe-stack-events")
+            .args(["--output", "json"])
+            .run(&NoLog)
+        {
+            if finished.success() {
+                error.failures = read_failed_events(&finished.stdout, &stack.resources);
+            }
+        }
+        error
     }
 
     /// The stack's status, or `None` when there is no such stack.
@@ -461,6 +483,61 @@ fn secrets_file(context: &RunContext) -> Result<Option<SecretFile>, RunError> {
         .map_err(|e| RunError::new(format!("writing the parameters file: {e}")))
 }
 
+/// The resources that failed in the stack's last operation, from
+/// `describe-stack-events`: newest first, back to the stack's own
+/// `User Initiated` event. A resource CloudFormation cancelled because
+/// another failed is `dependency-failed`.
+fn read_failed_events(json: &str, resources: &BTreeMap<String, String>) -> Vec<Failure> {
+    let Ok(value) = decode_value(json.trim().as_bytes()) else {
+        return Vec::new();
+    };
+    let events = value
+        .as_map()
+        .and_then(|m| m.get("StackEvents"))
+        .and_then(Value::as_list)
+        .unwrap_or(&[]);
+    let mut failures: Vec<Failure> = Vec::new();
+    for event in events {
+        let Some(event) = event.as_map() else {
+            continue;
+        };
+        let text = |key: &str| event.get(key).and_then(Value::as_str).unwrap_or("");
+        let status = text("ResourceStatus");
+        let reason = text("ResourceStatusReason");
+        if text("ResourceType") == "AWS::CloudFormation::Stack" {
+            if status.ends_with("_IN_PROGRESS") && reason == "User Initiated" {
+                break;
+            }
+            continue;
+        }
+        if !status.ends_with("_FAILED") {
+            continue;
+        }
+        let logical = text("LogicalResourceId");
+        let resource = resources
+            .get(logical)
+            .cloned()
+            .unwrap_or(logical.to_owned());
+        if failures.iter().any(|f| f.resource == resource) {
+            continue;
+        }
+        let lower = reason.to_ascii_lowercase();
+        let cause = if lower.contains("cancelled") {
+            Cause::DependencyFailed
+        } else if lower.contains("not authorized") || lower.contains("accessdenied") {
+            Cause::AuthFailed
+        } else {
+            Cause::from_message(reason).unwrap_or(Cause::ResourceFailed)
+        };
+        failures.push(
+            Failure::new(cause, resource, reason.lines().next().unwrap_or_default()).code(status),
+        );
+    }
+    // Oldest first: the failure that started it leads.
+    failures.reverse();
+    failures
+}
+
 fn parse(finished: &Finished, what: &str) -> Result<Value, RunError> {
     decode_value(finished.stdout.trim().as_bytes())
         .map_err(|e| RunError::new(format!("{what} could not be read: {e}")))
@@ -602,11 +679,13 @@ impl Runner for CloudFormationRunner {
             } else {
                 "wait stack-update-complete"
             };
-            self.aws(context, cloud, &stack, wait).run_ok(
-                "the stack did not reach a complete state; CloudFormation rolls a failed \
-                 deployment back, and the stack's events say which resource failed",
-                log,
-            )?;
+            self.aws(context, cloud, &stack, wait)
+                .run_ok(
+                    "the stack did not reach a complete state; CloudFormation rolls a failed \
+                     deployment back, and the stack's events say which resource failed",
+                    log,
+                )
+                .map_err(|e| self.with_failures(e, context, cloud, &stack))?;
         }
         Ok(Applied {
             changes: preview.changes,
@@ -671,7 +750,39 @@ impl Runner for CloudFormationRunner {
                 "the stack was not deleted; its events say which resource CloudFormation \
                  could not remove",
                 log,
-            )?;
+            )
+            .map_err(|e| self.with_failures(e, context, cloud, &stack))?;
         Ok(removals)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_last_operations_failed_resources_are_read_from_the_stacks_events() {
+        let events = r#"{"StackEvents": [
+            {"LogicalResourceId": "shop", "ResourceType": "AWS::CloudFormation::Stack", "ResourceStatus": "UPDATE_ROLLBACK_IN_PROGRESS", "ResourceStatusReason": "The following resource(s) failed to create: [LogsBucket]."},
+            {"LogicalResourceId": "Queue", "ResourceType": "AWS::SQS::Queue", "ResourceStatus": "CREATE_FAILED", "ResourceStatusReason": "Resource creation cancelled"},
+            {"LogicalResourceId": "LogsBucket", "ResourceType": "AWS::S3::Bucket", "ResourceStatus": "CREATE_FAILED", "ResourceStatusReason": "shop-logs already exists"},
+            {"LogicalResourceId": "shop", "ResourceType": "AWS::CloudFormation::Stack", "ResourceStatus": "UPDATE_IN_PROGRESS", "ResourceStatusReason": "User Initiated"},
+            {"LogicalResourceId": "Old", "ResourceType": "AWS::S3::Bucket", "ResourceStatus": "CREATE_FAILED", "ResourceStatusReason": "an earlier run"}
+        ]}"#;
+        let resources = BTreeMap::from([("LogsBucket".to_owned(), "logs".to_owned())]);
+        let failures = read_failed_events(events, &resources);
+        let got: Vec<(&str, Cause, &str)> = failures
+            .iter()
+            .map(|f| (f.resource.as_str(), f.cause, f.tool_code.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("logs", Cause::ResourceFailed, "CREATE_FAILED"),
+                ("Queue", Cause::DependencyFailed, "CREATE_FAILED"),
+            ]
+        );
+        assert_eq!(failures[0].summary, "shop-logs already exists");
+        assert!(read_failed_events("not json", &resources).is_empty());
     }
 }
