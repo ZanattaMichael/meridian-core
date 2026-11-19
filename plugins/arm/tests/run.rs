@@ -564,3 +564,66 @@ fn inspect_refuses_a_name_that_is_an_expression_and_a_subscription_deployment() 
     }
     assert!(!dir.join("calls").exists());
 }
+
+#[test]
+fn an_action_is_az_resource_invoke_action_on_the_resource() {
+    let dir = scratch(TMP, "act");
+    fs::create_dir_all(dir.join("work")).unwrap();
+    let runner = runner(&dir, "--resource-group) echo '{}' ;;");
+    let log = KeptLog::default();
+    let acted = runner
+        .act(&context(&dir), &compiled(GROUP), "web_db", "restart", &log)
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        ["resource invoke-action --resource-group web-rg --action restart --namespace microsoft.sql --parent servers/sql --resource-type databases --name orders --only-show-errors"]
+    );
+    assert_eq!(
+        acted.command,
+        "az resource invoke-action --resource-group web-rg --action restart --namespace microsoft.sql --parent servers/sql --resource-type databases --name orders"
+    );
+    assert!(meridian_sdk::notify::performs(
+        &runner.acts(),
+        "Microsoft.Web/sites",
+        "restart"
+    ));
+}
+
+#[test]
+fn an_action_az_refuses_fails_and_one_on_a_subscription_deployment_is_refused() {
+    let dir = scratch(TMP, "act-failed");
+    fs::create_dir_all(dir.join("work")).unwrap();
+    let runner = runner(
+        &dir,
+        "--resource-group) echo 'ERROR: (Conflict) busy' >&2; exit 1 ;;",
+    );
+    let err = runner
+        .act(
+            &context(&dir),
+            &compiled(GROUP),
+            "web_vnet",
+            "restart",
+            &KeptLog::default(),
+        )
+        .unwrap_err();
+    assert!(
+        err.msg.contains("az could not restart the resource"),
+        "{}",
+        err.msg
+    );
+    assert!(
+        err.command.starts_with("az resource invoke-action"),
+        "{}",
+        err.command
+    );
+    let err = runner
+        .act(
+            &context(&dir),
+            &compiled(SUBSCRIPTION),
+            "network_rg",
+            "restart",
+            &KeptLog::default(),
+        )
+        .unwrap_err();
+    assert!(err.msg.contains("cannot restart it"), "{}", err.msg);
+}

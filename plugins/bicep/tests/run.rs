@@ -339,3 +339,42 @@ fn inspect_of_a_resource_azure_does_not_have_finds_nothing() {
     .unwrap();
     assert!(!read.found);
 }
+
+#[test]
+fn an_action_is_az_resource_invoke_action_on_the_resource() {
+    let dir = scratch(TMP, "act");
+    fs::create_dir_all(dir.join("work")).unwrap();
+    let runner = runner(&dir, "--resource-group) echo '{}' ;;");
+    let acted = runner
+        .act(
+            &context(&dir),
+            &compiled(),
+            "web_ip",
+            "restart",
+            &KeptLog::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.join("calls")).unwrap().trim(),
+        "resource invoke-action --resource-group web-prod --action restart --resource-type microsoft.network/publicipaddresses --name web-ip"
+    );
+    assert_eq!(
+        acted.command,
+        "az resource invoke-action --resource-group web-prod --action restart --resource-type microsoft.network/publicipaddresses --name web-ip"
+    );
+    assert!(meridian_sdk::notify::performs(
+        &runner.acts(),
+        "Microsoft.Web/sites@2023-01-01",
+        "restart"
+    ));
+    let err = runner
+        .act(
+            &context(&dir),
+            &compiled(),
+            "nothing",
+            "restart",
+            &KeptLog::default(),
+        )
+        .unwrap_err();
+    assert!(err.msg.contains("cannot restart it"), "{}", err.msg);
+}

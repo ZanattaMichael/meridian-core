@@ -17,7 +17,7 @@ and deploys it to a resource group or a subscription with the `az` command line.
 | References | Yes: a resource's id, name, type, API version and state, and parameters. Checked at compile time |
 | ARM expressions | Yes, written in square brackets and passed through after a check that they are well formed |
 | `dependsOn` | Yes, as ARM's `dependsOn`. Every reference is written as one too, because Resource Manager infers no order from a resource id |
-| `notifies` | No. Resource Manager has no way to react to a change in another resource. Refused |
+| `notifies` | Meridian-run: `az resource invoke-action` after the deployment, for the types in [Notifications](#notifications) |
 | `runtimeWhen` | No. An ARM `condition` is decided before anything is deployed. Refused |
 | `adopt` | Accepted, and changes nothing: Resource Manager updates a resource of the same name in place. The compile warns |
 | `state: absent` | No. A template only says what should exist. Refused; remove the resource, and use mode `Complete` if it should be deleted |
@@ -224,11 +224,40 @@ outputs:
 
 Every output is a `string`; other values go through `string()` (objects as JSON).
 
-## `notifies`, `runtimeWhen` and `state`
+## Notifications
 
-All refused:
+Resource Manager cannot act on one resource because another changed, so a notify is
+[Meridian-run](../concepts/dependencies.md#meridian-run-notifies): after the deployment,
+Meridian runs `az resource invoke-action` on each notified resource whose notifier the
+what-if reports as created, modified or deployed. The compile warns.
 
-- `notifies` on any resource, whatever the action: `unsupported-action`.
+| Type | Actions |
+|---|---|
+| `Microsoft.Web/sites`, `Microsoft.Web/sites/slots` | `restart`, `start`, `stop` |
+| `Microsoft.Compute/virtualMachines`, shared `vm` | `restart`, `start`, `deallocate`, `powerOff` |
+| `Microsoft.ContainerInstance/containerGroups` | `restart`, `start`, `stop` |
+
+Any other action, and a resource whose name is an expression, or a deployment to a subscription,
+is refused with `unsupported-action` or fails the action. A `Deploy` change (what-if cannot
+tell) counts as changed, so its notify may fire with nothing changed.
+
+```yaml
+- id: app_settings
+  type: Microsoft.Web/sites/config
+  params: {name: web-app/appsettings, properties: {LOG_LEVEL: info}}
+  notifies:
+    - resource: web_app
+      action: restart
+```
+
+```text
+  ran restart web_app: az resource invoke-action --resource-group web-rg --action restart --resource-type microsoft.web/sites --name web-app
+```
+
+## `runtimeWhen` and `state`
+
+Refused:
+
 - `runtimeWhen`: `unsupported-runtime-condition`. ARM's `condition` param passes through.
 - `state: absent`, or any state other than `present`: `unsupported-state`.
 
@@ -362,7 +391,7 @@ Each refusal names the resource, line and rule:
 | `duplicate-resource`, `duplicate-output` | The same thing is declared twice. Azure compares names without regard to case. Two resources with the same name are allowed when one has a `condition` or a `copy`. |
 | `invalid-name`, `empty-document`, `template-too-large` | Resource Manager's own limits: a deployment name of up to 64 characters, at least one resource, and at most 800 resources, 256 parameters and 64 outputs |
 | `unsupported-dependency` | A `dependsOn` names a `parameter` or the `deployment`, which are not resources of the template |
-| `unsupported-action` | `notifies` has nothing to compile into: Resource Manager cannot act on one resource because another changed |
+| `unsupported-action` | a notify whose type and action are not in [Notifications](#notifications) |
 | `unsupported-state` | `state: absent`: a template only says what should exist. Remove the resource, and use mode `Complete` if it should be deleted. |
 | `unsupported-runtime-condition` | `runtimeWhen`: an ARM `condition` is decided before anything is deployed |
 

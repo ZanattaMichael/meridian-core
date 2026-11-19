@@ -38,6 +38,19 @@
 - **Credentials**: the action runs with the stage's context, so with the credential from
   its provider (decision 0047). Nothing new is stored.
 
+## Azure (part 2)
+
+| Target | Action | Types |
+|---|---|---|
+| ARM, Bicep | `az resource invoke-action --resource-group RG --action A` naming the resource as `az resource show` does | `Microsoft.Web/sites`, `Microsoft.Web/sites/slots` (`restart`, `start`, `stop`); `Microsoft.Compute/virtualMachines` and shared `vm` (`restart`, `start`, `deallocate`, `powerOff`); `Microsoft.ContainerInstance/containerGroups` (`restart`, `start`, `stop`) |
+
+- The table lives once, in the bicep crate (`act::ACTIONS`); Bicep matches a type with any
+  API version.
+- `az` runs with the same sign-in as the deployment. A resource whose name is an
+  expression, or one in an ARM deployment to a subscription, fails the action.
+- Pulumi on azure-native waits for #272: its credential reaches Pulumi's environment, and
+  `az` would need a login, which Meridian does not do.
+
 ## The fake target
 
 `touch` on a `file` is Meridian-run; acting appends to `acts.log`; `NOACT` in the applied

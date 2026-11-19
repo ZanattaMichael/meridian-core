@@ -229,3 +229,65 @@ esac"#,
         artifact.files["template.json"]
     );
 }
+
+/// A notify on a web app compiles as Meridian-run through the host, and the
+/// host's act reaches `az resource invoke-action` across the boundary.
+#[test]
+fn a_notify_is_meridian_run_and_acted_on_across_the_boundary() {
+    let dir = scratch(TMP, "process-act");
+    let az = stand_in(
+        &dir,
+        "az",
+        &format!("echo \"$@\" >> \"{}/calls\"\necho '{{}}'", dir.display()),
+    );
+    let mut env: Vec<(String, String)> = std::env::vars().collect();
+    env.push(("MERIDIAN_AZ".to_owned(), az.to_str().unwrap().to_owned()));
+    let mut registry = meridian_plugin_host::Registry::new();
+    registry
+        .load(
+            plugin_binary("meridian-target-arm").to_str().unwrap(),
+            &StartOptions {
+                env: Some(env),
+                ..StartOptions::default()
+            },
+        )
+        .unwrap();
+    let target = registry.target("arm").unwrap();
+    let graph = graph_from_text(
+        "infra.yaml",
+        "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: web\nspec:\n  target: arm\n  resources:\n    - id: deployment\n      type: deployment\n      params: {resourceGroup: web-rg}\n    - id: settings\n      type: Microsoft.Web/sites/config\n      params: {apiVersion: \"2023-01-01\", name: web-app/appsettings}\n      notifies:\n        - resource: web_app\n          action: restart\n    - id: web_app\n      type: Microsoft.Web/sites\n      params: {apiVersion: \"2023-01-01\", name: web-app}\n",
+        "arm",
+    );
+    let emitted = target.emit(&graph, &Data::new()).unwrap();
+    assert!(
+        emitted
+            .warnings
+            .iter()
+            .any(|w| w.msg.starts_with("Meridian runs restart on web_app")),
+        "{:?}",
+        emitted.warnings
+    );
+    let context = RunContext {
+        document: "web".into(),
+        work_dir: dir.join("work"),
+        ..RunContext::default()
+    };
+    fs::create_dir_all(&context.work_dir).unwrap();
+    let acted = target
+        .act_with(
+            &context,
+            &emitted.artifact,
+            "web_app",
+            "restart",
+            &mut |_| {},
+            &meridian_plugin_host::Stop::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        acted.command,
+        "az resource invoke-action --resource-group web-rg --action restart --resource-type microsoft.web/sites --name web-app"
+    );
+    assert!(fs::read_to_string(dir.join("calls"))
+        .unwrap()
+        .starts_with("resource invoke-action --resource-group web-rg --action restart"));
+}
