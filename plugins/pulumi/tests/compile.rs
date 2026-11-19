@@ -44,11 +44,12 @@ fn refusal(spec: &str) -> CompileError {
 fn the_plugin_says_what_it_is() {
     assert_eq!(Pulumi.name(), "pulumi");
     assert_eq!(Pulumi.category(), Category::InfrastructureAsCode);
-    // No notify and no apply-time conditional is claimed, so the core never
-    // promises either on this target; a secret is taken.
+    // A notify is synthetic (replacementTrigger); no apply-time conditional
+    // is claimed; a secret is taken.
     assert_eq!(
         Pulumi.capabilities(),
         Capabilities {
+            synthetic_notify: true,
             secrets: true,
             cloud_credentials: true,
             adopt: meridian_sdk::Adoption::Import,
@@ -284,13 +285,32 @@ fn absent_is_refused_with_what_to_do_instead() {
 }
 
 #[test]
-fn a_notify_is_refused_with_what_pulumi_offers_instead() {
+fn a_replace_notify_becomes_the_replacement_trigger() {
+    let spec = "  resources:\n    - id: cert\n      type: aws:acm:Certificate\n      params: {domainName: example.com}\n      notifies:\n        - resource: lb\n          action: replace\n    - id: lb\n      type: aws:lb:LoadBalancer\n      params: {name: web}\n";
+    let emitted = compile(spec).unwrap();
+    let text = &emitted.artifact.files["Pulumi.yaml"];
+    assert!(
+        text.contains("    options:\n      replacementTrigger:\n        cert:\n          domainName: example.com\n"),
+        "{text}"
+    );
+    assert_eq!(emitted.warnings[0].resource, "lb");
+    assert!(
+        emitted.warnings[0]
+            .msg
+            .contains("is replaced whenever \"cert\" changes"),
+        "{}",
+        emitted.warnings[0].msg
+    );
+}
+
+#[test]
+fn a_notify_pulumi_cannot_express_is_refused() {
     let err = refusal(
-        "  resources:\n    - id: cert\n      type: aws:acm:Certificate\n      params: {domainName: example.com}\n      notifies:\n        - resource: lb\n          action: replace\n    - id: lb\n      type: aws:lb:LoadBalancer\n      params: {name: web}\n",
+        "  resources:\n    - id: cert\n      type: aws:acm:Certificate\n      params: {domainName: example.com}\n      notifies:\n        - resource: lb\n          action: reload\n    - id: lb\n      type: aws:lb:LoadBalancer\n      params: {name: web}\n",
     );
     assert_eq!(err.rule, "unsupported-action");
     assert_eq!(err.resource, "cert");
-    assert!(err.msg.contains("replaceOnChanges"), "{}", err.msg);
+    assert!(err.msg.contains("(supported: replace)"), "{}", err.msg);
 }
 
 #[test]

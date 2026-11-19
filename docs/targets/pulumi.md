@@ -21,7 +21,7 @@ with the `pulumi` command line.
 | The [common infrastructure types](#common-infrastructure-types) | Yes, on AWS (`aws`) and Azure (`azure-native`). |
 | Plan, apply and outputs | Yes: `pulumi preview`, `pulumi up`, `pulumi stack output`. |
 | Destroy | Yes: `pulumi destroy`; the stack and its history are kept. See [Destroying](../operations/destroying.md) |
-| `notifies` | Meridian-run on AWS: an `aws` call after `pulumi up`, for the types in [Notifications](#notifications). Refused elsewhere. |
+| `notifies` | Synthetic: `replace` on any resource, as `replacementTrigger`. Meridian-run on AWS for the actions in [Notifications](#notifications). Any other is refused |
 | `runtimeWhen` | **No.** Refused at compile time. |
 | `adopt` | Yes: the `import` resource option. See [Adopting what exists](#adopting-what-exists) |
 | `state: absent` | **No.** Refused: remove the resource from the document instead. |
@@ -278,10 +278,27 @@ it.
 
 ## Notifications
 
-Pulumi cannot act on one resource because another changed, so a notify on an AWS resource is
+A notify with action `replace`, aimed at any resource, writes the resource option
+`replacementTrigger` on the notified resource, holding the notifier's properties (references
+and all) or, for a `config`, its value. When any of them changes, Pulumi replaces the
+notified resource. The compile warns.
+
+```yaml
+- id: cert
+  type: aws:acm:Certificate
+  params: {domainName: example.com}
+  notifies:
+    - resource: listener
+      action: replace       # options: {replacementTrigger: {cert: {domainName: example.com}}}
+```
+
+A notifier whose params hold a secret is refused (`unsupported-secret-place`): a secret is
+never written into an option.
+
+Any other action on an AWS resource is
 [Meridian-run](../concepts/dependencies.md#meridian-run-notifies): after `pulumi up`, Meridian
 reads the notified resource's id and region from `pulumi stack export` and calls `aws` on it
-when the preview created, updated or replaced the notifier. The compile warns.
+when the preview created, updated or replaced the notifier.
 
 | Type | Action | Call |
 |---|---|---|
@@ -290,23 +307,7 @@ when the preview created, updated or replaced the notifier. The compile warns.
 | `aws:lambda:Function` | `run` | `aws lambda invoke`; a function that raises fails the action |
 
 The full tokens (`aws:ec2/instance:Instance`) are matched too. Azure types wait for issue 272,
-as `az` would need its own sign-in. Any other notify is refused with `unsupported-action`;
-for those, pass the changing value into a property and name it in `replaceOnChanges`:
-
-```yaml
-- id: cert
-  type: aws:acm:Certificate
-  params:
-    domainName: example.com
-
-- id: listener
-  type: aws:lb:Listener
-  params:
-    loadBalancerArn: ${lb.arn}
-    certificateArn: ${cert.arn}       # the listener reads the certificate
-    resourceOptions:
-      replaceOnChanges: [certificateArn]   # and is replaced when it changes
-```
+as `az` would need its own sign-in. Any other notify is refused with `unsupported-action`.
 
 ## The stack and its state
 
@@ -548,7 +549,7 @@ Each names the rule, and the resource with file and line where there is one.
 |---|---|---|
 | `unsupported-resource-type` | The `type` is not a Pulumi type token, `config`, `stack` or `invoke.<function>`. Terraform's `aws_instance` is the usual cause. | Use the Pulumi token: `aws:ec2:Instance`. |
 | `invalid-reference` | `${...}` names an id the document does not declare, holds something computed, reads a provider setting, or appears in a `config` declaration. | Fix the id, or use a `fn::` function. |
-| `unsupported-action` | A notify whose type and action are not in [Notifications](#notifications). Nothing in a Pulumi YAML program makes one resource react to a change in another. | Pass the changing value into a property of the other resource and name that property in its `replaceOnChanges` option. |
+| `unsupported-action` | A notify that is neither `replace` nor an action in [Notifications](#notifications), one aimed at a `config` or function call, or one from a function call. | Use `replace`, or a listed action. |
 | `unsupported-runtime-condition` | The resource has `runtimeWhen`. A Pulumi YAML program has no conditional. | Decide before compiling, with `when`. |
 | `invalid-adopt` | `adopt` on something that is not a resource, or beside a `resourceOptions.import` that names another identifier. | Put `adopt` on the resource, and remove the option. |
 | `unsupported-state` | `state: absent`. | Remove the resource from the document; Pulumi deletes what its program no longer declares. |
