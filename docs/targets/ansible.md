@@ -319,6 +319,29 @@ Both force the `default` callback with colour off. A `changed:` line under
 A task check mode skips makes the plan **unknown**. A failed task fails the stage with what
 had changed; exit `2` is a failed task, `4` an unreachable host.
 
+### Reading a failure
+
+Each `fatal:` or `failed:` result is a [resource failure](../reference/state.md#resource-failures)
+of the task above it, on the host in brackets, once per task and host:
+
+```
+TASK [nginx_svc] ***
+fatal: [web01]: FAILED! => {"changed": false, "msg": "Could not find the requested service nginx"}
+```
+
+| From the result | Becomes |
+|---|---|
+| `TASK [name]` | the resource |
+| `[host]` | the endpoint; for `web01 -> localhost`, `web01` |
+| `msg`, or `stderr` when `msg` is `non-zero return code` | the summary, first line |
+| `stderr` | the detail |
+| `rc` | the tool code, `rc=3` |
+| `UNREACHABLE!` | `unreachable` |
+| `FAILED!` | `resource-failed`, or from `msg`: `auth-failed` (permission denied, sudo password), `invalid-config` (unsupported parameters, couldn't resolve module), `dependency-missing` (Python module missing), `timed-out` |
+
+A looped task keeps its first failed item's reason. A failure followed by
+`...ignoring` is dropped.
+
 ## Settings
 
 | Variable | Meaning |

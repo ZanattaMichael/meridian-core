@@ -1,0 +1,4 @@
+# `RunError` is the error of every runner call and carries what the tool did
+# (`changes`) and what failed (`failures`). It is returned once per tool call,
+# so its size costs nothing worth boxing it for.
+large-error-threshold = 160

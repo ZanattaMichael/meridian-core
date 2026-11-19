@@ -80,6 +80,7 @@ The core knows the language; each plugin knows one tool.
 | [Conformance matrix](reference/conformance-matrix.md) | generated |
 | [Infra conformance matrix](reference/infra-conformance-matrix.md) | generated |
 | [Refusal rules](reference/refusal-rules.md) | generated |
+| [Failure causes](reference/failure-causes.md) | generated |
 | [Compatibility](reference/compatibility.md) | generated |
 
 | Targets | |

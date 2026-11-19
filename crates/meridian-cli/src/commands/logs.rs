@@ -210,6 +210,12 @@ pub(crate) fn bug_report(
             .map_err(|e| Failure::Message(format!("reading {}: {e}", path.display())))?;
         files.push((format!("logs/{name}"), bytes));
     }
+    let failures = logs::failures_file(&state.state_dir, &id);
+    if failures.is_file() {
+        let bytes = std::fs::read(&failures)
+            .map_err(|e| Failure::Message(format!("reading {}: {e}", failures.display())))?;
+        files.push((logs::FAILURES_FILE.to_owned(), bytes));
+    }
     files.push(("version.txt".to_owned(), versions().into_bytes()));
     files.push((
         "plugins.json".to_owned(),

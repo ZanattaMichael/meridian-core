@@ -129,7 +129,7 @@ impl OpenTofuRunner {
         };
         let mut plan = self
             .tool(context, cloud)
-            .args(["plan", "-input=false", "-no-color"])
+            .args(["plan", "-input=false", "-no-color", "-json"])
             .args(self.extra_args.iter().cloned())
             .arg(format!("-out={PLAN_FILE}"));
         if destroy {
@@ -138,7 +138,12 @@ impl OpenTofuRunner {
         if let Some(file) = &secrets {
             plan = plan.arg(format!("-var-file={}", file.path().display()));
         }
-        let planned = plan.run_ok("tofu plan failed", log);
+        let planned = meridian_target_terraform::machine::run(
+            plan,
+            "tofu plan failed",
+            meridian_target_terraform::machine::Phase::Plan,
+            log,
+        );
         drop(secrets);
         planned?;
         let shown = self
@@ -302,12 +307,17 @@ impl Runner for OpenTofuRunner {
         };
         // The saved plan is applied, so nothing changes that was not just
         // reported. A plan file is its own approval.
-        let applied = self
+        let apply = self
             .tool(context, cloud.as_ref())
-            .args(["apply", "-input=false", "-no-color"])
+            .args(["apply", "-input=false", "-no-color", "-json"])
             .args(self.extra_args.iter().cloned())
-            .arg(PLAN_FILE)
-            .run_ok("tofu apply failed", log);
+            .arg(PLAN_FILE);
+        let applied = meridian_target_terraform::machine::run(
+            apply,
+            "tofu apply failed",
+            meridian_target_terraform::machine::Phase::Apply,
+            log,
+        );
         self.scrub(context);
         applied?;
         Ok(Applied {
@@ -364,12 +374,17 @@ impl Runner for OpenTofuRunner {
                 return Err(e);
             }
         };
-        let destroyed = self
+        let destroy = self
             .tool(context, cloud.as_ref())
-            .args(["apply", "-input=false", "-no-color"])
+            .args(["apply", "-input=false", "-no-color", "-json"])
             .args(self.extra_args.iter().cloned())
-            .arg(PLAN_FILE)
-            .run_ok("tofu destroy failed", log);
+            .arg(PLAN_FILE);
+        let destroyed = meridian_target_terraform::machine::run(
+            destroy,
+            "tofu destroy failed",
+            meridian_target_terraform::machine::Phase::Apply,
+            log,
+        );
         self.scrub(context);
         destroyed?;
         Ok(changes)

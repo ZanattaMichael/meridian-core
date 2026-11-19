@@ -86,7 +86,10 @@ pub use plan::{file_hash, Asked, PlanFile, PlannedStage, PlannedStatus, PLAN_FIL
 pub use policy::{Decisions, Policy};
 pub use reason::{Reason, UnknownReason};
 pub use record::{RunRecord, RunStatus, StepRecord, StepStatus};
-pub use report::{Drift, Kept, Mode, Outcome, Refusal, RunReport, StageId, StageKind, StageReport};
+pub use report::{
+    Drift, Kept, Mode, Outcome, Refusal, ResourceFailure, RunReport, StageId, StageKind,
+    StageReport,
+};
 pub use rollback::{RollbackOutcome, RollbackReport};
 pub use run::work_dir;
 pub use secrets::{check_declared, names_declared, places_declared, Declared};
@@ -379,6 +382,7 @@ pub fn run_selected(
                 },
                 reason: None,
                 done_before_failing: Vec::new(),
+                failures: Vec::new(),
                 previous_good: String::new(),
                 policy: None,
                 analyses: Vec::new(),

@@ -505,6 +505,13 @@
         "error": {
           "type": "string"
         },
+        "failures": {
+          "description": "For a failed stage: each resource its tool failed on, masked. The detail is kept only in runs/<id>/failures.jsonl.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/failure"
+          }
+        },
         "becauseOf": {
           "$ref": "#/$defs/stageId"
         },
@@ -759,6 +766,64 @@
         "host",
         "status"
       ]
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resource",
+        "endpoint",
+        "cause",
+        "toolCode",
+        "summary",
+        "at"
+      ],
+      "properties": {
+        "resource": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The resource id, or the tool's own name for it."
+        },
+        "endpoint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cause": {
+          "enum": [
+            "unreachable",
+            "auth-failed",
+            "invalid-config",
+            "dependency-missing",
+            "resource-failed",
+            "dependency-failed",
+            "timed-out",
+            "reboot-required",
+            "tool-crashed",
+            "unknown"
+          ]
+        },
+        "toolCode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The tool's own code or status."
+        },
+        "summary": {
+          "type": "string"
+        },
+        "at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Where the document declares the resource, as file:line."
+        }
+      }
     }
   }
 }

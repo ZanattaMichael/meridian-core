@@ -412,6 +412,19 @@ impl Journal {
                 for change in &report.done_before_failing {
                     self.emit(observer, event::RESOURCE_CHANGED, at, resource(change));
                 }
+                // Which resource and why, as fixed words: the tool's own
+                // text about it is kept on this machine only.
+                for failed in &report.failures {
+                    self.emit(
+                        observer,
+                        event::RESOURCE_FAILED,
+                        at,
+                        vec![
+                            ("resource", Value::from(failed.failure.resource.as_str())),
+                            ("cause", Value::from(failed.failure.cause.as_str())),
+                        ],
+                    );
+                }
                 step.status = StepStatus::Failed;
                 step.reason = report.reason.map_or_else(String::new, |r| r.to_string());
                 step.changes = report.done_before_failing.len() as u64;

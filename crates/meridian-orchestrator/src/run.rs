@@ -184,6 +184,7 @@ impl Run<'_> {
             outcome: Outcome::Compiled,
             reason: None,
             done_before_failing: Vec::new(),
+            failures: Vec::new(),
             previous_good: String::new(),
             policy: None,
             analyses: Vec::new(),
@@ -536,7 +537,10 @@ impl Run<'_> {
                 .unwrap_or_else(|| target.plan_with(&context, &emitted.artifact, &mut log, stop))
             {
                 Ok(plan) => report.outcome = Outcome::Planned(plan),
-                Err(e) => return fail(report, reason_of(&e), self.describe(e)),
+                Err(e) => {
+                    report.failures = self.failures(&e, &document);
+                    return fail(report, reason_of(&e), self.describe(e));
+                }
             },
             Mode::Destroy => {
                 match target.destroy_with(&context, &emitted.artifact, &mut log, stop) {
@@ -554,6 +558,7 @@ impl Run<'_> {
                             }
                             RunFailure::Plugin(_) => {}
                         }
+                        report.failures = self.failures(&e, &document);
                         return fail(report, reason_of(&e), self.describe(e));
                     }
                 }
@@ -575,7 +580,10 @@ impl Run<'_> {
                         Drift::Drifted(plan.changes)
                     });
                 }
-                Err(e) => return fail(report, reason_of(&e), self.describe(e)),
+                Err(e) => {
+                    report.failures = self.failures(&e, &document);
+                    return fail(report, reason_of(&e), self.describe(e));
+                }
             },
             Mode::Apply => {
                 report.previous_good = last.map(|l| l.last_good).unwrap_or_default();
@@ -624,6 +632,7 @@ impl Run<'_> {
                             }
                             RunFailure::Plugin(_) => {}
                         }
+                        report.failures = self.failures(&e, &document);
                         return fail(report, reason_of(&e), self.describe(e));
                     }
                 }
@@ -1455,6 +1464,38 @@ impl Run<'_> {
             }
         }
         Some(applied_in)
+    }
+
+    /// Each resource the tool said it failed on, masked as its error text
+    /// is, with where the document declares it.
+    fn failures(&self, failure: &RunFailure, document: &Document) -> Vec<ResourceFailure> {
+        let RunFailure::Tool(error) = failure else {
+            return Vec::new();
+        };
+        let hide = |text: &str| self.masker.mask(&mask(text, &self.secrets));
+        error
+            .failures
+            .iter()
+            .map(|f| {
+                let at = document
+                    .resources()
+                    .iter()
+                    .find(|r| !f.resource.is_empty() && r.id == f.resource)
+                    .map(|r| format!("{}:{}", r.pos.file, r.pos.line))
+                    .unwrap_or_default();
+                ResourceFailure {
+                    failure: meridian_sdk::failure::Failure {
+                        resource: f.resource.clone(),
+                        endpoint: f.endpoint.clone(),
+                        cause: f.cause,
+                        tool_code: hide(&f.tool_code),
+                        summary: hide(&f.summary),
+                        detail: hide(&f.detail),
+                    },
+                    at,
+                }
+            })
+            .collect()
     }
 
     pub(crate) fn describe(&self, failure: RunFailure) -> String {
