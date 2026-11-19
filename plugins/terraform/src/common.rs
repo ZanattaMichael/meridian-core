@@ -22,12 +22,13 @@ use crate::{refuse, refuse_at, NAME};
 pub const SETTINGS_KEYS: [&str; 3] = ["cloud", "location", "resourceGroup"];
 
 /// The clouds the common types map to on this target.
-pub const CLOUDS: &[&str] = &["aws", "azure"];
+pub const CLOUDS: &[&str] = &["aws", "azure", "gcp"];
 
 /// The provider each cloud is configured with.
 fn provider_of(cloud: &str) -> &'static str {
     match cloud {
         "aws" => "aws",
+        "gcp" => "google",
         _ => "azurerm",
     }
 }
@@ -133,9 +134,9 @@ fn cloud(graph: &ResourceGraph, first: &Resource) -> Result<String, CompileError
                  spec.settings.cloud ({})",
                 first.r#type,
                 if configured.is_empty() {
-                    "configures no aws or azurerm provider".to_owned()
+                    "configures no aws, azurerm or google provider".to_owned()
                 } else {
-                    "configures both the aws and the azurerm provider".to_owned()
+                    "configures more than one of the aws, azurerm and google providers".to_owned()
                 },
                 CLOUDS.join(", ")
             ),
@@ -177,6 +178,7 @@ pub(crate) fn lower(graph: &ResourceGraph) -> Result<ResourceGraph, CompileError
         };
         match cloud.as_str() {
             "aws" => aws(r, graph, &mut state),
+            "gcp" => gcp(r, graph),
             _ => azure(r, graph),
         }
     })
@@ -935,6 +937,404 @@ fn name_text(r: &Resource) -> String {
     }
 }
 
+// ---- Google Cloud ----
+
+/// Google Cloud machine types, smallest first: (machine type, processors,
+/// memory in GB).
+pub const GCP_SIZES: &[(&str, u32, f64)] = &[
+    ("e2-micro", 2, 1.0),
+    ("e2-small", 2, 2.0),
+    ("e2-medium", 2, 4.0),
+    ("e2-standard-2", 2, 8.0),
+    ("e2-standard-4", 4, 16.0),
+    ("e2-standard-8", 8, 32.0),
+    ("e2-standard-16", 16, 64.0),
+    ("e2-standard-32", 32, 128.0),
+];
+
+/// The public image family of each image a vm asks for, as
+/// `<project>/<family>`: the newest image of the family is used.
+pub const GCP_IMAGES: &[(&str, &str, &str)] = &[
+    ("debian", "11", "debian-cloud/debian-11"),
+    ("debian", "12", "debian-cloud/debian-12"),
+    ("ubuntu", "22.04", "ubuntu-os-cloud/ubuntu-2204-lts"),
+    ("ubuntu", "24.04", "ubuntu-os-cloud/ubuntu-2404-lts-amd64"),
+];
+
+/// The region a regional resource is in: its `location`, or
+/// `spec.settings.location`.
+fn gcp_region(r: &Resource, graph: &ResourceGraph) -> Result<Value, CompileError> {
+    if let Some(location) = param(r, "location") {
+        return Ok(location);
+    }
+    text_setting(graph, "location")?.ok_or_else(|| {
+        refuse(
+            r,
+            &rules::MISSING_PARAM,
+            format!(
+                "a {} on Google Cloud is in a region: give the param location, or \
+                 spec.settings.location for the whole document",
+                r.r#type
+            ),
+        )
+    })
+}
+
+/// A Google Cloud name: lower case letters, digits and hyphens, so an
+/// underscore of the id becomes a hyphen. A name given as text is used as
+/// written, and the cloud says if it is not one.
+fn gcp_name(r: &Resource) -> Value {
+    match r.params.get("name") {
+        Some(name) => name.clone(),
+        None => Value::String(r.id.replace('_', "-")),
+    }
+}
+
+fn gcp_labels(r: &Resource, body: &mut BTreeMap<String, Value>) {
+    if let Some(tags) = param(r, "tags") {
+        body.insert("labels".to_owned(), tags);
+    }
+}
+
+/// The network tag a firewall's rules apply to, and that a vm the firewall
+/// protects carries.
+fn gcp_target_tag(id: &str) -> Value {
+    Value::String(format!("meridian-{}", id.replace('_', "-")))
+}
+
+fn gcp(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError> {
+    if graph.settings.contains_key("resourceGroup") {
+        return Err(setting_error(
+            "spec.settings.resourceGroup is Azure's; on Google Cloud the google provider's \
+             project decides where resources go"
+                .to_owned(),
+        ));
+    }
+    let id = r.id.as_str();
+    let own_id = || outputs(&[("id", format!("${{{id}.id}}"))]);
+    Ok(match r.r#type.as_str() {
+        "network" => {
+            if r.params.contains_key("location") {
+                return Err(refuse_param(
+                    r,
+                    "location",
+                    "a Google Cloud network is global; give its subnets a region",
+                ));
+            }
+            if r.params.contains_key("tags") {
+                return Err(refuse_param(
+                    r,
+                    "tags",
+                    "a Google Cloud network carries no labels",
+                ));
+            }
+            Expansion {
+                order: Vec::new(),
+                resources: vec![primary(
+                    r,
+                    "google_compute_network",
+                    map(vec![
+                        ("name", gcp_name(r)),
+                        ("auto_create_subnetworks", Value::Bool(false)),
+                    ]),
+                )],
+                outputs: own_id(),
+            }
+        }
+        "subnet" => {
+            if matches!(r.params.get("public"), Some(Value::Bool(true))) {
+                return Err(refuse_param(
+                    r,
+                    "public",
+                    "a Google Cloud subnet gives no machine a public address of its own; attach \
+                     an address resource to the vm instead",
+                ));
+            }
+            if r.params.contains_key("tags") {
+                return Err(refuse_param(
+                    r,
+                    "tags",
+                    "a Google Cloud subnet carries no labels",
+                ));
+            }
+            let network = ref_param(r, "network").unwrap_or_default();
+            Expansion {
+                order: Vec::new(),
+                resources: vec![primary(
+                    r,
+                    "google_compute_subnetwork",
+                    map(vec![
+                        ("name", gcp_name(r)),
+                        ("network", reference(&network, "id")),
+                        ("ip_cidr_range", param(r, "cidr").unwrap_or(Value::Null)),
+                        ("region", gcp_region(r, graph)?),
+                    ]),
+                )],
+                outputs: own_id(),
+            }
+        }
+        "firewall" => gcp_firewall(r)?,
+        "address" => {
+            let mut body = map(vec![
+                ("name", gcp_name(r)),
+                ("region", gcp_region(r, graph)?),
+            ]);
+            gcp_labels(r, &mut body);
+            Expansion {
+                order: Vec::new(),
+                resources: vec![primary(r, "google_compute_address", body)],
+                outputs: outputs(&[
+                    ("address", format!("${{{id}.address}}")),
+                    ("id", format!("${{{id}.id}}")),
+                ]),
+            }
+        }
+        _ => gcp_vm(r, graph)?,
+    })
+}
+
+/// A Google Cloud firewall rule is one direction and one source or
+/// destination, so each rule of the common firewall is a rule of its own,
+/// applied to the machines that carry the firewall's network tag. The
+/// first stands for the firewall.
+fn gcp_firewall(r: &Resource) -> Result<Expansion, CompileError> {
+    if r.params.contains_key("location") {
+        return Err(refuse_param(
+            r,
+            "location",
+            "a Google Cloud firewall rule is global, like its network",
+        ));
+    }
+    if r.params.contains_key("tags") {
+        return Err(refuse_param(
+            r,
+            "tags",
+            "a Google Cloud firewall rule carries no labels",
+        ));
+    }
+    let rules = firewall_rules(r);
+    if rules.is_empty() {
+        return Err(refuse(
+            r,
+            &rules::MISSING_PARAM,
+            "a firewall on Google Cloud is its rules: give at least one. A machine with no \
+             firewall already may send anything and receive nothing"
+                .to_owned(),
+        ));
+    }
+    let id = r.id.as_str();
+    let network = ref_param(r, "network").unwrap_or_default();
+    let tag = gcp_target_tag(id);
+    let name = name_text(r).replace('_', "-");
+    let mut resources = Vec::new();
+    let mut any_out = false;
+    for (i, rule) in rules.iter().enumerate() {
+        let inbound = rule.direction != "out";
+        any_out |= !inbound;
+        let mut allow = map(vec![(
+            "protocol",
+            Value::from(match rule.protocol.as_str() {
+                "any" => "all",
+                p => p,
+            }),
+        )]);
+        if let Some((a, b)) = rule.ports {
+            let ports = if a == b {
+                a.to_string()
+            } else {
+                format!("{a}-{b}")
+            };
+            allow.insert("ports".to_owned(), Value::List(vec![Value::String(ports)]));
+        }
+        let body = map(vec![
+            ("name", Value::String(format!("{name}-{i}"))),
+            ("network", reference(&network, "id")),
+            (
+                "direction",
+                Value::from(if inbound { "INGRESS" } else { "EGRESS" }),
+            ),
+            ("priority", Value::Int(1000 + i as i64)),
+            (
+                if inbound {
+                    "source_ranges"
+                } else {
+                    "destination_ranges"
+                },
+                Value::List(vec![Value::from(rule.cidr.as_str())]),
+            ),
+            ("target_tags", Value::List(vec![tag.clone()])),
+            ("allow", Value::List(vec![Value::Map(allow)])),
+        ]);
+        resources.push(if i == 0 {
+            primary(r, "google_compute_firewall", body)
+        } else {
+            helper(r, &format!("rule_{i}"), "google_compute_firewall", body)
+        });
+    }
+    if any_out {
+        // Google Cloud lets every machine send anything; an outbound rule
+        // narrows that only with a deny below it, for the firewall's
+        // machines alone.
+        resources.push(helper(
+            r,
+            "out_deny",
+            "google_compute_firewall",
+            map(vec![
+                ("name", Value::String(format!("{name}-out-deny"))),
+                ("network", reference(&network, "id")),
+                ("direction", Value::from("EGRESS")),
+                ("priority", Value::Int(65534)),
+                (
+                    "destination_ranges",
+                    Value::List(vec![Value::from("0.0.0.0/0")]),
+                ),
+                ("target_tags", Value::List(vec![tag])),
+                (
+                    "deny",
+                    Value::List(vec![Value::Map(map(vec![(
+                        "protocol",
+                        Value::from("all"),
+                    )]))]),
+                ),
+            ]),
+        ));
+    }
+    Ok(Expansion {
+        order: Vec::new(),
+        resources,
+        outputs: outputs(&[("id", format!("${{{id}.id}}"))]),
+    })
+}
+
+fn gcp_vm(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError> {
+    let id = r.id.as_str();
+    // A vm is in a zone: its location, or the region's first zone.
+    let zone = match param(r, "location") {
+        Some(zone) => zone,
+        None => match text_setting(graph, "location")? {
+            Some(Value::String(region)) => Value::String(format!("{region}-b")),
+            _ => {
+                return Err(refuse(
+                    r,
+                    &rules::MISSING_PARAM,
+                    "a vm on Google Cloud is in a zone: give the param location (such as \
+                     europe-west1-b), or spec.settings.location for its region"
+                        .to_owned(),
+                ))
+            }
+        },
+    };
+    let size = r.params.get("size").cloned().unwrap_or(Value::Null);
+    let machine_type = match asked_size(&size) {
+        Some((cpus, memory)) => Value::from(
+            closest_size(GCP_SIZES, cpus, memory)
+                .ok_or_else(|| too_big(r, cpus, memory, GCP_SIZES))?,
+        ),
+        None => size,
+    };
+    let image = r.params.get("image").cloned().unwrap_or(Value::Null);
+    let image = match asked_image(&image) {
+        Some((family, version)) => {
+            let (_, _, path) = GCP_IMAGES
+                .iter()
+                .find(|(f, v, _)| *f == family && *v == version)
+                .expect("the SDK accepts only images every cloud maps");
+            Value::from(*path)
+        }
+        None => image,
+    };
+    let mut interface = map(vec![(
+        "subnetwork",
+        reference(&ref_param(r, "subnet").unwrap_or_default(), "id"),
+    )]);
+    let address = ref_param(r, "address");
+    if let Some(address) = &address {
+        interface.insert(
+            "access_config".to_owned(),
+            Value::List(vec![Value::Map(map(vec![(
+                "nat_ip",
+                reference(address, "address"),
+            )]))]),
+        );
+    }
+    let mut body = map(vec![
+        ("name", Value::String(name_text(r).replace('_', "-"))),
+        ("machine_type", machine_type),
+        ("zone", zone),
+        (
+            "boot_disk",
+            Value::List(vec![Value::Map(map(vec![(
+                "initialize_params",
+                Value::List(vec![Value::Map(map(vec![("image", image)]))]),
+            )]))]),
+        ),
+        (
+            "network_interface",
+            Value::List(vec![Value::Map(interface)]),
+        ),
+    ]);
+    if let Some(Value::List(firewalls)) = r.params.get("firewalls") {
+        body.insert(
+            "tags".to_owned(),
+            Value::List(
+                firewalls
+                    .iter()
+                    .filter_map(referenced_id)
+                    .map(|f| gcp_target_tag(&f))
+                    .collect(),
+            ),
+        );
+    }
+    if let Some(key) = param(r, "sshKey") {
+        let user = match param(r, "user") {
+            Some(Value::String(u)) => u,
+            _ => "gceuser".to_owned(),
+        };
+        let entry = match key {
+            Value::String(k) => Value::String(format!("{user}:{k}")),
+            // A secret is joined to its user by the tool, at plan time, from
+            // the sensitive variable it is handed over as.
+            Value::Secret(at) => match graph.secrets.iter().find(|n| n.secret == at) {
+                Some(named) => {
+                    Value::String(format!("{user}:{}", crate::secret_reference(&named.name)))
+                }
+                None => Value::from(meridian_sdk::SENSITIVE),
+            },
+            other => other,
+        };
+        body.insert(
+            "metadata".to_owned(),
+            Value::Map(map(vec![("ssh-keys", entry)])),
+        );
+    } else if r.params.contains_key("user") {
+        return Err(refuse_param(
+            r,
+            "user",
+            "on Google Cloud the user is the login an sshKey is for; give the key too",
+        ));
+    }
+    gcp_labels(r, &mut body);
+    let public = match &address {
+        Some(address) => format!("${{{address}.address}}"),
+        None => format!("${{{id}.network_interface[0].access_config[0].nat_ip}}"),
+    };
+    let mut reads = vec![
+        ("id", format!("${{{id}.id}}")),
+        (
+            "privateAddress",
+            format!("${{{id}.network_interface[0].network_ip}}"),
+        ),
+    ];
+    if address.is_some() {
+        reads.push(("publicAddress", public));
+    }
+    Ok(Expansion {
+        order: Vec::new(),
+        resources: vec![primary(r, "google_compute_instance", body)],
+        outputs: outputs(&reads),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -961,7 +1361,7 @@ mod tests {
 
     #[test]
     fn the_size_tables_grow() {
-        for table in [AWS_SIZES, AZURE_SIZES] {
+        for table in [AWS_SIZES, AZURE_SIZES, GCP_SIZES] {
             for pair in table.windows(2) {
                 assert!(pair[0].1 <= pair[1].1 && pair[0].2 <= pair[1].2, "{pair:?}");
             }

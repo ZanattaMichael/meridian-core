@@ -74,8 +74,8 @@ The same resource compiles for any of them. `cloud-init` applies them once, on f
 | `dsc` | module and resource | `PSDscResources/Service` |
 
 The five [common infrastructure types](../reference/dsl/common-infrastructure-types.md)
-(`network`, `subnet`, `firewall`, `address`, `vm`) sit beside native types on `terraform`,
-`opentofu`, `pulumi` (AWS, Azure), `cloudformation`, `bicep` and `arm`.
+(`network`, `subnet`, `firewall`, `address`, `vm`) sit beside native types on `terraform` and
+`opentofu` (AWS, Azure, Google Cloud), `pulumi` (AWS, Azure), `cloudformation`, `bicep` and `arm`.
 
 Most passthrough targets also take a **settings resource** with a fixed type name
 (`stack`, `deployment`, `cluster`, `project`) that says where to deploy. Exceptions:

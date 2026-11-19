@@ -1,0 +1,140 @@
+{
+  "output": {
+    "address": {
+      "value": "${google_compute_address.web_ip.address}"
+    },
+    "private_address": {
+      "value": "${google_compute_instance.vm.network_interface[0].network_ip}"
+    }
+  },
+  "provider": {
+    "google": {
+      "project": "example-project",
+      "region": "europe-west1"
+    }
+  },
+  "resource": {
+    "google_compute_address": {
+      "web_ip": {
+        "name": "web-ip",
+        "region": "europe-west1"
+      }
+    },
+    "google_compute_firewall": {
+      "web_fw": {
+        "allow": [
+          {
+            "ports": [
+              "22"
+            ],
+            "protocol": "tcp"
+          }
+        ],
+        "direction": "INGRESS",
+        "name": "web-fw-0",
+        "network": "${google_compute_network.net.id}",
+        "priority": 1000,
+        "source_ranges": [
+          "203.0.113.0/24"
+        ],
+        "target_tags": [
+          "meridian-web-fw"
+        ]
+      },
+      "web_fw_rule_1": {
+        "allow": [
+          {
+            "ports": [
+              "80"
+            ],
+            "protocol": "tcp"
+          }
+        ],
+        "direction": "INGRESS",
+        "name": "web-fw-1",
+        "network": "${google_compute_network.net.id}",
+        "priority": 1001,
+        "source_ranges": [
+          "0.0.0.0/0"
+        ],
+        "target_tags": [
+          "meridian-web-fw"
+        ]
+      },
+      "web_fw_rule_2": {
+        "allow": [
+          {
+            "ports": [
+              "443"
+            ],
+            "protocol": "tcp"
+          }
+        ],
+        "direction": "INGRESS",
+        "name": "web-fw-2",
+        "network": "${google_compute_network.net.id}",
+        "priority": 1002,
+        "source_ranges": [
+          "0.0.0.0/0"
+        ],
+        "target_tags": [
+          "meridian-web-fw"
+        ]
+      }
+    },
+    "google_compute_instance": {
+      "vm": {
+        "boot_disk": [
+          {
+            "initialize_params": [
+              {
+                "image": "ubuntu-os-cloud/ubuntu-2404-lts-amd64"
+              }
+            ]
+          }
+        ],
+        "machine_type": "e2-medium",
+        "metadata": {
+          "ssh-keys": "gceuser:ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCy3ccG4bHhpvuPdv4+wFBzkP+U7qF4nTg+rghAkKjOLbSJa/yUPZ0EwpJaXm+rtItFerUJK41JH4bArOJJazkHMdWR6iXYQtu5BB/CZALQHiS0LYg5zUhKMxISCESlzNDWFBza28pPjfpj3gnmrPc8D1bAsnKSaHGOffZxtJ62q3Rq0ESwzN/9ahvaiBW707kT/9NC9GqMcSk1HS1Z7Wz6sJEiCC/qIfbS3TAjJ+SloXlTC8+FIdptsxJ3KgWczg4q6Z1aiv9agASdEXMJTo+sUNt7C6qNKY1W03VxFf0cj59Zh6YIo2/ZQ1NyyUOB3rO2U2pbVGLaTvEnF6GSc0TH admin@example.com"
+        },
+        "name": "vm",
+        "network_interface": [
+          {
+            "access_config": [
+              {
+                "nat_ip": "${google_compute_address.web_ip.address}"
+              }
+            ],
+            "subnetwork": "${google_compute_subnetwork.web.id}"
+          }
+        ],
+        "tags": [
+          "meridian-web-fw"
+        ],
+        "zone": "europe-west1-b"
+      }
+    },
+    "google_compute_network": {
+      "net": {
+        "auto_create_subnetworks": false,
+        "name": "net"
+      }
+    },
+    "google_compute_subnetwork": {
+      "web": {
+        "ip_cidr_range": "10.0.1.0/24",
+        "name": "web",
+        "network": "${google_compute_network.net.id}",
+        "region": "europe-west1"
+      }
+    }
+  },
+  "terraform": {
+    "required_providers": {
+      "google": {
+        "source": "hashicorp/google",
+        "version": "~> 6.0"
+      }
+    }
+  }
+}

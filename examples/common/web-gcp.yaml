@@ -1,0 +1,62 @@
+# The web server of web-aws.yaml on Google Cloud: the same common resources,
+# compiled by Terraform with the google provider.
+#
+# spec.settings.location is the region; the vm goes to its zone b unless it
+# gives a location of its own. As on Azure, the machine takes the address
+# resource, and the firewall's rules apply to the machines that list it.
+apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: web-gcp
+spec:
+  target: terraform
+  settings:
+    cloud: gcp
+    location: europe-west1
+  resources:
+    - id: google
+      type: provider
+      params:
+        source: hashicorp/google
+        version: "~> 6.0"
+        project: example-project
+        region: europe-west1
+
+    - id: net
+      type: network
+      params:
+        cidr: 10.0.0.0/16
+
+    - id: web
+      type: subnet
+      params:
+        network: ${net}
+        cidr: 10.0.1.0/24
+
+    - id: web_fw
+      type: firewall
+      params:
+        network: ${net}
+        rules:
+          - {port: "22", cidr: 203.0.113.0/24}
+          - {port: "80", cidr: 0.0.0.0/0}
+          - {port: "443", cidr: 0.0.0.0/0}
+
+    - id: web_ip
+      type: address
+
+    - id: vm
+      type: vm
+      params:
+        subnet: ${web}
+        firewalls: ["${web_fw}"]
+        address: ${web_ip}
+        size: {cpus: 2, memoryGb: 4}
+        image: {family: ubuntu, version: "24.04"}
+        sshKey: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCy3ccG4bHhpvuPdv4+wFBzkP+U7qF4nTg+rghAkKjOLbSJa/yUPZ0EwpJaXm+rtItFerUJK41JH4bArOJJazkHMdWR6iXYQtu5BB/CZALQHiS0LYg5zUhKMxISCESlzNDWFBza28pPjfpj3gnmrPc8D1bAsnKSaHGOffZxtJ62q3Rq0ESwzN/9ahvaiBW707kT/9NC9GqMcSk1HS1Z7Wz6sJEiCC/qIfbS3TAjJ+SloXlTC8+FIdptsxJ3KgWczg4q6Z1aiv9agASdEXMJTo+sUNt7C6qNKY1W03VxFf0cj59Zh6YIo2/ZQ1NyyUOB3rO2U2pbVGLaTvEnF6GSc0TH admin@example.com
+
+  outputs:
+    - name: address
+      value: ${vm.publicAddress}
+    - name: private_address
+      value: ${vm.privateAddress}
