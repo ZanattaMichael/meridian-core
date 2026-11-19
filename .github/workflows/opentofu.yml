@@ -11,6 +11,8 @@ on:
     paths:
       - 'plugins/opentofu/**'
       - 'examples/opentofu/**'
+      - 'examples/common/**'
+      - 'plugins/terraform/**'
       - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
