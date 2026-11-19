@@ -36,7 +36,7 @@ pub struct StageRecord {
     /// rollback goes back to. Empty when no apply ever succeeded.
     pub last_good: String,
     /// Meridian-run actions an apply triggered and that have not run yet;
-    /// the next apply of the stage runs them (decision 0055).
+    /// the next apply of the stage runs them (decision 0056).
     pub pending: Vec<MeridianRun>,
 }
 

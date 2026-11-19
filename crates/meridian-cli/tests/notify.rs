@@ -1,4 +1,4 @@
-//! Meridian-run notifies (decision 0055): a notify the fake target's tool
+//! Meridian-run notifies (decision 0056): a notify the fake target's tool
 //! cannot express (`touch`), run by its plugin after the stage applies.
 
 use std::fs;

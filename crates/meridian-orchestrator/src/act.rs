@@ -1,4 +1,4 @@
-//! Meridian-run notifies (decision 0055): which actions a stage's changes
+//! Meridian-run notifies (decision 0056): which actions a stage's changes
 //! trigger, and running them after the stage applies.
 
 use meridian_sdk::notify::triggers;

@@ -78,4 +78,4 @@ page it affects. The pull request template asks for it.
 | [`meridian inspect` reads one resource through an optional plugin call](0052-inspect-reads-one-resource-through-an-optional-plugin-call.md) | Runs | proposed |
 | [The run id is carried in the data and read as `meridian.run.id`](0053-the-run-id-is-carried-in-the-data-and-read-as-meridian-run-id.md) | Language | proposed |
 | [A lab is a matrix over lifecycle cases, and sweep reads the state](0054-a-lab-is-a-matrix-over-lifecycle-cases-and-sweep-reads-the-state.md) | Testing | proposed |
-| [Meridian runs a notify the tool cannot, after the stage applies](0055-meridian-runs-a-notify-the-tool-cannot-after-the-stage-applies.md) | Runs | proposed |
+| [Meridian runs a notify the tool cannot, after the stage applies](0056-meridian-runs-a-notify-the-tool-cannot-after-the-stage-applies.md) | Runs | proposed |

@@ -107,7 +107,7 @@ pub struct PlannedStage {
     /// What the plan's policy said, when one was asked.
     pub policy: Option<Decisions>,
     /// The Meridian-run actions an apply of the stage would or may run. An
-    /// apply from the plan runs only these (decision 0055).
+    /// apply from the plan runs only these (decision 0056).
     pub actions: Vec<ActionReport>,
 }
 

@@ -224,7 +224,7 @@ pub struct StageReport {
     /// were named; empty when none was asked.
     pub analyses: Vec<Analysis>,
     /// The stage's Meridian-run actions: what a plan would run, or what an
-    /// apply ran or left pending (decision 0055).
+    /// apply ran or left pending (decision 0056).
     pub actions: Vec<ActionReport>,
 }
 

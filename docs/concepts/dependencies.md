@@ -84,7 +84,7 @@ refused, never substituted:
 A plugin lists the actions it performs itself, by resource type (`acts`). Meridian takes
 each notify it covers out of the document before compiling, with a compile warning, and
 after the stage applies asks the plugin to perform the action
-([decision 0055](../decisions/0055-meridian-runs-a-notify-the-tool-cannot-after-the-stage-applies.md)).
+([decision 0056](../decisions/0056-meridian-runs-a-notify-the-tool-cannot-after-the-stage-applies.md)).
 Native and synthetic come first: a plugin lists only what its tool cannot express.
 
 | | |

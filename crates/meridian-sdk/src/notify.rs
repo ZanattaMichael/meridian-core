@@ -1,5 +1,5 @@
 //! Meridian-run notifies: a notify whose tool cannot express it, performed
-//! by the plugin's runner after the stage applies (decision 0055).
+//! by the plugin's runner after the stage applies (decision 0056).
 //!
 //! A runner lists what it acts on in [`Runner::acts`](crate::Runner::acts).
 //! The host takes each notify it covers out of the tree before `emit`, so the

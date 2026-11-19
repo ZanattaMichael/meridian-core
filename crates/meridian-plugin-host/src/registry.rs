@@ -38,7 +38,7 @@ impl Target {
     ///
     /// A notify the target's runner performs itself (its `acts`) is taken
     /// out of the tree first, with a warning, so the emitter never refuses
-    /// it (decision 0055).
+    /// it (decision 0056).
     pub fn emit(&self, graph: &ResourceGraph, data: &Data) -> Result<Emitted, EmitError> {
         let mut taken = graph.clone();
         let (_, warnings) = meridian_sdk::notify::take_meridian_run(&mut taken, &self.info.acts);
