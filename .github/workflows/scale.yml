@@ -1,0 +1,53 @@
+name: scale
+
+# Tier 1 of the scale tests (issue 240): a generated project of 10,000
+# resources, 1,000 endpoints and 200 stages, compiled, planned, applied and
+# destroyed through the fake target, held to tests/scale/budgets.toml. Runs on
+# every pull request that touches the core, and on main.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'crates/**'
+      - 'tests/scale/**'
+      - 'tools/lab/generate.py'
+      - '.github/workflows/scale.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tier1:
+    name: a large project within its budgets
+    # Minutes long, like the real-tool jobs: a draft skips it.
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: release
+
+      - name: Build
+        run: cargo build --release --locked -p meridian-cli -p meridian-target-fake
+
+      - name: Scale test
+        env:
+          MERIDIAN_SCALE_REPORT: ${{ runner.temp }}/scale.md
+        run: cargo test --release --locked -p meridian-cli --test scale -- --ignored --nocapture
+
+      - name: Report
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/scale.md" ]; then cat "$RUNNER_TEMP/scale.md" >> "$GITHUB_STEP_SUMMARY"; fi
