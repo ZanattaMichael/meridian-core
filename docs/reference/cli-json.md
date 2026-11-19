@@ -526,6 +526,19 @@ empty otherwise) and `millis`; then a `summary` of `files`, `cases`, `passed`,
 }
 ```
 
+### `lab run`, `lab list`, `lab sweep`
+
+`lab run`: `lab`, `run` (the run id), `cells` (each a [test case](#test) with `cell`, its
+number, `name` and `values`, the matrix value of each axis) and a `summary` of `cells`,
+`passed`, `failed` and `errors`. Schema: `schemas/output/lab-run.schema.json`.
+
+`lab list`: `lab`, `lastRun` (or `null`) and `cells`, each with `cell`, `name`, `values` and
+`last` (`passed`, `failed`, `error` or `not-run`). Schema: `schemas/output/lab-list.schema.json`.
+
+`lab sweep`: `environments`, each with `dir`, `name`, `runId`, `outcome` (`destroyed`,
+`not-due` or `failed`) and `error`, then a `summary` of `destroyed`, `failed` and `notDue`.
+Schema: `schemas/output/lab-sweep.schema.json`.
+
 ## In a pipeline
 
 A pull request job that fails only on error:

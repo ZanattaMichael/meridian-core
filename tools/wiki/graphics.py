@@ -667,6 +667,32 @@ def modules_flow() -> str:
     return doc(W, H, "Modules: a manifest names what a project needs, install fetches and pins it in the lockfile, and every run verifies the pin without fetching", "".join(p))
 
 
+def lab_flow() -> str:
+    W, H = 1200, 500
+    p: list[str] = []
+    p.append(card(40, 60, 300, 170, "nightly.lab.yaml", ["kind: Lab", "environments: [web.test.yaml]", "matrix:", "  target: [terraform, opentofu]", "  provider: [localstack, azure]", "concurrency: 4   expiry: 2h"], WHITE, 17, 12.5, True))
+    p.append(heading(400, 48, "Cells: each lifecycle case under each combination, concurrency at a time"))
+    cells = [("cell 1", "terraform · localstack", IAC), ("cell 2", "terraform · azure", IAC), ("cell 3", "opentofu · localstack", CM)]
+    for i, (name, note, colour) in enumerate(cells):
+        y = 60 + i * 64
+        p.append(card(400, y, 230, 52, name, [note], colour, 15, 12))
+        p.append(flow(f"M340 145C370 145 370 {y + 26} 400 {y + 26}", colour, delay=i * 0.3, seconds=1.6))
+        steps = [("provision", ORC), ("verify", GREEN), ("destroy", PIPE)]
+        for j, (step, c) in enumerate(steps):
+            x = 670 + j * 175
+            p.append(card(x, y, 150, 52, step, [], c, 14, 12))
+            p.append(flow(f"M{x - 40 if j == 0 else x - 25} {y + 26}L{x} {y + 26}", c, delay=0.6 + i * 0.3 + j * 0.4, seconds=1.6))
+    # Per cell.
+    cy = 290
+    p.append(heading(40, cy - 12, "Each cell has its own"))
+    p.append(card(40, cy, 360, 110, "state and id", ["lab/nightly/<run>/<cell>-<case>/", "meridian.run.id = <run>-<cell>", "meridian.lab.target, .provider, …", "environment.json: how to destroy it"], WHITE, 16, 12.5, True))
+    p.append(card(440, cy, 340, 110, "report", ["ok / FAIL per cell, and per phase;", "--output json: one object;", "--junit FILE: a suite per cell;", "lab list: the last run"], WHITE, 16, 12.5))
+    p.append(card(820, cy, 340, 110, "lab sweep", ["destroys what a failed destroy,", "--keep or a killed run left,", "once its expiry has passed", "(or --older-than)"], PIPE, 16, 12.5, True))
+    p.append(flow(f"M990 236L990 {cy}", PIPE, delay=2.4, seconds=1.6))
+    p.append(caption(W, H, "One cell failing does not stop the others. A destroyed cell's directory is removed; one left behind waits for sweep."))
+    return doc(W, H, "meridian lab: a Lab document's matrix expands into cells; each cell provisions, verifies and destroys its environment in a state directory of its own, under its own run id, concurrency at a time; sweep destroys what kept or killed runs left once it expires", "".join(p))
+
+
 def test_flow() -> str:
     W, H = 1200, 470
     p: list[str] = []
@@ -922,6 +948,7 @@ GRAPHIC_FILES = {
     "meridian-modules-flow.svg": modules_flow,
     "meridian-saved-plan.svg": saved_plan,
     "meridian-test-flow.svg": test_flow,
+    "meridian-lab.svg": lab_flow,
     "meridian-common-types.svg": common_types,
     "meridian-analyzers-flow.svg": analyzers_flow,
     "meridian-schema-bundles.svg": schema_bundles,

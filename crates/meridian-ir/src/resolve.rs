@@ -219,7 +219,8 @@ pub(crate) fn scope(data: &Data) -> Scope {
         .with_unset_hint(
             RESERVED_DATA_KEY,
             "the run id is given with --run-id or MERIDIAN_RUN_ID, and meridian test gives \
-             each case one; test for it with defined({path})",
+             each case one; meridian.lab is set only in a lab cell; test for it with \
+             defined({path})",
         )
 }
 

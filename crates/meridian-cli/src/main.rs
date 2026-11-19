@@ -365,6 +365,7 @@ fn run() -> ExitCode {
             &state_dir,
             keep,
         ),
+        Command::Lab { command } => lab(command),
         Command::Fmt(args) => tools::format(&args),
         Command::Lint(args) => tools::lint(&args),
         Command::Schema(args) => tools::schema(&args),

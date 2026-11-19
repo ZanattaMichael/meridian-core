@@ -52,6 +52,7 @@ What an expression can read depends on where it is written:
 | `cond.<name>` | a [named condition](interpolation.md#named-conditions) the document declares: `true` or `false` | every `when` and every interpolation |
 | `secret.<name>` | a [secret](secrets.md) the document declares. The expression holds a reference to it, never the value | a `when`, a named condition, a variable, and an interpolation in `params`; [refused](secrets.md#where-a-secret-cannot-be-used) where a value is shown or stored |
 | `meridian.run.id` | the run id given with `--run-id` or `MERIDIAN_RUN_ID`, or by [`meridian test`](../testing.md#the-run-id); unset otherwise. For names and tags of what one environment makes | every `when` and every interpolation |
+| `meridian.lab.<axis>` | in a [lab](../../operations/lab.md) cell, the cell's value for that matrix axis; also `meridian.lab.run` (the lab run's id) and `meridian.lab.cell` (the cell's number) | every `when` and every interpolation |
 | `facts.<path>` | facts about the machine | nowhere yet: refused, with a reason |
 
 More names (`param`, `endpoint`, `outputs`) arrive with

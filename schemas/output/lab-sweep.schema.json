@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ZanattaMichael/meridian-core/schemas/output/lab-sweep.schema.json",
+  "title": "lab sweep",
+  "description": "Every environment a lab or test run left, and what the sweep did with it.",
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "const": "lab sweep",
+      "description": "The subcommand as it is typed"
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "Whether the command did what was asked: false means it exited 1, or 130 when interrupted"
+    },
+    "environments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "dir": {
+            "type": "string",
+            "description": "Its state directory"
+          },
+          "name": {
+            "type": "string",
+            "description": "The test and case, or the lab cell; empty when its record could not be read"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "destroyed",
+              "not-due",
+              "failed"
+            ],
+            "description": "destroyed: its directory is removed; not-due: its expiry has not passed and --older-than did not reach it; failed: kept, to try again"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "dir",
+          "name",
+          "runId",
+          "outcome",
+          "error"
+        ]
+      }
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "destroyed": {
+          "type": "integer"
+        },
+        "failed": {
+          "type": "integer"
+        },
+        "notDue": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "destroyed",
+        "failed",
+        "notDue"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "command",
+    "ok",
+    "environments",
+    "summary"
+  ]
+}

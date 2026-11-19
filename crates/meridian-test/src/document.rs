@@ -196,17 +196,21 @@ pub fn load(path: &Path) -> Result<Vec<TestFile>, String> {
 }
 
 /// A reader that names where a problem is.
-struct Reader<'a> {
-    at: &'a str,
-    base: &'a Path,
+pub(crate) struct Reader<'a> {
+    pub(crate) at: &'a str,
+    pub(crate) base: &'a Path,
 }
 
 impl Reader<'_> {
-    fn refuse(&self, path: &str, why: impl std::fmt::Display) -> String {
+    pub(crate) fn refuse(&self, path: &str, why: impl std::fmt::Display) -> String {
         format!("{}: {path}: {why}", self.at)
     }
 
-    fn map<'v>(&self, value: &'v Value, path: &str) -> Result<&'v BTreeMap<String, Value>, String> {
+    pub(crate) fn map<'v>(
+        &self,
+        value: &'v Value,
+        path: &str,
+    ) -> Result<&'v BTreeMap<String, Value>, String> {
         value.as_map().ok_or_else(|| {
             self.refuse(
                 path,
@@ -215,14 +219,14 @@ impl Reader<'_> {
         })
     }
 
-    fn text(&self, value: &Value, path: &str) -> Result<String, String> {
+    pub(crate) fn text(&self, value: &Value, path: &str) -> Result<String, String> {
         match value {
             Value::String(s) => Ok(s.clone()),
             other => Err(self.refuse(path, format!("expected text, found {}", other.describe()))),
         }
     }
 
-    fn texts(&self, value: &Value, path: &str) -> Result<Vec<String>, String> {
+    pub(crate) fn texts(&self, value: &Value, path: &str) -> Result<Vec<String>, String> {
         match value {
             Value::String(s) => Ok(vec![s.clone()]),
             Value::List(items) => items
@@ -240,7 +244,7 @@ impl Reader<'_> {
         }
     }
 
-    fn paths(&self, value: Option<&Value>, path: &str) -> Result<Vec<PathBuf>, String> {
+    pub(crate) fn paths(&self, value: Option<&Value>, path: &str) -> Result<Vec<PathBuf>, String> {
         let Some(value) = value else {
             return Ok(Vec::new());
         };
@@ -257,7 +261,7 @@ impl Reader<'_> {
             .collect())
     }
 
-    fn data(&self, value: Option<&Value>, path: &str) -> Result<Data, String> {
+    pub(crate) fn data(&self, value: Option<&Value>, path: &str) -> Result<Data, String> {
         let data = match value {
             None | Some(Value::Null) => Data::new(),
             Some(value) => self.map(value, path).cloned()?,
@@ -272,7 +276,7 @@ impl Reader<'_> {
         Ok(data)
     }
 
-    fn only(
+    pub(crate) fn only(
         &self,
         map: &BTreeMap<String, Value>,
         path: &str,
@@ -522,7 +526,7 @@ fn phases(r: &Reader<'_>, value: &Value, path: &str) -> Result<Phases, String> {
 
 /// A length of time as a person writes one: `90`, `30s`, `5m`, `1h`. A
 /// bare number is seconds.
-fn duration(text: &str) -> Result<Duration, String> {
+pub(crate) fn duration(text: &str) -> Result<Duration, String> {
     let text = text.trim();
     let digits = text.chars().take_while(char::is_ascii_digit).count();
     let (number, unit) = text.split_at(digits);

@@ -17,7 +17,7 @@ use crate::assert::{check, outcome_word};
 use crate::document::{Case, Run, TestFile};
 
 /// Turns paths written `@module:path` into the files they name.
-pub type Resolver<'a> = &'a dyn Fn(&[PathBuf]) -> Result<Vec<PathBuf>, String>;
+pub type Resolver<'a> = &'a (dyn Fn(&[PathBuf]) -> Result<Vec<PathBuf>, String> + Sync);
 
 /// What a test needs from the command that runs it.
 pub struct Runner<'a> {
@@ -122,8 +122,27 @@ pub fn run_file(file: &TestFile, runner: &Runner<'_>, filter: Option<&str>) -> F
         if filter.is_some_and(|text| !case.name.contains(text)) {
             continue;
         }
-        let started = Instant::now();
-        let (status, failures, stages, phases, run_id) = match run_case(file, case, index, runner) {
+        cases.push(result_of(file, index, runner, None));
+    }
+    FileResult {
+        path: file.path.clone(),
+        name: file.name.clone(),
+        cases,
+    }
+}
+
+/// Runs one case and says how it ended. `place` puts a lifecycle case
+/// somewhere other than `tests/`, under a given run id, as a lab cell does.
+pub(crate) fn result_of(
+    file: &TestFile,
+    index: usize,
+    runner: &Runner<'_>,
+    place: Option<&Place>,
+) -> CaseResult {
+    let case = &file.cases[index];
+    let started = Instant::now();
+    let (status, failures, stages, phases, run_id) =
+        match run_case(file, case, index, runner, place) {
             Ok(ran) => {
                 let failed = !ran.failures.is_empty()
                     || ran.phases.iter().any(|p| p.status == Status::Failed);
@@ -142,22 +161,30 @@ pub fn run_file(file: &TestFile, runner: &Runner<'_>, filter: Option<&str>) -> F
                 String::new(),
             ),
         };
-        cases.push(CaseResult {
-            name: case.name.clone(),
-            run: case.run,
-            status,
-            failures,
-            stages,
-            run_id,
-            phases,
-            millis: started.elapsed().as_millis(),
-        });
+    CaseResult {
+        name: case.name.clone(),
+        run: case.run,
+        status,
+        failures,
+        stages,
+        run_id,
+        phases,
+        millis: started.elapsed().as_millis(),
     }
-    FileResult {
-        path: file.path.clone(),
-        name: file.name.clone(),
-        cases,
-    }
+}
+
+/// Where a lifecycle case runs when it is not a test's own: a lab cell.
+#[derive(Clone, Debug)]
+pub(crate) struct Place {
+    /// Its state directory, which must not exist yet.
+    pub scratch: PathBuf,
+    /// What the documents read as `meridian.run.id`.
+    pub run_id: String,
+    /// What the documents read as `meridian.lab`.
+    pub lab: Value,
+    /// When `meridian lab sweep` may destroy what is left, in seconds since
+    /// the Unix epoch.
+    pub expires: Option<u64>,
 }
 
 #[derive(Default)]
@@ -178,6 +205,7 @@ fn run_case(
     case: &Case,
     index: usize,
     runner: &Runner<'_>,
+    place: Option<&Place>,
 ) -> Result<Ran, String> {
     let documents = (runner.resolve)(&file.documents)?;
     let bundle =
@@ -217,13 +245,24 @@ fn run_case(
         Some(text) => Selector::parse(text).map_err(|e| format!("select: {e}"))?,
         None => Selector::all(),
     };
-    let scratch = runner
-        .state_dir
-        .join("tests")
-        .join(slug(&file.name))
-        .join(format!("{}-{}", index + 1, slug(&case.name)));
+    let scratch = match place {
+        Some(place) => place.scratch.clone(),
+        None => runner
+            .state_dir
+            .join("tests")
+            .join(slug(&file.name))
+            .join(format!("{}-{}", index + 1, slug(&case.name))),
+    };
     if case.run == Run::Lifecycle {
-        return lifecycle(file, case, runner, &bundle, &data, &selector, &scratch);
+        let ready = Ready {
+            bundle: &bundle,
+            documents: &documents,
+            data: &data,
+            selector: &selector,
+            select: case.select.as_deref().or(file.select.as_deref()),
+            scratch: &scratch,
+        };
+        return lifecycle(file, case, runner, &ready, place);
     }
     meridian_ir::set_run_id(&mut data, TEST_RUN_ID);
     // A directory of the case's own, emptied first: a plan is always against
@@ -284,23 +323,42 @@ fn summaries(report: &RunReport) -> Vec<StageSummary> {
 /// failed or timed-out provision leaves nothing behind; when destroy itself
 /// fails, the scratch directory is kept and named, so what is left can be
 /// found and removed.
+/// What a lifecycle case runs over, once loaded.
+struct Ready<'a> {
+    bundle: &'a Bundle,
+    documents: &'a [PathBuf],
+    data: &'a Data,
+    selector: &'a Selector,
+    select: Option<&'a str>,
+    scratch: &'a Path,
+}
+
 fn lifecycle(
     file: &TestFile,
     case: &Case,
     runner: &Runner<'_>,
-    bundle: &Bundle,
-    data: &Data,
-    selector: &Selector,
-    scratch: &Path,
+    ready: &Ready<'_>,
+    place: Option<&Place>,
 ) -> Result<Ran, String> {
+    let (bundle, selector, scratch) = (ready.bundle, ready.selector, ready.scratch);
     // One id for every phase, so destroy finds what provision named.
-    let run_id = new_run_id(scratch);
-    let mut data = data.clone();
+    let run_id = match place {
+        Some(place) => place.run_id.clone(),
+        None => new_run_id(scratch),
+    };
+    let mut data = ready.data.clone();
     meridian_ir::set_run_id(&mut data, &run_id);
+    if let (Some(place), Some(Value::Map(meridian))) =
+        (place, data.get_mut(meridian_ir::RESERVED_DATA_KEY))
+    {
+        meridian.insert("lab".to_owned(), place.lab.clone());
+    }
     let data = &data;
-    // A target that cannot destroy would leave the environment behind.
+    // A target that cannot destroy would leave the environment behind. Only
+    // the documents this case runs count: a lab cell leaves the others out
+    // with `when`.
     let mut cannot: Vec<String> = Vec::new();
-    for document in &bundle.documents {
+    for document in bundle.documents.iter().filter(|d| runs(d, selector, data)) {
         let target = document.target();
         match runner.registry.target(target) {
             Some(t) if t.info().destroys => {}
@@ -337,9 +395,24 @@ fn lifecycle(
     }
     create(scratch)?;
     // Written first, so whoever cleans up after a failure knows the id the
-    // environment's names and tags carry.
+    // environment's names and tags carry, and `meridian lab sweep` can
+    // destroy it.
     std::fs::write(scratch.join(RUN_ID_FILE), format!("{run_id}\n"))
         .map_err(|e| format!("cannot write {}: {e}", scratch.join(RUN_ID_FILE).display()))?;
+    let record = crate::sweep::Record {
+        documents: ready
+            .documents
+            .iter()
+            .map(|p| std::path::absolute(p).unwrap_or_else(|_| p.clone()))
+            .collect(),
+        data: data.clone(),
+        select: ready.select.map(str::to_owned),
+        run_id: run_id.clone(),
+        started: crate::sweep::now(),
+        expires: place.and_then(|p| p.expires),
+        name: format!("{}: {}", file.name, case.name),
+    };
+    record.write(scratch)?;
     let options = |mode_stop: Stop| Options {
         data: data.clone(),
         backend: Some(Arc::new(LocalBackend::new(scratch)) as Arc<_>),
@@ -456,7 +529,7 @@ impl Ran {
 }
 
 /// Each stage that failed or did not run, one line each.
-fn stage_failures(report: &RunReport) -> Vec<String> {
+pub(crate) fn stage_failures(report: &RunReport) -> Vec<String> {
     report
         .stages
         .iter()
@@ -469,6 +542,20 @@ fn stage_failures(report: &RunReport) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+/// Whether a document is part of a run under this selector and data: its
+/// labels match and its `when` holds. One that cannot be decided counts,
+/// so its error is reported by the run.
+fn runs(document: &meridian_ir::Document, selector: &Selector, data: &Data) -> bool {
+    let labelled = meridian_ir::resolved_labels(document, data)
+        .map_or(true, |labels| selector.matches(&labels));
+    let when = document.when();
+    labelled
+        && (when.is_empty()
+            || meridian_ir::Condition::parse(when)
+                .and_then(|c| c.evaluate(data))
+                .unwrap_or(true))
 }
 
 /// The file in a lifecycle case's scratch directory that holds its run id.
@@ -576,7 +663,7 @@ fn merge_into(data: &mut BTreeMap<String, Value>, set: &BTreeMap<String, Value>)
 }
 
 /// A name as a directory name: letters, digits and `-`, nothing else.
-fn slug(name: &str) -> String {
+pub(crate) fn slug(name: &str) -> String {
     let mut out: String = name
         .chars()
         .map(|c| {
