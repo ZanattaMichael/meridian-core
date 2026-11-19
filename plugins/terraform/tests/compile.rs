@@ -464,3 +464,41 @@ fn a_gcp_resource_group_setting_is_refused() {
     ));
     assert_eq!(err.rule, "invalid-setting");
 }
+
+const AWS_VM: &str = "  settings:\n    cloud: aws\n  resources:\n    - id: net\n      type: network\n      params: {cidr: 10.0.0.0/16}\n    - id: s\n      type: subnet\n      params: {network: \"${net}\", cidr: 10.0.1.0/24}\n    - id: vm\n      type: vm\n      params: {subnet: \"${s}\", size: t3.micro, image: ami-123}\n";
+
+fn disks(n: usize) -> String {
+    let mut text = AWS_VM.to_owned();
+    for i in 0..n {
+        text.push_str(&format!(
+            "    - id: d{i}\n      type: disk\n      params: {{vm: \"${{vm}}\", sizeGb: 10}}\n"
+        ));
+    }
+    text
+}
+
+#[test]
+fn a_vms_disks_are_attached_in_document_order() {
+    let text = config(&disks(2));
+    assert!(text.contains("\"/dev/sdf\""), "{text}");
+    assert!(text.contains("\"/dev/sdg\""), "{text}");
+    assert!(
+        text.contains("\"availability_zone\": \"${aws_instance.vm.availability_zone}\""),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_twelfth_disk_on_an_aws_vm_is_refused() {
+    config(&disks(11));
+    assert_eq!(refusal(&disks(12)).rule, "invalid-param");
+}
+
+#[test]
+fn an_azure_disk_takes_the_next_lun() {
+    let text = config(
+        "  settings:\n    cloud: azure\n    location: westeurope\n    resourceGroup: rg\n  resources:\n    - id: vm\n      type: azurerm_linux_virtual_machine\n      params: {name: x}\n    - id: a\n      type: disk\n      params: {sizeGb: 10}\n    - id: b\n      type: disk\n      params: {vm: \"${vm}\", sizeGb: 10}\n",
+    );
+    assert!(text.contains("\"lun\": 0"), "{text}");
+    assert!(!text.contains("a_attachment"), "{text}");
+}

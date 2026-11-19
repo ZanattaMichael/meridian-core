@@ -2,7 +2,7 @@
 
 What happens to the same document on each target, and each cloud, that maps
 the [common infrastructure types](dsl/common-infrastructure-types.md)
-(`network`, `subnet`, `firewall`, `address`, `vm`). This page is generated:
+(`network`, `subnet`, `firewall`, `address`, `vm`, `disk`). This page is generated:
 `crates/meridian-cli/tests/infra_conformance.rs` compiles one small document
 per row for every column and writes down how each compile came out, and it
 fails when this page is out of date. So the page cannot drift from the code,
@@ -97,4 +97,13 @@ The configuration management types have [their own matrix](conformance-matrix.md
 | `privateAddress` and `id` of a vm | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | `address` of an address | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | an id taken by what a common type adds (`vm_nic`) | no | ok | `duplicate-resource` | ok | ok | `duplicate-resource` | ok | ok | `duplicate-resource` | ok | `duplicate-resource` | `duplicate-resource` |
+
+## `disk`
+
+| Document | same | terraform (aws) | terraform (azure) | terraform (gcp) | opentofu (aws) | opentofu (azure) | opentofu (gcp) | pulumi (aws) | pulumi (azure) | cloudformation | bicep | arm |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| two disks on a vm | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| no vm and no location | no | `missing-param` | ok | ok | `missing-param` | ok | ok | `missing-param` | ok | `missing-param` | ok | ok |
+| a size of zero | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+| a vm that is not a reference | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
 

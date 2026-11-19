@@ -120,6 +120,20 @@ resources:
     properties:
       allocationId: ${web_ip.id}
       instanceId: ${vm.id}
+  store:
+    type: aws:ebs:Volume
+    properties:
+      availabilityZone: ${vm.availabilityZone}
+      size: 50
+      tags:
+        Name: store
+      type: gp3
+  store_attachment:
+    type: aws:ec2:VolumeAttachment
+    properties:
+      deviceName: /dev/sdf
+      instanceId: ${vm.id}
+      volumeId: ${store.id}
   logs:
     type: aws:s3:BucketV2
     properties:

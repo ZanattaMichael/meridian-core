@@ -1,6 +1,6 @@
 # The common infrastructure types
 
-Five resource types, `network`, `subnet`, `firewall`, `address` and `vm`, compile to each
+Six resource types, `network`, `subnet`, `firewall`, `address`, `vm` and `disk`, compile to each
 cloud's own resources on the targets below.
 
 | Type | What it is |
@@ -10,13 +10,14 @@ cloud's own resources on the targets below.
 | [`firewall`](#firewall) | which traffic may reach, or leave, the machines it is attached to |
 | [`address`](#address) | a fixed public IP address |
 | [`vm`](#vm) | a virtual machine in a subnet, from an image, of a size, reachable with a key |
+| [`disk`](#disk) | a data disk, attached to a vm |
 
 The vocabulary is defined once, in the SDK. A param outside it is refused. What a cloud
 cannot express is refused at compile time with what to write instead. The
 [infra conformance matrix](../infra-conformance-matrix.md) is generated from what the
 targets do.
 
-<p align="center"><img src="../../graphics/meridian-common-types.svg" alt="One document with network, subnet, firewall, address and vm on the left; four columns on the right showing what each becomes on Terraform for AWS, CloudFormation, Terraform for Azure, and Bicep and ARM" width="100%"></p>
+<p align="center"><img src="../../graphics/meridian-common-types.svg" alt="One document with network, subnet, firewall, address, vm and disk on the left; four columns on the right showing what each becomes on Terraform for AWS, CloudFormation, Terraform for Azure, and Bicep and ARM" width="100%"></p>
 
 ## Where they compile
 
@@ -114,6 +115,7 @@ Read as `${id.output}`; each target rewrites it to the tool's expression. A
 |---|---|
 | `network`, `subnet`, `firewall` | `id`: the cloud's own id |
 | `address` | `id`; `address`: the IP address |
+| `disk` | `id` |
 | `vm` | `id`; `privateAddress`: the address inside the network; `publicAddress`: the machine's address from the internet |
 
 `publicAddress` is the attached `address`. On AWS a vm in a public subnet has one
@@ -221,6 +223,7 @@ and an address are in a region, and a vm is in a zone.
 | `firewall` | one `google_compute_firewall` per rule (`<fw>_rule_<n>` after the first), applied to the machines that carry the tag `meridian-<fw>`. With an `out` rule, a deny-all egress rule (`<fw>_out_deny`) below it for the same machines. A firewall with no rules is refused as `missing-param`, since a Google Cloud firewall is its rules |
 | `address` | `google_compute_address`, regional, `tags` as labels |
 | `vm` | `google_compute_instance` in the zone of its `location`, or zone `b` of the region (`europe-west1-b`). The firewalls' tags, an `access_config` for an `address`, and `sshKey` as the `ssh-keys` metadata of `user` (`gceuser` unless given) |
+| `disk` | `google_compute_disk`, pd-balanced, in the vm's zone; a `google_compute_attached_disk` (`<id>_attachment`) |
 
 Names on Google Cloud are lower case with hyphens, so an id's `_` becomes
 `-` (`web_ip` is named `web-ip`). `spec.settings.resourceGroup` is refused on
@@ -263,6 +266,25 @@ vendor's public SSM parameter as `{{resolve:ssm:...}}`:
 `/aws/service/canonical/ubuntu/server/<version>/stable/current/amd64/hvm/ebs-gp3/ami-id`
 (`ebs-gp2` for 22.04). Other images are text: an AMI id, an Azure image id, or a Google Cloud image or family path.
 
+## `disk`
+
+| Param | Kind | |
+|---|---|---|
+| `sizeGb` | whole number, required | the size in gigabytes |
+| `vm` | reference | the vm it is attached to. A vm's disks are attached in document order |
+| `location` | text | AWS: the availability zone, needed only without `vm`. Azure: as on `network`. Google Cloud: the zone; the vm's zone unless given |
+| `name`, `tags` | | as on `network` |
+
+| Terraform, AWS | CloudFormation | Terraform, Azure | Bicep |
+|---|---|---|---|
+| `aws_ebs_volume`, gp3, in the vm's zone; an `aws_volume_attachment` (`<id>_attachment`) as `/dev/sdf`, `/dev/sdg`, ... | `AWS::EC2::Volume`, gp3, in the vm's zone; an `AWS::EC2::VolumeAttachment` (`<id>_attachment`) | `azurerm_managed_disk`, StandardSSD_LRS; an `azurerm_virtual_machine_data_disk_attachment` (`<id>_attachment`) at LUN 0, 1, ... | `Microsoft.Compute/disks`, StandardSSD_LRS, listed in the vm's `dataDisks` at LUN 0, 1, ... |
+
+Pulumi writes the same as Terraform with its own types (`aws:ebs:Volume` and
+`aws:ec2:VolumeAttachment`; `azure-native:compute:Disk` in the vm's `dataDisks`). AWS
+names at most 11 data disks per vm (`/dev/sdf` to `/dev/sdp`); a twelfth is refused as
+`invalid-param`. On AWS a disk with neither `vm` nor `location` is refused as
+`missing-param`.
+
 ## What a common type adds
 
 Some common resources become several tool resources. The main one keeps the id; the
@@ -274,6 +296,7 @@ others are named from it:
 | `<vm>_nic`, `<vm>_nic_firewall` | Azure: the network interface, and its firewall |
 | `<net>_gateway`, `<net>_gateway_link` (CloudFormation), `<subnet>_routes`, `<subnet>_routes_internet`, `<subnet>_routes_link` | AWS: a public subnet's way out |
 | `<fw>_in_<n>`, `<fw>_out_<n>`, `<fw>_out_all`, `<fw>_rule_<n>`, `<fw>_out_deny` | a firewall's rules |
+| `<disk>_attachment` | AWS, Terraform on Azure, Google Cloud: a disk's attachment to its vm |
 
 A document that already uses one of these ids is refused as `duplicate-resource`.
 
@@ -296,8 +319,8 @@ CloudFormation needs none (the stack's region; a subnet's `location` is its zone
 | Rule | When |
 |---|---|
 | `unsupported-param` | a param outside the vocabulary; or one this cloud cannot express (the message says why and what to write) |
-| `missing-param` | a required param is not given; on Azure, a vm with no `sshKey`, or a resource with no location on Terraform |
-| `invalid-param` | a param of the wrong kind, a reference param that is not one `${id}`, a size or image of the wrong shape, a firewall rule that breaks the rules above, a size bigger than the table |
+| `missing-param` | a required param is not given; on Azure, a vm with no `sshKey`, or a resource with no location on Terraform; on AWS, a disk with no `vm` and no `location` |
+| `invalid-param` | a param of the wrong kind, a reference param that is not one `${id}`, a size or image of the wrong shape, a firewall rule that breaks the rules above, a size bigger than the table, a disk `sizeGb` below 1, a twelfth disk on an AWS vm |
 | `invalid-reference` | a read of a promised output that this cloud cannot give, such as `publicAddress` of an Azure vm with no address |
 | `unsupported-state` | any state but `present` |
 | `missing-resource` | Terraform: the cloud cannot be told from the document; or Azure with no `resourceGroup` |
@@ -306,5 +329,4 @@ CloudFormation needs none (the stack's region; a subnet's `location` is its zone
 
 ## Why so few
 
-Each of the five maps one-to-one on every target. Disks, object stores and DNS records
-are next. See [decision 0040](../../decisions/0040-common-infrastructure-types-are-a-small-core-mapped-per-cloud.md).
+Each type maps one-to-one on every target. Object stores and DNS records are next. See [decision 0040](../../decisions/0040-common-infrastructure-types-are-a-small-core-mapped-per-cloud.md).

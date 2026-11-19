@@ -273,12 +273,12 @@ fn outputs(pairs: &[(&str, String)]) -> BTreeMap<String, String> {
 }
 
 fn aws(r: &Resource, graph: &ResourceGraph, state: &mut State) -> Result<Expansion, CompileError> {
-    if r.params.contains_key("location") && r.r#type != "subnet" {
+    if r.params.contains_key("location") && r.r#type != "subnet" && r.r#type != "disk" {
         return Err(refuse_param(
             r,
             "location",
             "on AWS a resource is in the region its provider is configured for; only a subnet \
-             takes a location, its availability zone",
+             and a disk take a location, an availability zone",
         ));
     }
     let id = r.id.as_str();
@@ -451,6 +451,7 @@ fn aws(r: &Resource, graph: &ResourceGraph, state: &mut State) -> Result<Expansi
                 ]),
             }
         }
+        "disk" => aws_disk(r, graph)?,
         _ => aws_vm(r)?,
     })
 }
@@ -564,6 +565,106 @@ fn aws_vm(r: &Resource) -> Result<Expansion, CompileError> {
             ("privateAddress", format!("${{{id}.private_ip}}")),
             ("publicAddress", public),
         ]),
+    })
+}
+
+/// A disk's place among the disks of its vm, which numbers its attachment.
+fn disk_index(r: &Resource, graph: &ResourceGraph, vm: &str) -> usize {
+    infra::disks_of(graph, vm)
+        .iter()
+        .position(|d| d.id == r.id)
+        .unwrap_or(0)
+}
+
+/// The device names an AWS data disk is attached as, in order.
+const AWS_DEVICES: &str = "fghijklmnop";
+
+fn aws_disk(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError> {
+    let id = r.id.as_str();
+    let vm = ref_param(r, "vm");
+    let zone = match (param(r, "location"), &vm) {
+        (Some(zone), _) => zone,
+        (None, Some(vm)) => reference(vm, "availability_zone"),
+        (None, None) => {
+            return Err(refuse(
+                r,
+                &rules::MISSING_PARAM,
+                "a disk on AWS is in an availability zone: give the param vm, or location \
+                 (such as eu-west-1a)"
+                    .to_owned(),
+            ))
+        }
+    };
+    let mut resources = vec![primary(
+        r,
+        "aws_ebs_volume",
+        map(vec![
+            ("availability_zone", zone),
+            ("size", Value::Uint(infra::disk_size(r))),
+            ("type", Value::from("gp3")),
+            ("tags", aws_tags(r)),
+        ]),
+    )];
+    if let Some(vm) = vm {
+        let i = disk_index(r, graph, &vm);
+        let letter = AWS_DEVICES.chars().nth(i).ok_or_else(|| {
+            refuse(
+                r,
+                &rules::INVALID_PARAM,
+                format!(
+                    "vm {vm:?} has more than {} disks; AWS names them /dev/sdf to /dev/sdp",
+                    AWS_DEVICES.len()
+                ),
+            )
+        })?;
+        resources.push(helper(
+            r,
+            "attachment",
+            "aws_volume_attachment",
+            map(vec![
+                ("device_name", Value::String(format!("/dev/sd{letter}"))),
+                ("volume_id", reference(id, "id")),
+                ("instance_id", reference(&vm, "id")),
+            ]),
+        ));
+    }
+    Ok(Expansion {
+        order: Vec::new(),
+        resources,
+        outputs: outputs(&[("id", format!("${{{id}.id}}"))]),
+    })
+}
+
+fn azure_disk(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError> {
+    let id = r.id.as_str();
+    let mut body = with(
+        map(vec![
+            ("name", cloud_name(r)),
+            ("storage_account_type", Value::from("StandardSSD_LRS")),
+            ("create_option", Value::from("Empty")),
+            ("disk_size_gb", Value::Uint(infra::disk_size(r))),
+        ]),
+        azure_place(r, graph, Some(azure_location(r, graph)?))?,
+    );
+    azure_tags(r, &mut body);
+    let mut resources = vec![primary(r, "azurerm_managed_disk", body)];
+    if let Some(vm) = ref_param(r, "vm") {
+        resources.push(helper(
+            r,
+            "attachment",
+            "azurerm_virtual_machine_data_disk_attachment",
+            map(vec![
+                ("managed_disk_id", reference(id, "id")),
+                ("virtual_machine_id", reference(&vm, "id")),
+                ("lun", Value::Uint(disk_index(r, graph, &vm) as u64)),
+                ("caching", Value::from("ReadWrite")),
+            ]),
+        ));
+    }
+    Ok(Expansion {
+        order: Vec::new(),
+        resources,
+        outputs: outputs(&[("id", format!("${{{id}.id}}"))]),
     })
 }
 
@@ -751,6 +852,7 @@ fn azure(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError>
                 ]),
             }
         }
+        "disk" => azure_disk(r, graph)?,
         _ => azure_vm(r, graph)?,
     })
 }
@@ -1092,6 +1194,7 @@ fn gcp(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError> {
                 ]),
             }
         }
+        "disk" => gcp_disk(r, graph)?,
         _ => gcp_vm(r, graph)?,
     })
 }
@@ -1199,6 +1302,50 @@ fn gcp_firewall(r: &Resource) -> Result<Expansion, CompileError> {
                         Value::from("all"),
                     )]))]),
                 ),
+            ]),
+        ));
+    }
+    Ok(Expansion {
+        order: Vec::new(),
+        resources,
+        outputs: outputs(&[("id", format!("${{{id}.id}}"))]),
+    })
+}
+
+fn gcp_disk(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError> {
+    let id = r.id.as_str();
+    let vm = ref_param(r, "vm");
+    let zone =
+        match (param(r, "location"), &vm) {
+            (Some(zone), _) => zone,
+            (None, Some(vm)) => reference(vm, "zone"),
+            (None, None) => match text_setting(graph, "location")? {
+                Some(Value::String(region)) => Value::String(format!("{region}-b")),
+                _ => return Err(refuse(
+                    r,
+                    &rules::MISSING_PARAM,
+                    "a disk on Google Cloud is in a zone: give the param vm, location (such as \
+                     europe-west1-b), or spec.settings.location for its region"
+                        .to_owned(),
+                )),
+            },
+        };
+    let mut body = map(vec![
+        ("name", gcp_name(r)),
+        ("zone", zone),
+        ("size", Value::Uint(infra::disk_size(r))),
+        ("type", Value::from("pd-balanced")),
+    ]);
+    gcp_labels(r, &mut body);
+    let mut resources = vec![primary(r, "google_compute_disk", body)];
+    if let Some(vm) = vm {
+        resources.push(helper(
+            r,
+            "attachment",
+            "google_compute_attached_disk",
+            map(vec![
+                ("disk", reference(id, "id")),
+                ("instance", reference(&vm, "id")),
             ]),
         ));
     }

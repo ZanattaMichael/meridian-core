@@ -133,6 +133,15 @@ resource vm 'Microsoft.Compute/virtualMachines@2024-03-01' = {
       }
     }
     storageProfile: {
+      dataDisks: [
+        {
+          createOption: 'Attach'
+          lun: 0
+          managedDisk: {
+            id: store.id
+          }
+        }
+      ]
       imageReference: {
         offer: 'ubuntu-24_04-lts'
         publisher: 'Canonical'
@@ -143,6 +152,20 @@ resource vm 'Microsoft.Compute/virtualMachines@2024-03-01' = {
         createOption: 'FromImage'
       }
     }
+  }
+}
+
+resource store 'Microsoft.Compute/disks@2024-03-01' = {
+  name: 'store'
+  location: resourceGroup().location
+  properties: {
+    creationData: {
+      createOption: 'Empty'
+    }
+    diskSizeGB: 50
+  }
+  sku: {
+    name: 'StandardSSD_LRS'
   }
 }
 

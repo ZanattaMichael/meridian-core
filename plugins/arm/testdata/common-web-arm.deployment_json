@@ -9,6 +9,10 @@
       "name": "net",
       "type": "Microsoft.Network/virtualNetworks"
     },
+    "store": {
+      "name": "store",
+      "type": "Microsoft.Compute/disks"
+    },
     "vm": {
       "name": "vm",
       "type": "Microsoft.Compute/virtualMachines"

@@ -99,6 +99,11 @@ resources:
                 path: /home/azureuser/.ssh/authorized_keys
       resourceGroupName: web-prod
       storageProfile:
+        dataDisks:
+          - createOption: Attach
+            lun: 0
+            managedDisk:
+              id: ${store.id}
         imageReference:
           offer: ubuntu-24_04-lts
           publisher: Canonical
@@ -107,6 +112,17 @@ resources:
         osDisk:
           createOption: FromImage
       vmName: vm
+  store:
+    type: azure-native:compute:Disk
+    properties:
+      creationData:
+        createOption: Empty
+      diskName: store
+      diskSizeGB: 50
+      location: westeurope
+      resourceGroupName: web-prod
+      sku:
+        name: StandardSSD_LRS
 outputs:
   address: ${web_ip.ipAddress}
   private_address: ${vm_nic.ipConfigurations[0].privateIPAddress}

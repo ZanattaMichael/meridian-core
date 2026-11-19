@@ -61,6 +61,7 @@ fn the_plugin_says_what_it_is() {
             "<package>:<module>:<Type>",
             "address",
             "config",
+            "disk",
             "firewall",
             "invoke.<function>",
             "network",

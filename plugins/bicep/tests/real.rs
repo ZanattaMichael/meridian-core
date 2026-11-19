@@ -166,6 +166,7 @@ fn the_common_types_are_bicep_the_real_compiler_builds() {
     assert_eq!(
         types,
         [
+            "Microsoft.Compute/disks",
             "Microsoft.Compute/virtualMachines",
             "Microsoft.Network/networkInterfaces",
             "Microsoft.Network/networkSecurityGroups",

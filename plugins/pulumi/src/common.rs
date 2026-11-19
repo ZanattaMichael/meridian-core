@@ -296,12 +296,12 @@ fn aws_tags(r: &Resource) -> Value {
 }
 
 fn aws(r: &Resource, graph: &ResourceGraph, state: &mut State) -> Result<Expansion, CompileError> {
-    if r.params.contains_key("location") && r.r#type != "subnet" {
+    if r.params.contains_key("location") && r.r#type != "subnet" && r.r#type != "disk" {
         return Err(refuse_param(
             r,
             "location",
             "on AWS a resource is in the region its provider is configured for (aws:region); \
-             only a subnet takes a location, its availability zone",
+             only a subnet and a disk take a location, an availability zone",
         ));
     }
     let id = r.id.as_str();
@@ -467,8 +467,67 @@ fn aws(r: &Resource, graph: &ResourceGraph, state: &mut State) -> Result<Expansi
                 ],
             )
         }
+        "disk" => aws_disk(r, graph)?,
         _ => aws_vm(r)?,
     })
+}
+
+/// The device names an AWS data disk is attached as, in order.
+const AWS_DEVICES: &str = "fghijklmnop";
+
+fn aws_disk(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError> {
+    let id = r.id.as_str();
+    let vm = ref_param(r, "vm");
+    let zone = match (r.params.get("location"), &vm) {
+        (Some(zone), _) => zone.clone(),
+        (None, Some(vm)) => reference(vm, "availabilityZone"),
+        (None, None) => {
+            return Err(refuse(
+                r,
+                &rules::MISSING_PARAM,
+                "a disk on AWS is in an availability zone: give the param vm, or location \
+                 (such as eu-west-1a)"
+                    .to_owned(),
+            ))
+        }
+    };
+    let mut resources = vec![primary(
+        r,
+        "aws:ebs:Volume",
+        map(vec![
+            ("availabilityZone", zone),
+            ("size", Value::Uint(infra::disk_size(r))),
+            ("type", Value::from("gp3")),
+            ("tags", aws_tags(r)),
+        ]),
+    )];
+    if let Some(vm) = vm {
+        let i = infra::disks_of(graph, &vm)
+            .iter()
+            .position(|d| d.id == r.id)
+            .unwrap_or(0);
+        let letter = AWS_DEVICES.chars().nth(i).ok_or_else(|| {
+            refuse(
+                r,
+                &rules::INVALID_PARAM,
+                format!(
+                    "vm {vm:?} has more than {} disks; AWS names them /dev/sdf to /dev/sdp",
+                    AWS_DEVICES.len()
+                ),
+            )
+        })?;
+        resources.push(helper(
+            r,
+            "attachment",
+            "aws:ec2:VolumeAttachment",
+            map(vec![
+                ("deviceName", Value::String(format!("/dev/sd{letter}"))),
+                ("volumeId", reference(id, "id")),
+                ("instanceId", reference(&vm, "id")),
+            ]),
+        ));
+    }
+    Ok(expansion(resources, &[("id", format!("${{{id}.id}}"))]))
 }
 
 fn aws_vm(r: &Resource) -> Result<Expansion, CompileError> {
@@ -732,6 +791,28 @@ fn azure(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError>
                 ("id", format!("${{{id}.id}}")),
             ],
         ),
+        "disk" => expansion(
+            vec![primary(
+                r,
+                "azure-native:compute:Disk",
+                with(
+                    azure_place(r, graph, true)?,
+                    vec![
+                        ("diskName", cloud_name(r)),
+                        (
+                            "sku",
+                            Value::Map(map(vec![("name", Value::from("StandardSSD_LRS"))])),
+                        ),
+                        (
+                            "creationData",
+                            Value::Map(map(vec![("createOption", Value::from("Empty"))])),
+                        ),
+                        ("diskSizeGB", Value::Uint(infra::disk_size(r))),
+                    ],
+                ),
+            )],
+            &own_id(),
+        ),
         _ => azure_vm(r, graph)?,
     })
 }
@@ -865,6 +946,37 @@ fn azure_vm(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileErr
         }
         None => map(vec![("id", image)]),
     };
+    let mut storage = map(vec![
+        ("imageReference", Value::Map(image_reference)),
+        (
+            "osDisk",
+            Value::Map(map(vec![("createOption", Value::from("FromImage"))])),
+        ),
+    ]);
+    // An Azure machine lists its data disks itself: each disk whose vm is
+    // this one, numbered in document order.
+    let disks = infra::disks_of(graph, &r.id);
+    if !disks.is_empty() {
+        storage.insert(
+            "dataDisks".to_owned(),
+            Value::List(
+                disks
+                    .iter()
+                    .enumerate()
+                    .map(|(lun, d)| {
+                        Value::Map(map(vec![
+                            ("lun", Value::Uint(lun as u64)),
+                            ("createOption", Value::from("Attach")),
+                            (
+                                "managedDisk",
+                                Value::Map(map(vec![("id", reference(&d.id, "id"))])),
+                            ),
+                        ]))
+                    })
+                    .collect(),
+            ),
+        );
+    }
     let machine = primary(
         r,
         "azure-native:compute:VirtualMachine",
@@ -876,16 +988,7 @@ fn azure_vm(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileErr
                     "hardwareProfile",
                     Value::Map(map(vec![("vmSize", size(r, AZURE_SIZES)?)])),
                 ),
-                (
-                    "storageProfile",
-                    Value::Map(map(vec![
-                        ("imageReference", Value::Map(image_reference)),
-                        (
-                            "osDisk",
-                            Value::Map(map(vec![("createOption", Value::from("FromImage"))])),
-                        ),
-                    ])),
-                ),
+                ("storageProfile", Value::Map(storage)),
                 (
                     "osProfile",
                     Value::Map(map(vec![

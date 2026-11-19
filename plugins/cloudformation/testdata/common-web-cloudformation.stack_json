@@ -11,6 +11,8 @@
     "Net": "net",
     "NetGateway": "net_gateway",
     "NetGatewayLink": "net_gateway_link",
+    "Store": "store",
+    "StoreAttachment": "store_attachment",
     "Vm": "vm",
     "VmAddress": "vm_address",
     "VmKey": "vm_key",

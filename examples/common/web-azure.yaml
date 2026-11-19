@@ -55,6 +55,13 @@ spec:
         image: {family: ubuntu, version: "24.04"}
         sshKey: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCy3ccG4bHhpvuPdv4+wFBzkP+U7qF4nTg+rghAkKjOLbSJa/yUPZ0EwpJaXm+rtItFerUJK41JH4bArOJJazkHMdWR6iXYQtu5BB/CZALQHiS0LYg5zUhKMxISCESlzNDWFBza28pPjfpj3gnmrPc8D1bAsnKSaHGOffZxtJ62q3Rq0ESwzN/9ahvaiBW707kT/9NC9GqMcSk1HS1Z7Wz6sJEiCC/qIfbS3TAjJ+SloXlTC8+FIdptsxJ3KgWczg4q6Z1aiv9agASdEXMJTo+sUNt7C6qNKY1W03VxFf0cj59Zh6YIo2/ZQ1NyyUOB3rO2U2pbVGLaTvEnF6GSc0TH admin@example.com
 
+    # A data disk, attached to the machine.
+    - id: store
+      type: disk
+      params:
+        vm: ${vm}
+        sizeGb: 50
+
   outputs:
     - name: address
       value: ${vm.publicAddress}

@@ -118,6 +118,26 @@ Resources:
           - AllocationId
       InstanceId:
         Ref: Vm
+  Store:
+    Type: AWS::EC2::Volume
+    Properties:
+      AvailabilityZone:
+        Fn::GetAtt:
+          - Vm
+          - AvailabilityZone
+      Size: 50
+      Tags:
+        - Key: Name
+          Value: store
+      VolumeType: gp3
+  StoreAttachment:
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      Device: /dev/sdf
+      InstanceId:
+        Ref: Vm
+      VolumeId:
+        Ref: Store
   Logs:
     Type: AWS::S3::Bucket
 Outputs:

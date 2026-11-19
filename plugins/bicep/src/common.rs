@@ -191,9 +191,9 @@ pub fn lower_for(
         target: target.to_owned(),
         ..e
     };
-    let lowered = infra::lower(graph, |r, _| {
+    let lowered = infra::lower(graph, |r, graph| {
         infra::check_common(r).map_err(stamp)?;
-        expand(azure, r)
+        expand(azure, r, graph)
     })
     .map_err(stamp)?;
     let mut seen = std::collections::BTreeSet::new();
@@ -217,7 +217,7 @@ pub(crate) fn lower(graph: &ResourceGraph) -> Result<ResourceGraph, CompileError
     lower_for(graph, Dialect::Bicep, NAME)
 }
 
-fn expand(azure: Azure, r: &Resource) -> Result<Expansion, CompileError> {
+fn expand(azure: Azure, r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError> {
     let id = r.id.as_str();
     let own_id = || outputs(&[("id", azure.id(id))]);
     Ok(match r.r#type.as_str() {
@@ -342,7 +342,36 @@ fn expand(azure: Azure, r: &Resource) -> Result<Expansion, CompileError> {
                 ("id", azure.id(id)),
             ]),
         },
-        _ => vm(azure, r)?,
+        "disk" => Expansion {
+            order: Vec::new(),
+            resources: vec![azure.resource(
+                r,
+                None,
+                "Microsoft.Compute/disks",
+                COMPUTE_API,
+                azure.top(
+                    r,
+                    map(vec![
+                        (
+                            "sku",
+                            Value::Map(map(vec![("name", Value::from("StandardSSD_LRS"))])),
+                        ),
+                        (
+                            "properties",
+                            Value::Map(map(vec![
+                                (
+                                    "creationData",
+                                    Value::Map(map(vec![("createOption", Value::from("Empty"))])),
+                                ),
+                                ("diskSizeGB", Value::Uint(infra::disk_size(r))),
+                            ])),
+                        ),
+                    ]),
+                ),
+            )],
+            outputs: own_id(),
+        },
+        _ => vm(azure, r, graph)?,
     })
 }
 
@@ -387,7 +416,7 @@ fn azure_rule(i: usize, rule: &infra::FirewallRule) -> BTreeMap<String, Value> {
     ])
 }
 
-fn vm(azure: Azure, r: &Resource) -> Result<Expansion, CompileError> {
+fn vm(azure: Azure, r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError> {
     let id = r.id.as_str();
     let Some(key) = r.params.get("sshKey").cloned() else {
         return Err(azure.refuse(
@@ -499,18 +528,40 @@ fn vm(azure: Azure, r: &Resource) -> Result<Expansion, CompileError> {
         }
         None => map(vec![("id", image)]),
     };
+    let mut storage = map(vec![
+        ("imageReference", Value::Map(image_reference)),
+        (
+            "osDisk",
+            Value::Map(map(vec![("createOption", Value::from("FromImage"))])),
+        ),
+    ]);
+    // An Azure machine lists its data disks itself: each disk whose vm is
+    // this one, numbered in document order.
+    let disks = infra::disks_of(graph, id);
+    if !disks.is_empty() {
+        storage.insert(
+            "dataDisks".to_owned(),
+            Value::List(
+                disks
+                    .iter()
+                    .enumerate()
+                    .map(|(lun, d)| {
+                        Value::Map(map(vec![
+                            ("lun", Value::Uint(lun as u64)),
+                            ("createOption", Value::from("Attach")),
+                            (
+                                "managedDisk",
+                                Value::Map(map(vec![("id", azure.id_value(&d.id))])),
+                            ),
+                        ]))
+                    })
+                    .collect(),
+            ),
+        );
+    }
     let properties = map(vec![
         ("hardwareProfile", Value::Map(map(vec![("vmSize", size)]))),
-        (
-            "storageProfile",
-            Value::Map(map(vec![
-                ("imageReference", Value::Map(image_reference)),
-                (
-                    "osDisk",
-                    Value::Map(map(vec![("createOption", Value::from("FromImage"))])),
-                ),
-            ])),
-        ),
+        ("storageProfile", Value::Map(storage)),
         (
             "osProfile",
             Value::Map(map(vec![

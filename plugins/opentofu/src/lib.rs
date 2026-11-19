@@ -275,6 +275,7 @@ impl Emitter for OpenTofu {
             "address",
             "backend",
             "data.<type>",
+            "disk",
             "encryption",
             "ephemeral.<type>",
             "firewall",
