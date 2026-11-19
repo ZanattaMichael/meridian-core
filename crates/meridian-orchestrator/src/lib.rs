@@ -266,6 +266,7 @@ pub fn run_selected(
                 "rollsBack",
                 Value::from(rolling_back.as_ref().map_or("", |r| r.id.as_str())),
             ),
+            ("toolDebug", Value::Int(i64::from(options.tool_debug))),
         ],
     );
     journal.flush();
@@ -517,6 +518,7 @@ pub fn identifiers(
         credential: None,
         save_plan: false,
         saved_plan: None,
+        debug_level: 0,
     };
     plugin
         .identifiers(&context)

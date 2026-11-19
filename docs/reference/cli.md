@@ -256,6 +256,7 @@ dsc
   resources: <Module>/<Resource>, runner
   versions:  2, 3
   settings:  credential, engine, target
+  debug:     1: $VerbosePreference = 'Continue', 2: $VerbosePreference = 'Continue' $DebugPreference = 'Continue'
   imports:   PowerShell DSC configurations (*.ps1)
   imports:   DSC v3 configuration documents and DscPipelineRunner projects (*.dsc.yaml, *.dsc.yml, *.dsc.json, *.dsc.config.yaml, *.dsc.config.yml, *.dsc.config.json, Datum.yml, *.yaml, *.yml, *.json)
   sdk:       0.1.0 (protocol 2)
@@ -573,6 +574,8 @@ meridian signing verify --trusted-key acme.pub meridian-target-acme
 | `--keep-runs N` | | `50` | `plan`, `apply`, `drift`, `rollback`: how many runs' records to keep; a run's [tool logs](state.md#runsidlogs) go with its record |
 | `--log-limit SIZE` | | `10MiB` | `plan`, `apply`, `drift`, `rollback`: the most of one step's tool output kept, as in `512KiB` or a number of bytes. Past it the start and the end are kept, with a line saying how much was cut |
 | `--no-logs` | `MERIDIAN_NO_LOGS` | off | the same commands: keep no tool output in the state directory. It is still printed |
+| `--tool-debug`, `--tool-debug=LEVEL` | `MERIDIAN_TOOL_DEBUG` | `0` | `plan`, `apply`, `drift`, `rollback`: ask each step's tool for its own debug output, level `1` to `3`; the bare flag is `1`. [Asking a tool for more output](#asking-a-tool-for-more-output) |
+| `--tool-debug-step NAME` | | every step | with `--tool-debug`: only the document named; may be repeated |
 | `--out DIR` | | | `compile` only: where to write the compiled files |
 | `-l SELECTOR`, `--selector SELECTOR` | | every document | `compile`, `plan`, `apply`: run only the documents whose `metadata.labels` match, as in `tier=web,env!=prod`. May be repeated; every requirement must hold. [Labels and selectors](dsl/index.md#labels-and-selectors) |
 | `--data FILE` | | no data | `compile`, `plan`, `apply`: a YAML or JSON mapping of values that [`when`](dsl/index.md#when-and-runtimewhen) conditions and [interpolations](dsl/interpolation.md) read as `data.<key>`. May be repeated; a later file's key replaces an earlier file's |
@@ -597,6 +600,21 @@ error: site.yaml:34:7: spec.resources[0]: unknown field "colour"
 
 Stdout is untouched. `--annotations off|on` overrides detection (Buildkite needs `on`).
 See [running in a pipeline](../operations/running-in-a-pipeline.md).
+
+### Asking a tool for more output
+
+```
+meridian apply site.yaml --tool-debug=2 --tool-debug-step web
+```
+
+Each target maps the level to its tool's own switch: `-vvv` for Ansible,
+`TF_LOG=DEBUG` for Terraform. The [capability matrix](capability-matrix.md#--tool-debug)
+lists every target's levels, and `meridian plugins` prints them under `debug:`.
+
+- A level above the target's last uses its last.
+- A target with no levels runs as usual, with a warning.
+- The output is printed and kept in the [step's log](#logs), masked like every tool line.
+- The level is recorded in the run's `run.started` event and in its command.
 
 ### Running part of a workflow
 

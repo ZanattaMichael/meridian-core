@@ -21,6 +21,10 @@ use meridian_yaml::Yaml;
 use crate::emit::RENDERED_FILE;
 use crate::secret_token;
 
+/// What `--tool-debug` adds to the tool, level 1 first. Helm has one debug level.
+pub const DEBUG: &[meridian_sdk::debug::DebugLevel] =
+    &[meridian_sdk::debug::DebugLevel::args(&["--debug"])];
+
 /// Helm given the run's secrets, when it has any: the chart's `values.yaml`
 /// with each token replaced by its value, put together in protected memory
 /// and read by Helm on standard input as one more values file, which
@@ -292,6 +296,7 @@ impl HelmRunner {
             .args(operation.iter().copied())
             .args(["--namespace", &release.namespace])
             .args(self.helm_args.iter().cloned())
+            .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level))
             .dir(&context.work_dir)
     }
 
@@ -557,6 +562,10 @@ impl HelmRunner {
 }
 
 impl Runner for HelmRunner {
+    fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
+        DEBUG
+    }
+
     fn settings(&self) -> Vec<Setting> {
         settings()
     }

@@ -72,6 +72,8 @@ case "$verb" in
     done ;;
   stop)
     for s in "$@"; do rm -f "{d}/active/$s"; done ;;
+  status)
+    echo "status of $1" ;;
 esac"#
         ),
     );
@@ -920,4 +922,40 @@ fn a_credential_for_this_machine_is_refused() {
         "{err}"
     );
     assert!(!dir.join("ssh-agent.args").exists());
+}
+
+#[test]
+fn a_debug_level_shows_more_of_the_journal_systemds_status_and_quadlets_units() {
+    let dir = scratch(TMP, "debug");
+    let runner = host(&dir);
+    fs::write(dir.join("broken/web.service"), "").unwrap();
+    let at = |level: u32| RunContext {
+        debug_level: level,
+        ..context(&dir)
+    };
+    let err = runner
+        .apply(&at(2), &shop(), &KeptLog::default())
+        .unwrap_err();
+    assert!(
+        err.output
+            .contains("journal: --user -u web.service -n 100 --no-pager"),
+        "{}",
+        err.output
+    );
+    assert!(
+        err.output.contains("status of web.service"),
+        "{}",
+        err.output
+    );
+
+    let log = KeptLog::default();
+    runner.plan(&at(3), &shop(), &log).unwrap();
+    assert!(log.text().iter().any(|l| l == "[Unit]"), "{:?}", log.text());
+    let log = KeptLog::default();
+    runner.plan(&at(0), &shop(), &log).unwrap();
+    assert!(
+        !log.text().iter().any(|l| l == "[Unit]"),
+        "{:?}",
+        log.text()
+    );
 }

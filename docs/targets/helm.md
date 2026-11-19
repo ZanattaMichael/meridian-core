@@ -457,6 +457,8 @@ The plugin describes `chart`, `release`, `values` and `kustomization` itself.
 **Apply** skips a matching deployed release, adding no revision. A failed release is
 upgraded again; a plan shows it as "may change".
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `--debug` to `helm` at every level.
+
 ## Configuration
 
 Environment variables.

@@ -18,6 +18,21 @@ use meridian_sdk::{settings, Setting};
 
 use crate::{MANIFEST_PATH, SITE_PATH};
 
+/// What `--tool-debug` adds to `puppet apply` on this machine, level 1 first.
+pub const DEBUG: &[meridian_sdk::debug::DebugLevel] = &[
+    meridian_sdk::debug::DebugLevel::args(&["--evaltrace"]),
+    meridian_sdk::debug::DebugLevel::args(&["--debug"]),
+    meridian_sdk::debug::DebugLevel::args(&["--debug", "--trace"]),
+];
+
+/// What `--tool-debug` adds to `bolt apply`, level 1 first. Bolt logs to
+/// standard error, so the JSON report on standard output is unchanged.
+pub const BOLT_DEBUG: &[meridian_sdk::debug::DebugLevel] = &[
+    meridian_sdk::debug::DebugLevel::args(&["--log-level", "info"]),
+    meridian_sdk::debug::DebugLevel::args(&["--log-level", "debug"]),
+    meridian_sdk::debug::DebugLevel::args(&["--log-level", "trace"]),
+];
+
 /// Names the `puppet` program, when it is not on `PATH`.
 pub const PUPPET_VARIABLE: &str = "MERIDIAN_PUPPET";
 /// Names the `bolt` program, when it is not on `PATH`.
@@ -182,6 +197,7 @@ impl PuppetRunner {
     ) -> Result<Report, RunError> {
         let mut tool = Tool::new(&self.puppet)
             .args(["apply", "--detailed-exitcodes", "--color=false"])
+            .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level))
             .dir(&context.work_dir);
         if noop {
             tool = tool.arg("--noop");
@@ -256,7 +272,9 @@ impl PuppetRunner {
         if let Some(agent) = &agent {
             tool = agent.tell(tool);
         }
-        tool = tool.args(self.extra_args.iter().cloned());
+        tool = tool
+            .debug(meridian_sdk::debug::pick(BOLT_DEBUG, context.debug_level))
+            .args(self.extra_args.iter().cloned());
 
         let finished = tool.run(log)?;
         drop(inventory);
@@ -355,6 +373,16 @@ fn hiera_files(context: &RunContext) -> Result<Option<HieraFiles>, RunError> {
 }
 
 impl Runner for PuppetRunner {
+    fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
+        DEBUG
+    }
+
+    fn more_debug_levels(
+        &self,
+    ) -> &'static [(&'static str, &'static [meridian_sdk::debug::DebugLevel])] {
+        &[("bolt", BOLT_DEBUG)]
+    }
+
     fn settings(&self) -> Vec<Setting> {
         settings()
     }
@@ -511,7 +539,13 @@ fn is_event(property: &str, message: &str) -> bool {
 fn read_bolt(stdout: &str, noop: bool) -> Report {
     let mut report = Report::default();
     let statuses = decode_value(stdout.trim().as_bytes()).ok().and_then(|v| {
-        let item = v.as_map()?.get("items")?.as_list()?.first()?.clone();
+        // `bolt apply` prints a list of results; `bolt task run` and older
+        // releases wrap it as `{"items": [...]}`.
+        let items = match v.as_map() {
+            Some(map) => map.get("items")?.as_list()?.to_vec(),
+            None => v.as_list()?.to_vec(),
+        };
+        let item = items.first()?.clone();
         let value = item.as_map()?.get("value")?.clone();
         let statuses = value
             .as_map()?
@@ -525,7 +559,21 @@ fn read_bolt(stdout: &str, noop: bool) -> Report {
         report.unreadable = true;
         return report;
     };
-    for (name, status) in &statuses {
+    // The report keys statuses by name; the order Puppet evaluated them in
+    // is each one's time, which sorts as text.
+    let mut ordered: Vec<(&str, &String, &Value)> = statuses
+        .iter()
+        .map(|(name, status)| {
+            let time = status
+                .as_map()
+                .and_then(|m| m.get("time"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            (time, name, status)
+        })
+        .collect();
+    ordered.sort_by(|a, b| a.0.cmp(b.0));
+    for (_, name, status) in ordered {
         let Some(status) = status.as_map() else {
             continue;
         };

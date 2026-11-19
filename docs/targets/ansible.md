@@ -417,6 +417,8 @@ Each names the resource, line and rule:
 | a handler did not run | handlers run only when a task that notifies them changed | expected; change the notifier, or declare the state you want on the service |
 | a warning that resources are independent but run in sequence | a play is one sequence | expected; it says what the target cannot express |
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `-v`, `-vvv` or `-vvvv` to `ansible-playbook`.
+
 ## How it is tested
 
 - **Golden files** in `plugins/ansible/testdata/`, warnings and refusals included.

@@ -359,6 +359,8 @@ Handed-over values go to `preview` and `up` as `--config <name>=<value>` (JSON u
 text), set the same-named `config`, are never logged, and are saved in the stack settings
 file.
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `-v=3`, `-v=6` or `-v=9` with `--logtostderr` to every `pulumi` call.
+
 ## Secrets
 
 A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) becomes a secret config

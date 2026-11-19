@@ -14,6 +14,10 @@ use meridian_sdk::{settings, Setting};
 use crate::outputs::{self, Built};
 use crate::{BUILD_PATH, CONFIG_PATH, MANIFEST_PATH};
 
+/// What `--tool-debug` adds to the tool, level 1 first. Packer has one level of log.
+pub const DEBUG: &[meridian_sdk::debug::DebugLevel] =
+    &[meridian_sdk::debug::DebugLevel::env(&[("PACKER_LOG", "1")])];
+
 /// Names the program to run, when it is not `packer` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_PACKER";
 /// Extra arguments for `packer validate` and `packer build`, split like a
@@ -75,7 +79,8 @@ impl PackerRunner {
         let mut tool = Tool::new(&self.program)
             .dir(&context.work_dir)
             .env("PACKER_NO_COLOR", "1")
-            .env("CHECKPOINT_DISABLE", "1");
+            .env("CHECKPOINT_DISABLE", "1")
+            .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level));
         // Values handed over from earlier stages reach the template as input
         // variables, for a document that declares them. Packer ignores one it
         // has no variable for.
@@ -157,6 +162,10 @@ impl PackerRunner {
 }
 
 impl Runner for PackerRunner {
+    fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
+        DEBUG
+    }
+
     fn settings(&self) -> Vec<Setting> {
         settings()
     }

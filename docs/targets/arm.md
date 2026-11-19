@@ -293,6 +293,8 @@ See the [plugin settings reference](../reference/plugin-settings.md#arm).
 
 Operator values and secure parameters are never logged.
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `--verbose` to `az` at level 1 and `--debug` from level 2.
+
 ## Secrets
 
 A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) becomes a `securestring`

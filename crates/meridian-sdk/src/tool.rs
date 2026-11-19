@@ -190,6 +190,19 @@ impl Tool {
         self
     }
 
+    /// Adds what a debug level asks of the tool: its arguments, here, and its
+    /// environment. `None`, a run that asked for no debug output, adds
+    /// nothing. See [`crate::debug`].
+    pub fn debug(mut self, level: Option<&crate::debug::DebugLevel>) -> Self {
+        if let Some(level) = level {
+            self = self.args(level.args.iter().copied());
+            for (key, value) in level.env {
+                self = self.env(*key, *value);
+            }
+        }
+        self
+    }
+
     /// A secret the tool's process is given in its environment, which is
     /// the last channel the plan allows (rank 4): the environment of a
     /// process can be read by the same user through `/proc/<pid>/environ`,

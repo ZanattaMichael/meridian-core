@@ -224,7 +224,7 @@ These words are never reused. See also
 | Type | When | `detail` |
 |---|---|---|
 | `lock.acquired` | the run holds the lock | `id` |
-| `run.started` | the run begins | `mode`, `command`, `resumes`, `rollsBack` (the run a `rollback` puts back), `plan` (the run that took the saved plan an `apply --plan` carries out) |
+| `run.started` | the run begins | `mode`, `command`, `resumes`, `rollsBack` (the run a `rollback` puts back), `plan` (the run that took the saved plan an `apply --plan` carries out), `toolDebug` (the [`--tool-debug`](cli.md#asking-a-tool-for-more-output) level, 0 when off) |
 | `step.started` | a step begins | `kind` |
 | `resource.planned` | one line of a plan, or of a drift check | `kind`, `resource`, `action` |
 | `resource.changed` | one thing an apply or a rollback changed, including what a failed apply had done before it failed | `kind`, `resource`, `action` |
