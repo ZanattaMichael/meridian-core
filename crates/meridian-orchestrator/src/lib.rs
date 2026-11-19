@@ -42,6 +42,7 @@ pub mod event;
 pub mod history;
 pub mod inspect;
 mod journal;
+mod lab_tags;
 pub mod lock;
 pub mod logs;
 mod options;

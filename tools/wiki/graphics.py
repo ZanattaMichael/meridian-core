@@ -685,12 +685,12 @@ def lab_flow() -> str:
     # Per cell.
     cy = 290
     p.append(heading(40, cy - 12, "Each cell has its own"))
-    p.append(card(40, cy, 360, 110, "state and id", ["lab/nightly/<run>/<cell>-<case>/", "meridian.run.id = <run>-<cell>", "meridian.lab.target, .provider, …", "environment.json: how to destroy it"], WHITE, 16, 12.5, True))
+    p.append(card(40, cy, 360, 110, "state, id and tags", ["lab/nightly/<run>/<cell>-<case>/", "meridian.run.id = <run>-<cell>", "tags: meridian-lab-run, -cell, -expires", "environment.json: how to destroy it"], WHITE, 16, 12.5, True))
     p.append(card(440, cy, 340, 110, "report", ["ok / FAIL per cell, and per phase;", "--output json: one object;", "--junit FILE: a suite per cell;", "lab list: the last run"], WHITE, 16, 12.5))
     p.append(card(820, cy, 340, 110, "lab sweep", ["destroys what a failed destroy,", "--keep or a killed run left,", "once its expiry has passed", "(or --older-than)"], PIPE, 16, 12.5, True))
     p.append(flow(f"M990 236L990 {cy}", PIPE, delay=2.4, seconds=1.6))
     p.append(caption(W, H, "One cell failing does not stop the others. A destroyed cell's directory is removed; one left behind waits for sweep."))
-    return doc(W, H, "meridian lab: a Lab document's matrix expands into cells; each cell provisions, verifies and destroys its environment in a state directory of its own, under its own run id, concurrency at a time; sweep destroys what kept or killed runs left once it expires", "".join(p))
+    return doc(W, H, "meridian lab: a Lab document's matrix expands into cells; each cell provisions, verifies and destroys its environment in a state directory of its own, under its own run id and tags, concurrency at a time; sweep destroys what kept or killed runs left once it expires", "".join(p))
 
 
 def test_flow() -> str:

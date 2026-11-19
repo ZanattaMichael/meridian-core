@@ -24,7 +24,7 @@ pub const LAB_KIND: &str = "Lab";
 pub const DEFAULT_EXPIRY: Duration = Duration::from_secs(2 * 3600);
 
 /// Names a matrix axis cannot take: they are the lab's own.
-const RESERVED_AXES: &[&str] = &["run", "cell"];
+const RESERVED_AXES: &[&str] = &["run", "cell", "expires"];
 
 /// One `Lab` document.
 #[derive(Clone, Debug, PartialEq)]
@@ -114,8 +114,8 @@ pub fn load_lab(path: &Path) -> Result<LabFile, String> {
                 return Err(r.refuse(
                     &at,
                     format!(
-                        "an axis is named with letters, digits and _, and not {}",
-                        RESERVED_AXES.join(" or ")
+                        "an axis is named with letters, digits and _, and is not {}",
+                        RESERVED_AXES.join(", ")
                     ),
                 ));
             }
@@ -313,6 +313,7 @@ pub fn run_lab(
             .collect();
         lab_values.insert("run".to_owned(), Value::String(run.to_owned()));
         lab_values.insert("cell".to_owned(), Value::Uint(cell.number as u64));
+        lab_values.insert("expires".to_owned(), Value::Uint(expires));
         let place = Place {
             scratch: base.join(format!(
                 "{}-{}",

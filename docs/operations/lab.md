@@ -4,7 +4,7 @@
 [lifecycle case](../reference/testing.md#lifecycle-cases) of some Test files, under each
 combination of a matrix of values. One combination of one case is a **cell**.
 
-<p align="center"><img src="../graphics/meridian-lab.svg" alt="meridian lab: a Lab document's matrix expands into cells; each cell provisions, verifies and destroys its environment in a state directory of its own, under its own run id, concurrency at a time; sweep destroys what kept or killed runs left once it expires" width="100%"></p>
+<p align="center"><img src="../graphics/meridian-lab.svg" alt="meridian lab: a Lab document's matrix expands into cells; each cell provisions, verifies and destroys its environment in a state directory of its own, under its own run id and tags, concurrency at a time; sweep destroys what kept or killed runs left once it expires" width="100%"></p>
 
 ## A lab
 
@@ -29,7 +29,7 @@ spec:
 |---|---|---|
 | `metadata.name` | yes | Lowercase letters, digits and `-`; names the lab's directory |
 | `spec.environments` | yes | Test files, relative to the lab file. Their `run: lifecycle` cases are the environments; other cases are ignored |
-| `spec.matrix` | no | Axes, each a list of values (text, numbers or `true`/`false`). An axis is named with letters, digits and `_`, not `run` or `cell`. No matrix: one cell per case |
+| `spec.matrix` | no | Axes, each a list of values (text, numbers or `true`/`false`). An axis is named with letters, digits and `_`, not `run`, `cell` or `expires`. No matrix: one cell per case |
 | `spec.exclude` | no | Combinations left out; each names some axes and a value of each |
 | `spec.concurrency` | no | How many cells run at once. Default `1` |
 | `spec.expiry` | no | How long a cell's environment lives before `lab sweep` destroys it: `30m`, `2h`. Default `2h` |
@@ -44,6 +44,7 @@ localstack.
 | `meridian.lab.<axis>` | The cell's value for that axis, as text |
 | `meridian.lab.run` | The lab run's id, `l` and 8 hex digits |
 | `meridian.lab.cell` | The cell's number, from 1 |
+| `meridian.lab.expires` | When `lab sweep` may destroy the cell's environment, in seconds since the Unix epoch |
 | `meridian.run.id` | `<lab run>-<cell>`, as in `l3f9a2c1d-2`. Name and tag what the cell makes with it |
 
 A document picks its cells with `when`:
@@ -62,6 +63,29 @@ spec:
 ```
 
 A target that cannot [destroy](destroying.md) is refused only when a cell runs its documents.
+
+## Tags
+
+Every resource a cell makes whose type takes `tags` (every
+[common infrastructure type](../reference/dsl/common-infrastructure-types.md)) carries:
+
+| Tag | Value |
+|---|---|
+| `meridian-lab-run` | `meridian.lab.run` |
+| `meridian-lab-cell` | `meridian.lab.cell` |
+| `meridian-lab-expires` | `meridian.lab.expires` |
+
+The target writes them as it writes the document's own tags: AWS tags, Azure tags, Google Cloud
+labels. A resource that carries no tags on its cloud (an Azure subnet; a Google Cloud network,
+subnet or firewall) is left without them. A tool's own type, such as `aws_instance`, is tagged
+by its document:
+
+```yaml
+params:
+  tags:
+    meridian-lab-run: "${{ meridian.lab.run }}"
+    meridian-lab-cell: "${{ meridian.lab.cell }}"
+```
 
 ## Running
 
@@ -104,9 +128,7 @@ scheduled lab run.
 
 ## What is not here yet
 
-- **Tags on every resource** (`meridian.lab/run`, `meridian.lab/cell`,
-  `meridian.lab/expires`) through each target's tag mechanism, and a sweep that finds
-  resources by those tags when the state directory is gone.
+- **A sweep that finds resources by their tags** when the state directory is gone.
 - **Faults** to break an environment and the diagnosis each must produce
   ([issue 237](https://github.com/ZanattaMichael/meridian-core/issues/237)).
 - **The self-hosted runner and workflow** ([issue 238](https://github.com/ZanattaMichael/meridian-core/issues/238)).

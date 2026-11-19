@@ -78,6 +78,7 @@ fn scratch(test: &str, expiry: &str) -> PathBuf {
 fn meridian(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_meridian"))
         .env("MERIDIAN_ANNOTATIONS", "off")
+        .env("FAKE_TAGS", "on")
         .env(
             "MERIDIAN_PLUGIN_DIR",
             meridian_target_fake::plugin_dir().display().to_string(),
@@ -266,6 +267,24 @@ fn sweep_destroys_kept_environments_once_they_are_due() {
         .join(&run)
         .join("2-network/infrastructure/network/fake/current/files/tag");
     assert_eq!(fs::read_to_string(tag).unwrap(), format!("{run}-2 small b"));
+    // And the lab's tags are on everything it made that takes tags.
+    let tags = dir
+        .join(".meridian/lab/nightly")
+        .join(&run)
+        .join("2-network/infrastructure/network/fake/current/tags/vm");
+    let tags: Json = serde_json::from_str(&fs::read_to_string(tags).unwrap()).unwrap();
+    assert_eq!(tags["meridian-lab-run"], run.as_str(), "{tags}");
+    assert_eq!(tags["meridian-lab-cell"], "2", "{tags}");
+    let expires: u64 = tags["meridian-lab-expires"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    assert!(expires > now && expires <= now + 3600, "{tags}");
 
     // Not expired yet.
     let early = meridian(&dir, &["lab", "sweep"]);
@@ -322,7 +341,7 @@ fn a_lab_with_a_mistake_is_refused_before_anything_runs() {
         ),
         (
             lab_file("1h").replace("zone: [a, b]", "run: [a, b]"),
-            "spec.matrix.run: an axis is named with letters, digits and _, and not run or cell",
+            "spec.matrix.run: an axis is named with letters, digits and _, and is not run, cell, expires",
         ),
         (
             lab_file("1h").replace("name: nightly", "name: Nightly Run"),

@@ -1013,6 +1013,13 @@ impl Run<'_> {
         // write a reference the operator recognises. Only a target that
         // takes secrets is read with any (see `read`).
         name_secrets(&mut graph, declared_secrets);
+        // A lab cell's tags go on everything it makes that takes tags, so
+        // what it made can be told apart, and found, by run and cell.
+        crate::lab_tags::apply(
+            &mut graph,
+            &info.resource_schemas,
+            &crate::lab_tags::of(&options.data),
+        );
         let failed =
             |reason: Reason, why: String, host: String| NotCompiled::Failed { reason, why, host };
         // The run id reached every value through the resolve; the plugin is

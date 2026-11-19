@@ -502,3 +502,31 @@ fn an_azure_disk_takes_the_next_lun() {
     assert!(text.contains("\"lun\": 0"), "{text}");
     assert!(!text.contains("a_attachment"), "{text}");
 }
+
+#[test]
+fn a_labs_tags_reach_every_cloud_and_are_left_off_what_carries_none() {
+    let lab = "{meridian-lab-run: l0000abcd, meridian-lab-cell: \"2\", meridian-lab-expires: \"1800000000\"}";
+    // Google Cloud: labels on the address, none on the network.
+    let text = config(&format!(
+        "{GCP}    - id: net\n      type: network\n      params: {{cidr: 10.0.0.0/16, tags: {lab}}}\n    - id: ip\n      type: address\n      params: {{tags: {lab}}}\n"
+    ));
+    assert_eq!(
+        text.matches("\"meridian-lab-run\": \"l0000abcd\"").count(),
+        1,
+        "{text}"
+    );
+    // Azure: tags on the network, none on the subnet.
+    let text = config(&format!(
+        "  settings:\n    cloud: azure\n    location: westeurope\n    resourceGroup: rg\n  resources:\n    - id: net\n      type: network\n      params: {{cidr: 10.0.0.0/16, tags: {lab}}}\n    - id: s\n      type: subnet\n      params: {{network: \"${{net}}\", cidr: 10.0.1.0/24, tags: {lab}}}\n"
+    ));
+    assert_eq!(
+        text.matches("\"meridian-lab-cell\": \"2\"").count(),
+        1,
+        "{text}"
+    );
+    // An author's own tag where the cloud carries none is still refused.
+    let err = refusal(&format!(
+        "{GCP}    - id: net\n      type: network\n      params: {{cidr: 10.0.0.0/16, tags: {{team: web}}}}\n"
+    ));
+    assert_eq!(err.rule, "unsupported-param");
+}
