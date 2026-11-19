@@ -51,7 +51,7 @@ jobs:
       version: ${{ steps.plan.outputs.version }}
       publish: ${{ steps.plan.outputs.publish }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - id: plan
         env:
@@ -105,7 +105,7 @@ jobs:
       TARGET: ${{ matrix.target }}
       PYTHON: ${{ startsWith(matrix.os, 'windows') && 'python' || 'python3' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the stable toolchain
         run: |
@@ -184,7 +184,7 @@ jobs:
           fi
           grep -q "its contents have changed" changed.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: archive-${{ matrix.target }}
           path: dist/meridian-*
@@ -198,9 +198,9 @@ jobs:
     env:
       VERSION: ${{ needs.plan.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: archive-*
           path: dist
@@ -255,7 +255,7 @@ jobs:
           rm -rf dist/packaging
           ls -l dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-files
           path: dist
@@ -273,7 +273,7 @@ jobs:
     env:
       VERSION: ${{ needs.plan.outputs.version }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-files
           path: dist
@@ -332,7 +332,7 @@ jobs:
     name: cargo install from source
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the stable toolchain
         run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
@@ -356,9 +356,9 @@ jobs:
     env:
       VERSION: ${{ needs.plan.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: archive-*-unknown-linux-musl
           path: dist
@@ -367,8 +367,8 @@ jobs:
       - name: Lay out the build context
         run: tools/release/image-context.sh "$VERSION" dist context
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build the image for both platforms
         run: |
@@ -409,9 +409,9 @@ jobs:
       VERSION: ${{ needs.plan.outputs.version }}
       IMAGE: ghcr.io/${{ github.repository_owner }}/meridian
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-files
           path: dist
@@ -427,12 +427,12 @@ jobs:
             "dist/meridian-$VERSION-checksums.txt"
 
       - name: Record where the archives were built
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-checksums: dist/meridian-${{ needs.plan.outputs.version }}-checksums.txt
 
       - name: Attest the SBOM for the archives
-        uses: actions/attest-sbom@v2
+        uses: actions/attest-sbom@v4
         with:
           subject-checksums: dist/meridian-${{ needs.plan.outputs.version }}-checksums.txt
           sbom-path: dist/meridian-${{ needs.plan.outputs.version }}-sbom.spdx.json
@@ -440,8 +440,8 @@ jobs:
       - name: Lay out the image's build context
         run: tools/release/image-context.sh "$VERSION" dist context
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
         env:
@@ -470,7 +470,7 @@ jobs:
         run: cosign sign --yes "$NAME@$DIGEST"
 
       - name: Record where the image was built
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ steps.image.outputs.name }}
           subject-digest: ${{ steps.image.outputs.digest }}

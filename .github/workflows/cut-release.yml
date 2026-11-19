@@ -58,7 +58,7 @@ jobs:
       contents: write # push the tag
       actions: write # start the release workflow
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || 'main' }}
           fetch-depth: 0
