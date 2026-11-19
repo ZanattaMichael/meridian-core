@@ -10,6 +10,8 @@ meridian rollback <files>... [--run RUN]
 meridian status
 meridian runs
 meridian events   [RUN] [--type TYPE]
+meridian logs     [RUN] [--step NAME] [--endpoint ENDPOINT] [--stream STREAM] [--grep RE] [--tail N] [--all]
+meridian bug-report [RUN] [--out FILE]
 meridian report   [RUN] [--format FORMAT] [--out FILE] [--from FILE]
 meridian unlock   <ID>
 meridian plugins
@@ -182,6 +184,51 @@ A run's [events](state.md#events) (default: the last), one per line. `--type` fi
 ```
 meridian events --type step.failed --type 'resource.*'
 ```
+
+### `logs`
+
+Prints the tool output a run kept on this machine
+([`runs/<id>/logs/`](state.md#runsidlogs)), the last run's when no run is
+named. With no filter it shows the failed steps, or every step when none
+failed; `--all` shows every step regardless.
+
+```
+$ meridian logs
+== web (ResourceSet, target ansible on 203.0.113.10): failed (tool-failed)
+   .meridian/runs/2026-11-17T09-14-03Z-0cc7/logs/resourceset/web@203.0.113.10.log
+2026-11-17T09:15:09.880Z stdout TASK [nginx : install] ****
+2026-11-17T09:15:11.102Z stderr fatal: [203.0.113.10]: FAILED! => {"msg": "No package matching 'nginx'"}
+2026-11-17T09:15:11.204Z meridian step failed (tool-failed): ansible-playbook exited 2
+```
+
+| Option | Keeps |
+|---|---|
+| `--step NAME` | the step of that document |
+| `--endpoint ENDPOINT` | the step on that machine, as `status` shows it |
+| `--stream STREAM` | lines of one stream: `stdout`, `stderr`, or `meridian` (what Meridian added) |
+| `--grep RE` | lines whose text matches the regular expression |
+| `--tail N` | the last `N` lines of each step, after the other filters |
+
+A step whose output was not kept (`--no-logs`, another machine, or a step
+that ran no tool) is listed with `no tool output was kept on this machine`.
+
+### `bug-report`
+
+Writes one `.tar.gz` of a run, the last one when no run is named, for a bug
+report. It sends nothing anywhere. `--out FILE` names the archive; the default
+is `meridian-bug-report-<RUN>.tar.gz` in the current directory, readable only
+by its owner.
+
+| File in `meridian-bug-report-<RUN>/` | Holds |
+|---|---|
+| `run.json`, `events.jsonl` | the run's [record](state.md#runsidrunjson) and [events](state.md#events) |
+| `logs/<kind>/<document>[@<endpoint>].log` | the tool output this machine kept, masked |
+| `version.txt` | what `meridian version` prints |
+| `plugins.json` | the plugins of the run's targets, as `meridian plugins --output json` lists them |
+
+Everything in it is copied as it was kept, so it holds no secret value. The
+record names the operating system user and the machine that ran; read the
+archive before you share it.
 
 ### `report`
 
@@ -523,7 +570,9 @@ meridian signing verify --trusted-key acme.pub meridian-target-acme
 | `--sink NAME` | `MERIDIAN_SINKS` (separated by `,`) | | the same commands: send every event, as it happens, to a [sink](reporting.md#sinks); may be repeated |
 | `--sink-config SINK.KEY=VALUE` | | | a setting for a sink; may be repeated. `on` chooses the event types and `required=true` fails the run when the sink fails |
 | `--sink-timeout DURATION` | | `30s` | how long a sink has to finish sending after the run's last event |
-| `--keep-runs N` | | `50` | `plan`, `apply`, `drift`, `rollback`: how many runs' records to keep |
+| `--keep-runs N` | | `50` | `plan`, `apply`, `drift`, `rollback`: how many runs' records to keep; a run's [tool logs](state.md#runsidlogs) go with its record |
+| `--log-limit SIZE` | | `10MiB` | `plan`, `apply`, `drift`, `rollback`: the most of one step's tool output kept, as in `512KiB` or a number of bytes. Past it the start and the end are kept, with a line saying how much was cut |
+| `--no-logs` | `MERIDIAN_NO_LOGS` | off | the same commands: keep no tool output in the state directory. It is still printed |
 | `--out DIR` | | | `compile` only: where to write the compiled files |
 | `-l SELECTOR`, `--selector SELECTOR` | | every document | `compile`, `plan`, `apply`: run only the documents whose `metadata.labels` match, as in `tier=web,env!=prod`. May be repeated; every requirement must hold. [Labels and selectors](dsl/index.md#labels-and-selectors) |
 | `--data FILE` | | no data | `compile`, `plan`, `apply`: a YAML or JSON mapping of values that [`when`](dsl/index.md#when-and-runtimewhen) conditions and [interpolations](dsl/interpolation.md) read as `data.<key>`. May be repeated; a later file's key replaces an earlier file's |

@@ -78,6 +78,30 @@ pub(crate) fn import_configuration(
     outcome
 }
 
+/// What a plugin can do, in the words `meridian plugins` lists.
+pub(crate) fn abilities(info: &meridian_plugin_host::Info) -> Vec<&'static str> {
+    let mut can = vec!["compile"];
+    if info.operations.plan {
+        can.push("plan");
+    }
+    if info.operations.apply {
+        can.push("apply");
+    }
+    if info.operations.outputs {
+        can.push("outputs");
+    }
+    if info.accepts_inputs {
+        can.push("inputs");
+    }
+    if !info.import_formats.is_empty() {
+        can.push("import");
+    }
+    if info.exports_schemas {
+        can.push("schemas");
+    }
+    can
+}
+
 pub(crate) fn list_plugins(
     plugins: &PluginDirs,
     with_settings: bool,
@@ -95,25 +119,7 @@ pub(crate) fn list_plugins(
             .target(name)
             .expect("a listed target exists")
             .info();
-        let mut can = vec!["compile"];
-        if info.operations.plan {
-            can.push("plan");
-        }
-        if info.operations.apply {
-            can.push("apply");
-        }
-        if info.operations.outputs {
-            can.push("outputs");
-        }
-        if info.accepts_inputs {
-            can.push("inputs");
-        }
-        if !info.import_formats.is_empty() {
-            can.push("import");
-        }
-        if info.exports_schemas {
-            can.push("schemas");
-        }
+        let can = abilities(info);
         if json_output() {
             listed.push(output::plugin(name, info, &can));
             continue;

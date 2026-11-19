@@ -2,12 +2,12 @@
 
 Locks, run records, resuming, stopping, sharing, rollback, drift and policy checks.
 
-<p align="center"><img src="../graphics/meridian-run-safety.svg" alt="Running safely: the lock, the policy check, the record of every event, the run-state, and what happens when a stage fails" width="100%"></p>
+<p align="center"><img src="../graphics/meridian-run-safety.svg" alt="Running safely: the lock, the policy check, the record of every event, the run-state, the tool logs kept on the machine, and what happens when a stage fails" width="100%"></p>
 
 - Each tool owns its state. Meridian records what it did; outputs are read back from the
   tool, never stored.
 - The record holds steps, resource ids, output names and artifact hashes, never a param,
-  output value or tool output.
+  output value or tool output. Tool output is kept apart, masked, on the machine that ran.
 - `compile` and `validate` take no lock and leave no record.
 
 ## One run at a time
@@ -49,12 +49,15 @@ not locked
 | `meridian runs` | every recorded run, oldest first, with its mode and how it ended |
 | `meridian events [run]` | the run's events, one JSON object per line; `--type step.failed` or `--type 'step.*'` narrows them |
 | `--events json` on `plan` or `apply` | the same events on standard output while the run is going, for CI |
+| `meridian logs [run]` | the tool output each step printed, kept on this machine; by default the failed steps |
+| `meridian bug-report [run]` | one archive of the run's record, events, tool output and versions, to attach to an issue; it sends nothing |
 
 A killed run never records how it ended. `status` shows it as `interrupted`,
 with the last step it started.
 
 A failed step records a fixed reason (`tool-failed`, `plugin-failed`, `compile-refused`,
-...), never the tool's message.
+...), never the tool's message. The tool's output is kept, masked, on the machine that ran
+([`runs/<id>/logs/`](../reference/state.md#runsidlogs)); `meridian logs` prints it.
 
 The newest 50 runs are kept; change with `--keep-runs N`. Every file and field
 is in [the state reference](../reference/state.md).
