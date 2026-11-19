@@ -721,7 +721,7 @@ def common_types() -> str:
     for i in range(5):
         y = 92 + i * 80
         p.append(flow(f"M290 {y}C315 {y} 315 {y} 340 {y}", IAC, delay=i * 0.35, seconds=2.4))
-    p.append(caption(W, H, "The same outputs on every cloud: id, privateAddress, publicAddress. What a cloud cannot express is refused, never dropped."))
+    p.append(caption(W, H, "Pulumi makes the Terraform resources with its own type tokens. The same outputs everywhere: id, privateAddress, publicAddress."))
     return doc(W, H, "The common infrastructure types: network, subnet, firewall, address and vm written once, and the native resources Terraform for AWS, CloudFormation, Terraform for Azure, and Bicep and ARM compile each of them to", "".join(p))
 
 
