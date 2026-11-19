@@ -65,6 +65,15 @@ later. Until then a document that names one for them is refused before anything 
 
 ## Status
 
-Proposed. Open to the owner: whether `bicep` and `arm` should take a credential through a
-private configuration directory, and whether the plan line's wording is the right amount
-of warning for rank 4.
+Proposed, with the owner's direction of 2026-11-19 to be built:
+
+- Credentials are kept in credential providers (a vault, a keychain, a cloud secret store).
+  Meridian reads a credential from its provider when a run needs it and never stores one.
+  Reading from those providers is not built yet; today a secret comes from `env` or a file.
+- A credential goes on a tool's command line only when the document asks for that
+  explicitly. With that opt-in, `bicep` and `arm` can run `az login` instead of refusing.
+  The opt-in is not built yet.
+- The environment route above stays for the tools that read a login nowhere else.
+
+Still open: which providers come first, and whether the plan line's wording is the right
+amount of warning for rank 4.
