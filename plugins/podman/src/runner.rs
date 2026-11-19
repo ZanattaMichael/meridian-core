@@ -497,6 +497,55 @@ impl Runner for PodmanRunner {
         Operations::ALL
     }
 
+    fn inspects(&self) -> bool {
+        true
+    }
+
+    /// The same look at the host a plan takes, which changes nothing: the
+    /// unit file installed or not, and the state systemd has its service in.
+    fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        _endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunError> {
+        let agent = self.session(context, &NoLog)?;
+        let survey = self.survey(context, artifact, agent.as_ref(), &NoLog)?;
+        let Some(unit) = survey.meta.units.iter().find(|u| u.id == resource) else {
+            return Err(RunError::new(format!(
+                "the document has no unit for {resource:?}"
+            )));
+        };
+        let file = survey
+            .probe
+            .files
+            .get(&unit.file)
+            .copied()
+            .unwrap_or(FileState::New);
+        let mut actual = meridian_sdk::Data::new();
+        actual.insert(
+            "unitFile".to_owned(),
+            Value::from(match file {
+                FileState::New => "not installed",
+                FileState::Changed => "differs from the document",
+                FileState::Same => "as the document writes it",
+            }),
+        );
+        if let Some(active) = survey.probe.active.get(&unit.service) {
+            actual.insert("active".to_owned(), Value::String(active.clone()));
+        }
+        Ok(meridian_sdk::Inspection {
+            found: file != FileState::New,
+            actual,
+            in_desired_state: Some(!survey.changes.iter().any(|c| c.resource == resource)),
+            command: format!(
+                "systemctl is-active {}; compare {} with the installed unit",
+                unit.service, unit.file
+            ),
+        })
+    }
+
     fn plan(
         &self,
         context: &RunContext,

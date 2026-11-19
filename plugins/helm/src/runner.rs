@@ -717,6 +717,94 @@ impl Runner for HelmRunner {
         self.read_outputs(context, &Release::read(&settings)?)
     }
 
+    fn inspects(&self) -> bool {
+        true
+    }
+
+    /// An object of the chart is read with `kubectl get`, cut to what the
+    /// rendered chart declares; the release itself with `helm status`. The
+    /// rendered chart compared with `helm get manifest` says whether it is
+    /// as declared, as a plan does.
+    fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        _endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunError> {
+        let preview = self.preview(context, artifact, &NoLog)?;
+        let release = &preview.rendered.release;
+        let Some(target) = release.resources.get(resource) else {
+            // The release, its chart or its values: what Helm says of the
+            // release as a whole.
+            let mut actual = meridian_sdk::Data::new();
+            if let Some(status) = &preview.status {
+                actual.insert("status".to_owned(), Value::String(status.clone()));
+            }
+            return Ok(meridian_sdk::Inspection {
+                found: preview.status.is_some(),
+                actual,
+                in_desired_state: Some(preview.in_sync()),
+                command: format!(
+                    "helm status {}; helm get manifest {}",
+                    release.name, release.name
+                ),
+            });
+        };
+        let kind = target.kind.to_ascii_lowercase();
+        let applied_as = match target.api_version.split_once('/') {
+            Some((group, _)) => format!("{kind}.{group}/{}", target.name),
+            None => format!("{kind}/{}", target.name),
+        };
+        let command = format!(
+            "kubectl get {applied_as} --output json; helm get manifest {}",
+            release.name
+        );
+        let namespace = if target.namespace.is_empty() {
+            &release.namespace
+        } else {
+            &target.namespace
+        };
+        let got = Tool::new(&self.kubectl)
+            .args(["get", &applied_as])
+            .args(["--namespace", namespace, "--output", "json"])
+            .args(self.kubectl_args.iter().cloned())
+            .dir(&context.work_dir)
+            .capture_stdout()
+            .run(&NoLog)?;
+        if !got.success() {
+            if got.stderr.contains("NotFound") {
+                return Ok(meridian_sdk::Inspection {
+                    found: false,
+                    in_desired_state: Some(false),
+                    command,
+                    ..Default::default()
+                });
+            }
+            return Err(got.into_error(format!(
+                "kubectl could not read the {} {}",
+                target.kind, target.name
+            )));
+        }
+        let declared = meridian_target_kubernetes::inspect::declared(
+            &preview.rendered.manifests,
+            &[&applied_as],
+        )
+        .map_err(|e| RunError::new(format!("the rendered chart could not be read: {e}")))?;
+        let actual = match declared.first() {
+            Some(declared) => meridian_target_kubernetes::inspect::actual(&got.stdout, declared)
+                .map_err(|e| RunError::new(format!("kubectl printed what is not JSON: {e}")))?,
+            None => meridian_sdk::Data::new(),
+        };
+        let changed = preview.changes.iter().any(|c| c.resource == resource);
+        Ok(meridian_sdk::Inspection {
+            found: true,
+            actual,
+            in_desired_state: Some(!changed && preview.status.as_deref() == Some("deployed")),
+            command,
+        })
+    }
+
     fn destroys(&self) -> bool {
         true
     }

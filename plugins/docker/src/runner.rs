@@ -654,6 +654,41 @@ pub(crate) fn diff(desired: &Desired, actual: &Actual) -> Plan {
     }
 }
 
+/// What `docker inspect` says of a container that a document can declare:
+/// its image, status, health and restarts. Its environment, which can hold
+/// secrets, is left out.
+pub(crate) fn read_inspected(json: &str) -> meridian_sdk::Data {
+    let mut actual = meridian_sdk::Data::new();
+    let Ok(value) = decode_value(json.trim().as_bytes()) else {
+        return actual;
+    };
+    let Some(container) = value
+        .as_list()
+        .and_then(|l| l.first())
+        .and_then(Value::as_map)
+    else {
+        return actual;
+    };
+    let at = |path: &[&str]| {
+        let mut value = container.get(path[0])?;
+        for key in &path[1..] {
+            value = value.as_map()?.get(*key)?;
+        }
+        Some(value.clone())
+    };
+    for (name, path) in [
+        ("image", &["Config", "Image"][..]),
+        ("status", &["State", "Status"]),
+        ("health", &["State", "Health", "Status"]),
+        ("restartCount", &["RestartCount"]),
+    ] {
+        if let Some(value) = at(path).filter(|v| *v != Value::Null) {
+            actual.insert(name.to_owned(), value);
+        }
+    }
+    actual
+}
+
 /// One failure per service whose container `docker inspect` shows broken:
 /// an error starting it, killed for memory, exited with a status other
 /// than 0, or unhealthy. A container created and never started waited on
@@ -766,6 +801,74 @@ impl Runner for DockerRunner {
 
     fn operations(&self) -> Operations {
         Operations::ALL
+    }
+
+    fn inspects(&self) -> bool {
+        true
+    }
+
+    /// A service is read from `docker inspect` of its container, a network
+    /// or volume from Docker's listing of the project's. The file compared
+    /// with what Docker runs, as a plan compares them, says whether it is as
+    /// declared.
+    fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        _endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunError> {
+        let project = self.prepare(context, artifact)?;
+        let secrets = secrets_file(context)?;
+        let (desired, actual) = self.inventory(context, &project, secrets.as_ref(), &NoLog)?;
+        drop(secrets);
+        let plan = diff(&desired, &actual);
+        let changed = plan.changes.iter().any(|c| c.resource == resource);
+        let named = |list: &[(String, String)]| {
+            list.iter()
+                .find(|(key, _)| key == resource)
+                .map(|(_, name)| name.clone())
+        };
+        if let Some((name, kind, set)) = named(&desired.networks)
+            .map(|n| (n, "network", &actual.networks))
+            .or_else(|| named(&desired.volumes).map(|n| (n, "volume", &actual.volumes)))
+        {
+            return Ok(meridian_sdk::Inspection {
+                found: set.contains(&name),
+                in_desired_state: Some(!changed),
+                command: format!(
+                    "docker {kind} ls --filter label={PROJECT_LABEL}={}",
+                    project.name
+                ),
+                ..Default::default()
+            });
+        }
+        let Some(service) = desired.services.iter().find(|s| s.name == resource) else {
+            return Err(RunError::new(format!(
+                "{COMPOSE_PATH} has no service, network or volume {resource:?}"
+            )));
+        };
+        let command = format!("docker compose ps --all {resource}; docker inspect CONTAINER");
+        let in_desired_state = if service.builds { None } else { Some(!changed) };
+        let Some(container) = actual.containers.iter().find(|c| c.service == resource) else {
+            return Ok(meridian_sdk::Inspection {
+                found: false,
+                in_desired_state,
+                command,
+                ..Default::default()
+            });
+        };
+        let inspected = self
+            .docker(context, &project)
+            .args(["inspect", &container.name])
+            .capture_stdout()
+            .run_ok("docker could not inspect the container", &NoLog)?;
+        Ok(meridian_sdk::Inspection {
+            found: true,
+            actual: read_inspected(&inspected.stdout),
+            in_desired_state,
+            command: command.replace("CONTAINER", &container.name),
+        })
     }
 
     fn plan(

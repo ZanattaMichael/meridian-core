@@ -626,3 +626,41 @@ fn a_secret_is_created_in_podman_and_read_by_the_container_and_no_file_holds_it(
         .unwrap();
     assert!(plan.in_sync(), "{:?}", plan.changes);
 }
+
+#[ignore = "needs a real Podman; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn inspect_reads_a_running_unit_and_changes_nothing() {
+    if !wants("system") {
+        return;
+    }
+    let dir = scratch(TMP, "real-inspect");
+    let context = context(&dir);
+    let runner = PodmanRunner {
+        scope: Scope::System,
+        ..PodmanRunner::default()
+    };
+    let _cleanup = Cleanup;
+    drop(Cleanup);
+    let artifact = compiled(&document(&web("")));
+    let log = KeptLog::default();
+    runner
+        .apply(&context, &artifact, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{:?}", log.text()));
+
+    let read = runner
+        .inspect(&context, &artifact, CONTAINER, "")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(true));
+    assert_eq!(read.actual.get("active"), Some(&Value::from("active")));
+
+    as_root(&["systemctl", "stop", "meridian-ci-web.service"]);
+    let read = runner
+        .inspect(&context, &artifact, CONTAINER, "")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(read.in_desired_state, Some(false));
+    assert!(
+        !running().contains(&CONTAINER.to_owned()),
+        "inspect starts nothing"
+    );
+}

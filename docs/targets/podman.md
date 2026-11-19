@@ -588,3 +588,15 @@ MERIDIAN_TEST_REAL_PODMAN=system  cargo test -p meridian-target-podman --test re
 `quadlet` has the machine's own Quadlet read every example and installs nothing. `system`
 also installs, starts, changes and removes real units in `/etc/containers/systemd`; it
 needs systemd and root or passwordless `sudo`, and CI runs it on every pull request.
+
+## Inspecting one resource
+
+[`meridian inspect`](../reference/cli.md#inspect) takes the same look at the host a plan
+takes, which changes nothing.
+
+| Answer | From |
+|---|---|
+| actual | `unitFile`: not installed, differs from the document, or as the document writes it; `active`: the service's state in systemd |
+| as declared | the plan has no change for the unit |
+
+A unit that is not installed is not found.
