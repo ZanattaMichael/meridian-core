@@ -1001,3 +1001,31 @@ fn a_destroy_stops_and_removes_every_unit_it_installed_and_nothing_else() {
         .unwrap();
     assert!(again.is_empty(), "{again:?}");
 }
+
+#[test]
+fn inspect_looks_at_the_unit_as_a_plan_does_and_changes_nothing() {
+    let dir = scratch(TMP, "inspect");
+    let runner = host(&dir);
+    let read = runner.inspect(&context(&dir), &shop(), "web", "").unwrap();
+    assert!(!read.found);
+    assert_eq!(read.in_desired_state, Some(false));
+    assert_eq!(
+        read.actual.get("unitFile"),
+        Some(&Value::from("not installed"))
+    );
+    assert!(installed(&dir).is_empty(), "inspect installs nothing");
+
+    runner
+        .apply(&context(&dir), &shop(), &KeptLog::default())
+        .unwrap();
+    fs::remove_file(dir.join("systemctl.calls")).unwrap();
+    let read = runner.inspect(&context(&dir), &shop(), "web", "").unwrap();
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(true));
+    assert_eq!(read.actual.get("active"), Some(&Value::from("active")));
+    assert_eq!(
+        read.command,
+        "systemctl is-active web.service; compare web.container with the installed unit"
+    );
+    assert!(systemctl(&dir).is_empty(), "nothing is reloaded or started");
+}

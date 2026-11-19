@@ -570,3 +570,49 @@ fn a_destroy_preview_changes_nothing_and_an_empty_project_is_not_taken_down() {
     assert!(removed.is_empty());
     assert_eq!(calls(&dir), SURVEY);
 }
+
+#[test]
+fn inspect_reads_a_services_container_and_compares_the_file() {
+    let dir = scratch(TMP, "inspect");
+    let inspect = r#"*"inspect shop-db-1"*) echo '[{"Config":{"Image":"postgres:16","Env":["POSTGRES_PASSWORD=x"]},"RestartCount":2,"State":{"Status":"running","Health":{"Status":"healthy"}}}]' ;;"#;
+    let cases = format!("{CONFIG}\n{RUNNING}\n{inspect}");
+    let runner = runner(&dir, &cases);
+    let read = runner
+        .inspect(&context(&dir), &compiled(""), "db", "")
+        .unwrap();
+    let mut expected: Vec<String> = SURVEY.iter().map(|s| s.to_string()).collect();
+    expected.push("inspect shop-db-1".to_owned());
+    assert_eq!(calls(&dir), expected);
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(true));
+    assert_eq!(read.actual.get("image"), Some(&Value::from("postgres:16")));
+    assert_eq!(read.actual.get("health"), Some(&Value::from("healthy")));
+    assert!(!read.actual.contains_key("Env"));
+    assert_eq!(
+        read.command,
+        "docker compose ps --all db; docker inspect shop-db-1"
+    );
+
+    let read = runner
+        .inspect(&context(&dir), &compiled(""), "data", "")
+        .unwrap();
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(true));
+}
+
+#[test]
+fn inspect_of_a_service_with_no_container_is_not_found() {
+    let dir = scratch(TMP, "inspect-none");
+    let read = runner(&dir, CONFIG)
+        .inspect(&context(&dir), &compiled(""), "app", "")
+        .unwrap();
+    assert!(!read.found);
+    assert_eq!(read.in_desired_state, Some(false));
+    let error = runner(&dir, CONFIG)
+        .inspect(&context(&dir), &compiled(""), "nothing", "")
+        .unwrap_err();
+    assert_eq!(
+        error.msg,
+        "compose.yaml has no service, network or volume \"nothing\""
+    );
+}

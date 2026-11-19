@@ -41,6 +41,7 @@
 mod emit;
 pub mod failures;
 mod import;
+pub mod inspect;
 mod runner;
 mod schemas;
 mod sort;

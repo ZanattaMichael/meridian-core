@@ -373,3 +373,58 @@ fn a_failed_delete_says_so() {
         .unwrap_err();
     assert_eq!(err.msg, "kubectl could not delete the objects");
 }
+
+fn declaring() -> Artifact {
+    artifact(&[
+        (
+            "manifests.yaml",
+            "---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\n  namespace: shop\nspec:\n  replicas: 2\n",
+        ),
+        (
+            "cluster.json",
+            r#"{"context":"prod","namespace":"web","kubeconfig":"","objects":{"deployment.apps/web":"web"},"outputs":[]}"#,
+        ),
+    ])
+}
+
+#[test]
+fn inspect_gets_the_object_in_its_namespace_and_asks_a_dry_run() {
+    let dir = scratch(TMP, "inspect");
+    let cases = r#"'get deployment.apps/web') echo '{"kind":"Deployment","metadata":{"name":"web","namespace":"shop","uid":"9"},"spec":{"replicas":3,"paused":false}}' ;;
+apply*) echo 'deployment.apps/web configured (server dry run)' ;;"#;
+    let read = runner(&dir, cases)
+        .inspect(&context(&dir), &declaring(), "web", "")
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        [
+            "get deployment.apps/web --output json --context prod --namespace shop",
+            "apply --dry-run=server --filename manifests.yaml --context prod --namespace web",
+        ]
+    );
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(false));
+    assert_eq!(
+        read.actual.get("spec").unwrap().canonical(),
+        r#"{"replicas":3}"#
+    );
+    assert_eq!(
+        read.command,
+        "kubectl get deployment.apps/web --output json; kubectl apply --dry-run=server"
+    );
+}
+
+#[test]
+fn inspect_of_an_object_not_in_the_cluster_is_not_found() {
+    let dir = scratch(TMP, "inspect-missing");
+    let cases = r#"'get deployment.apps/web') echo 'Error from server (NotFound): deployments.apps "web" not found' >&2; exit 1 ;;"#;
+    let read = runner(&dir, cases)
+        .inspect(&context(&dir), &declaring(), "web", "")
+        .unwrap();
+    assert!(!read.found);
+    assert_eq!(
+        calls(&dir).len(),
+        1,
+        "no dry run for an object that is not there"
+    );
+}

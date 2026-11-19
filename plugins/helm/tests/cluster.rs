@@ -442,3 +442,43 @@ fn a_release_that_never_becomes_ready_names_what_was_not_ready() {
         .collect();
     assert_eq!(named, [("web", "timed-out")], "{err}");
 }
+
+#[test]
+#[ignore = "needs helm, kubectl and a cluster"]
+fn inspect_reads_an_object_of_the_release_and_the_release_itself() {
+    let dir = scratch(TMP, "cluster-inspect");
+    uninstall("meridian-helm-test", "meridian-helm-test");
+    let artifact = compile(&document(1, "fast", false));
+    let runner = HelmRunner::from_env();
+
+    let read = runner
+        .inspect(&context(&dir), &artifact, "settings", "")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(!read.found, "nothing is installed yet");
+
+    apply(&dir, &artifact);
+    let read = runner
+        .inspect(&context(&dir), &artifact, "settings", "")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(true));
+    assert_eq!(
+        read.actual
+            .get("data")
+            .and_then(|d| d.as_map())
+            .and_then(|d| d.get("mode")),
+        Some(&text("fast"))
+    );
+    let read = runner
+        .inspect(&context(&dir), &artifact, "release", "")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(read.actual.get("status"), Some(&text("deployed")));
+    assert_eq!(read.in_desired_state, Some(true));
+
+    let changed = compile(&document(1, "slow", false));
+    let read = runner
+        .inspect(&context(&dir), &changed, "settings", "")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(read.in_desired_state, Some(false));
+    uninstall("meridian-helm-test", "meridian-helm-test");
+}

@@ -164,6 +164,7 @@ case "$2" in
 Service) echo '{SERVICE}' ;;
 Deployment.v1.apps) echo '{{"status":{{"readyReplicas":2}}}}' ;;
 Secret) echo '{{"data":{{"token":"aHVudGVyMg=="}}}}' ;;
+deployment.apps/web) echo '{{"metadata":{{"name":"web","uid":"7"}},"spec":{{"replicas":1,"paused":false}}}}' ;;
 *) echo "Error from server (NotFound): $2 not found" >&2; exit 1 ;;
 esac"#
         ),
@@ -654,4 +655,41 @@ fn a_destroy_preview_uninstalls_nothing_and_a_missing_release_has_nothing_to_rem
         .unwrap();
     assert!(removed.is_empty());
     assert_eq!(calls(&dir), ["helm status web-app --output json"]);
+}
+
+#[test]
+fn inspect_reads_an_object_of_the_chart_and_compares_the_release() {
+    let dir = scratch(TMP, "inspect");
+    let runner = runner(&dir, "deployed", INSTALLED);
+    let read = runner
+        .inspect(&context(&dir), &compiled(false), "web", "")
+        .unwrap();
+    assert!(
+        calls(&dir).contains(&"kubectl get deployment.apps/web --namespace web".to_owned()),
+        "{:?}",
+        calls(&dir)
+    );
+    assert!(read.found);
+    // The release holds one replica; the chart says two.
+    assert_eq!(read.in_desired_state, Some(false));
+    assert_eq!(
+        read.actual.get("spec").unwrap().canonical(),
+        r#"{"replicas":1}"#
+    );
+    assert_eq!(
+        read.command,
+        "kubectl get deployment.apps/web --output json; helm get manifest web-app"
+    );
+
+    let read = runner
+        .inspect(&context(&dir), &compiled(false), "web_svc", "")
+        .unwrap();
+    assert!(!read.found);
+
+    let read = runner
+        .inspect(&context(&dir), &compiled(false), "release", "")
+        .unwrap();
+    assert!(read.found);
+    assert_eq!(read.actual.get("status"), Some(&Value::from("deployed")));
+    assert_eq!(read.in_desired_state, Some(false));
 }

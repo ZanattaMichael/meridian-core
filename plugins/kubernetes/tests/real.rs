@@ -499,3 +499,59 @@ fn a_secret_reaches_the_cluster_as_a_secret_and_is_in_no_file() {
         .unwrap();
     assert_eq!(changes(&plan.changes), [(ChangeAction::Update, "login")]);
 }
+
+#[ignore = "needs a real kubectl and a cluster; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn inspect_reads_one_object_and_a_dry_run_says_whether_it_is_as_declared() {
+    if !cluster() {
+        return;
+    }
+    delete_namespace();
+    let _tear_down = TearDown;
+    let dir = scratch(TMP, "real-inspect");
+    let text = fs::read_to_string(repo_root().join(DOCUMENT)).unwrap();
+    let artifact = compile(&text);
+    apply(&dir, &artifact);
+
+    let runner = KubernetesRunner::from_env();
+    let read = runner
+        .inspect(&context(&dir), &artifact, "web_config", "")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(true));
+    assert_eq!(
+        read.actual.get("data").map(|v| v.canonical()),
+        Some(r#"{"greeting":"hello"}"#.to_owned())
+    );
+
+    kubectl(&[
+        "patch",
+        "configmap",
+        "web-config",
+        "--namespace",
+        NAMESPACE,
+        "--type",
+        "merge",
+        "--patch",
+        r#"{"data":{"greeting":"drifted"}}"#,
+    ])
+    .unwrap();
+    let read = runner
+        .inspect(&context(&dir), &artifact, "web_config", "")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(read.in_desired_state, Some(false));
+    assert_eq!(
+        kubectl(&[
+            "get",
+            "configmap",
+            "web-config",
+            "--namespace",
+            NAMESPACE,
+            "--output",
+            "jsonpath={.data.greeting}"
+        ])
+        .unwrap(),
+        "drifted",
+        "inspect changes nothing"
+    );
+}
