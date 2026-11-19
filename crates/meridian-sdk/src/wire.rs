@@ -977,6 +977,43 @@ pub fn destroy_result_from_wire(
     Ok(Ok(changes))
 }
 
+pub fn act_schema_to_wire(a: &crate::ActSchema) -> pb::ActSchema {
+    pb::ActSchema {
+        r#type: a.r#type.clone(),
+        actions: a.actions.clone(),
+    }
+}
+
+pub fn acts_from_wire(acts: Vec<pb::ActSchema>) -> Vec<crate::ActSchema> {
+    acts.into_iter()
+        .map(|a| crate::ActSchema {
+            r#type: a.r#type,
+            actions: a.actions,
+        })
+        .collect()
+}
+
+pub fn act_result(outcome: Result<crate::Acted, RunError>) -> pb::ActResult {
+    match outcome {
+        Ok(acted) => pb::ActResult {
+            command: acted.command,
+            error: None,
+        },
+        Err(e) => pb::ActResult {
+            command: e.command.clone(),
+            error: Some(run_error_to_wire(e)),
+        },
+    }
+}
+
+/// The outer error is a malformed message; the inner one is the tool failing.
+pub fn act_result_from_wire(r: pb::ActResult) -> Result<crate::Acted, RunError> {
+    match r.error {
+        Some(e) => Err(run_error_from_wire(e, Vec::new())),
+        None => Ok(crate::Acted { command: r.command }),
+    }
+}
+
 pub fn outputs_response(outcome: Result<Vec<Output>, RunError>) -> pb::OutputsResponse {
     match outcome {
         Ok(outputs) => pb::OutputsResponse {

@@ -35,6 +35,7 @@
                 "apply",
                 "outputs",
                 "destroy",
+                "act",
                 "inputs",
                 "import",
                 "schemas"

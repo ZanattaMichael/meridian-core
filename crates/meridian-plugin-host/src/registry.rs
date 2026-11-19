@@ -35,7 +35,22 @@ impl Target {
     }
 
     /// Compiles a tree with this target.
+    ///
+    /// A notify the target's runner performs itself (its `acts`) is taken
+    /// out of the tree first, with a warning, so the emitter never refuses
+    /// it (decision 0056).
     pub fn emit(&self, graph: &ResourceGraph, data: &Data) -> Result<Emitted, EmitError> {
+        let mut taken = graph.clone();
+        let (_, warnings) = meridian_sdk::notify::take_meridian_run(&mut taken, &self.info.acts);
+        if warnings.is_empty() {
+            return self.emit_tree(graph, data);
+        }
+        let mut emitted = self.emit_tree(&taken, data)?;
+        emitted.warnings.extend(warnings);
+        Ok(emitted)
+    }
+
+    fn emit_tree(&self, graph: &ResourceGraph, data: &Data) -> Result<Emitted, EmitError> {
         match &self.kind {
             Kind::Plugin(client) => client.emit(graph, data),
             // A compiled-in emitter does not know its own registered name is
@@ -185,6 +200,21 @@ impl Target {
             .inspect(context, artifact, resource, endpoint)
     }
 
+    /// Performs one notify action on a resource of the artifact, stopped
+    /// early as `stop` says.
+    pub fn act_with(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        action: &str,
+        log: &mut dyn FnMut(LogLine),
+        stop: &Stop,
+    ) -> Result<meridian_sdk::Acted, RunFailure> {
+        self.client("act")?
+            .act_with(context, artifact, resource, action, log, stop)
+    }
+
     /// A compiled-in emitter only compiles; running a tool is a plugin's job.
     fn client(&self, verb: &str) -> Result<&Client, RunFailure> {
         match &self.kind {
@@ -271,6 +301,7 @@ impl Registry {
             debug_levels: Vec::new(),
             destroys: false,
             inspects: false,
+            acts: Vec::new(),
             path: String::new(),
             signature: crate::Signature::NotChecked,
         };

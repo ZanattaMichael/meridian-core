@@ -239,6 +239,7 @@ impl Client {
             debug_levels: reply.debug_levels,
             destroys: reply.destroys,
             inspects: reply.inspects,
+            acts: wire::acts_from_wire(reply.acts),
             import_formats: wire::import_formats_from_wire(reply.import_formats),
             exports_schemas: reply.exports_schemas,
             settings: wire::settings_from_wire(reply.settings),
@@ -624,6 +625,55 @@ impl Client {
             Some(stopped) => match run.result {
                 Ok(Some(result)) => match decode(result)? {
                     Ok(changes) => Ok(changes),
+                    Err(error) => Err(RunFailure::Stopped(stopped.with(error))),
+                },
+                _ => Err(RunFailure::Stopped(stopped)),
+            },
+        }
+    }
+
+    /// Performs one notify action, stopped early as `stop` says. Asked only
+    /// for a type and action the plugin listed in its acts.
+    pub fn act_with(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        action: &str,
+        log: &mut dyn FnMut(LogLine),
+        stop: &Stop,
+    ) -> Result<meridian_sdk::Acted, RunFailure> {
+        let mut runner = self.runner("act", !self.info.acts.is_empty())?;
+        let request = pb::ActRequest {
+            context: Some(wire::context_to_wire(context)),
+            artifact: Some(wire::artifact_to_wire(artifact)),
+            resource: resource.to_owned(),
+            action: action.to_owned(),
+        };
+        let run = self.runtime.block_on(async {
+            let events = runner.act(request).await?.into_inner();
+            Ok::<_, tonic::Status>(
+                self.drive(events, stop, |event| match event.event {
+                    Some(pb::act_event::Event::Log(line)) => {
+                        log(wire::log_from_wire(line));
+                        None
+                    }
+                    Some(pb::act_event::Event::Result(r)) => Some(r),
+                    None => None,
+                })
+                .await,
+            )
+        });
+        let run = run.unwrap_or_else(|status| Driven {
+            result: Err(status),
+            stopped: None,
+        });
+        match run.stopped {
+            None => wire::act_result_from_wire(self.finished("acting", run.result)?)
+                .map_err(RunFailure::Tool),
+            Some(stopped) => match run.result {
+                Ok(Some(result)) => match wire::act_result_from_wire(result) {
+                    Ok(acted) => Ok(acted),
                     Err(error) => Err(RunFailure::Stopped(stopped.with(error))),
                 },
                 _ => Err(RunFailure::Stopped(stopped)),

@@ -11,7 +11,9 @@ compiled, with the reason. Each target's own page says how it does what it can.
 - **notifies** is *native* when the tool has its own way to react to a change,
   and *synthetic* when Meridian builds the reaction out of something else the
   tool has. A synthetic notify shows up in the tool's own output, and the
-  target's page says what it looks like.
+  target's page says what it looks like. *Meridian-run* means the plugin
+  performs the action after the stage applies, when the tool can do neither.
+  See [Meridian-run notifies](../concepts/dependencies.md#meridian-run-notifies).
 - **runtimeWhen** is a condition the tool checks on the node at the moment it
   applies a resource.
 - **plan** asks the tool what an apply would change, without changing it.

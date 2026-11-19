@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
-use meridian_sdk::{canonical_map, decode_map, Artifact, Value};
+use meridian_sdk::{canonical_map, decode_map, Artifact, MeridianRun, Value};
 use sha2::{Digest, Sha256};
 
 use crate::backend::Backend;
@@ -35,6 +35,9 @@ pub struct StageRecord {
     /// `artifact_hash` after a success, and after a failure it is what a
     /// rollback goes back to. Empty when no apply ever succeeded.
     pub last_good: String,
+    /// Meridian-run actions an apply triggered and that have not run yet;
+    /// the next apply of the stage runs them (decision 0056).
+    pub pending: Vec<MeridianRun>,
 }
 
 /// Every stage's last apply.
@@ -93,6 +96,26 @@ impl RunState {
             if last_good.is_empty() && applied && !fields.contains_key("lastGood") {
                 last_good = artifact_hash.clone();
             }
+            let pending = match fields.get("pending") {
+                Some(Value::List(items)) => items
+                    .iter()
+                    .filter_map(|item| match item {
+                        Value::Map(m) => {
+                            let field = |name: &str| match m.get(name) {
+                                Some(Value::String(s)) => s.clone(),
+                                _ => String::new(),
+                            };
+                            Some(MeridianRun {
+                                notifier: field("notifier"),
+                                resource: field("resource"),
+                                action: field("action"),
+                            })
+                        }
+                        _ => None,
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
             state.stages.insert(
                 key,
                 StageRecord {
@@ -101,6 +124,7 @@ impl RunState {
                     applied,
                     run: text("run"),
                     last_good,
+                    pending,
                 },
             );
         }
@@ -125,7 +149,7 @@ impl RunState {
             .stages
             .iter()
             .map(|(key, record)| {
-                let fields: BTreeMap<String, Value> = [
+                let mut fields: BTreeMap<String, Value> = [
                     ("target", record.target.as_str()),
                     ("artifactHash", record.artifact_hash.as_str()),
                     ("status", if record.applied { "applied" } else { "failed" }),
@@ -135,6 +159,25 @@ impl RunState {
                 .into_iter()
                 .map(|(name, value)| (name.to_owned(), Value::from(value)))
                 .collect();
+                if !record.pending.is_empty() {
+                    let pending = record
+                        .pending
+                        .iter()
+                        .map(|p| {
+                            Value::Map(
+                                [
+                                    ("notifier", &p.notifier),
+                                    ("resource", &p.resource),
+                                    ("action", &p.action),
+                                ]
+                                .into_iter()
+                                .map(|(k, v)| (k.to_owned(), Value::from(v.as_str())))
+                                .collect(),
+                            )
+                        })
+                        .collect();
+                    fields.insert("pending".to_owned(), Value::List(pending));
+                }
                 (key.clone(), Value::Map(fields))
             })
             .collect();
@@ -191,6 +234,11 @@ mod tests {
                 applied: false,
                 run: "2026-11-17T09-14-03Z-7f3a".to_owned(),
                 last_good: "sha256:old".to_owned(),
+                pending: vec![MeridianRun {
+                    notifier: "settings".to_owned(),
+                    resource: "web".to_owned(),
+                    action: "restart".to_owned(),
+                }],
             },
         );
         state.write(&backend).unwrap();

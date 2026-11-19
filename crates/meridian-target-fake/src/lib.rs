@@ -28,6 +28,12 @@
 //! secret reference resolved as its tool would show it. `FAKE_INSPECT=off`
 //! makes it a target that cannot.
 //!
+//! It acts: a notify with action `touch` on a `file` is Meridian-run, and
+//! acting appends `touch <id>` to `acts.log` in the work directory. An
+//! applied file holding `NOACT` fails it. `FAKE_CHANGES=ids` names each
+//! change by its resource id instead of its file, so a change triggers one. `FAKE_ACTS=off` makes it a
+//! target that acts on nothing.
+//!
 //! It imports as well. Its tool's "existing configuration" is a `*.fake`
 //! file of `name = content` lines, each of which becomes a `file` resource.
 //! A line that starts with `?` is something the importer does not
@@ -401,6 +407,24 @@ fn read_state(work_dir: &Path) -> Result<BTreeMap<String, Value>, RunError> {
 /// tool's import, not a file it manages, so a plan never reports it.
 const ADOPT_DIR: &str = "adopt/";
 
+/// What a change names: the file's path, or with `FAKE_CHANGES=ids` the id
+/// of the resource it was compiled from, as a tool that traces its report
+/// back to the document does.
+fn traced(path: &str) -> String {
+    match path.strip_prefix("files/") {
+        Some(id) if std::env::var("FAKE_CHANGES").as_deref() == Ok("ids") => id.to_owned(),
+        _ => path.to_owned(),
+    }
+}
+
+/// A change as the tool reports it, named as [`traced`] says.
+fn reported(change: Change) -> Change {
+    Change {
+        resource: traced(&change.resource),
+        ..change
+    }
+}
+
 fn diff(state: &BTreeMap<String, Value>, artifact: &Artifact) -> Vec<Change> {
     let mut changes = Vec::new();
     for (path, content) in &artifact.files {
@@ -548,7 +572,7 @@ impl Runner for FakeRunner {
             None
         };
         Ok(Plan {
-            changes,
+            changes: changes.into_iter().map(reported).collect(),
             unknown: artifact.files.values().any(|c| c.contains("UNKNOWN")),
             saved,
         })
@@ -622,7 +646,7 @@ impl Runner for FakeRunner {
             if change.action == ChangeAction::Delete {
                 let _ = fs::remove_file(&path);
                 state.remove(&change.resource);
-                done.push(change);
+                done.push(reported(change));
                 continue;
             }
             let content = &artifact.files[&change.resource];
@@ -680,7 +704,7 @@ impl Runner for FakeRunner {
                 });
             }
             state.insert(change.resource.clone(), Value::from(content.as_str()));
-            done.push(change);
+            done.push(reported(change));
         }
         save(&state)?;
         Ok(Applied {
@@ -828,6 +852,49 @@ impl Runner for FakeRunner {
             in_desired_state: Some(artifact.files.get(&path) == Some(applied)),
             command,
         })
+    }
+
+    /// `FAKE_ACTS=off` stands it in for a plugin that acts on nothing.
+    fn acts(&self) -> Vec<meridian_sdk::ActSchema> {
+        if std::env::var("FAKE_ACTS").as_deref() == Ok("off") {
+            return Vec::new();
+        }
+        vec![meridian_sdk::ActSchema::new("file", &["touch"])]
+    }
+
+    /// Appends `<action> <resource>` to `acts.log`; an applied file holding
+    /// `NOACT` fails instead.
+    fn act(
+        &self,
+        context: &RunContext,
+        _artifact: &Artifact,
+        resource: &str,
+        action: &str,
+        log: &dyn Log,
+    ) -> Result<meridian_sdk::Acted, RunError> {
+        let path = format!("files/{resource}");
+        let command = format!("fake-tool {action} {path}");
+        log.out(&command);
+        let state = read_state(&context.work_dir)?;
+        if matches!(state.get(&path), Some(Value::String(c)) if c.contains("NOACT")) {
+            let mut e = RunError::new(format!("fake-tool could not {action} {path}"));
+            e.command = command;
+            e.failures = vec![Failure::new(
+                Cause::ResourceFailed,
+                resource,
+                format!("{action} failed"),
+            )];
+            return Err(e);
+        }
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(context.work_dir.join("acts.log"))
+            .map_err(|e| RunError::new(format!("writing acts.log: {e}")))?;
+        use std::io::Write as _;
+        writeln!(file, "{action} {resource}")
+            .map_err(|e| RunError::new(format!("writing acts.log: {e}")))?;
+        Ok(meridian_sdk::Acted { command })
     }
 }
 

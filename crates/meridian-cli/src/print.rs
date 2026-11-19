@@ -469,7 +469,34 @@ impl Printer<'_> {
                 writeln!(out, "  not run, because {because_of} failed")?
             }
         }
+        // The Meridian-run actions, after what the tool did.
+        for action in &report.actions {
+            writeln!(out, "  {}", action_line(action))?;
+        }
         Ok(())
+    }
+}
+
+/// One Meridian-run action, as a plan or an apply says it.
+pub(crate) fn action_line(a: &meridian_orchestrator::ActionReport) -> String {
+    use meridian_orchestrator::ActionStatus;
+    let because = if a.notifier.is_empty() {
+        "left pending by an earlier apply".to_owned()
+    } else {
+        format!("{} changes", a.notifier)
+    };
+    match a.status {
+        ActionStatus::Would => format!("would {} {} ({because})", a.action, a.resource),
+        ActionStatus::May => format!(
+            "may {} {} (if {}; this tool cannot preview)",
+            a.action, a.resource, a.notifier
+        ),
+        ActionStatus::Done => format!("ran {} {}: {}", a.action, a.resource, a.command),
+        ActionStatus::Failed => format!("{} {} failed; it is pending", a.action, a.resource),
+        ActionStatus::Pending => format!(
+            "{} {} pending ({because}); the next apply runs it",
+            a.action, a.resource
+        ),
     }
 }
 

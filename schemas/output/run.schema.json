@@ -691,6 +691,50 @@
               "measures"
             ]
           }
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "notifier": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "resource": {
+                "type": "string"
+              },
+              "action": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "would",
+                  "may",
+                  "done",
+                  "failed",
+                  "pending"
+                ]
+              },
+              "command": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "notifier",
+              "resource",
+              "action",
+              "status",
+              "command"
+            ]
+          }
         }
       },
       "additionalProperties": false,
@@ -707,6 +751,7 @@
         "removed",
         "policy",
         "analyses",
+        "actions",
         "previousGood"
       ]
     },
