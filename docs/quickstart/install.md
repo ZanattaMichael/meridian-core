@@ -45,6 +45,25 @@ It installs into `%LOCALAPPDATA%\Meridian\bin` and adds that to your user `PATH`
 (`MERIDIAN_NO_PATH` skips this). It needs no administrator rights. See
 [Meridian on Windows](windows.md).
 
+## Nightly
+
+The `nightly` pre-release is built from `main` each night it changes. It is unstable, and
+has no Sigstore signature: check it with `gh attestation verify <file> --repo
+ZanattaMichael/meridian-core`.
+
+```
+base=https://github.com/ZanattaMichael/meridian-core/releases/download/nightly
+curl -fsSL "$base/install.sh" | MERIDIAN_DOWNLOAD_BASE="$base" sh
+```
+
+```
+$env:MERIDIAN_DOWNLOAD_BASE = 'https://github.com/ZanattaMichael/meridian-core/releases/download/nightly'
+irm "$env:MERIDIAN_DOWNLOAD_BASE/install.ps1" | iex
+```
+
+A nightly's version is a pre-release of the next patch, as in `0.1.1-nightly.20261119.g1a2b3c4`.
+A module's `spec.meridian` is checked against the release it leads to (`0.1.1`).
+
 ## Homebrew
 
 A release carries a Homebrew formula, kept in the project's tap. Once the tap

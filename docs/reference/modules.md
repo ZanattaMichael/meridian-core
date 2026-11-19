@@ -647,7 +647,7 @@ A cache; safe to delete, not to edit.
 | `… is required from two different sources` | Two manifests name different sources for one module | Make them agree |
 | `… holds the module X, and it was required as Y` | The `name` in the requirement is not the module's `metadata.name` | Use the module's own name |
 | `the version X of … holds a manifest that says Y` | A tag and the module's `metadata.version` disagree | Fix it in the module and release a new version |
-| `… needs meridian >=X, and this is meridian Y` | The module's `spec.meridian` excludes this release | Upgrade `meridian`, or use an older version of the module |
+| `… needs meridian >=X, and this is meridian Y` | The module's `spec.meridian` excludes this release. A pre-release (`0.1.1-nightly.…`) is checked as its release (`0.1.1`) | Upgrade `meridian`, or use an older version of the module |
 | `… requires … by path, which only works between modules on disk` | A fetched module names a `path` source | The module must name a `git` or `oci` source |
 | `the registry … did not allow reading …` or `writing to …` | No login, or a refused one | `docker login` for that registry, or [name a credential](#registry-logins) for it. `the credential X was refused` means the registry did not accept that user and password |
 | `the credential X is for the registry A, and … is on B; it was not sent` | A `registry` credential's `server` is not the host in `oci` | Fix `server`, or declare a credential for that registry |

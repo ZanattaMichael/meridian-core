@@ -45,6 +45,7 @@ page it affects. The pull request template asks for it.
 | [The Windows named pipe can be opened for reading by any local account](0016-windows-pipe-readable-by-local-accounts.md) | Releases | proposed |
 | [A dispatch of the release workflow at a `v*` tag is a release](0021-a-dispatch-at-a-tag-is-a-release.md) | Releases | proposed |
 | [Package-manager listings are sent by a workflow and start private](0045-package-manager-listings-start-private.md) | Releases | proposed |
+| [A nightly is a rolling pre-release of `main`](0055-a-nightly-is-a-rolling-pre-release-of-main.md) | Releases | proposed |
 | [Project settings are keyed by the plugin's short names, and the environment wins](0023-project-settings-named-by-the-plugin-and-the-environment-wins.md) | Plugins | proposed |
 | [A stop is asked of the plugin, and an interrupted run is not rolled back](0025-a-stop-is-asked-of-the-plugin-and-an-interrupted-run-is-not-rolled-back.md) | Runs | proposed |
 | [cloud-init's `apply` does not touch a machine](0017-cloud-init-apply-touches-no-machine.md) | Targets | proposed |

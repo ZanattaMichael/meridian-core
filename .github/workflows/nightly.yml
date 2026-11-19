@@ -1,0 +1,139 @@
+name: nightly
+
+# Builds main every night, if it changed since the last nightly, and replaces
+# the `nightly` pre-release with the result. The build and its checks are the
+# release workflow's, called at version <next patch>-nightly.<date>.g<commit>.
+#
+# A nightly is unstable and never a release: a pre-release that does not move
+# `releases/latest`, no Sigstore signature (the install scripts accept only a
+# signature made for a `v*` tag), no image pushed, no package-manager files
+# sent. It carries GitHub build provenance. docs/contributing/releasing.md#nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *" # 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build even if main has not changed since the last nightly
+        type: boolean
+        default: false
+  # A pull request changing the nightly is built at a nightly version, and
+  # nothing is published.
+  pull_request:
+    paths:
+      - .github/workflows/nightly.yml
+      - tools/release/set_version.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  plan:
+    name: decide whether to build
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      version: ${{ steps.plan.outputs.version }}
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force || false }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          sha="$GITHUB_SHA"
+          if [ "$EVENT" != pull_request ] && [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::a nightly is built from main; run this workflow on main"
+            exit 1
+          fi
+          last="$(gh api "repos/$GITHUB_REPOSITORY/commits/nightly" --jq .sha 2>/dev/null || true)"
+          build=true
+          if [ "$EVENT" != pull_request ] && [ "$sha" = "$last" ] && [ "$FORCE" != true ]; then
+            build=false
+            echo "main is still ${sha:0:7}, the last nightly; nothing to build" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # A pre-release of the next patch, so it sorts after the release it
+          # was built from and before the next one.
+          current="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          case "$current" in
+            *-*) base="${current%%-*}" ;;
+            *) IFS=. read -r major minor patch <<< "$current"; base="$major.$minor.$((patch + 1))" ;;
+          esac
+          version="$base-nightly.$(date -u +%Y%m%d).g${sha:0:7}"
+
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Meridian $version from ${sha:0:7}; build: $build" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: build
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      version: ${{ needs.plan.outputs.version }}
+    # The release workflow's `publish` job asks for these; it is skipped
+    # when called, but a called workflow may not ask for more than it is given.
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+
+  publish:
+    name: replace the nightly pre-release
+    needs: [plan, build]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # replace the release and its tag
+      id-token: write # build provenance
+      attestations: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      SHA: ${{ needs.plan.outputs.sha }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-files
+          path: dist
+
+      - name: Record where the archives were built
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-checksums: dist/meridian-${{ needs.plan.outputs.version }}-checksums.txt
+
+      - name: Replace the nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "**Unstable.** Built from \`main\` at $SHA. Not a release: no compatibility promise, no Sigstore signature, no container image. Replaced every night that \`main\` changes."
+            echo
+            echo "Install (Linux, macOS):"
+            echo
+            echo '```sh'
+            echo "curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/nightly/install.sh | MERIDIAN_DOWNLOAD_BASE=https://github.com/$GITHUB_REPOSITORY/releases/download/nightly sh"
+            echo '```'
+            echo
+            echo "Check what you downloaded: \`gh attestation verify <file> --repo $GITHUB_REPOSITORY\`."
+          } > notes.md
+          gh release delete nightly --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
+          find dist -maxdepth 1 -type f -print0 \
+            | xargs -0 gh release create nightly --repo "$GITHUB_REPOSITORY" \
+                --target "$SHA" --prerelease --latest=false \
+                --title "Meridian nightly $VERSION" --notes-file notes.md
