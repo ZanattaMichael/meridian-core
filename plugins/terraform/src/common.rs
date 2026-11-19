@@ -1036,6 +1036,9 @@ fn gcp(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError> {
                     map(vec![
                         ("name", gcp_name(r)),
                         ("auto_create_subnetworks", Value::Bool(false)),
+                        // No range of its own: the cidr is kept as the
+                        // description, so the document's value is visible.
+                        ("description", param(r, "cidr").unwrap_or(Value::Null)),
                     ]),
                 )],
                 outputs: own_id(),

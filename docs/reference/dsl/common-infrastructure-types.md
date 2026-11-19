@@ -252,7 +252,7 @@ and an address are in a region, and a vm is in a zone.
 
 | Common type | Becomes |
 |---|---|
-| `network` | `google_compute_network` with no automatic subnets. `cidr` is required as on every cloud, but a Google Cloud network has no range of its own, so it is not written; its subnets' ranges are. `location` and `tags` are refused |
+| `network` | `google_compute_network` with no automatic subnets. `cidr` is required as on every cloud, but a Google Cloud network has no range of its own, so it is written as the network's `description`; its subnets' ranges are the real ones. `location` and `tags` are refused |
 | `subnet` | `google_compute_subnetwork` in the region of its `location` or `spec.settings.location`. `public: true` and `tags` are refused, as on Azure |
 | `firewall` | one `google_compute_firewall` per rule (`<fw>_rule_<n>` after the first), applied to the machines that carry the tag `meridian-<fw>`. With an `out` rule, a deny-all egress rule (`<fw>_out_deny`) below it for the same machines. A firewall with no rules is refused as `missing-param`, since a Google Cloud firewall is its rules |
 | `address` | `google_compute_address`, regional, `tags` as labels |

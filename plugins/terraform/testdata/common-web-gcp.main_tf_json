@@ -117,6 +117,7 @@
     "google_compute_network": {
       "net": {
         "auto_create_subnetworks": false,
+        "description": "10.0.0.0/16",
         "name": "net"
       }
     },
