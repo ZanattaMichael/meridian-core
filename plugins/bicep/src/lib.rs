@@ -198,6 +198,7 @@ impl Emitter for Bicep {
             "address",
             "deployment",
             "disk",
+            "dnsRecord",
             "firewall",
             "network",
             "objectStore",

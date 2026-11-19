@@ -262,6 +262,40 @@ fn expand(
             }
         }
         "disk" => disk(r, graph)?,
+        "dnsRecord" => {
+            let zone = r
+                .params
+                .get("zone")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim_end_matches('.')
+                .to_owned();
+            let (kind, values) = infra::dns_record(r);
+            let records = if kind == "TXT" {
+                infra::quoted_txt(&values)
+            } else {
+                values
+            };
+            let name = match infra::dns_full_name(r, &zone) {
+                Value::String(n) => Value::String(format!("{n}.")),
+                other => other,
+            };
+            Expansion {
+                resources: vec![primary(
+                    r,
+                    "AWS::Route53::RecordSet",
+                    map(vec![
+                        ("HostedZoneName", Value::String(format!("{zone}."))),
+                        ("Name", name),
+                        ("Type", Value::String(kind)),
+                        ("TTL", Value::String(infra::dns_ttl(r).to_string())),
+                        ("ResourceRecords", Value::List(records)),
+                    ]),
+                )],
+                outputs: outputs(&[("id", format!("${{{id}}}"))]),
+                order: Vec::new(),
+            }
+        }
         "objectStore" => {
             let mut body = map(vec![("BucketName", cloud_name(r)), ("Tags", tags(r))]);
             if infra::versioning(r) {

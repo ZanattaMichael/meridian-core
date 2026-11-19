@@ -147,6 +147,17 @@ Resources:
           Value: files
       VersioningConfiguration:
         Status: Enabled
+  Www:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneName: example.com.
+      Name: www.example.com.
+      ResourceRecords:
+        - Fn::GetAtt:
+            - WebIp
+            - PublicIp
+      TTL: "300"
+      Type: A
   Logs:
     Type: AWS::S3::Bucket
 Outputs:

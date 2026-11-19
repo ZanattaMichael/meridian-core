@@ -192,5 +192,17 @@ resource files_objects 'Microsoft.Storage/storageAccounts/blobServices/container
   properties: {}
 }
 
+resource www 'Microsoft.Network/dnsZones/A@2018-05-01' = {
+  name: 'example.com/www'
+  properties: {
+    ARecords: [
+      {
+        ipv4Address: web_ip.properties.ipAddress
+      }
+    ]
+    TTL: 300
+  }
+}
+
 output address string = string(web_ip.properties.ipAddress)
 output private_address string = string(vm_nic.properties.ipConfigurations[0].properties.privateIPAddress)

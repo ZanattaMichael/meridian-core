@@ -1,4 +1,11 @@
 {
+  "data": {
+    "google_dns_managed_zone": {
+      "www_zone": {
+        "name": "example-com"
+      }
+    }
+  },
   "output": {
     "address": {
       "value": "${google_compute_address.web_ip.address}"
@@ -141,6 +148,17 @@
         "name": "web",
         "network": "${google_compute_network.net.id}",
         "region": "europe-west1"
+      }
+    },
+    "google_dns_record_set": {
+      "www": {
+        "managed_zone": "${data.google_dns_managed_zone.www_zone.name}",
+        "name": "www.${data.google_dns_managed_zone.www_zone.dns_name}",
+        "rrdatas": [
+          "${google_compute_address.web_ip.address}"
+        ],
+        "ttl": 300,
+        "type": "A"
       }
     },
     "google_storage_bucket": {

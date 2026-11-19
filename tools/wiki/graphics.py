@@ -729,18 +729,18 @@ def analyzers_flow() -> str:
 
 def common_types() -> str:
     """One document of common infrastructure types, and what each target and cloud makes of it."""
-    W, H = 1200, 680
+    W, H = 1200, 760
     p: list[str] = []
     p.append(heading(40, 40, "Written once"))
-    rows = [("network", "cidr"), ("subnet", "network, cidr, public"), ("firewall", "network, rules"), ("address", ""), ("vm", "subnet, size, image, sshKey"), ("disk", "vm, sizeGb"), ("objectStore", "versioning")]
+    rows = [("network", "cidr"), ("subnet", "network, cidr, public"), ("firewall", "network, rules"), ("address", ""), ("vm", "subnet, size, image, sshKey"), ("disk", "vm, sizeGb"), ("objectStore", "versioning"), ("dnsRecord", "zone, name, type, values")]
     for i, (name, params) in enumerate(rows):
         y = 60 + i * 80
         p.append(card(40, y, 250, 64, f"type: {name}", [params] if params else ["a fixed public IP"], IAC, 16, 12.5, True))
     cols = [
-        ("terraform · aws", ["aws_vpc", "aws_subnet + routes", "aws_security_group + rules", "aws_eip", "aws_instance + key, ami", "aws_ebs_volume + attachment", "aws_s3_bucket"]),
-        ("cloudformation", ["AWS::EC2::VPC", "AWS::EC2::Subnet + routes", "AWS::EC2::SecurityGroup", "AWS::EC2::EIP", "AWS::EC2::Instance + key", "AWS::EC2::Volume + attachment", "AWS::S3::Bucket"]),
-        ("terraform · azure", ["azurerm_virtual_network", "azurerm_subnet", "azurerm_network_security_group", "azurerm_public_ip", "azurerm_linux_virtual_machine", "azurerm_managed_disk + link", "azurerm_storage_account"]),
-        ("bicep · arm", ["virtualNetworks", "virtualNetworks/subnets", "networkSecurityGroups", "publicIPAddresses", "virtualMachines + nic", "disks, in the vm's dataDisks", "storageAccounts + container"]),
+        ("terraform · aws", ["aws_vpc", "aws_subnet + routes", "aws_security_group + rules", "aws_eip", "aws_instance + key, ami", "aws_ebs_volume + attachment", "aws_s3_bucket", "aws_route53_record"]),
+        ("cloudformation", ["AWS::EC2::VPC", "AWS::EC2::Subnet + routes", "AWS::EC2::SecurityGroup", "AWS::EC2::EIP", "AWS::EC2::Instance + key", "AWS::EC2::Volume + attachment", "AWS::S3::Bucket", "AWS::Route53::RecordSet"]),
+        ("terraform · azure", ["azurerm_virtual_network", "azurerm_subnet", "azurerm_network_security_group", "azurerm_public_ip", "azurerm_linux_virtual_machine", "azurerm_managed_disk + link", "azurerm_storage_account", "azurerm_dns_a_record"]),
+        ("bicep · arm", ["virtualNetworks", "virtualNetworks/subnets", "networkSecurityGroups", "publicIPAddresses", "virtualMachines + nic", "disks, in the vm's dataDisks", "storageAccounts + container", "dnsZones/A"]),
     ]
     for c, (title, natives) in enumerate(cols):
         x = 340 + c * 215
@@ -753,7 +753,7 @@ def common_types() -> str:
         y = 92 + i * 80
         p.append(flow(f"M290 {y}C315 {y} 315 {y} 340 {y}", IAC, delay=i * 0.35, seconds=2.4))
     p.append(caption(W, H, "Pulumi makes the Terraform resources with its own type tokens. The same outputs everywhere: id, privateAddress, publicAddress."))
-    return doc(W, H, "The common infrastructure types: network, subnet, firewall, address, vm, disk and objectStore written once, and the native resources Terraform for AWS, CloudFormation, Terraform for Azure, and Bicep and ARM compile each of them to", "".join(p))
+    return doc(W, H, "The common infrastructure types: network, subnet, firewall, address, vm, disk, objectStore and dnsRecord written once, and the native resources Terraform for AWS, CloudFormation, Terraform for Azure, and Bicep and ARM compile each of them to", "".join(p))
 
 
 def schema_bundles() -> str:

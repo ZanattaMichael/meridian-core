@@ -145,7 +145,7 @@ A second is refused (`duplicate-resource`), as is `dependsOn` on it
 
 ## Common infrastructure types
 
-`network`, `subnet`, `firewall`, `address`, `vm`, `disk` and `objectStore` are Meridian's own types,
+`network`, `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore` and `dnsRecord` are Meridian's own types,
 and this target turns each into Azure's own resource types
 ([the common infrastructure types](../reference/dsl/common-infrastructure-types.md)
 has every param and mapping). They are mixed freely with Azure's own types and
@@ -161,6 +161,7 @@ resource gives one.
 | `vm` | `Microsoft.Compute/virtualMachines@2024-03-01` and a `Microsoft.Network/networkInterfaces@2023-09-01` named `<id>_nic` |
 | `disk` | `Microsoft.Compute/disks@2024-03-01`, listed in its vm's `dataDisks` |
 | `objectStore` | `Microsoft.Storage/storageAccounts@2023-05-01`, its `blobServices` and a container |
+| `dnsRecord` | `Microsoft.Network/dnsZones/<type>@2018-05-01` in the existing zone |
 
 The same document compiles with Terraform for Azure, with the same sizes and
 images; compare [`examples/common/web-bicep.yaml`](../../examples/common/web-bicep.yaml)

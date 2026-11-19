@@ -21,6 +21,11 @@
           "099720109477"
         ]
       }
+    },
+    "aws_route53_zone": {
+      "www_zone": {
+        "name": "example.com"
+      }
     }
   },
   "output": {
@@ -91,6 +96,17 @@
         "destination_cidr_block": "0.0.0.0/0",
         "gateway_id": "${aws_internet_gateway.net_gateway.id}",
         "route_table_id": "${aws_route_table.web_routes.id}"
+      }
+    },
+    "aws_route53_record": {
+      "www": {
+        "name": "www.example.com",
+        "records": [
+          "${aws_eip.web_ip.public_ip}"
+        ],
+        "ttl": 300,
+        "type": "A",
+        "zone_id": "${data.aws_route53_zone.www_zone.zone_id}"
       }
     },
     "aws_route_table": {

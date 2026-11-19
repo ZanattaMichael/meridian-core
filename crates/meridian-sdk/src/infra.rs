@@ -1,5 +1,5 @@
 //! The common infrastructure resource types: `network`, `subnet`, `firewall`,
-//! `address`, `vm`, `disk` and `objectStore`.
+//! `address`, `vm`, `disk`, `objectStore` and `dnsRecord`.
 //!
 //! Most of what an infrastructure document describes is the same on every
 //! cloud: a network, a subnet in it, a firewall, a fixed address, a machine.
@@ -41,6 +41,10 @@ const COMMON_TYPES: &[(&str, &str)] = &[
         "A fixed public IP address, which a vm takes with its `address` param.",
     ),
     ("disk", "A data disk, attached to a vm with its `vm` param."),
+    (
+        "dnsRecord",
+        "A record in a DNS zone the cloud already hosts: A, AAAA, CNAME or TXT.",
+    ),
     (
         "firewall",
         "A set of rules saying which traffic may reach, or leave, the machines it is attached to.",
@@ -95,6 +99,43 @@ const COMMON_PARAMS: &[(&str, &str, ParamKind, bool, &str)] = &[
         false,
         "The vm the disk is attached to, as a reference: `${web_vm}`. Disks of one vm are \
          attached in document order.",
+    ),
+    (
+        "dnsRecord",
+        "name",
+        ParamKind::String,
+        true,
+        "The record's name inside the zone, such as `www`; `@` for the zone itself.",
+    ),
+    (
+        "dnsRecord",
+        "ttl",
+        ParamKind::Integer,
+        false,
+        "How long, in seconds, a resolver may keep the answer. 300 unless given.",
+    ),
+    (
+        "dnsRecord",
+        "type",
+        ParamKind::String,
+        true,
+        "`A`, `AAAA`, `CNAME` or `TXT`.",
+    ),
+    (
+        "dnsRecord",
+        "values",
+        ParamKind::List,
+        true,
+        "The answers, as text: addresses for A and AAAA (`[\"${ip.address}\"]`), one host \
+         name for CNAME, strings for TXT.",
+    ),
+    (
+        "dnsRecord",
+        "zone",
+        ParamKind::String,
+        true,
+        "The zone the record goes in, which must exist: its domain (`example.com`) on AWS and \
+         Azure, its managed zone name on Google Cloud.",
     ),
     ("firewall", "location", ParamKind::String, false, LOCATION),
     ("firewall", "name", ParamKind::String, false, NAME),
@@ -257,6 +298,7 @@ const COMMON_OUTPUTS: &[(&str, &str, &str)] = &[
     ("address", "address", "The IP address."),
     ("address", "id", "The cloud's own id for the address."),
     ("disk", "id", "The cloud's own id for the disk."),
+    ("dnsRecord", "id", "The cloud's own id for the record."),
     ("firewall", "id", "The cloud's own id for the firewall."),
     ("network", "id", "The cloud's own id for the network."),
     (
@@ -283,6 +325,9 @@ const COMMON_OUTPUTS: &[(&str, &str, &str)] = &[
 /// A target keeps the cloud's own image for every pair.
 pub const IMAGE_FAMILIES: &[(&str, &[&str])] =
     &[("debian", &["12", "11"]), ("ubuntu", &["24.04", "22.04"])];
+
+/// The record types a `dnsRecord` may have.
+pub const DNS_TYPES: &[&str] = &["A", "AAAA", "CNAME", "TXT"];
 
 /// The directions a firewall rule may have, and the one assumed.
 pub const DIRECTIONS: &[&str] = &["in", "out"];
@@ -592,6 +637,44 @@ fn check_shape(
                 return Err(invalid(format!(
                     "param {name:?} of a {type} must be a reference to one resource of this \
                      document, written ${{id}}, not {}",
+                    value.canonical()
+                )));
+            }
+        }
+        ("dnsRecord", "type") => {
+            if !value.as_str().is_some_and(|t| DNS_TYPES.contains(&t)) {
+                return Err(invalid(format!(
+                    "type must be one of {}, not {}",
+                    DNS_TYPES.join(", "),
+                    value.canonical()
+                )));
+            }
+        }
+        ("dnsRecord", "values") => {
+            let items = value.as_list().unwrap_or_default();
+            if items.is_empty() {
+                return Err(invalid("values needs at least one answer".to_owned()));
+            }
+            if let Some(item) = items.iter().find(|v| !is_text(v)) {
+                return Err(invalid(format!(
+                    "each of values must be text, not {}",
+                    item.describe()
+                )));
+            }
+            if resource.params.get("type").and_then(Value::as_str) == Some("CNAME")
+                && items.len() > 1
+            {
+                return Err(invalid(
+                    "a CNAME record has one value: the host name it points at".to_owned(),
+                ));
+            }
+        }
+        ("dnsRecord", "ttl") => {
+            if !matches!(value, Value::Int(i) if *i > 0)
+                && !matches!(value, Value::Uint(u) if *u > 0)
+            {
+                return Err(invalid(format!(
+                    "ttl must be a whole number of seconds above zero, not {}",
                     value.canonical()
                 )));
             }
@@ -991,6 +1074,57 @@ pub fn storage_account_name(resource: &Resource) -> Value {
                 .filter(char::is_ascii_alphanumeric)
                 .collect(),
         ),
+    }
+}
+
+/// The time to live of a `dnsRecord`, in seconds. Only called after
+/// [`check_common`] accepted the record.
+pub fn dns_ttl(resource: &Resource) -> u64 {
+    match resource.params.get("ttl") {
+        Some(Value::Int(i)) => (*i).max(0) as u64,
+        Some(Value::Uint(u)) => *u,
+        _ => 300,
+    }
+}
+
+/// The type and answers of a `dnsRecord`. Only called after [`check_common`]
+/// accepted the record.
+pub fn dns_record(resource: &Resource) -> (String, Vec<Value>) {
+    let r#type = resource
+        .params
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("A")
+        .to_owned();
+    let values = resource
+        .params
+        .get("values")
+        .and_then(Value::as_list)
+        .map(<[Value]>::to_vec)
+        .unwrap_or_default();
+    (r#type, values)
+}
+
+/// The answers of a TXT record as AWS and Google Cloud take them: each one
+/// in double quotes. A value already quoted is left as it is.
+pub fn quoted_txt(values: &[Value]) -> Vec<Value> {
+    values
+        .iter()
+        .map(|v| match v {
+            Value::String(t) if !t.starts_with('"') => {
+                Value::String(format!("\"{}\"", t.replace('"', "\\\"")))
+            }
+            other => other.clone(),
+        })
+        .collect()
+}
+
+/// The full name of a `dnsRecord` in `domain`: `name.domain`, or the domain
+/// itself for `@`. `domain` is text or an expression that reads as text.
+pub fn dns_full_name(resource: &Resource, domain: &str) -> Value {
+    match resource.params.get("name").and_then(Value::as_str) {
+        Some("@") | None => Value::String(domain.to_owned()),
+        Some(name) => Value::String(format!("{name}.{domain}")),
     }
 }
 

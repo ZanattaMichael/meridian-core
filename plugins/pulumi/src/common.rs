@@ -468,6 +468,38 @@ fn aws(r: &Resource, graph: &ResourceGraph, state: &mut State) -> Result<Expansi
             )
         }
         "disk" => aws_disk(r, graph)?,
+        "dnsRecord" => {
+            let zone = param(r, "zone");
+            let domain = zone.as_str().unwrap_or_default().to_owned();
+            let (kind, values) = infra::dns_record(r);
+            let records = if kind == "TXT" {
+                infra::quoted_txt(&values)
+            } else {
+                values
+            };
+            expansion(
+                vec![
+                    helper(
+                        r,
+                        "zone",
+                        "invoke.aws:route53:getZone",
+                        map(vec![("name", zone)]),
+                    ),
+                    primary(
+                        r,
+                        "aws:route53:Record",
+                        map(vec![
+                            ("zoneId", reference(&format!("{id}_zone"), "zoneId")),
+                            ("name", infra::dns_full_name(r, &domain)),
+                            ("type", Value::String(kind)),
+                            ("ttl", Value::Uint(infra::dns_ttl(r))),
+                            ("records", Value::List(records)),
+                        ]),
+                    ),
+                ],
+                &own_id(),
+            )
+        }
         "objectStore" => {
             let mut resources = vec![primary(
                 r,
@@ -813,6 +845,62 @@ fn azure(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError>
                 ("id", format!("${{{id}.id}}")),
             ],
         ),
+        "dnsRecord" => {
+            let (kind, values) = infra::dns_record(r);
+            let (key, answers) = match kind.as_str() {
+                "CNAME" => (
+                    "cnameRecord",
+                    Value::Map(map(vec![(
+                        "cname",
+                        values.into_iter().next().unwrap_or(Value::Null),
+                    )])),
+                ),
+                "TXT" => (
+                    "txtRecords",
+                    Value::List(
+                        values
+                            .into_iter()
+                            .map(|v| Value::Map(map(vec![("value", Value::List(vec![v]))])))
+                            .collect(),
+                    ),
+                ),
+                "AAAA" => (
+                    "aaaaRecords",
+                    Value::List(
+                        values
+                            .into_iter()
+                            .map(|v| Value::Map(map(vec![("ipv6Address", v)])))
+                            .collect(),
+                    ),
+                ),
+                _ => (
+                    "aRecords",
+                    Value::List(
+                        values
+                            .into_iter()
+                            .map(|v| Value::Map(map(vec![("ipv4Address", v)])))
+                            .collect(),
+                    ),
+                ),
+            };
+            expansion(
+                vec![primary(
+                    r,
+                    "azure-native:network:RecordSet",
+                    with(
+                        azure_place(r, graph, false)?,
+                        vec![
+                            ("zoneName", param(r, "zone")),
+                            ("relativeRecordSetName", param(r, "name")),
+                            ("recordType", Value::String(kind)),
+                            ("ttl", Value::Uint(infra::dns_ttl(r))),
+                            (key, answers),
+                        ],
+                    ),
+                )],
+                &own_id(),
+            )
+        }
         "objectStore" => {
             let account = || reference(id, "name");
             let mut resources = vec![

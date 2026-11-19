@@ -69,6 +69,7 @@ fn the_plugin_introduces_itself() {
             "address",
             "deployment",
             "disk",
+            "dnsRecord",
             "firewall",
             "network",
             "objectStore",

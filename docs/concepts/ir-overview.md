@@ -73,8 +73,8 @@ The same resource compiles for any of them. `cloud-init` applies them once, on f
 | `podman` | a kind of Quadlet unit | `container` |
 | `dsc` | module and resource | `PSDscResources/Service` |
 
-The seven [common infrastructure types](../reference/dsl/common-infrastructure-types.md)
-(`network`, `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore`) sit beside native types on `terraform` and
+The eight [common infrastructure types](../reference/dsl/common-infrastructure-types.md)
+(`network`, `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore`, `dnsRecord`) sit beside native types on `terraform` and
 `opentofu` (AWS, Azure, Google Cloud), `pulumi` (AWS, Azure), `cloudformation`, `bicep` and `arm`.
 
 Most passthrough targets also take a **settings resource** with a fixed type name

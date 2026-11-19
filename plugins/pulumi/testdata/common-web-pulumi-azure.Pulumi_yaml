@@ -145,6 +145,16 @@ resources:
       blobServicesName: default
       isVersioningEnabled: true
       resourceGroupName: web-prod
+  www:
+    type: azure-native:network:RecordSet
+    properties:
+      aRecords:
+        - ipv4Address: ${web_ip.ipAddress}
+      recordType: A
+      relativeRecordSetName: www
+      resourceGroupName: web-prod
+      ttl: 300
+      zoneName: example.com
 outputs:
   address: ${web_ip.ipAddress}
   private_address: ${vm_nic.ipConfigurations[0].privateIPAddress}

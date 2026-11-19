@@ -62,6 +62,15 @@ spec:
       params:
         versioning: true
 
+    # The machine's name in a zone the cloud already hosts.
+    - id: www
+      type: dnsRecord
+      params:
+        zone: example.com
+        name: www
+        type: A
+        values: ["${vm.publicAddress}"]
+
   outputs:
     - name: address
       value: ${vm.publicAddress}
