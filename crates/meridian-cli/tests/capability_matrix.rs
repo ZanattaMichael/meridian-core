@@ -44,6 +44,11 @@ compiled, with the reason. Each target's own page says how it does what it can.
   fields, such as the user, and hands its secret fields to the tool by a
   private channel when it runs. See
   [Credentials](dsl/credentials.md).
+- **cloud** says the target reaches its cloud as the credential
+  `spec.endpoint.credential` names (an `aws`, `azure` or `gcp` credential):
+  it hands the credential to its tool in the tool's own environment, the
+  one way the providers take a login, and the plan line says so. See
+  [Reaching a cloud as a credential](dsl/credentials.md#reaching-a-cloud-as-a-credential).
 - **adopt** is what the target does with a resource's `adopt`: *import*
   compiles it into the tool's own import, so the tool takes the existing
   thing into its state; *converge* means the tool keeps no state and makes
@@ -89,10 +94,11 @@ fn row(
         None => "no".to_owned(),
     };
     format!(
-        "| [{name}](../targets/{name}.md) | {category} | {types} | {notifies} | {runtime} | {plan} | {saved} | {apply} | {outputs} | {inputs} | {secrets} | {credentials} | {adopt} | {import} | {schemas} |\n",
+        "| [{name}](../targets/{name}.md) | {category} | {types} | {notifies} | {runtime} | {plan} | {saved} | {apply} | {outputs} | {inputs} | {secrets} | {credentials} | {cloud} | {adopt} | {import} | {schemas} |\n",
         schemas = yes(schemas.is_some()),
         saved = yes(runner.saves_plans()),
         credentials = yes(capabilities.credentials),
+        cloud = yes(capabilities.cloud_credentials),
         name = emitter.name(),
         category = emitter.category(),
         types = types.join(", "),
@@ -125,7 +131,7 @@ fn matrix() -> String {
         .collect();
     rows.sort();
     format!(
-        "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | saved plan | apply | outputs | inputs | secrets | credentials | adopt | import | schemas |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n{}",
+        "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | saved plan | apply | outputs | inputs | secrets | credentials | cloud | adopt | import | schemas |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n{}",
         rows.concat()
     )
 }

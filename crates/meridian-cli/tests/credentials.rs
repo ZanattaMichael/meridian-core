@@ -366,3 +366,149 @@ fn a_credential_the_host_does_not_name_is_not_fetched_or_handed_over() {
     assert!(!said(&out).contains(" as deploy"), "{}", said(&out));
     nothing_leaked(&out, &dir, &[]);
 }
+
+// ---- a cloud endpoint ---------------------------------------------------
+
+/// An Infrastructure document provisioning in a cloud reached as `prod`,
+/// an AWS credential whose secret key is a secret read from the
+/// environment.
+const IN_A_CLOUD: &str = r#"apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: net
+spec:
+  target: fake
+  endpoint:
+    type: cloud
+    credential: prod
+  secrets:
+    - name: aws_secret_key
+      from: env
+      key: DEPLOY_PASSWORD
+  credentials:
+    - name: prod
+      type: aws
+      accessKeyId: AKIA1
+      secretAccessKey: "${{ secret.aws_secret_key }}"
+      region: eu-west-1
+  resources:
+    - id: motd
+      type: file
+      params:
+        content: "welcome\n"
+"#;
+
+fn in_a_cloud(test: &str) -> PathBuf {
+    let dir = scratch(test);
+    fs::write(dir.join("net.yaml"), IN_A_CLOUD).unwrap();
+    dir
+}
+
+#[test]
+fn an_infrastructure_document_names_the_credential_its_cloud_is_reached_as() {
+    let dir = in_a_cloud("cloud-validate");
+    let out = meridian_with(&dir, &["validate", "net.yaml"], &[("DEPLOY_PASSWORD", "")]);
+    assert!(out.status.success(), "{}", said(&out));
+
+    // A cloud takes a cloud credential only, and the endpoint's type is one
+    // the language has.
+    let ssh = IN_A_CLOUD
+        .replace("type: aws", "type: ssh")
+        .replace("      accessKeyId: AKIA1\n", "      user: deploy\n")
+        .replace("secretAccessKey:", "privateKey:")
+        .replace("      region: eu-west-1\n", "");
+    fs::write(dir.join("net.yaml"), &ssh).unwrap();
+    let out = meridian(&dir, &["validate", "net.yaml"]);
+    assert!(!out.status.success());
+    assert!(
+        said(&out).contains("a cloud takes an aws, azure or gcp credential; \"prod\" is ssh"),
+        "{}",
+        said(&out)
+    );
+    let daemon = IN_A_CLOUD.replace("type: cloud", "type: daemon");
+    fs::write(dir.join("net.yaml"), &daemon).unwrap();
+    let out = meridian(&dir, &["validate", "net.yaml"]);
+    assert!(!out.status.success());
+    assert!(
+        said(&out).contains("unknown endpoint type \"daemon\" (expected cloud or cluster)"),
+        "{}",
+        said(&out)
+    );
+}
+
+#[test]
+fn plan_and_apply_hand_a_cloud_credential_to_the_tool_and_the_plan_line_says_how() {
+    let dir = in_a_cloud("cloud-handed");
+    let sink = sink(&dir);
+    for command in ["plan", "apply"] {
+        let _ = fs::remove_file(&sink);
+        let out = meridian_with(
+            &dir,
+            &[command, "net.yaml"],
+            &[("FAKE_CREDENTIAL_SINK", sink.to_str().unwrap())],
+        );
+        assert!(out.status.success(), "{command}: {}", said(&out));
+        let handed = fs::read_to_string(&sink).unwrap();
+        assert_eq!(
+            handed,
+            format!("{{\"secretAccessKey\":\"{PASSWORD}\"}}\n"),
+            "{command}"
+        );
+        // The plan says which identity reaches the cloud, and that it goes
+        // the one way the providers take it: the tool's environment.
+        let text = said(&out);
+        assert!(
+            text.contains(
+                "net (Infrastructure, target fake as prod (aws, region eu-west-1), in the \
+                 tool's environment)"
+            ),
+            "{command}: {text}"
+        );
+        nothing_leaked(&out, &dir, &["sink.json"]);
+    }
+    let work = dir.join(".meridian/infrastructure/net/fake");
+    let delivery = fs::read_to_string(work.join("credential-delivery.json")).unwrap();
+    assert_eq!(
+        delivery,
+        "{\"ambient\":false,\"channel\":\"file\",\"flags\":{},\"name\":\"prod\",\
+         \"secretFields\":[\"secretAccessKey\"],\"text\":{\"accessKeyId\":\"AKIA1\",\
+         \"region\":\"eu-west-1\"},\"type\":\"aws\"}"
+    );
+    // The compiled artifact names the credential and its plain fields, as
+    // the test target does, and never the value.
+    let compiled = fs::read_to_string(work.join("current/credential.txt")).unwrap();
+    assert_eq!(
+        compiled,
+        "prod (aws, region eu-west-1)\nsecret fields: secretAccessKey\n"
+    );
+}
+
+#[test]
+fn a_target_that_cannot_hand_its_tool_a_cloud_credential_is_refused_before_anything_runs() {
+    let dir = in_a_cloud("cloud-no-channel");
+    let sink = sink(&dir);
+    for command in ["compile", "plan", "apply"] {
+        let out = meridian_with(
+            &dir,
+            &[command, "net.yaml"],
+            &[
+                ("FAKE_SECRETS", "none"),
+                ("FAKE_CREDENTIAL_SINK", sink.to_str().unwrap()),
+            ],
+        );
+        assert!(!out.status.success(), "{command}: {}", said(&out));
+        let text = said(&out);
+        assert!(
+            text.contains(
+                "spec.endpoint names the credential \"prod\" for a cloud, and target \"fake\" \
+                 does not take one: it has no way to hand its tool that identity"
+            ) && text.contains("Leave the endpoint out to use the tool's own"),
+            "{command}: {text}"
+        );
+        assert!(!sink.exists(), "{command}");
+        nothing_leaked(&out, &dir, &[]);
+    }
+    assert!(!dir
+        .join(".meridian/infrastructure/net/fake/current")
+        .exists());
+}

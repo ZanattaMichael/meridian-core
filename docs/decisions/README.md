@@ -61,6 +61,7 @@ page it affects. The pull request template asks for it.
 | [A test is a document of cases over compile and plan, and never a script](0037-a-test-is-a-document-of-cases-over-compile-and-plan.md) | Testing | proposed |
 | [The common infrastructure types are a small core, checked once and mapped by each target per cloud](0040-common-infrastructure-types-are-a-small-core-mapped-per-cloud.md) | Targets | proposed |
 | [A key reaches a host through an agent Meridian starts](0028-a-key-reaches-a-host-through-an-agent-meridian-starts.md) | Targets | proposed |
+| [A cloud credential reaches a tool in its environment](0029-a-cloud-credential-reaches-a-tool-in-its-environment.md) | Targets | proposed |
 | [A configuration management target takes its tool's own types beside the six, and a colliding name is written `native/<name>`](0032-native-types-beside-the-six-and-a-prefix-for-colliding-names.md) | Targets | proposed |
 | [A tool's published schema file is fetched over HTTPS, pinned by its hash, and the last copy stands in offline](0036-a-published-schema-file-is-fetched-over-https-pinned-by-hash-and-reused-offline.md) | Tooling | proposed |
 | [Tool schemas travel as signed OCI bundles, chosen by the types the documents use and pinned by digest](0041-tool-schemas-travel-as-signed-oci-bundles-chosen-by-the-types-the-documents-use.md) | Tooling | proposed |

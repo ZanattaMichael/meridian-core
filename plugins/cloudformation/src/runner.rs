@@ -10,8 +10,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use meridian_sdk::tool::{write_artifact, Finished, Tool};
 use meridian_sdk::{
-    canonical_map, decode_map, decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog,
-    Operations, Output, Plan, RunContext, RunError, Runner, SavedPlan, SecretFile, Value,
+    canonical_map, cloud_for, decode_map, decode_value, Applied, Artifact, Change, ChangeAction,
+    CloudHandover, Log, NoLog, Operations, Output, Plan, RunContext, RunError, Runner, SavedPlan,
+    SecretFile, Value,
 };
 use meridian_sdk::{settings, Setting};
 
@@ -152,7 +153,13 @@ impl CloudFormationRunner {
 
     /// One `aws cloudformation` call against the stack. A waiter's name is
     /// part of the operation: `wait stack-create-complete`.
-    fn aws(&self, context: &RunContext, stack: &Stack, operation: &str) -> Tool {
+    fn aws(
+        &self,
+        context: &RunContext,
+        cloud: Option<&CloudHandover>,
+        stack: &Stack,
+        operation: &str,
+    ) -> Tool {
         let mut tool = Tool::new(&self.program)
             .arg("cloudformation")
             .args(operation.split(' '))
@@ -163,13 +170,18 @@ impl CloudFormationRunner {
         if !stack.region.is_empty() {
             tool = tool.args(["--region", &stack.region]);
         }
-        tool.args(self.extra_args.iter().cloned())
+        CloudHandover::tell_if_any(cloud, tool.args(self.extra_args.iter().cloned()))
     }
 
     /// The stack's status, or `None` when there is no such stack.
-    fn status(&self, context: &RunContext, stack: &Stack) -> Result<Option<Value>, RunError> {
+    fn status(
+        &self,
+        context: &RunContext,
+        cloud: Option<&CloudHandover>,
+        stack: &Stack,
+    ) -> Result<Option<Value>, RunError> {
         let finished = self
-            .aws(context, stack, "describe-stacks")
+            .aws(context, cloud, stack, "describe-stacks")
             .args(["--output", "json"])
             .run(&NoLog)?;
         if !finished.success() {
@@ -188,18 +200,27 @@ impl CloudFormationRunner {
     }
 
     /// Whether the stack exists only as the shell a change set leaves.
-    fn in_review(&self, context: &RunContext, stack: &Stack) -> bool {
-        self.status(context, stack).ok().flatten().is_some_and(|s| {
-            s.as_map()
-                .and_then(|s| s.get("StackStatus"))
-                .and_then(Value::as_str)
-                == Some("REVIEW_IN_PROGRESS")
-        })
+    fn in_review(
+        &self,
+        context: &RunContext,
+        cloud: Option<&CloudHandover>,
+        stack: &Stack,
+    ) -> bool {
+        self.status(context, cloud, stack)
+            .ok()
+            .flatten()
+            .is_some_and(|s| {
+                s.as_map()
+                    .and_then(|s| s.get("StackStatus"))
+                    .and_then(Value::as_str)
+                    == Some("REVIEW_IN_PROGRESS")
+            })
     }
 
     fn preview(
         &self,
         context: &RunContext,
+        cloud: Option<&CloudHandover>,
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<(Stack, Preview), RunError> {
@@ -220,7 +241,7 @@ impl CloudFormationRunner {
         // keeps every parameter, and shows `****` for them.
         let secrets = secrets_file(context)?;
 
-        let existing = self.status(context, &stack)?;
+        let existing = self.status(context, cloud, &stack)?;
         let status = existing
             .as_ref()
             .and_then(Value::as_map)
@@ -240,7 +261,7 @@ impl CloudFormationRunner {
             stack.name
         ));
         let mut create = self
-            .aws(context, &stack, "create-change-set")
+            .aws(context, cloud, &stack, "create-change-set")
             .args(["--change-set-name", &change_set])
             .args([
                 "--change-set-type",
@@ -260,19 +281,19 @@ impl CloudFormationRunner {
         if let Err(refused) = created {
             // A refusal can still leave the shell of a stack that was never
             // created. One that exists only in review is ours to remove.
-            if new_stack && self.in_review(context, &stack) {
-                let _ = self.aws(context, &stack, "delete-stack").run(&NoLog);
+            if new_stack && self.in_review(context, cloud, &stack) {
+                let _ = self.aws(context, cloud, &stack, "delete-stack").run(&NoLog);
             }
             return Err(refused);
         }
 
         // The wait fails when the change set does; the description says why.
         let _ = self
-            .aws(context, &stack, "wait change-set-create-complete")
+            .aws(context, cloud, &stack, "wait change-set-create-complete")
             .args(["--change-set-name", &change_set])
             .run(&NoLog)?;
         let described = self
-            .aws(context, &stack, "describe-change-set")
+            .aws(context, cloud, &stack, "describe-change-set")
             .args(["--change-set-name", &change_set])
             .args(["--output", "json"])
             .run_ok("aws could not describe the change set", log)?;
@@ -296,7 +317,7 @@ impl CloudFormationRunner {
                 || reason.contains("No updates are to be performed");
             if !nothing_to_do {
                 let reason = reason.to_owned();
-                self.discard(context, &stack, &preview);
+                self.discard(context, cloud, &stack, &preview);
                 return Err(RunError::new(format!(
                     "CloudFormation rejected the change set: {reason}"
                 )));
@@ -307,18 +328,29 @@ impl CloudFormationRunner {
 
     /// Removes a change set that will not be executed, and the empty shell of
     /// a stack that creating it left behind.
-    fn discard(&self, context: &RunContext, stack: &Stack, preview: &Preview) {
+    fn discard(
+        &self,
+        context: &RunContext,
+        cloud: Option<&CloudHandover>,
+        stack: &Stack,
+        preview: &Preview,
+    ) {
         let _ = self
-            .aws(context, stack, "delete-change-set")
+            .aws(context, cloud, stack, "delete-change-set")
             .args(["--change-set-name", &preview.change_set])
             .run(&NoLog);
         if preview.new_stack {
-            let _ = self.aws(context, stack, "delete-stack").run(&NoLog);
+            let _ = self.aws(context, cloud, stack, "delete-stack").run(&NoLog);
         }
     }
 
-    fn read_outputs(&self, context: &RunContext, stack: &Stack) -> Result<Vec<Output>, RunError> {
-        let Some(described) = self.status(context, stack)? else {
+    fn read_outputs(
+        &self,
+        context: &RunContext,
+        cloud: Option<&CloudHandover>,
+        stack: &Stack,
+    ) -> Result<Vec<Output>, RunError> {
+        let Some(described) = self.status(context, cloud, stack)? else {
             return Err(RunError::new(format!(
                 "there is no stack named {}, so it has no outputs",
                 stack.name
@@ -431,7 +463,11 @@ impl Runner for CloudFormationRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
-        let (stack, preview) = self.preview(context, artifact, log)?;
+        // A cloud credential reaches the tool in the environment of every
+        // call of the stage; the files a provider reads live to the end of it.
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let cloud = cloud.as_ref();
+        let (stack, preview) = self.preview(context, cloud, artifact, log)?;
         // The change set is CloudFormation's own saved plan: it stays, and
         // its name is what `meridian plan --out` keeps. The values it holds
         // stay with CloudFormation, so the name can be kept anywhere.
@@ -442,7 +478,7 @@ impl Runner for CloudFormationRunner {
             ));
             Some(SavedPlan::new(preview.to_json()))
         } else {
-            self.discard(context, &stack, &preview);
+            self.discard(context, cloud, &stack, &preview);
             None
         };
         Ok(Plan {
@@ -458,6 +494,10 @@ impl Runner for CloudFormationRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
+        // A cloud credential reaches the tool in the environment of every
+        // call of the stage; the files a provider reads live to the end of it.
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let cloud = cloud.as_ref();
         let (stack, preview) = match &context.saved_plan {
             // The change set a plan kept is executed as it is. CloudFormation
             // refuses one whose stack has been changed since.
@@ -476,10 +516,10 @@ impl Runner for CloudFormationRunner {
                 ));
                 (stack, preview)
             }
-            None => self.preview(context, artifact, log)?,
+            None => self.preview(context, cloud, artifact, log)?,
         };
         if preview.changes.is_empty() {
-            self.discard(context, &stack, &preview);
+            self.discard(context, cloud, &stack, &preview);
             log.out(&format!("stack {}: nothing to change", stack.name));
         } else {
             log.out(&format!(
@@ -487,7 +527,7 @@ impl Runner for CloudFormationRunner {
                 stack.name,
                 preview.changes.len()
             ));
-            self.aws(context, &stack, "execute-change-set")
+            self.aws(context, cloud, &stack, "execute-change-set")
                 .args(["--change-set-name", &preview.change_set])
                 .run_ok("aws could not execute the change set", log)?;
             let wait = if preview.new_stack {
@@ -495,7 +535,7 @@ impl Runner for CloudFormationRunner {
             } else {
                 "wait stack-update-complete"
             };
-            self.aws(context, &stack, wait).run_ok(
+            self.aws(context, cloud, &stack, wait).run_ok(
                 "the stack did not reach a complete state; CloudFormation rolls a failed \
                  deployment back, and the stack's events say which resource failed",
                 log,
@@ -503,17 +543,21 @@ impl Runner for CloudFormationRunner {
         }
         Ok(Applied {
             changes: preview.changes,
-            outputs: self.read_outputs(context, &stack)?,
+            outputs: self.read_outputs(context, cloud, &stack)?,
         })
     }
 
     fn outputs(&self, context: &RunContext) -> Result<Vec<Output>, RunError> {
+        // A cloud credential reaches the tool in the environment of every
+        // call of the stage; the files a provider reads live to the end of it.
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let cloud = cloud.as_ref();
         let settings =
             std::fs::read_to_string(context.work_dir.join(STACK_PATH)).map_err(|_| {
                 RunError::new(
                     "nothing has been applied for this document yet, so it has no outputs",
                 )
             })?;
-        self.read_outputs(context, &Stack::read(&settings)?)
+        self.read_outputs(context, cloud, &Stack::read(&settings)?)
     }
 }

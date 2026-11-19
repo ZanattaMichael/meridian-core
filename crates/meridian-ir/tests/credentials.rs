@@ -2,8 +2,9 @@
 //! are secrets and nothing else, and how a host names one.
 
 use meridian_ir::{
-    parse, resolve_with, secret_reference, Bundle, Data, Document, Resolution, Secrets, Value,
-    CREDENTIAL_FROM_AMBIENT, HOST_CREDENTIAL_TYPES,
+    endpoint_credential_types, parse, resolve_with, secret_reference, Bundle, Data, Document,
+    Resolution, Secrets, Value, CLOUD_CREDENTIAL_TYPES, CLUSTER_CREDENTIAL_TYPES,
+    CREDENTIAL_FROM_AMBIENT, ENDPOINT_TYPES, HOST_CREDENTIAL_TYPES,
 };
 use meridian_secret::SecretValue;
 
@@ -502,4 +503,168 @@ fn a_credential_a_host_does_not_name_is_still_checked_and_kept() {
     let resolved = kept(resolve_with(&doc, &Data::new(), &fetched(&doc)).unwrap());
     assert_eq!(resolved.credentials().len(), 1);
     assert_eq!(resolved.credential("deploy").unwrap().secrets().len(), 1);
+}
+
+// ---- endpoints ---------------------------------------------------------
+
+const AWS_KEY: &str = "{name: prod, type: aws, accessKeyId: AKIA, secretAccessKey: \"${{ secret.deploy_key }}\", region: eu-west-1}";
+
+/// An Infrastructure document declaring the two secrets and `credentials`,
+/// applied to an endpoint of `endpoint_type` as `credential`.
+fn cloud(endpoint_type: &str, credential: &str, credentials: &[&str]) -> String {
+    let entries: String = credentials.iter().map(|c| format!("  - {c}\n")).collect();
+    let endpoint = if endpoint_type.is_empty() && credential.is_empty() {
+        String::new()
+    } else {
+        format!("endpoint: {{type: {endpoint_type}, credential: {credential}}}\n")
+    };
+    infrastructure(&format!(
+        "{SECRETS}credentials:\n{entries}{endpoint}{RESOURCES}"
+    ))
+}
+
+#[test]
+fn an_endpoint_names_a_declared_credential_of_the_type_its_kind_takes() {
+    assert_eq!(ENDPOINT_TYPES, ["cloud", "cluster"]);
+    assert_eq!(CLOUD_CREDENTIAL_TYPES, ["aws", "azure", "gcp"]);
+    assert_eq!(CLUSTER_CREDENTIAL_TYPES, ["kubeconfig"]);
+    assert_eq!(
+        endpoint_credential_types("cloud"),
+        Some(CLOUD_CREDENTIAL_TYPES)
+    );
+    assert_eq!(endpoint_credential_types("host"), None);
+
+    valid(&cloud("cloud", "prod", &[AWS_KEY]));
+    valid(&cloud(
+        "cloud",
+        "prod",
+        &["{name: prod, type: azure, clientId: c, tenantId: t, subscriptionId: s, managedIdentity: true}"],
+    ));
+    valid(&cloud(
+        "cloud",
+        "prod",
+        &["{name: prod, type: gcp, project: shop, serviceAccountKey: \"${{ secret.deploy_key }}\"}"],
+    ));
+    valid(&cloud(
+        "cluster",
+        "shop",
+        &["{name: shop, type: kubeconfig, kubeconfig: \"${{ secret.deploy_key }}\"}"],
+    ));
+    // An ambient one names the identity without holding any of it.
+    valid(&cloud(
+        "cloud",
+        "prod",
+        &["{name: prod, type: aws, from: ambient, profile: ci}"],
+    ));
+
+    let doc = document(&cloud("cloud", "prod", &[AWS_KEY]));
+    let endpoint = doc.endpoint().unwrap();
+    assert_eq!(
+        (endpoint.r#type.as_str(), endpoint.credential.as_str()),
+        ("cloud", "prod")
+    );
+    assert_eq!(doc.named_credential().unwrap().name, "prod");
+    // The credential resolves with the document, its secret fields as slots.
+    let resolved = kept(resolve_with(&doc, &Data::new(), &fetched(&doc)).unwrap());
+    assert_eq!(resolved.named_credential().unwrap().secrets().len(), 1);
+    assert_eq!(resolved.endpoint().unwrap().credential, "prod");
+}
+
+#[test]
+fn an_endpoint_of_the_wrong_kind_or_credential_is_refused_with_the_reason() {
+    refused(
+        &cloud(
+            "cloud",
+            "prod",
+            &["{name: prod, type: ssh, user: deploy, agent: true}"],
+        ),
+        &[
+            "spec.endpoint.credential",
+            "a cloud takes an aws, azure or gcp credential; \"prod\" is ssh",
+        ],
+    );
+    refused(
+        &cloud("cluster", "prod", &[AWS_KEY]),
+        &[
+            "spec.endpoint.credential",
+            "a cluster takes a kubeconfig credential; \"prod\" is aws",
+        ],
+    );
+    refused(
+        &cloud("cloud", "staging", &[AWS_KEY]),
+        &[
+            "spec.endpoint.credential",
+            "no credential named \"staging\" is declared in spec.credentials (declared: prod)",
+        ],
+    );
+    refused(
+        &cloud("daemon", "prod", &[AWS_KEY]),
+        &[
+            "spec.endpoint.type",
+            "unknown endpoint type \"daemon\" (expected cloud or cluster)",
+        ],
+    );
+    refused(
+        &cloud("host", "prod", &[AWS_KEY]),
+        &["spec.endpoint.type", "a host is named in spec.targetHost"],
+    );
+    refused(
+        &infrastructure(&format!(
+            "{SECRETS}credentials:\n  - {AWS_KEY}\nendpoint: {{type: cloud}}\n{RESOURCES}"
+        )),
+        &[
+            "spec.endpoint.credential",
+            "missing required field: the credential the cloud is reached as",
+        ],
+    );
+    refused(
+        &infrastructure(&format!(
+            "{SECRETS}credentials:\n  - {AWS_KEY}\nendpoint: {{credential: prod}}\n{RESOURCES}"
+        )),
+        &["spec.endpoint.type", "missing required field"],
+    );
+    let open = concat!("$", "{{");
+    refused(
+        &cloud("cloud", &format!("\"{open} data.who }}}}\""), &[AWS_KEY]),
+        &[
+            "spec.endpoint.credential",
+            "a credential is named as written",
+            "it is not interpolated",
+        ],
+    );
+    // A field the shape does not have is refused when the file is read.
+    let text = infrastructure(&format!(
+        "{SECRETS}credentials:\n  - {AWS_KEY}\nendpoint: {{type: cloud, credential: prod, region: eu-west-1}}\n{RESOURCES}"
+    ));
+    let err = parse("doc.yaml", text.as_bytes()).unwrap_err().to_string();
+    assert!(
+        err.contains("spec.endpoint") && err.contains("region"),
+        "{err}"
+    );
+}
+
+#[test]
+fn a_resource_set_names_one_identity_for_its_host_or_its_endpoint_not_both() {
+    // A ResourceSet may be applied to a cloud too, on a target that reaches
+    // no host; it then names no credential for the host.
+    let both = resource_set(
+        "deploy",
+        &format!("{SECRETS}credentials:\n  - {SSH_KEY}\n  - {AWS_KEY}\nendpoint: {{type: cloud, credential: prod}}\n{RESOURCES}"),
+    );
+    refused(
+        &both,
+        &[
+            "spec.endpoint.credential",
+            "already names a credential for its host in spec.targetHost.credential",
+        ],
+    );
+    let endpoint_only = resource_set(
+        "",
+        &format!("{SECRETS}credentials:\n  - {AWS_KEY}\nendpoint: {{type: cloud, credential: prod}}\n{RESOURCES}"),
+    );
+    valid(&endpoint_only);
+    assert_eq!(
+        document(&endpoint_only).named_credential().unwrap().name,
+        "prod"
+    );
 }

@@ -11,8 +11,9 @@
 //! orders it with no further change.
 
 use crate::types::{
-    Kind, API_VERSION_V1, CREDENTIAL_FROM_AMBIENT, IMPORT_FROM_ARTIFACT, IMPORT_FROM_OUTPUT,
-    NOTIFY_ON_CHANGED, TARGET_HOST_FROM_INFRASTRUCTURE, TARGET_HOST_FROM_INLINE,
+    Kind, API_VERSION_V1, CREDENTIAL_FROM_AMBIENT, ENDPOINT_TYPE_CLOUD, ENDPOINT_TYPE_CLUSTER,
+    IMPORT_FROM_ARTIFACT, IMPORT_FROM_OUTPUT, NOTIFY_ON_CHANGED, TARGET_HOST_FROM_INFRASTRUCTURE,
+    TARGET_HOST_FROM_INLINE,
 };
 
 /// One mapping in a document: the fields it may hold, in the order the
@@ -622,6 +623,44 @@ pub const TARGET_HOST: Shape = Shape {
     ],
 };
 
+/// The values `endpoint.type` accepts.
+pub const ENDPOINT_TYPE: &[Choice] = &[
+    choice(
+        ENDPOINT_TYPE_CLOUD,
+        "An account, subscription or project of a cloud, for an infrastructure target; \
+         reached as an `aws`, `azure` or `gcp` credential.",
+    ),
+    choice(
+        ENDPOINT_TYPE_CLUSTER,
+        "A Kubernetes API, for an orchestration target; reached as a `kubeconfig` \
+         credential.",
+    ),
+];
+
+/// `spec.endpoint`.
+pub const ENDPOINT: Shape = Shape {
+    name: "Endpoint",
+    doc: "The place a document is applied to that is not a host, and the credential it \
+          is reached as. A host is `targetHost`.",
+    fields: &[
+        Field {
+            name: "type",
+            doc: "What kind of place it is. The type fixes which credential types reach it.",
+            required: true,
+            ty: Type::Enum(ENDPOINT_TYPE),
+            role: Role::None,
+        },
+        text(
+            "credential",
+            true,
+            Role::None,
+            "The credential the endpoint is reached with, by the name `spec.credentials` \
+             declares it under: `aws`, `azure` or `gcp` for a cloud, `kubeconfig` for a \
+             cluster.",
+        ),
+    ],
+};
+
 /// The values `credentials[].type` accepts.
 pub const CREDENTIAL_TYPE: &[Choice] = &[
     choice(
@@ -976,6 +1015,15 @@ pub const IMPORT: Shape = Shape {
     ],
 };
 
+const ENDPOINT_FIELD: Field = Field {
+    name: "endpoint",
+    doc: "The cloud or cluster this document is applied to, and the credential it is \
+          reached as.",
+    required: false,
+    ty: Type::Object(&ENDPOINT),
+    role: Role::None,
+};
+
 const IMPORTS: Field = Field {
     name: "imports",
     doc: "Values handed to the document's tool from other documents of the workflow.",
@@ -996,6 +1044,7 @@ pub const INFRASTRUCTURE_SPEC: Shape = Shape {
         CONDITIONS,
         SECRETS,
         CREDENTIALS,
+        ENDPOINT_FIELD,
         SETTINGS,
         IMPORTS,
         RESOURCES,
@@ -1029,6 +1078,7 @@ pub const RESOURCE_SET_SPEC: Shape = Shape {
             ty: Type::Object(&TARGET_HOST),
             role: Role::None,
         },
+        ENDPOINT_FIELD,
         SETTINGS,
         IMPORTS,
         RESOURCES,

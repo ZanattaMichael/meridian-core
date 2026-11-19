@@ -82,6 +82,9 @@ impl Emitter for Fake {
             runtime_condition: false,
             secrets: std::env::var("FAKE_SECRETS").as_deref() != Ok("none"),
             credentials: std::env::var("FAKE_SECRETS").as_deref() != Ok("none"),
+            // A cloud credential is handed over the same way as a host's:
+            // the fake has no provider to tell, so it records the handover.
+            cloud_credentials: std::env::var("FAKE_SECRETS").as_deref() != Ok("none"),
             // Adopts as a stateful tool does: the identifier is written
             // beside the file, and the first plan reports an adoption.
             // FAKE_ADOPT stands it in for a target that adopts by
@@ -151,8 +154,8 @@ impl Emitter for Fake {
                 );
             }
         }
-        // The credential the host is reached with: what a compile knows of
-        // it, which is never a value.
+        // The credential the host, or the cloud, is reached with: what a
+        // compile knows of it, which is never a value.
         if let Some(credential) = &graph.credential {
             emitted.artifact.files.insert(
                 "credential.txt".to_owned(),
