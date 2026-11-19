@@ -68,6 +68,7 @@ fn the_plugin_introduces_itself() {
             "<Namespace>/<type>",
             "address",
             "deployment",
+            "disk",
             "firewall",
             "network",
             "parameter",

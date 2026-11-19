@@ -67,7 +67,7 @@ Longer ones:
 ## Common types beside the native ones
 
 Five resource types are Meridian's own and mean the same on every cloud:
-`network`, `subnet`, `firewall`, `address` and `vm`. On `terraform` and
+`network`, `subnet`, `firewall`, `address`, `vm` and `disk`. On `terraform` and
 `opentofu` (for AWS, Azure and Google Cloud) and `bicep`, each becomes the cloud's own resources, and the same
 document compiles for each. They are used beside the tool's own types, so a
 document mixes `vm` with an `aws_s3_bucket` where the common type falls short.

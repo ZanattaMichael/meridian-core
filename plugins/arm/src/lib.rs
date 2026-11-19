@@ -211,6 +211,7 @@ impl Emitter for Arm {
             "<Namespace>/<type>",
             "address",
             "deployment",
+            "disk",
             "firewall",
             "network",
             "parameter",

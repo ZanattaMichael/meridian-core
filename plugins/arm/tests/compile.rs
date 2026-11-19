@@ -759,6 +759,7 @@ fn the_plugin_declares_what_it_is() {
             "<Namespace>/<type>",
             "address",
             "deployment",
+            "disk",
             "firewall",
             "network",
             "parameter",

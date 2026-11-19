@@ -160,12 +160,12 @@ fn expand(
     graph: &ResourceGraph,
     state: &mut State,
 ) -> Result<Expansion, CompileError> {
-    if r.params.contains_key("location") && r.r#type != "subnet" {
+    if r.params.contains_key("location") && r.r#type != "subnet" && r.r#type != "disk" {
         return Err(refuse_param(
             r,
             "location",
             "a CloudFormation stack is deployed to one region, set on its stack resource; only a \
-             subnet takes a location, its availability zone",
+             subnet and a disk take a location, an availability zone",
         ));
     }
     let id = r.id.as_str();
@@ -261,7 +261,70 @@ fn expand(
                 order: Vec::new(),
             }
         }
+        "disk" => disk(r, graph)?,
         _ => vm(r)?,
+    })
+}
+
+/// The device names an AWS data disk is attached as, in order.
+const DEVICES: &str = "fghijklmnop";
+
+fn disk(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError> {
+    let id = r.id.as_str();
+    let vm = ref_param(r, "vm");
+    let zone = match (r.params.get("location"), &vm) {
+        (Some(zone), _) => zone.clone(),
+        (None, Some(vm)) => attribute(vm, "AvailabilityZone"),
+        (None, None) => {
+            return Err(refuse(
+                r,
+                &rules::MISSING_PARAM,
+                "a disk on AWS is in an availability zone: give the param vm, or location \
+                 (such as eu-west-1a)"
+                    .to_owned(),
+            ))
+        }
+    };
+    let mut resources = vec![primary(
+        r,
+        "AWS::EC2::Volume",
+        map(vec![
+            ("AvailabilityZone", zone),
+            ("Size", Value::Uint(infra::disk_size(r))),
+            ("VolumeType", Value::from("gp3")),
+            ("Tags", tags(r)),
+        ]),
+    )];
+    if let Some(vm) = vm {
+        let i = infra::disks_of(graph, &vm)
+            .iter()
+            .position(|d| d.id == r.id)
+            .unwrap_or(0);
+        let letter = DEVICES.chars().nth(i).ok_or_else(|| {
+            refuse(
+                r,
+                &rules::INVALID_PARAM,
+                format!(
+                    "vm {vm:?} has more than {} disks; AWS names them /dev/sdf to /dev/sdp",
+                    DEVICES.len()
+                ),
+            )
+        })?;
+        resources.push(helper(
+            r,
+            "attachment",
+            "AWS::EC2::VolumeAttachment",
+            map(vec![
+                ("Device", Value::String(format!("/dev/sd{letter}"))),
+                ("InstanceId", r#ref(&vm)),
+                ("VolumeId", r#ref(id)),
+            ]),
+        ));
+    }
+    Ok(Expansion {
+        resources,
+        outputs: outputs(&[("id", format!("${{{id}}}"))]),
+        order: Vec::new(),
     })
 }
 

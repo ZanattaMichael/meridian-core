@@ -264,6 +264,7 @@ impl Emitter for Pulumi {
             "<package>:<module>:<Type>",
             "address",
             "config",
+            "disk",
             "firewall",
             "invoke.<function>",
             "network",

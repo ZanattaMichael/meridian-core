@@ -86,6 +86,7 @@ fn the_plugin_describes_itself_as_infrastructure_as_code() {
             "address",
             "backend",
             "data.<type>",
+            "disk",
             "encryption",
             "ephemeral.<type>",
             "firewall",

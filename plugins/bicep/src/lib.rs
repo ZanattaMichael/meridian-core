@@ -197,6 +197,7 @@ impl Emitter for Bicep {
             "<Namespace>/<type>@<api-version>",
             "address",
             "deployment",
+            "disk",
             "firewall",
             "network",
             "subnet",

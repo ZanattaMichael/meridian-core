@@ -1,5 +1,5 @@
 //! The common infrastructure resource types: `network`, `subnet`, `firewall`,
-//! `address` and `vm`.
+//! `address`, `vm` and `disk`.
 //!
 //! Most of what an infrastructure document describes is the same on every
 //! cloud: a network, a subnet in it, a firewall, a fixed address, a machine.
@@ -40,6 +40,7 @@ const COMMON_TYPES: &[(&str, &str)] = &[
         "address",
         "A fixed public IP address, which a vm takes with its `address` param.",
     ),
+    ("disk", "A data disk, attached to a vm with its `vm` param."),
     (
         "firewall",
         "A set of rules saying which traffic may reach, or leave, the machines it is attached to.",
@@ -65,6 +66,31 @@ const COMMON_PARAMS: &[(&str, &str, ParamKind, bool, &str)] = &[
     ("address", "location", ParamKind::String, false, LOCATION),
     ("address", "name", ParamKind::String, false, NAME),
     ("address", "tags", ParamKind::Map, false, TAGS),
+    (
+        "disk",
+        "location",
+        ParamKind::String,
+        false,
+        "On AWS, the availability zone, needed only when there is no `vm`. On Azure, as \
+         `location` of any type. On Google Cloud, the zone; the vm's zone unless given.",
+    ),
+    ("disk", "name", ParamKind::String, false, NAME),
+    (
+        "disk",
+        "sizeGb",
+        ParamKind::Integer,
+        true,
+        "The disk's size, in gigabytes.",
+    ),
+    ("disk", "tags", ParamKind::Map, false, TAGS),
+    (
+        "disk",
+        "vm",
+        ParamKind::String,
+        false,
+        "The vm the disk is attached to, as a reference: `${web_vm}`. Disks of one vm are \
+         attached in document order.",
+    ),
     ("firewall", "location", ParamKind::String, false, LOCATION),
     ("firewall", "name", ParamKind::String, false, NAME),
     (
@@ -200,6 +226,7 @@ const TAGS: &str = "Labels on the resource, as a mapping of text to text.";
 const COMMON_OUTPUTS: &[(&str, &str, &str)] = &[
     ("address", "address", "The IP address."),
     ("address", "id", "The cloud's own id for the address."),
+    ("disk", "id", "The cloud's own id for the disk."),
     ("firewall", "id", "The cloud's own id for the firewall."),
     ("network", "id", "The cloud's own id for the network."),
     ("subnet", "id", "The cloud's own id for the subnet."),
@@ -525,11 +552,21 @@ fn check_shape(
                 }
             }
         }
-        (_, "network") | ("vm", "subnet") | ("vm", "address") => {
+        (_, "network") | ("vm", "subnet") | ("vm", "address") | ("disk", "vm") => {
             if referenced_id(value).is_none() {
                 return Err(invalid(format!(
                     "param {name:?} of a {type} must be a reference to one resource of this \
                      document, written ${{id}}, not {}",
+                    value.canonical()
+                )));
+            }
+        }
+        ("disk", "sizeGb") => {
+            if !matches!(value, Value::Int(i) if *i > 0)
+                && !matches!(value, Value::Uint(u) if *u > 0)
+            {
+                return Err(invalid(format!(
+                    "sizeGb must be a whole number above zero, not {}",
                     value.canonical()
                 )));
             }
@@ -943,6 +980,28 @@ pub fn asked_size(value: &Value) -> Option<(u32, f64)> {
 pub fn asked_image(value: &Value) -> Option<(&str, &str)> {
     let map = value.as_map()?;
     Some((map.get("family")?.as_str()?, map.get("version")?.as_str()?))
+}
+
+/// The disks attached to `vm`, in document order, as their ids. A target
+/// numbers a disk's attachment (its LUN, its device name) by its place here.
+pub fn disks_of<'a>(graph: &'a ResourceGraph, vm: &str) -> Vec<&'a Resource> {
+    graph
+        .resources
+        .iter()
+        .filter(|r| {
+            r.r#type == "disk" && r.params.get("vm").and_then(referenced_id).as_deref() == Some(vm)
+        })
+        .collect()
+}
+
+/// The size a `disk` asks for, in gigabytes. Only called after
+/// [`check_common`] accepted the disk.
+pub fn disk_size(resource: &Resource) -> u64 {
+    match resource.params.get("sizeGb") {
+        Some(Value::Int(i)) => (*i).max(0) as u64,
+        Some(Value::Uint(u)) => *u,
+        _ => 0,
+    }
 }
 
 #[cfg(test)]

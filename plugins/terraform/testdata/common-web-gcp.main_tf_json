@@ -20,6 +20,20 @@
         "region": "europe-west1"
       }
     },
+    "google_compute_attached_disk": {
+      "store_attachment": {
+        "disk": "${google_compute_disk.store.id}",
+        "instance": "${google_compute_instance.vm.id}"
+      }
+    },
+    "google_compute_disk": {
+      "store": {
+        "name": "store",
+        "size": 50,
+        "type": "pd-balanced",
+        "zone": "${google_compute_instance.vm.zone}"
+      }
+    },
     "google_compute_firewall": {
       "web_fw": {
         "allow": [

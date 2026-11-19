@@ -2362,6 +2362,7 @@
                   "enum": [
                     "address",
                     "deployment",
+                    "disk",
                     "firewall",
                     "network",
                     "parameter",
@@ -2417,6 +2418,77 @@
                   }
                 },
                 "additionalProperties": false
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "disk"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A data disk, attached to a vm with its `vm` param. Reads on every target: `${id.id}`.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "location": {
+                    "description": "On AWS, the availability zone, needed only when there is no `vm`. On Azure, as `location` of any type. On Google Cloud, the zone; the vm's zone unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The resource's name in the cloud. The resource's id unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "sizeGb": {
+                    "description": "The disk's size, in gigabytes.",
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "tags": {
+                    "description": "Labels on the resource, as a mapping of text to text.",
+                    "type": [
+                      "object",
+                      "string"
+                    ]
+                  },
+                  "vm": {
+                    "description": "The vm the disk is attached to, as a reference: `${web_vm}`. Disks of one vm are attached in document order.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "sizeGb"
+                ]
               },
               "state": {
                 "enum": [
@@ -2861,6 +2933,7 @@
                   "enum": [
                     "address",
                     "deployment",
+                    "disk",
                     "firewall",
                     "network",
                     "subnet",
@@ -2915,6 +2988,77 @@
                   }
                 },
                 "additionalProperties": false
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "disk"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A data disk, attached to a vm with its `vm` param. Reads on every target: `${id.id}`.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "location": {
+                    "description": "On AWS, the availability zone, needed only when there is no `vm`. On Azure, as `location` of any type. On Google Cloud, the zone; the vm's zone unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The resource's name in the cloud. The resource's id unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "sizeGb": {
+                    "description": "The disk's size, in gigabytes.",
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "tags": {
+                    "description": "Labels on the resource, as a mapping of text to text.",
+                    "type": [
+                      "object",
+                      "string"
+                    ]
+                  },
+                  "vm": {
+                    "description": "The vm the disk is attached to, as a reference: `${web_vm}`. Disks of one vm are attached in document order.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "sizeGb"
+                ]
               },
               "state": {
                 "enum": [
@@ -4199,6 +4343,7 @@
                 {
                   "enum": [
                     "address",
+                    "disk",
                     "firewall",
                     "network",
                     "stack",
@@ -4254,6 +4399,77 @@
                   }
                 },
                 "additionalProperties": false
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "disk"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A data disk, attached to a vm with its `vm` param. Reads on every target: `${id.id}`.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "location": {
+                    "description": "On AWS, the availability zone, needed only when there is no `vm`. On Azure, as `location` of any type. On Google Cloud, the zone; the vm's zone unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The resource's name in the cloud. The resource's id unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "sizeGb": {
+                    "description": "The disk's size, in gigabytes.",
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "tags": {
+                    "description": "Labels on the resource, as a mapping of text to text.",
+                    "type": [
+                      "object",
+                      "string"
+                    ]
+                  },
+                  "vm": {
+                    "description": "The vm the disk is attached to, as a reference: `${web_vm}`. Disks of one vm are attached in document order.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "sizeGb"
+                ]
               },
               "state": {
                 "enum": [
@@ -4799,6 +5015,7 @@
                   "enum": [
                     "address",
                     "backend",
+                    "disk",
                     "encryption",
                     "firewall",
                     "local",
@@ -4864,6 +5081,77 @@
                   }
                 },
                 "additionalProperties": false
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "disk"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A data disk, attached to a vm with its `vm` param. Reads on every target: `${id.id}`.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "location": {
+                    "description": "On AWS, the availability zone, needed only when there is no `vm`. On Azure, as `location` of any type. On Google Cloud, the zone; the vm's zone unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The resource's name in the cloud. The resource's id unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "sizeGb": {
+                    "description": "The disk's size, in gigabytes.",
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "tags": {
+                    "description": "Labels on the resource, as a mapping of text to text.",
+                    "type": [
+                      "object",
+                      "string"
+                    ]
+                  },
+                  "vm": {
+                    "description": "The vm the disk is attached to, as a reference: `${web_vm}`. Disks of one vm are attached in document order.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "sizeGb"
+                ]
               },
               "state": {
                 "enum": [
@@ -5769,6 +6057,7 @@
                   "enum": [
                     "address",
                     "config",
+                    "disk",
                     "firewall",
                     "network",
                     "stack",
@@ -5827,6 +6116,77 @@
                   }
                 },
                 "additionalProperties": false
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "disk"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A data disk, attached to a vm with its `vm` param. Reads on every target: `${id.id}`.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "location": {
+                    "description": "On AWS, the availability zone, needed only when there is no `vm`. On Azure, as `location` of any type. On Google Cloud, the zone; the vm's zone unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The resource's name in the cloud. The resource's id unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "sizeGb": {
+                    "description": "The disk's size, in gigabytes.",
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "tags": {
+                    "description": "Labels on the resource, as a mapping of text to text.",
+                    "type": [
+                      "object",
+                      "string"
+                    ]
+                  },
+                  "vm": {
+                    "description": "The vm the disk is attached to, as a reference: `${web_vm}`. Disks of one vm are attached in document order.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "sizeGb"
+                ]
               },
               "state": {
                 "enum": [
@@ -7076,6 +7436,7 @@
                   "enum": [
                     "address",
                     "backend",
+                    "disk",
                     "firewall",
                     "local",
                     "module",
@@ -7137,6 +7498,77 @@
                   }
                 },
                 "additionalProperties": false
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "disk"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A data disk, attached to a vm with its `vm` param. Reads on every target: `${id.id}`.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "location": {
+                    "description": "On AWS, the availability zone, needed only when there is no `vm`. On Azure, as `location` of any type. On Google Cloud, the zone; the vm's zone unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The resource's name in the cloud. The resource's id unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "sizeGb": {
+                    "description": "The disk's size, in gigabytes.",
+                    "type": [
+                      "integer",
+                      "string"
+                    ]
+                  },
+                  "tags": {
+                    "description": "Labels on the resource, as a mapping of text to text.",
+                    "type": [
+                      "object",
+                      "string"
+                    ]
+                  },
+                  "vm": {
+                    "description": "The vm the disk is attached to, as a reference: `${web_vm}`. Disks of one vm are attached in document order.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "sizeGb"
+                ]
               },
               "state": {
                 "enum": [

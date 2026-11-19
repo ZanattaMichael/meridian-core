@@ -2,6 +2,7 @@
   "name": "web-bicep",
   "resourceGroup": "web-prod",
   "resources": {
+    "microsoft.compute/disks/store": "store",
     "microsoft.compute/virtualmachines/vm": "vm",
     "microsoft.network/networkinterfaces/vm-nic": "vm_nic",
     "microsoft.network/networksecuritygroups/web_fw": "web_fw",

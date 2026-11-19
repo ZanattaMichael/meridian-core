@@ -223,6 +223,7 @@ impl Emitter for CloudFormation {
         [
             "<Vendor>::<Service>::<Type>",
             "address",
+            "disk",
             "firewall",
             "network",
             "stack",

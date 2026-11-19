@@ -1,7 +1,7 @@
 //! Conformance of the common infrastructure types: the same document through
 //! every target and cloud that maps them.
 //!
-//! `network`, `subnet`, `firewall`, `address` and `vm` promise that a
+//! The common types (`network`, `subnet`, `firewall`, `address`, `vm`, `disk`) promise that a
 //! resource written once compiles for each infrastructure as code target
 //! that takes them, on each cloud it maps them to, "within what each cloud
 //! can do". This test writes that promise down cell by cell, the way
@@ -422,6 +422,30 @@ const CASES: &[Case] = &[
         Varies,
         with_subnet!("    - id: vm\n      type: vm\n      params:\n        subnet: \"${sub}\"\n        size: {cpus: 1, memoryGb: 1}\n        image: my-image\n        sshKey: ssh-ed25519 AAAAexample\n    - id: vm_nic\n      type: network\n      params: {cidr: 10.9.0.0/16}\n"),
     ),
+    case(
+        "disk",
+        "two disks on a vm",
+        Same,
+        with_subnet!("    - id: vm\n      type: vm\n      params:\n        subnet: \"${sub}\"\n        size: {cpus: 1, memoryGb: 1}\n        image: {family: debian, version: \"12\"}\n        sshKey: ssh-ed25519 AAAAexample\n    - id: store\n      type: disk\n      params: {vm: \"${vm}\", sizeGb: 50}\n    - id: logs\n      type: disk\n      params: {vm: \"${vm}\", sizeGb: 20, tags: {role: logs}}\n"),
+    ),
+    case(
+        "disk",
+        "no vm and no location",
+        Varies,
+        "    - id: store\n      type: disk\n      params: {sizeGb: 50}\n",
+    ),
+    case(
+        "disk",
+        "a size of zero",
+        Same,
+        "    - id: store\n      type: disk\n      params: {sizeGb: 0, location: eu-west-1a}\n",
+    ),
+    case(
+        "disk",
+        "a vm that is not a reference",
+        Same,
+        "    - id: store\n      type: disk\n      params: {sizeGb: 10, vm: web}\n",
+    ),
 ];
 
 fn document(column: &Column, name: &str, resources: &str) -> String {
@@ -448,7 +472,7 @@ const INTRODUCTION: &str = "\
 
 What happens to the same document on each target, and each cloud, that maps
 the [common infrastructure types](dsl/common-infrastructure-types.md)
-(`network`, `subnet`, `firewall`, `address`, `vm`). This page is generated:
+(`network`, `subnet`, `firewall`, `address`, `vm`, `disk`). This page is generated:
 `crates/meridian-cli/tests/infra_conformance.rs` compiles one small document
 per row for every column and writes down how each compile came out, and it
 fails when this page is out of date. So the page cannot drift from the code,
@@ -576,7 +600,7 @@ fn every_target_that_takes_the_common_types_has_a_column() {
         assert_eq!(
             takes,
             COMMON_TARGETS.contains(&target.name()),
-            "{}: declare all five common types and add a column, or none",
+            "{}: declare all the common types and add a column, or none",
             target.name()
         );
         if takes {

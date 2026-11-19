@@ -37,6 +37,16 @@
     }
   },
   "resource": {
+    "aws_ebs_volume": {
+      "store": {
+        "availability_zone": "${aws_instance.vm.availability_zone}",
+        "size": 50,
+        "tags": {
+          "Name": "store"
+        },
+        "type": "gp3"
+      }
+    },
     "aws_eip": {
       "web_ip": {
         "domain": "vpc",
@@ -119,6 +129,13 @@
           "Name": "web"
         },
         "vpc_id": "${aws_vpc.net.id}"
+      }
+    },
+    "aws_volume_attachment": {
+      "store_attachment": {
+        "device_name": "/dev/sdf",
+        "instance_id": "${aws_instance.vm.id}",
+        "volume_id": "${aws_ebs_volume.store.id}"
       }
     },
     "aws_vpc": {

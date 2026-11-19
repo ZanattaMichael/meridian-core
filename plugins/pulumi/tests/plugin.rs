@@ -87,6 +87,7 @@ fn the_binary_reports_what_the_plugin_is() {
             "<package>:<module>:<Type>",
             "address",
             "config",
+            "disk",
             "firewall",
             "invoke.<function>",
             "network",

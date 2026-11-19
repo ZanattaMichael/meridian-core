@@ -133,6 +133,7 @@
     {
       "apiVersion": "2024-03-01",
       "dependsOn": [
+        "[resourceId('Microsoft.Compute/disks', 'store')]",
         "[resourceId('Microsoft.Network/networkInterfaces', 'vm-nic')]"
       ],
       "location": "[resourceGroup().location]",
@@ -164,6 +165,15 @@
           }
         },
         "storageProfile": {
+          "dataDisks": [
+            {
+              "createOption": "Attach",
+              "lun": 0,
+              "managedDisk": {
+                "id": "[resourceId('Microsoft.Compute/disks', 'store')]"
+              }
+            }
+          ],
           "imageReference": {
             "offer": "ubuntu-24_04-lts",
             "publisher": "Canonical",
@@ -176,6 +186,21 @@
         }
       },
       "type": "Microsoft.Compute/virtualMachines"
+    },
+    {
+      "apiVersion": "2024-03-01",
+      "location": "[resourceGroup().location]",
+      "name": "store",
+      "properties": {
+        "creationData": {
+          "createOption": "Empty"
+        },
+        "diskSizeGB": 50
+      },
+      "sku": {
+        "name": "StandardSSD_LRS"
+      },
+      "type": "Microsoft.Compute/disks"
     }
   ]
 }

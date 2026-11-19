@@ -257,6 +257,7 @@ impl Emitter for Terraform {
             "address",
             "backend",
             "data.<type>",
+            "disk",
             "firewall",
             "local",
             "module",

@@ -41,6 +41,16 @@
         }
       }
     },
+    "azurerm_managed_disk": {
+      "store": {
+        "create_option": "Empty",
+        "disk_size_gb": 50,
+        "location": "westeurope",
+        "name": "store",
+        "resource_group_name": "web-prod",
+        "storage_account_type": "StandardSSD_LRS"
+      }
+    },
     "azurerm_network_interface": {
       "vm_nic": {
         "ip_configuration": [
@@ -127,6 +137,14 @@
         "name": "web",
         "resource_group_name": "web-prod",
         "virtual_network_name": "${azurerm_virtual_network.net.name}"
+      }
+    },
+    "azurerm_virtual_machine_data_disk_attachment": {
+      "store_attachment": {
+        "caching": "ReadWrite",
+        "lun": 0,
+        "managed_disk_id": "${azurerm_managed_disk.store.id}",
+        "virtual_machine_id": "${azurerm_linux_virtual_machine.vm.id}"
       }
     },
     "azurerm_virtual_network": {

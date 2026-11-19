@@ -54,6 +54,7 @@ fn the_binary_declares_its_category_and_everything_it_can_do() {
             "address",
             "backend",
             "data.<type>",
+            "disk",
             "encryption",
             "ephemeral.<type>",
             "firewall",
