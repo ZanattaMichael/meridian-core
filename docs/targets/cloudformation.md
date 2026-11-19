@@ -417,3 +417,11 @@ reads them the same way.
   `MERIDIAN_TEST_REAL_CLOUDFORMATION=1 cargo test -p meridian-target-cloudformation --test real -- --ignored`
   and `MERIDIAN_AWS_ARGS` pointing at it. Not yet run against real AWS; see
   [Real-tool tests](../contributing/real-tool-tests.md#cloudformation).
+
+## Inspecting one resource
+
+[`meridian inspect`](../reference/cli.md#inspect) runs
+`aws cloudformation detect-stack-resource-drift --logical-resource-id ID`, which reads the
+resource's actual properties from the cloud and changes nothing. Drift is measured against the
+stack's last template, so the tool's verdict is left empty and the comparison with the
+document is the answer. A stack or resource that does not exist is *not found*.

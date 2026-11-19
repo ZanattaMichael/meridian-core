@@ -614,6 +614,63 @@ impl Runner for ArmRunner {
         Ok(read_outputs(&parse(&shown, "the deployment's record")?))
     }
 
+    fn inspects(&self) -> bool {
+        true
+    }
+
+    /// The resource as Azure has it now, from `az resource show`. ARM keeps
+    /// no record to compare with, so whether it is as declared is left to
+    /// the comparison. A deployment to a subscription is not read.
+    fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        _endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunError> {
+        let Some(settings) = artifact.files.get(DEPLOYMENT_PATH) else {
+            return Err(RunError::new(format!(
+                "the artifact has no {DEPLOYMENT_PATH}; it was not compiled by this plugin"
+            )));
+        };
+        let deployment = Deployment::read(settings)?;
+        let args = (!deployment.subscription_scope)
+            .then(|| {
+                deployment
+                    .resources
+                    .iter()
+                    .find(|(_, id)| *id == resource)
+                    .and_then(|((kind, name), _)| {
+                        meridian_target_bicep::inspect::show_args(kind, name)
+                    })
+            })
+            .flatten()
+            .ok_or_else(|| {
+                RunError::new(format!(
+                    "{resource} is not one Azure resource of a resource group with a plain \
+                     name ({})",
+                    meridian_sdk::rules::UNSUPPORTED_INSPECT.name
+                ))
+            })?;
+        let mut tool = Tool::new(&self.program)
+            .args([
+                "resource",
+                "show",
+                "--resource-group",
+                &deployment.resource_group,
+            ])
+            .dir(&context.work_dir);
+        if !deployment.subscription.is_empty() {
+            tool = tool.args(["--subscription", &deployment.subscription]);
+        }
+        let shown_as = format!(
+            "az resource show --resource-group {} {}",
+            deployment.resource_group,
+            args.join(" ")
+        );
+        meridian_target_bicep::inspect::show(tool, &args, &self.extra_args, shown_as)
+    }
+
     fn destroys(&self) -> bool {
         true
     }

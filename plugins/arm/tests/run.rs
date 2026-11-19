@@ -529,3 +529,38 @@ fn a_resource_that_cannot_be_deleted_stops_the_destroy_and_says_what_went() {
         .iter()
         .any(|c| c.starts_with("deployment group delete")));
 }
+
+#[test]
+fn inspect_names_a_child_resource_under_its_parent() {
+    let dir = scratch(TMP, "inspect");
+    fs::create_dir_all(dir.join("work")).unwrap();
+    let runner = runner(
+        &dir,
+        r#"--resource-group) echo '{"name":"orders","sku":{"name":"S0"},"properties":{"status":"Online"}}' ;;"#,
+    );
+    let read = runner
+        .inspect(&context(&dir), &compiled(GROUP), "web_db", "")
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        ["resource show --resource-group web-rg --namespace microsoft.sql --parent servers/sql --resource-type databases --name orders --only-show-errors --output json"]
+    );
+    assert!(read.found);
+    assert_eq!(
+        read.actual.get("sku"),
+        Some(&Value::Map([("name".to_owned(), Value::from("S0"))].into()))
+    );
+}
+
+#[test]
+fn inspect_refuses_a_name_that_is_an_expression_and_a_subscription_deployment() {
+    let dir = scratch(TMP, "inspect-refused");
+    let runner = runner(&dir, "");
+    for (deployment, id) in [(GROUP, "web_logs"), (SUBSCRIPTION, "network_rg")] {
+        let err = runner
+            .inspect(&context(&dir), &compiled(deployment), id, "")
+            .unwrap_err();
+        assert!(err.msg.contains("unsupported-inspect"), "{}", err.msg);
+    }
+    assert!(!dir.join("calls").exists());
+}

@@ -215,6 +215,21 @@ fn a_document_is_planned_applied_read_back_and_changed() {
     );
     assert!(found.values().all(|id| !id.is_empty()), "{found:?}");
 
+    // One resource is read back as it is, and a plan targeted at it agrees
+    // it is as declared.
+    let read = client
+        .inspect(&context, &artifact, "config", "")
+        .unwrap_or_else(|e| panic!("{}", explain("inspecting", &e, &[])));
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(true));
+    assert_eq!(read.actual.get("input"), Some(&Value::String("v1".into())));
+    assert!(
+        read.command
+            .ends_with("plan -target=terraform_data.config -detailed-exitcode"),
+        "{}",
+        read.command
+    );
+
     // Nothing has changed, so a second plan is empty.
     let (again, _) = plan_ok("the second plan", &client, &context, &artifact);
     assert!(again.changes.is_empty(), "{:?}", again.changes);

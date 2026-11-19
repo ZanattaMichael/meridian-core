@@ -26,6 +26,7 @@
 
 mod common;
 mod emit;
+pub mod inspect;
 pub mod operations;
 mod runner;
 pub mod schemas;

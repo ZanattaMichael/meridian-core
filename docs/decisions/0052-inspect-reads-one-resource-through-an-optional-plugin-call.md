@@ -4,7 +4,7 @@
 |---|---|
 | Area | Runs |
 | Status | **proposed**: made during the work, not yet accepted or changed by the owner |
-| Made in | the pull request "`meridian inspect`, part 1" (issue 222) |
+| Made in | the pull requests for issue 222: part 1 (core), part 2 (infrastructure targets) |
 | Where it shows | [the `meridian` command](../reference/cli.md#inspect), [`--output json`](../reference/cli-json.md#inspect), [Troubleshooting a failed run](../operations/troubleshooting.md#meridian-inspect), [the MCP server](../tooling/mcp-server.md), [Writing a plugin](../contributing/writing-a-plugin.md), [the capability matrix](../reference/capability-matrix.md) |
 
 ## The choice
@@ -28,6 +28,18 @@
 - **`diagnose` suggests it** for a failure that names a resource.
 - **The MCP tool is opt-in** (`--allow-inspect`), as it runs the real tool.
 - **Exit 0 whatever the tool reads**: a difference is the answer, not a failure.
+
+## Infrastructure targets (part 2)
+
+| Target | Actual | As declared |
+|---|---|---|
+| Terraform, OpenTofu | `show -json`, the root-module resource named by the id | `plan -target=ADDR -detailed-exitcode -lock=false` of the compiled configuration |
+| Pulumi | `stack export`, the resource's `outputs` | not given: the export is the last update's record |
+| CloudFormation | `detect-stack-resource-drift`, the actual properties | not given: drift is against the last template |
+| Bicep, ARM | `az resource show`; location, tags, sku, kind, identity, properties | not given: Azure keeps no record |
+
+A name that is an expression, and an ARM deployment to a subscription, are refused with
+`unsupported-inspect`.
 
 ## Status
 

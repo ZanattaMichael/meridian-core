@@ -518,6 +518,44 @@ impl Runner for PulumiRunner {
         read_identifiers(&exported.stdout)
     }
 
+    fn inspects(&self) -> bool {
+        true
+    }
+
+    /// The resource's outputs as `pulumi stack export` records them; a
+    /// secret is left as what stands for one. Pulumi records what was
+    /// applied, so whether that is still the cloud's is not asked.
+    fn inspect(
+        &self,
+        context: &RunContext,
+        _artifact: &Artifact,
+        resource: &str,
+        _endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunError> {
+        let command = "pulumi stack export".to_owned();
+        let Ok(settings) = std::fs::read_to_string(context.work_dir.join(STACK_PATH)) else {
+            return Ok(meridian_sdk::Inspection {
+                found: false,
+                in_desired_state: Some(false),
+                command,
+                ..Default::default()
+            });
+        };
+        let stack = Stack::read(&settings)?;
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let exported = self
+            .on_stack(context, cloud.as_ref(), &stack, &["stack", "export"])
+            .capture_stdout()
+            .run_ok("pulumi could not export the stack", &meridian_sdk::NoLog)?;
+        let found = read_outputs_of(&exported.stdout, resource)?;
+        Ok(meridian_sdk::Inspection {
+            found: found.is_some(),
+            in_desired_state: if found.is_some() { None } else { Some(false) },
+            actual: found.unwrap_or_default(),
+            command,
+        })
+    }
+
     fn destroys(&self) -> bool {
         true
     }
@@ -613,6 +651,54 @@ fn read_export(json: &str) -> Result<Vec<Exported>, RunError> {
         });
     }
     Ok(found)
+}
+
+/// The outputs `pulumi stack export` records for the resource named
+/// `name`, with each secret written as [`meridian_sdk::SENSITIVE`]; `None`
+/// when the stack has no such resource.
+fn read_outputs_of(json: &str, name: &str) -> Result<Option<meridian_sdk::Data>, RunError> {
+    let export = decode_value(json.as_bytes()).map_err(|e| unreadable("stack export", e))?;
+    let resources = export
+        .as_map()
+        .and_then(|m| m.get("deployment"))
+        .and_then(Value::as_map)
+        .and_then(|m| m.get("resources"))
+        .and_then(Value::as_list)
+        .unwrap_or(&[]);
+    for resource in resources.iter().filter_map(Value::as_map) {
+        let urn = resource.get("urn").and_then(Value::as_str).unwrap_or("");
+        let kind = urn_type(urn);
+        if urn_name(urn) != name
+            || kind == "pulumi:pulumi:Stack"
+            || kind.starts_with("pulumi:providers:")
+        {
+            continue;
+        }
+        let outputs = resource
+            .get("outputs")
+            .and_then(Value::as_map)
+            .cloned()
+            .unwrap_or_default();
+        return Ok(Some(
+            outputs
+                .into_iter()
+                .map(|(k, v)| (k, hide_secrets(v)))
+                .collect(),
+        ));
+    }
+    Ok(None)
+}
+
+/// Pulumi's mark for a secret in an export.
+const SECRET_SIG: &str = "4dabf18193072939515e22adb298388d";
+
+fn hide_secrets(value: Value) -> Value {
+    match value {
+        Value::Map(map) if map.contains_key(SECRET_SIG) => Value::from(meridian_sdk::SENSITIVE),
+        Value::Map(map) => Value::Map(map.into_iter().map(|(k, v)| (k, hide_secrets(v))).collect()),
+        Value::List(items) => Value::List(items.into_iter().map(hide_secrets).collect()),
+        other => other,
+    }
 }
 
 /// Reads `pulumi stack export` into the cloud id of each resource of the
@@ -998,6 +1084,23 @@ fn holds_mask(value: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_resource_is_read_from_the_export_with_secrets_hidden() {
+        let json = r#"{"deployment":{"resources":[
+          {"urn":"urn:pulumi:dev::web::pulumi:pulumi:Stack::web-dev","type":"pulumi:pulumi:Stack"},
+          {"urn":"urn:pulumi:dev::web::random:index/randomPet:RandomPet::name","id":"keen-cat",
+           "outputs":{"length":2,"id":"keen-cat","keepers":{"4dabf18193072939515e22adb298388d":"1b47061264138c4ac30d75fd1eb44270","ciphertext":"v1:abc"}}}
+        ]}}"#;
+        let read = read_outputs_of(json, "name").unwrap().unwrap();
+        assert_eq!(read.get("length"), Some(&Value::Int(2)));
+        assert_eq!(
+            read.get("keepers"),
+            Some(&Value::from(meridian_sdk::SENSITIVE))
+        );
+        assert_eq!(read_outputs_of(json, "web-dev").unwrap(), None);
+        assert_eq!(read_outputs_of(json, "other").unwrap(), None);
+    }
 
     #[test]
     fn an_error_in_the_diagnostics_is_its_resources_failure() {

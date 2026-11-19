@@ -425,3 +425,9 @@ Compiled output: [`plugins/arm/testdata`](../../plugins/arm/testdata).
 ## ARM and Bicep
 
 Use `arm` when you need the JSON template itself; otherwise see [Bicep](bicep.md).
+
+## Inspecting one resource
+
+[`meridian inspect`](../reference/cli.md#inspect) works as on
+[Bicep](bicep.md#inspecting-one-resource). A deployment to a subscription, and a name that is
+an expression, are refused with `unsupported-inspect`.

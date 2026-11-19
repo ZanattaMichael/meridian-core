@@ -538,6 +538,29 @@ fn read_failed_events(json: &str, resources: &BTreeMap<String, String>) -> Vec<F
     failures
 }
 
+/// Reads `detect-stack-resource-drift` into whether the resource exists and
+/// its actual properties.
+fn read_drift(drift: &Value) -> Result<(bool, meridian_sdk::Data), RunError> {
+    let detail = drift
+        .as_map()
+        .and_then(|m| m.get("StackResourceDrift"))
+        .and_then(Value::as_map)
+        .ok_or_else(|| {
+            RunError::new("the resource's drift could not be read: no StackResourceDrift")
+        })?;
+    let text = |key: &str| detail.get(key).and_then(Value::as_str).unwrap_or("");
+    if text("StackResourceDriftStatus") == "DELETED" {
+        return Ok((false, meridian_sdk::Data::new()));
+    }
+    let actual = match text("ActualProperties") {
+        "" => meridian_sdk::Data::new(),
+        json => decode_map(json.as_bytes()).map_err(|e| {
+            RunError::new(format!("the resource's properties could not be read: {e}"))
+        })?,
+    };
+    Ok((true, actual))
+}
+
 fn parse(finished: &Finished, what: &str) -> Result<Value, RunError> {
     decode_value(finished.stdout.trim().as_bytes())
         .map_err(|e| RunError::new(format!("{what} could not be read: {e}")))
@@ -707,6 +730,73 @@ impl Runner for CloudFormationRunner {
         self.read_outputs(context, cloud, &Stack::read(&settings)?)
     }
 
+    fn inspects(&self) -> bool {
+        true
+    }
+
+    /// The resource's properties as the cloud has them now, from
+    /// `detect-stack-resource-drift`, which reads and changes nothing. Drift
+    /// is measured against the stack's last template, not this document,
+    /// so whether it is as declared is left to the comparison.
+    fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        _endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunError> {
+        let Some(settings) = artifact.files.get(STACK_PATH) else {
+            return Err(RunError::new(format!(
+                "the artifact has no {STACK_PATH}; it was not compiled by this plugin"
+            )));
+        };
+        let stack = Stack::read(settings)?;
+        let Some(logical) = stack
+            .resources
+            .iter()
+            .find(|(_, id)| *id == resource)
+            .map(|(logical, _)| logical.clone())
+        else {
+            return Err(RunError::new(format!(
+                "{resource} compiles to no resource of its own in the stack ({})",
+                meridian_sdk::rules::UNSUPPORTED_INSPECT.name
+            )));
+        };
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let command = format!(
+            "aws cloudformation detect-stack-resource-drift --stack-name {} --logical-resource-id {logical}",
+            stack.name
+        );
+        let finished = self
+            .aws(
+                context,
+                cloud.as_ref(),
+                &stack,
+                "detect-stack-resource-drift",
+            )
+            .args(["--logical-resource-id", &logical, "--output", "json"])
+            .run(&NoLog)?;
+        if !finished.success() {
+            if finished.stderr.contains("does not exist") {
+                return Ok(meridian_sdk::Inspection {
+                    found: false,
+                    in_desired_state: Some(false),
+                    command,
+                    ..Default::default()
+                });
+            }
+            return Err(finished.into_error("aws could not read the resource"));
+        }
+        let drift = parse(&finished, "the resource's drift")?;
+        let (found, actual) = read_drift(&drift)?;
+        Ok(meridian_sdk::Inspection {
+            found,
+            actual,
+            in_desired_state: if found { None } else { Some(false) },
+            command,
+        })
+    }
+
     fn destroys(&self) -> bool {
         true
     }
@@ -759,6 +849,22 @@ impl Runner for CloudFormationRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drift_is_read_into_the_actual_properties() {
+        let drift = decode_value(
+            br#"{"StackResourceDrift":{"LogicalResourceId":"Logs","StackResourceDriftStatus":"MODIFIED",
+              "ActualProperties":"{\"BucketName\":\"logs-1\",\"VersioningConfiguration\":{\"Status\":\"Suspended\"}}"}}"#,
+        )
+        .unwrap();
+        let (found, actual) = read_drift(&drift).unwrap();
+        assert!(found);
+        assert_eq!(actual.get("BucketName"), Some(&Value::from("logs-1")));
+        let deleted =
+            decode_value(br#"{"StackResourceDrift":{"StackResourceDriftStatus":"DELETED"}}"#)
+                .unwrap();
+        assert_eq!(read_drift(&deleted).unwrap(), (false, Default::default()));
+    }
 
     #[test]
     fn the_last_operations_failed_resources_are_read_from_the_stacks_events() {
