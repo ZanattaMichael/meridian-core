@@ -143,6 +143,41 @@ impl BicepRunner {
         }
     }
 
+    /// The deployment an artifact makes, with the artifact written out.
+    fn load(context: &RunContext, artifact: &Artifact) -> Result<Deployment, RunError> {
+        let Some(settings) = artifact.files.get(DEPLOYMENT_PATH) else {
+            return Err(RunError::new(format!(
+                "the artifact has no {DEPLOYMENT_PATH}; it was not compiled by this plugin"
+            )));
+        };
+        let deployment = Deployment::read(settings)?;
+        write_artifact(&context.work_dir, artifact)?;
+        Ok(deployment)
+    }
+
+    /// The resources the deployment made, in the order to delete them, or
+    /// `None` when there is no such deployment.
+    fn removals(
+        &self,
+        context: &RunContext,
+        deployment: &Deployment,
+    ) -> Result<Option<Vec<String>>, RunError> {
+        let shown = self
+            .az(context, deployment, "show")
+            .args(["--output", "json"])
+            .run(&NoLog)?;
+        if !shown.success() {
+            if not_found(&shown.stderr) {
+                return Ok(None);
+            }
+            return Err(shown.into_error("az could not show the deployment"));
+        }
+        let record = decode_value(shown.stdout.trim().as_bytes()).map_err(|e| {
+            RunError::new(format!("the deployment's record could not be read: {e}"))
+        })?;
+        Ok(Some(removal_order(&record)))
+    }
+
     fn preview(
         &self,
         context: &RunContext,
@@ -203,6 +238,44 @@ fn secrets_file(context: &RunContext) -> Result<Option<SecretFile>, RunError> {
         )
         .map(Some)
         .map_err(|e| RunError::new(format!("writing the parameters file: {e}")))
+}
+
+/// The resources a deployment's record says it made
+/// (`properties.outputResources`), in the order to delete them: children
+/// before their parents, and otherwise last made first.
+pub(crate) fn removal_order(record: &Value) -> Vec<String> {
+    let mut ids: Vec<String> = record
+        .as_map()
+        .and_then(|m| m.get("properties"))
+        .and_then(Value::as_map)
+        .and_then(|p| p.get("outputResources"))
+        .and_then(Value::as_list)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|r| Some(r.as_map()?.get("id")?.as_str()?.to_owned()))
+        .collect();
+    ids.reverse();
+    ids.sort_by_key(|id| std::cmp::Reverse(id.trim_end_matches('/').matches('/').count()));
+    ids
+}
+
+/// Whether Azure said what was asked for is not there.
+fn not_found(stderr: &str) -> bool {
+    stderr.contains("NotFound") || stderr.contains("could not be found")
+}
+
+/// The change that deleting one resource is, by the id the author wrote.
+fn deletion(resource_id: &str, deployment: &Deployment) -> Change {
+    let azure_type = resource_id
+        .split_once("/providers/")
+        .map_or("", |(_, tail)| tail)
+        .rsplit_once('/')
+        .map_or("", |(azure_type, _)| azure_type);
+    Change {
+        resource: deployment.resource(resource_id),
+        action: ChangeAction::Delete,
+        summary: azure_type.to_owned(),
+    }
 }
 
 /// Reads the result of `az deployment group what-if`.
@@ -337,5 +410,69 @@ impl Runner for BicepRunner {
             .args(["--output", "json"])
             .run_ok("az could not show the deployment", &NoLog)?;
         read_outputs(&finished.stdout)
+    }
+
+    fn destroys(&self) -> bool {
+        true
+    }
+
+    fn plan_destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        _log: &dyn Log,
+    ) -> Result<Plan, RunError> {
+        let deployment = Self::load(context, artifact)?;
+        let ids = self.removals(context, &deployment)?.unwrap_or_default();
+        Ok(Plan {
+            changes: ids.iter().map(|id| deletion(id, &deployment)).collect(),
+            unknown: false,
+            saved: None,
+        })
+    }
+
+    /// Deletes each resource the deployment's record says it made, children
+    /// first, then the record. A resource already gone is not an error.
+    fn destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Vec<Change>, RunError> {
+        let deployment = Self::load(context, artifact)?;
+        let Some(ids) = self.removals(context, &deployment)? else {
+            log.out(&format!(
+                "deployment {}: there is no such deployment",
+                deployment.name
+            ));
+            return Ok(Vec::new());
+        };
+        let mut removed = Vec::new();
+        for id in &ids {
+            let change = deletion(id, &deployment);
+            log.out(&format!("deleting {}", change.resource));
+            let finished = Tool::new(&self.program)
+                .args(["resource", "delete", "--ids", id])
+                .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level))
+                .dir(&context.work_dir)
+                .args(self.extra_args.iter().cloned())
+                .run(log)?;
+            if !finished.success() && !not_found(&finished.stderr) {
+                let mut error = finished.into_error(format!("az could not delete {id}"));
+                error.changes = removed;
+                return Err(error);
+            }
+            removed.push(change);
+        }
+        let forgotten = self.az(context, &deployment, "delete").run(log)?;
+        if !forgotten.success() && !not_found(&forgotten.stderr) {
+            let mut error = forgotten.into_error(format!(
+                "az could not delete the record of the deployment {}",
+                deployment.name
+            ));
+            error.changes = removed;
+            return Err(error);
+        }
+        Ok(removed)
     }
 }

@@ -20,6 +20,7 @@ Compiles an Infrastructure document into a Bicep file, deployed to a resource gr
 | Plan | Yes: `what-if`. Where Azure cannot analyse a resource type, the plan is reported as unknown |
 | Apply | Yes: the same preview, then `create` |
 | Outputs | Yes, always as strings |
+| Destroy | Yes: each resource the deployment's record lists is deleted, then the record. See [Destroying](../operations/destroying.md) |
 | Editor schemas | Yes: `meridian schema sync` reads the Azure type definitions Bicep compiles against, published as files; no account and no compiler. See [Editor schemas](#editor-schemas) |
 | Compiles to | `main.bicep` and `deployment.json` |
 | Runs with | `az deployment group` |
@@ -225,6 +226,7 @@ as `cost-center` are quoted.
 | Plan | `az deployment group what-if --resource-group <rg> --name <name> --template-file main.bicep --no-pretty-print --output json` |
 | Apply | the same preview, so the changes can be reported, then `az deployment group create --resource-group <rg> --name <name> --template-file main.bicep --output json` |
 | Outputs later | `az deployment group show --resource-group <rg> --name <name> --output json` |
+| Destroy | `az deployment group show` (the record's `outputResources`), then `az resource delete --ids` for each, children first and otherwise last made first, then `az deployment group delete`; `plan --destroy` stops after `show`. A resource already gone is skipped. A resource the deployment did not make, or one made by a nested deployment that the record does not list, is kept |
 
 `--subscription` is added when named. A file the compiler rejects fails the plan with its
 diagnostics.

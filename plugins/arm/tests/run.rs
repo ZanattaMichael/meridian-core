@@ -430,3 +430,87 @@ fn secrets_reach_resource_manager_as_a_private_parameters_file_and_nowhere_else(
         "{path} was left behind"
     );
 }
+
+fn shown_record() -> String {
+    format!(
+        r#"show) echo '{{"properties":{{"outputResources":[
+  {{"id":"{ID}/Microsoft.Network/virtualNetworks/web-vnet"}},
+  {{"id":"{ID}/Microsoft.Sql/servers/sql/databases/orders"}}]}}}}' ;;"#
+    )
+}
+
+#[test]
+fn a_destroy_deletes_what_the_record_says_children_first_then_the_record() {
+    let dir = scratch(TMP, "destroy");
+    let runner = runner(
+        &dir,
+        &format!(
+            "{}\n--ids) case \"$4\" in *orders) echo 'ResourceNotFound' >&2; exit 3 ;; esac ;;",
+            shown_record()
+        ),
+    );
+    assert!(runner.destroys());
+    let removed = runner
+        .destroy(&context(&dir), &compiled(GROUP), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        [
+            "deployment group show --name web-vm-prod --resource-group web-rg --only-show-errors --output json".to_owned(),
+            format!("resource delete --ids {ID}/Microsoft.Sql/servers/sql/databases/orders --only-show-errors"),
+            format!("resource delete --ids {ID}/Microsoft.Network/virtualNetworks/web-vnet --only-show-errors"),
+            "deployment group delete --name web-vm-prod --resource-group web-rg --only-show-errors --output json".to_owned(),
+        ]
+    );
+    let resources: Vec<(&str, ChangeAction)> = removed
+        .iter()
+        .map(|c| (c.resource.as_str(), c.action))
+        .collect();
+    assert_eq!(
+        resources,
+        [
+            ("web_db", ChangeAction::Delete),
+            ("web_vnet", ChangeAction::Delete)
+        ]
+    );
+}
+
+#[test]
+fn a_destroy_preview_deletes_nothing_and_a_missing_deployment_has_nothing_to_remove() {
+    let dir = scratch(TMP, "destroy-preview");
+    let plan = runner(&dir, &shown_record())
+        .plan_destroy(&context(&dir), &compiled(GROUP), &KeptLog::default())
+        .unwrap();
+    assert_eq!(calls(&dir).len(), 1);
+    assert_eq!(plan.changes.len(), 2);
+
+    let dir = scratch(TMP, "destroy-missing");
+    let removed = runner(
+        &dir,
+        "show) echo \"ERROR: (DeploymentNotFound) Deployment 'web-vm-prod' could not be found.\" >&2; exit 3 ;;",
+    )
+    .destroy(&context(&dir), &compiled(GROUP), &KeptLog::default())
+    .unwrap();
+    assert!(removed.is_empty());
+    assert_eq!(calls(&dir).len(), 1);
+}
+
+#[test]
+fn a_resource_that_cannot_be_deleted_stops_the_destroy_and_says_what_went() {
+    let dir = scratch(TMP, "destroy-fails");
+    let err = runner(
+        &dir,
+        &format!(
+            "{}\n--ids) case \"$4\" in *web-vnet) echo 'InUseSubnetCannotBeDeleted' >&2; exit 1 ;; esac ;;",
+            shown_record()
+        ),
+    )
+    .destroy(&context(&dir), &compiled(GROUP), &KeptLog::default())
+    .unwrap_err();
+    assert!(err.msg.starts_with("az could not delete"), "{err:?}");
+    assert_eq!(err.changes.len(), 1);
+    assert_eq!(err.changes[0].resource, "web_db");
+    assert!(!calls(&dir)
+        .iter()
+        .any(|c| c.starts_with("deployment group delete")));
+}

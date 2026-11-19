@@ -228,3 +228,62 @@ fn a_run_without_secrets_names_no_parameters_file() {
     );
     assert!(!dir.join("secrets.json").exists());
 }
+
+const RG: &str = "/subscriptions/0000/resourceGroups/web-prod/providers";
+
+fn shown_record() -> String {
+    format!(
+        r#"show) echo '{{"properties":{{"outputResources":[
+  {{"id":"{RG}/Microsoft.Network/virtualNetworks/web-vnet"}},
+  {{"id":"{RG}/Microsoft.Network/virtualNetworks/web-vnet/subnets/a"}},
+  {{"id":"{RG}/Microsoft.Network/publicIPAddresses/web-ip"}}]}}}}' ;;"#
+    )
+}
+
+#[test]
+fn a_destroy_deletes_what_the_record_says_children_first_then_the_record() {
+    let dir = scratch(TMP, "destroy");
+    let runner = runner(&dir, &shown_record());
+    assert!(runner.destroys());
+    let removed = runner
+        .destroy(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        [
+            "show --output json".to_owned(),
+            format!(
+                "resource delete --ids {RG}/Microsoft.Network/virtualNetworks/web-vnet/subnets/a"
+            ),
+            format!("resource delete --ids {RG}/Microsoft.Network/publicIPAddresses/web-ip"),
+            format!("resource delete --ids {RG}/Microsoft.Network/virtualNetworks/web-vnet"),
+            "delete".to_owned(),
+        ]
+    );
+    let said: Vec<String> = removed.iter().map(ToString::to_string).collect();
+    assert_eq!(
+        said[1],
+        "delete web_ip: Microsoft.Network/publicIPAddresses"
+    );
+    assert_eq!(said.len(), 3);
+}
+
+#[test]
+fn a_destroy_preview_deletes_nothing_and_a_missing_deployment_has_nothing_to_remove() {
+    let dir = scratch(TMP, "destroy-preview");
+    let plan = runner(&dir, &shown_record())
+        .plan_destroy(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(calls(&dir), ["show --output json"]);
+    assert_eq!(plan.changes.len(), 3);
+
+    let dir = scratch(TMP, "destroy-missing");
+    let removed = runner(
+        &dir,
+        "show) echo \"ERROR: (DeploymentNotFound) Deployment 'web-vm' could not be found.\" >&2; exit 3 ;;",
+    )
+    .destroy(&context(&dir), &compiled(), &KeptLog::default())
+    .unwrap();
+    assert!(removed.is_empty());
+    assert_eq!(calls(&dir), ["show --output json"]);
+}

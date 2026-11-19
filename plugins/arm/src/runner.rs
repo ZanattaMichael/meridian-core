@@ -221,6 +221,29 @@ impl ArmRunner {
         Ok(deployment)
     }
 
+    /// The resources the deployment made, in the order to delete them, or
+    /// `None` when there is no such deployment.
+    fn removals(
+        &self,
+        context: &RunContext,
+        deployment: &Deployment,
+    ) -> Result<Option<Vec<String>>, RunError> {
+        let shown = self.az(context, deployment, "show").run(&NoLog)?;
+        if !shown.success() {
+            if not_found(&shown.stderr) {
+                return Ok(None);
+            }
+            return Err(shown.into_error(format!(
+                "az could not read the deployment {}",
+                deployment.name
+            )));
+        }
+        Ok(Some(removal_order(&parse(
+            &shown,
+            "the deployment's record",
+        )?)))
+    }
+
     fn preview(
         &self,
         context: &RunContext,
@@ -340,6 +363,48 @@ pub(crate) fn type_and_name(resource_id: &str) -> Option<(String, String)> {
             name.to_owned(),
         )
     })
+}
+
+/// The resources a deployment's record says it made
+/// (`properties.outputResources`), in the order to delete them: children
+/// before their parents, and otherwise last made first.
+pub(crate) fn removal_order(record: &Value) -> Vec<String> {
+    let mut ids: Vec<String> = record
+        .as_map()
+        .and_then(|m| m.get("properties"))
+        .and_then(Value::as_map)
+        .and_then(|p| p.get("outputResources"))
+        .and_then(Value::as_list)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|r| Some(r.as_map()?.get("id")?.as_str()?.to_owned()))
+        .collect();
+    ids.reverse();
+    ids.sort_by_key(|id| std::cmp::Reverse(id.trim_end_matches('/').matches('/').count()));
+    ids
+}
+
+/// The change that deleting one resource is, by the id the author wrote.
+fn deletion(resource_id: &str, resources: &BTreeMap<(String, String), String>) -> Change {
+    let parsed = type_and_name(resource_id);
+    let summary = parsed.as_ref().map_or(String::new(), |(t, _)| t.clone());
+    let resource = parsed
+        .and_then(|(t, name)| {
+            resources
+                .get(&(t.to_lowercase(), name.to_lowercase()))
+                .cloned()
+        })
+        .unwrap_or_else(|| resource_id.to_owned());
+    Change {
+        resource,
+        action: ChangeAction::Delete,
+        summary,
+    }
+}
+
+/// Whether Azure said what was asked for is not there.
+fn not_found(stderr: &str) -> bool {
+    stderr.contains("NotFound") || stderr.contains("could not be found")
 }
 
 /// Reads the changes of a preview.
@@ -510,11 +575,99 @@ impl Runner for ArmRunner {
         }
         Ok(read_outputs(&parse(&shown, "the deployment's record")?))
     }
+
+    fn destroys(&self) -> bool {
+        true
+    }
+
+    fn plan_destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        _log: &dyn Log,
+    ) -> Result<Plan, RunError> {
+        let deployment = self.load(context, artifact)?;
+        let ids = self.removals(context, &deployment)?.unwrap_or_default();
+        Ok(Plan {
+            changes: ids
+                .iter()
+                .map(|id| deletion(id, &deployment.resources))
+                .collect(),
+            unknown: false,
+            saved: None,
+        })
+    }
+
+    /// Deletes each resource the deployment's record says it made, children
+    /// first, then the record. A resource already gone is not an error.
+    fn destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Vec<Change>, RunError> {
+        let deployment = self.load(context, artifact)?;
+        let Some(ids) = self.removals(context, &deployment)? else {
+            log.out(&format!(
+                "deployment {}: there is no such deployment",
+                deployment.name
+            ));
+            return Ok(Vec::new());
+        };
+        let mut removed = Vec::new();
+        for id in &ids {
+            let change = deletion(id, &deployment.resources);
+            log.out(&format!("deleting {}", change.resource));
+            let finished = Tool::new(&self.program)
+                .args(["resource", "delete", "--ids", id])
+                .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level))
+                .dir(&context.work_dir)
+                .args(self.extra_args.iter().cloned())
+                .run(log)?;
+            if !finished.success() && !not_found(&finished.stderr) {
+                let mut error = finished.into_error(format!("az could not delete {id}"));
+                error.changes = removed;
+                return Err(error);
+            }
+            removed.push(change);
+        }
+        let forgotten = self.az(context, &deployment, "delete").run(log)?;
+        if !forgotten.success() && !not_found(&forgotten.stderr) {
+            let mut error = forgotten.into_error(format!(
+                "az could not delete the record of the deployment {}",
+                deployment.name
+            ));
+            error.changes = removed;
+            return Err(error);
+        }
+        Ok(removed)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resources_are_deleted_children_first_then_last_made_first() {
+        let record = decode_value(
+            br#"{"properties":{"outputResources":[
+              {"id":"/subscriptions/s/resourceGroups/g"},
+              {"id":"/subscriptions/s/resourceGroups/g/providers/Microsoft.Network/virtualNetworks/net"},
+              {"id":"/subscriptions/s/resourceGroups/g/providers/Microsoft.Network/virtualNetworks/net/subnets/a"},
+              {"id":"/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/st"}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            removal_order(&record),
+            [
+                "/subscriptions/s/resourceGroups/g/providers/Microsoft.Network/virtualNetworks/net/subnets/a",
+                "/subscriptions/s/resourceGroups/g/providers/Microsoft.Storage/storageAccounts/st",
+                "/subscriptions/s/resourceGroups/g/providers/Microsoft.Network/virtualNetworks/net",
+                "/subscriptions/s/resourceGroups/g",
+            ]
+        );
+    }
 
     #[test]
     fn a_resource_id_splits_into_type_and_name() {
