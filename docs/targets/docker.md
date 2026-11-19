@@ -829,3 +829,15 @@ $ cargo test -p meridian-target-docker                              # everything
 $ MERIDIAN_TEST_REAL_DOCKER=0 cargo test -p meridian-target-docker       # without Docker
 $ UPDATE_GOLDEN=1 cargo test -p meridian-target-docker              # record the golden files again
 ```
+
+## Inspecting one resource
+
+[`meridian inspect`](../reference/cli.md#inspect) compares the file with what Docker runs, as a
+plan does.
+
+| Resource | Actual | As declared |
+|---|---|---|
+| service | `docker inspect` of its first container: `image`, `status`, `health`, `restartCount`. Its environment is left out | the plan has no change for it; not given for a service that builds |
+| network, volume | whether Docker has it | the same |
+
+A service with no container is not found.

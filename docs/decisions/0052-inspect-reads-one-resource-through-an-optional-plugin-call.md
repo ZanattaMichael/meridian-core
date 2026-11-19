@@ -4,7 +4,7 @@
 |---|---|
 | Area | Runs |
 | Status | **proposed**: made during the work, not yet accepted or changed by the owner |
-| Made in | the pull requests for issue 222: part 1 (core), part 2 (infrastructure targets), part 3 (configuration management) |
+| Made in | the pull requests for issue 222: part 1 (core), part 2 (infrastructure targets), part 3 (configuration management), part 4 (containers and orchestration) |
 | Where it shows | [the `meridian` command](../reference/cli.md#inspect), [`--output json`](../reference/cli-json.md#inspect), [Troubleshooting a failed run](../operations/troubleshooting.md#meridian-inspect), [the MCP server](../tooling/mcp-server.md), [Writing a plugin](../contributing/writing-a-plugin.md), [the capability matrix](../reference/capability-matrix.md) |
 
 ## The choice
@@ -51,6 +51,17 @@ A name that is an expression, and an ARM deployment to a subscription, are refus
 | DSC | not given: DscPipelineRunner's result has no properties | `Invoke-DscRunner -Mode Test`, the resource's status |
 | Chef | why-run's lines for the resource | why-run; on another machine refused |
 | cloud-init | refused: nothing to read per resource | |
+
+## Containers and orchestration (part 4)
+
+| Target | Actual | As declared |
+|---|---|---|
+| Kubernetes | `kubectl get`, cut to the fields the manifest declares | `kubectl apply --dry-run=server` reports it `unchanged` |
+| Helm | an object: `kubectl get`, cut to the rendered chart; the release: `helm status` | deployed, and `helm get manifest` matches the rendered chart |
+| Docker | `docker inspect` of the service's container: image, status, health, restarts | the plan's comparison of file and project |
+| Podman | the unit file's state and the service's systemd state | the plan's look at the host |
+
+A Secret's values and a container's environment are never read into `actual`.
 
 ## Status
 

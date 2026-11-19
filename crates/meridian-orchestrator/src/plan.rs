@@ -16,6 +16,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::{ActionReport, ActionStatus};
 use base64::Engine as _;
 use meridian_sdk::{canonical_map, decode_map, Change, ChangeAction, SavedPlan, Value};
 
@@ -105,6 +106,9 @@ pub struct PlannedStage {
     pub applied_before: String,
     /// What the plan's policy said, when one was asked.
     pub policy: Option<Decisions>,
+    /// The Meridian-run actions an apply of the stage would or may run. An
+    /// apply from the plan runs only these (decision 0056).
+    pub actions: Vec<ActionReport>,
 }
 
 /// A saved plan: every stage of one `meridian plan`, with what it takes to
@@ -174,7 +178,9 @@ impl PlanFile {
     /// count.
     pub fn has_changes(&self) -> bool {
         self.stages.iter().any(|stage| match stage.status {
-            PlannedStatus::Planned => stage.unknown || !stage.changes.is_empty(),
+            PlannedStatus::Planned => {
+                stage.unknown || !stage.changes.is_empty() || !stage.actions.is_empty()
+            }
             PlannedStatus::Deferred => true,
             PlannedStatus::Compiled | PlannedStatus::LeftOut => false,
         })
@@ -330,6 +336,7 @@ impl PlannedStage {
                 .map(|record| record.artifact_hash.clone())
                 .unwrap_or_default(),
             policy: stage.policy.clone(),
+            actions: stage.actions.clone(),
         })
     }
 
@@ -386,6 +393,26 @@ impl PlannedStage {
                 }
             },
         );
+        if !self.actions.is_empty() {
+            let actions = self
+                .actions
+                .iter()
+                .map(|a| {
+                    Value::Map(
+                        [
+                            ("notifier", a.notifier.as_str()),
+                            ("resource", a.resource.as_str()),
+                            ("action", a.action.as_str()),
+                            ("status", a.status.as_str()),
+                        ]
+                        .into_iter()
+                        .map(|(k, v)| (k.to_owned(), Value::from(v)))
+                        .collect(),
+                    )
+                })
+                .collect();
+            map.insert("actions".to_owned(), Value::List(actions));
+        }
         Value::Map(map)
     }
 
@@ -437,6 +464,29 @@ impl PlannedStage {
                 asked: matches!(policy.get("asked"), Some(Value::Bool(true))),
             }
         });
+        let mut actions = Vec::new();
+        for action in map.get("actions").and_then(Value::as_list).unwrap_or(&[]) {
+            let fields = action
+                .as_map()
+                .ok_or_else(|| format!("stage {name:?} has an action that is not an object"))?;
+            let field = |key: &str| {
+                fields
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned()
+            };
+            let status = field("status");
+            actions.push(ActionReport {
+                notifier: field("notifier"),
+                resource: field("resource"),
+                action: field("action"),
+                status: ActionStatus::parse(&status).ok_or_else(|| {
+                    format!("stage {name:?} has an action with the status {status:?}")
+                })?,
+                command: String::new(),
+            });
+        }
         Ok(PlannedStage {
             id: StageId { kind, name },
             target: text("target"),
@@ -447,6 +497,7 @@ impl PlannedStage {
             saved,
             applied_before: text("appliedBefore"),
             policy,
+            actions,
         })
     }
 }
@@ -570,6 +621,13 @@ mod tests {
                         warn: vec!["late".to_owned()],
                         asked: true,
                     }),
+                    actions: vec![ActionReport {
+                        notifier: "vm".to_owned(),
+                        resource: "app".to_owned(),
+                        action: "restart".to_owned(),
+                        status: ActionStatus::Would,
+                        command: String::new(),
+                    }],
                 },
                 PlannedStage {
                     id: StageId {
@@ -584,6 +642,7 @@ mod tests {
                     saved: None,
                     applied_before: String::new(),
                     policy: None,
+                    actions: Vec::new(),
                 },
             ],
             changed_data: Vec::new(),
@@ -612,6 +671,8 @@ mod tests {
         let mut plan = plan();
         plan.stages[0].changes.clear();
         plan.stages.pop();
+        assert!(plan.has_changes(), "an action pending is a change");
+        plan.stages[0].actions.clear();
         assert!(!plan.has_changes());
         plan.stages[0].unknown = true;
         assert!(plan.has_changes());
@@ -647,6 +708,7 @@ mod tests {
                 applied: true,
                 run: "r1".to_owned(),
                 last_good: "sha256:old".to_owned(),
+                pending: Vec::new(),
             },
         );
         check(&plan, &[id("network"), web.clone()], &state).unwrap();
@@ -666,6 +728,7 @@ mod tests {
                 applied: false,
                 run: "r2".to_owned(),
                 last_good: "sha256:old".to_owned(),
+                pending: Vec::new(),
             },
         );
         let moved = check(&plan, &[id("network"), web], &state).unwrap_err();

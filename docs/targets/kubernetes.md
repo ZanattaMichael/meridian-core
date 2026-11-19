@@ -239,3 +239,15 @@ in-sync, notify restart and a refused manifest. Managed clusters and admission w
 untested. See [Real-tool tests](../contributing/real-tool-tests.md).
 
 [`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `-v=4`, `-v=6` or `-v=8` to `kubectl`.
+
+## Inspecting one resource
+
+[`meridian inspect`](../reference/cli.md#inspect) reads the object the id compiled to.
+
+| Answer | From |
+|---|---|
+| actual | `kubectl get KIND/NAME --output json` in the object's namespace, cut to the fields the manifest declares. A Secret's `data` and `stringData` values are `(sensitive)` |
+| as declared | `kubectl apply --dry-run=server` of the manifests: yes when it reports the object `unchanged` |
+
+An object the cluster does not have is not found. An id that compiles to more than one object is
+refused with `unsupported-inspect`.

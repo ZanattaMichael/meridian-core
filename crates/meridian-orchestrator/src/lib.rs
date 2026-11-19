@@ -35,6 +35,7 @@
 //!
 //! None of it holds a secret value: see `docs/reference/state.md`.
 
+mod act;
 pub mod analyze;
 pub mod backend;
 pub mod diagnose;
@@ -77,6 +78,7 @@ use meridian_sdk::{
 };
 use meridian_secret::Masker;
 
+pub use act::{ActionReport, ActionStatus};
 pub use analyze::{
     Accepted, Analysis, Analyzer, Baseline, Counts, FailOn, Finding, Measure, Severity,
 };
@@ -365,6 +367,7 @@ pub fn run_selected(
                         },
                         policy: None,
                         analyses: Vec::new(),
+                        actions: Vec::new(),
                         ..check
                     }
                 };
@@ -403,6 +406,7 @@ pub fn run_selected(
                 previous_good: String::new(),
                 policy: None,
                 analyses: Vec::new(),
+                actions: Vec::new(),
             };
             journal.finished(observer, &skipped);
             observer.stage_finished(&skipped);

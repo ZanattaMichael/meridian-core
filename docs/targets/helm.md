@@ -527,3 +527,12 @@ use your kubeconfig or `KUBECONFIG`; point both at the same cluster.
 $ cargo test -p meridian-target-helm --test real -- --ignored
 $ cargo test -p meridian-target-helm --test cluster -- --ignored
 ```
+
+## Inspecting one resource
+
+[`meridian inspect`](../reference/cli.md#inspect) renders the chart as a plan does.
+
+| Resource | Actual | As declared |
+|---|---|---|
+| an object of the chart | `kubectl get KIND/NAME --output json`, cut to the fields the rendered chart declares; a Secret's values are `(sensitive)` | the release is `deployed` and `helm get manifest` holds the object as rendered |
+| the release, chart or values | `helm status`: the release's `status` | the release is `deployed` and holds every object as rendered |

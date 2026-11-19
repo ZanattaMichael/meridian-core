@@ -397,6 +397,20 @@ message DescribeResponse {
   // this field inspects nothing, and `meridian inspect` refuses its stages
   // with the rule unsupported-inspect.
   bool inspects = 30;
+  // acts lists the notify actions the plugin's Runner performs itself, by
+  // resource type, for a notify its tool cannot express. The host takes a
+  // notify whose target resource and action are listed here out of the tree
+  // before Emit, and asks Act for it after the stage applies, when the
+  // notifier changed. A plugin built before this field acts on nothing.
+  repeated ActSchema acts = 31;
+}
+
+// ActSchema is the notify actions a Runner performs on one resource type.
+message ActSchema {
+  // type is the type as a document writes it, or a glob with "*", such as
+  // "Microsoft.*/*".
+  string type = 1;
+  repeated string actions = 2;
 }
 
 // Setting is one thing an operator can configure about a runner.
@@ -776,6 +790,28 @@ message DestroyEvent {
   }
 }
 
+message ActRequest {
+  RunContext context = 1;
+  Artifact artifact = 2;
+  // resource is the id of the resource to act on, as the document declares
+  // it; action is one the plugin listed for its type in Describe.acts.
+  string resource = 3;
+  string action = 4;
+}
+
+message ActResult {
+  // command is the native command the plugin ran, with no secret in it.
+  string command = 1;
+  RunError error = 2;
+}
+
+message ActEvent {
+  oneof event {
+    LogLine log = 1;
+    ActResult result = 2;
+  }
+}
+
 message OutputsRequest {
   RunContext context = 1;
 }
@@ -860,6 +896,10 @@ service Runner {
   // endpoint, and changes nothing: no apply, no write to the tool's state.
   // Asked only of a plugin whose Describe says inspects.
   rpc Inspect(InspectRequest) returns (InspectResponse);
+  // Act performs one notify action on one resource, after the stage's apply,
+  // for a notify the tool cannot express. Asked only for a type and action
+  // the plugin listed in Describe.acts; Cancel stops it as it stops Apply.
+  rpc Act(ActRequest) returns (stream ActEvent);
 }
 
 message CancelRequest {}

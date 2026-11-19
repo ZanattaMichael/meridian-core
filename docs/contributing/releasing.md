@@ -102,22 +102,64 @@ the tag. See [decision 21](../decisions/0021-a-dispatch-at-a-tag-is-a-release.md
 
 ## Package managers
 
-`tools/release/manifests.py` writes `meridian-<version>-package-manifests.tar.gz`. Nothing is
-submitted automatically:
+A release carries the manifests in
+`meridian-<version>-package-manifests.tar.gz`. They are generated, with the
+release's URLs and checksums filled in, by `tools/release/manifests.py`. Each
+package manager reads them from a repository of its own, and the
+**`package managers`** workflow (Actions tab, Run workflow) puts them there
+once a release is published:
 
-| Manager | File | What publishing it takes |
+| Manager | Where the workflow sends it | What a user then runs |
 |---|---|---|
-| Homebrew | `packaging/homebrew/meridian.rb` | a tap repository, `ZanattaMichael/homebrew-meridian`, with the file at `Formula/meridian.rb`. Users then run `brew install zanattamichael/meridian/meridian` |
-| Scoop | `packaging/scoop/meridian.json` | a bucket repository, for example `ZanattaMichael/scoop-meridian`, with the file at `bucket/meridian.json`. The manifest has `checkver` and `autoupdate`, so the bucket can update itself |
-| winget | `packaging/winget/*.yaml` | a pull request to `microsoft/winget-pkgs` adding the three files under `manifests/z/ZanattaMichael/Meridian/<version>/`. Microsoft's validation runs on the pull request |
-| crates.io | none | not set up. `cargo install --git` works today. Publishing to crates.io would need the crate names reserved, a version on every path dependency between the crates, and a `CARGO_REGISTRY_TOKEN` secret |
+| Homebrew | `Formula/meridian.rb` in your tap repository `homebrew-meridian` | `brew install zanattamichael/meridian/meridian` |
+| Scoop | `bucket/meridian.json` in your bucket repository `scoop-meridian` | `scoop bucket add meridian https://github.com/ZanattaMichael/scoop-meridian`, then `scoop install meridian` |
+| winget | `manifests/z/ZanattaMichael/Meridian/<version>/` on a branch `meridian-<version>` of your fork of `microsoft/winget-pkgs` | `winget install ZanattaMichael.Meridian`, once Microsoft merges the pull request |
+| crates.io | nowhere | not set up. `cargo install --git` works today. Publishing to crates.io would need the crate names reserved, a version on every path dependency between the crates, and a `CARGO_REGISTRY_TOKEN` secret |
 
-Syntax is checked each run; real installs are untested until a release exists.
+The workflow takes the version to send (default: the latest release) and
+whether to open the pull request to `microsoft/winget-pkgs`. It refuses a
+draft release, because the manifests point at files nobody can download yet.
+An empty tap or bucket gets the files as its first commit; one with history
+gets a branch and a draft pull request, so a changed formula is read before it
+lands. By hand, `tools/release/package_managers.py` lays the same trees out
+from the tarball, and `tools/release/send_tree.sh` pushes one.
+
+### What it needs
+
+| What | Where | Value |
+|---|---|---|
+| The tap | a repository `ZanattaMichael/homebrew-meridian`, empty | private while you decide; public when you want others to `brew install` |
+| The bucket | a repository `ZanattaMichael/scoop-meridian`, empty | the same |
+| The winget fork | Fork `microsoft/winget-pkgs` on GitHub, keeping the name | forks are always public; the manifests sit on a branch there until you open the pull request |
+| The token | Settings, Secrets and variables, Actions, Secrets | `MERIDIAN_PACKAGING_TOKEN`: a fine-grained personal access token with **Contents: read and write** and **Pull requests: read and write** on those three repositories (and read on `meridian-core`, to download the release). The run's own token cannot reach other repositories |
+
+### Nothing public until you say
+
+The tap and the bucket can stay private: `brew tap` and `scoop bucket add`
+then work only for someone whose git credentials can read them, which is
+how to try them out before anyone else can. Make the repositories public
+under their Settings when you are ready; the files do not change. The winget
+pull request is opened as a draft only when the workflow is asked to, and
+Microsoft's validation runs on it; until it is merged, `winget install`
+does not find the package.
+
+### Code signing is not required by any of them
+
+None of the three checks for a code signature. Homebrew installs the archive
+with `curl`, which sets no quarantine flag, so Gatekeeper does not look for
+notarisation. Scoop and winget install the zip as it is; winget's validation
+checks the URL, the hash and that the files run, not a signature. The user
+sees a warning only when they download an archive **in a browser**, which
+the package managers never do. What a release does sign (Sigstore, and
+GitHub's attestations) is explained under
+[Check what you downloaded](../quickstart/install.md#check-what-you-downloaded).
+Paid signing (Apple notarisation, an Authenticode certificate) only removes
+the browser warnings; see [Known limits](#known-limits).
 
 ## Known limits
 
 - **No macOS notarisation.** Browser downloads are blocked by Gatekeeper.
-- **No Windows code signing.** SmartScreen may warn.
+- **No Windows code signing.** SmartScreen may warn. SignPath Foundation signs open-source projects for free, if that ever matters.
 - **Actions are pinned by tag**, not commit.
 - **One key per platform build**, so plugins cannot ship separately yet.
 

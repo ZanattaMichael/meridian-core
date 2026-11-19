@@ -525,6 +525,85 @@ impl Runner for KubernetesRunner {
         self.read_outputs(context, &cluster, Duration::ZERO, &NoLog)
     }
 
+    fn inspects(&self) -> bool {
+        true
+    }
+
+    /// `kubectl get` reads the object; a server-side dry run of the
+    /// manifests, which stores nothing, says whether an apply would change it.
+    fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        _endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunError> {
+        let cluster = self.prepare(context, artifact)?;
+        let names: Vec<&str> = cluster
+            .objects
+            .iter()
+            .filter(|(_, id)| id.as_str() == resource)
+            .map(|(object, _)| object.as_str())
+            .collect();
+        let manifests = &artifact.files[MANIFESTS_PATH];
+        let declared = crate::inspect::declared(manifests, &names)
+            .map_err(|e| RunError::new(format!("{MANIFESTS_PATH} could not be read: {e}")))?;
+        let declared = match declared.as_slice() {
+            [one] => one,
+            [] => {
+                return Err(RunError::new(format!(
+                    "{MANIFESTS_PATH} has no object for {resource:?}"
+                )))
+            }
+            _ => {
+                return Err(RunError::new(format!(
+                    "{resource} compiles to more than one object ({})",
+                    meridian_sdk::rules::UNSUPPORTED_INSPECT.name
+                )))
+            }
+        };
+        let log = &NoLog;
+        let got = self
+            .kubectl(
+                context,
+                &cluster,
+                &["get", &declared.applied_as, "--output", "json"],
+                &declared.namespace,
+            )
+            .run(log)?;
+        let command = format!(
+            "kubectl get {} --output json; kubectl apply --dry-run=server",
+            declared.applied_as
+        );
+        if !got.success() {
+            if got.stderr.contains("NotFound") {
+                return Ok(meridian_sdk::Inspection {
+                    found: false,
+                    in_desired_state: Some(false),
+                    command,
+                    ..Default::default()
+                });
+            }
+            return Err(cluster.error(got, "kubectl could not read the object"));
+        }
+        let actual = crate::inspect::actual(&got.stdout, declared)
+            .map_err(|e| RunError::new(format!("kubectl printed what is not JSON: {e}")))?;
+        let dry = self
+            .apply_manifests(context, &cluster, artifact, &["--dry-run=server"])?
+            .run(log)?;
+        let in_desired_state = dry.success().then(|| {
+            !read_report(&dry.stdout, &cluster)
+                .iter()
+                .any(|c| c.summary == declared.applied_as)
+        });
+        Ok(meridian_sdk::Inspection {
+            found: true,
+            actual,
+            in_desired_state,
+            command,
+        })
+    }
+
     fn destroys(&self) -> bool {
         true
     }

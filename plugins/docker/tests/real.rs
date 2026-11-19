@@ -598,3 +598,53 @@ fn the_compose_schema_is_exported_and_agrees_with_the_checked_attributes() {
         }
     }
 }
+
+#[ignore = "needs a real Docker; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn inspect_reads_a_services_container_across_the_plugin_boundary() {
+    if !docker_is_available() {
+        return;
+    }
+    let dir = scratch(TMP, "real-inspect");
+    let project = format!("meridian-inspect-{}", std::process::id());
+    let _tear_down = TearDown {
+        project: project.clone(),
+    };
+    let binary = plugin_binary("meridian-target-docker");
+    let session = Session {
+        client: Client::start(binary.to_str().unwrap(), &StartOptions::default())
+            .expect("the plugin starts"),
+        context: RunContext {
+            document: "real".into(),
+            work_dir: Path::new(&dir).join("work"),
+            ..RunContext::default()
+        },
+    };
+    let first = session.compile(&document(&project, "hello", false));
+    let read = session
+        .client
+        .inspect(&session.context, &first, "web", "")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(!read.found, "nothing is running yet");
+
+    session.apply(&first);
+    let read = session
+        .client
+        .inspect(&session.context, &first, "web", "")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(true));
+    assert_eq!(read.actual.get("status"), Some(&Value::from("running")));
+
+    let changed = session.compile(&document(&project, "bye", false));
+    let read = session
+        .client
+        .inspect(&session.context, &changed, "web", "")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(read.in_desired_state, Some(false));
+    assert_eq!(
+        containers(&project),
+        [format!("{project}-web-1")],
+        "inspect changes nothing"
+    );
+}

@@ -57,6 +57,9 @@ pub(crate) struct Compiled {
     /// The credential the host is reached with, when the document names
     /// one, with its secret fields as slots.
     pub(crate) credential: Option<meridian_ir::Credential>,
+    /// The notifies the target's runner performs after the apply, taken
+    /// out of the tree before it was compiled.
+    pub(crate) meridian_run: Vec<meridian_sdk::MeridianRun>,
 }
 
 /// Why a stage did not compile, or cannot yet.
@@ -188,6 +191,7 @@ impl Run<'_> {
             previous_good: String::new(),
             policy: None,
             analyses: Vec::new(),
+            actions: Vec::new(),
         };
         let fail = |mut report: StageReport, reason: Reason, why: String| {
             report.outcome = Outcome::Failed(why);
@@ -261,6 +265,7 @@ impl Run<'_> {
             host,
             mut inputs,
             credential,
+            meridian_run,
         } = match self.compile(stage, &secrets.names()) {
             Ok(compiled) => compiled,
             Err(NotCompiled::Failed { reason, why, host }) => {
@@ -581,7 +586,11 @@ impl Run<'_> {
             Mode::Plan => match plan_now
                 .unwrap_or_else(|| target.plan_with(&context, &emitted.artifact, &mut log, stop))
             {
-                Ok(plan) => report.outcome = Outcome::Planned(plan),
+                Ok(plan) => {
+                    let pending = self.pending(&id);
+                    report.actions = act::planned(&meridian_run, &plan, &pending, &order(&graph));
+                    report.outcome = Outcome::Planned(plan);
+                }
                 Err(e) => {
                     report.failures = self.failures(&e, &document);
                     return fail(report, reason_of(&e), self.describe(e));
@@ -647,6 +656,7 @@ impl Run<'_> {
                     masker: Masker::new(),
                 });
                 let outcome = target.apply_with(&context, &emitted.artifact, &mut log, stop);
+                let pending = self.pending(&id);
                 match outcome {
                     Ok(mut applied) => {
                         // A tool that hands a sensitive value straight back
@@ -661,6 +671,31 @@ impl Run<'_> {
                         self.record(&id, stage.target(), &hash, true);
                         self.snapshot(&id, &emitted.artifact, &report.previous_good);
                         self.learn(&id, &applied.outputs);
+                        // The triggered actions are recorded before any
+                        // runs, so a run that dies between leaves them for
+                        // the next apply.
+                        let runs = act::triggered(
+                            &meridian_run,
+                            &applied.changes,
+                            &pending,
+                            &order(&graph),
+                        );
+                        self.set_pending(&id, runs.clone());
+                        let (actions, failures, why) = self.act(
+                            target,
+                            &context,
+                            &emitted.artifact,
+                            &id,
+                            &document,
+                            runs,
+                            &mut log,
+                        );
+                        report.actions = actions;
+                        if let Some((reason, why)) = why {
+                            report.done_before_failing = applied.changes;
+                            report.failures = failures;
+                            return fail(report, reason, why);
+                        }
                         report.outcome = Outcome::Applied {
                             changes: applied.changes,
                             outputs: applied.outputs,
@@ -677,6 +712,25 @@ impl Run<'_> {
                             }
                             RunFailure::Plugin(_) => {}
                         }
+                        // What the failed apply did still triggers; it runs
+                        // at the next apply.
+                        let runs = act::triggered(
+                            &meridian_run,
+                            &report.done_before_failing,
+                            &pending,
+                            &order(&graph),
+                        );
+                        self.set_pending(&id, runs.clone());
+                        report.actions = runs
+                            .iter()
+                            .map(|r| ActionReport {
+                                notifier: r.notifier.clone(),
+                                resource: r.resource.clone(),
+                                action: r.action.clone(),
+                                status: ActionStatus::Pending,
+                                command: String::new(),
+                            })
+                            .collect();
                         report.failures = self.failures(&e, &document);
                         return fail(report, reason_of(&e), self.describe(e));
                     }
@@ -1020,6 +1074,10 @@ impl Run<'_> {
             &info.resource_schemas,
             &crate::lab_tags::of(&options.data),
         );
+        // A notify the tool cannot express and the runner performs itself
+        // never reaches the emitter.
+        let (meridian_run, acted_warnings) =
+            meridian_sdk::notify::take_meridian_run(&mut graph, &info.acts);
         let failed =
             |reason: Reason, why: String, host: String| NotCompiled::Failed { reason, why, host };
         // The run id reached every value through the resolve; the plugin is
@@ -1027,13 +1085,17 @@ impl Run<'_> {
         let mut data = options.data.clone();
         data.remove(meridian_ir::RESERVED_DATA_KEY);
         match target.emit(&graph, &data) {
-            Ok(emitted) => Ok(Compiled {
-                graph,
-                emitted,
-                host,
-                inputs,
-                credential,
-            }),
+            Ok(mut emitted) => {
+                emitted.warnings.extend(acted_warnings);
+                Ok(Compiled {
+                    graph,
+                    emitted,
+                    host,
+                    inputs,
+                    credential,
+                    meridian_run,
+                })
+            }
             Err(EmitError::Refused(e)) => Err(failed(Reason::CompileRefused, e.to_string(), host)),
             Err(EmitError::Plugin(e)) => Err(failed(Reason::PluginFailed, e.to_string(), host)),
         }
@@ -1455,7 +1517,7 @@ impl Run<'_> {
 
     /// What the saved plan this apply carries out says about a stage, when
     /// it carries one out.
-    fn planned(&self, id: &StageId) -> Option<&PlannedStage> {
+    pub(crate) fn planned(&self, id: &StageId) -> Option<&PlannedStage> {
         self.options
             .from_plan
             .as_ref()
@@ -1498,14 +1560,30 @@ impl Run<'_> {
                 applied,
                 run: self.run_id.clone(),
                 last_good,
+                pending: self.pending(id),
             },
         );
-        // The tool has done its work whether or not this is written, so a
-        // failure here is said out loud and does not fail the stage.
+        self.write_state();
+    }
+
+    /// The tool has done its work whether or not the run-state is written,
+    /// so a failure to write it is said out loud and does not fail the
+    /// stage.
+    pub(crate) fn write_state(&mut self) {
         if let Err(why) = self.state.write(self.backend.as_ref()) {
-            self.warnings
-                .push(format!("the run-state could not be written: {why}"));
+            let warning = format!("the run-state could not be written: {why}");
+            if !self.warnings.contains(&warning) {
+                self.warnings.push(warning);
+            }
         }
+    }
+
+    /// The stage's Meridian-run actions an earlier apply left pending.
+    pub(crate) fn pending(&self, id: &StageId) -> Vec<meridian_sdk::MeridianRun> {
+        self.state
+            .get(id)
+            .map(|r| r.pending.clone())
+            .unwrap_or_default()
     }
 
     /// Whether a resumed run can leave this stage alone, and if so which run
@@ -1522,7 +1600,8 @@ impl Run<'_> {
             return None;
         }
         let record = self.state.get(id)?;
-        if !record.applied || record.artifact_hash != hash {
+        // Actions left pending are run by applying the stage again.
+        if !record.applied || record.artifact_hash != hash || !record.pending.is_empty() {
             return None;
         }
         let applied_in = if record.run.is_empty() {
@@ -1541,7 +1620,11 @@ impl Run<'_> {
 
     /// Each resource the tool said it failed on, masked as its error text
     /// is, with where the document declares it.
-    fn failures(&self, failure: &RunFailure, document: &Document) -> Vec<ResourceFailure> {
+    pub(crate) fn failures(
+        &self,
+        failure: &RunFailure,
+        document: &Document,
+    ) -> Vec<ResourceFailure> {
         let RunFailure::Tool(error) = failure else {
             return Vec::new();
         };
@@ -1591,13 +1674,18 @@ impl Run<'_> {
     }
 
     /// Whether the operator has asked for the run to stop.
-    fn interrupted(&self) -> bool {
+    pub(crate) fn interrupted(&self) -> bool {
         self.options
             .stop
             .when
             .as_ref()
             .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst))
     }
+}
+
+/// The resources of a compiled tree, in the order they are declared.
+fn order(graph: &meridian_sdk::ResourceGraph) -> Vec<String> {
+    graph.resources.iter().map(|r| r.id.clone()).collect()
 }
 
 /// What a denied stage says.

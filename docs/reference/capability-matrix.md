@@ -11,7 +11,9 @@ compiled, with the reason. Each target's own page says how it does what it can.
 - **notifies** is *native* when the tool has its own way to react to a change,
   and *synthetic* when Meridian builds the reaction out of something else the
   tool has. A synthetic notify shows up in the tool's own output, and the
-  target's page says what it looks like.
+  target's page says what it looks like. *Meridian-run* means the plugin
+  performs the action after the stage applies, when the tool can do neither.
+  See [Meridian-run notifies](../concepts/dependencies.md#meridian-run-notifies).
 - **runtimeWhen** is a condition the tool checks on the node at the moment it
   applies a resource.
 - **plan** asks the tool what an apply would change, without changing it.
@@ -60,14 +62,14 @@ compiled, with the reason. Each target's own page says how it does what it can.
 | [chef](../targets/chef.md) | configuration-management | `‹resource›`, `exec`, `file`, `group`, `package`, `packageRepository`, `service`, `user` | native | yes | yes | no | yes | no | yes | no | yes | yes | no | converge | no | yes |
 | [cloud-init](../targets/cloud-init.md) | configuration-management | `‹module›`, `exec`, `file`, `group`, `package`, `packageRepository`, `service`, `user` | synthetic | no | yes | no | yes | yes | no | no | no | no | no | no | no | yes |
 | [cloudformation](../targets/cloudformation.md) | infrastructure-as-code | `‹Vendor›::‹Service›::‹Type›`, `address`, `disk`, `dnsRecord`, `firewall`, `network`, `objectStore`, `stack`, `subnet`, `vm` | no | no | yes | yes | yes | yes | yes | no | yes | no | yes | no | no | yes |
-| [docker](../targets/docker.md) | containerization | `config`, `network`, `project`, `secret`, `service`, `volume` | native and synthetic | no | yes | no | yes | yes | no | no | yes | no | no | no | Compose files | yes |
+| [docker](../targets/docker.md) | containerization | `config`, `network`, `project`, `secret`, `service`, `volume` | native and synthetic | no | yes | no | yes | yes | yes | no | yes | no | no | no | Compose files | yes |
 | [dsc](../targets/dsc.md) | configuration-management | `‹Module›/‹Resource›`, `runner` | native | yes | yes | no | yes | no | yes | no | no | no | no | converge | PowerShell DSC configurations; DSC v3 configuration documents and DscPipelineRunner projects | yes |
-| [helm](../targets/helm.md) | container-orchestration | `‹apiVersion›/‹Kind›`, `chart`, `kustomization`, `release`, `values` | synthetic | no | yes | no | yes | yes | no | no | yes | no | no | no | no | yes |
-| [kubernetes](../targets/kubernetes.md) | container-orchestration | `‹apiVersion›/‹Kind›`, `cluster` | synthetic | no | yes | no | yes | yes | no | no | yes | no | no | converge | Kubernetes manifests | yes |
+| [helm](../targets/helm.md) | container-orchestration | `‹apiVersion›/‹Kind›`, `chart`, `kustomization`, `release`, `values` | synthetic | no | yes | no | yes | yes | yes | no | yes | no | no | no | no | yes |
+| [kubernetes](../targets/kubernetes.md) | container-orchestration | `‹apiVersion›/‹Kind›`, `cluster` | synthetic | no | yes | no | yes | yes | yes | no | yes | no | no | converge | Kubernetes manifests | yes |
 | [opentofu](../targets/opentofu.md) | infrastructure-as-code | `‹provider›_‹type›`, `address`, `backend`, `data.‹type›`, `disk`, `dnsRecord`, `encryption`, `ephemeral.‹type›`, `firewall`, `local`, `module`, `network`, `objectStore`, `provider`, `subnet`, `variable`, `vm` | synthetic | no | yes | yes | yes | yes | yes | yes | yes | no | yes | import | OpenTofu configuration files; OpenTofu configuration files in the JSON syntax | yes |
 | [openvox](../targets/openvox.md) | configuration-management | `‹module›::‹type›`, `‹type›`, `exec`, `file`, `group`, `package`, `packageRepository`, `service`, `user` | native | no | yes | no | yes | no | yes | no | yes | yes | no | converge | no | yes |
 | [packer](../targets/packer.md) | infrastructure-as-code | `data.‹type›`, `error-cleanup-provisioner.‹type›`, `local`, `plugin`, `post-processor.‹type›`, `provisioner.‹type›`, `source.‹builder›`, `variable` | no | no | yes | no | yes | yes | no | yes | yes | no | yes | no | no | no |
-| [podman](../targets/podman.md) | containerization | `build`, `container`, `image`, `kube`, `network`, `pod`, `volume` | native | no | yes | no | yes | yes | no | no | yes | yes | no | no | no | no |
+| [podman](../targets/podman.md) | containerization | `build`, `container`, `image`, `kube`, `network`, `pod`, `volume` | native | no | yes | no | yes | yes | yes | no | yes | yes | no | no | no | no |
 | [pulumi](../targets/pulumi.md) | infrastructure-as-code | `‹package›:‹module›:‹Type›`, `address`, `config`, `disk`, `dnsRecord`, `firewall`, `invoke.‹function›`, `network`, `objectStore`, `stack`, `subnet`, `vm` | no | no | yes | yes | yes | yes | yes | yes | yes | no | yes | import | no | yes |
 | [puppet](../targets/puppet.md) | configuration-management | `‹module›::‹type›`, `‹type›`, `exec`, `file`, `group`, `package`, `packageRepository`, `service`, `user` | native | no | yes | no | yes | no | yes | no | yes | yes | no | converge | no | yes |
 | [salt](../targets/salt.md) | configuration-management | `‹module›.‹function›`, `exec`, `file`, `group`, `package`, `packageRepository`, `service`, `user` | native | yes | yes | no | yes | no | yes | no | yes | yes | no | converge | no | yes |

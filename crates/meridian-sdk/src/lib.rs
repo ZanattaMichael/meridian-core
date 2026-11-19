@@ -53,6 +53,7 @@ pub mod fetch;
 mod import;
 pub mod infra;
 mod listen;
+pub mod notify;
 pub mod rules;
 mod run;
 pub mod schema;
@@ -88,9 +89,10 @@ pub use meridian_value::host::check as check_host;
 pub use meridian_value::{
     canonical_map, decode_map, decode_value, PlacedEscape, SecretRef, Value, SENSITIVE,
 };
+pub use notify::{ActSchema, MeridianRun};
 pub use rules::{DescribedRule, Rule};
 pub use run::{
-    Applied, Category, Change, ChangeAction, Inspection, Log, LogLine, LogStream, NoLog,
+    Acted, Applied, Category, Change, ChangeAction, Inspection, Log, LogLine, LogStream, NoLog,
     Operations, Output, Plan, RunContext, RunError, Runner, SavedPlan,
 };
 pub use schema::{is_shared_type, ParamKind, ParamSchema, ResourceSchema, TypeName, NATIVE_PREFIX};

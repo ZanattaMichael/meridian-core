@@ -1,0 +1,172 @@
+name: package managers
+
+# Sends a published release's package-manager manifests where each manager
+# reads them from: the Homebrew tap, the Scoop bucket and a branch of your
+# winget-pkgs fork. Run it from the Actions tab after a release is published.
+#
+# Nothing here is public until you make it so. The tap and the bucket can be
+# private repositories while you decide (then `brew tap` and `scoop bucket
+# add` only work for you, with a token); the winget manifests go to a branch
+# of your fork, and the pull request to microsoft/winget-pkgs is opened only
+# when you ask for it with the input below.
+#
+# What it needs: three repositories of yours and one token; see
+# docs/contributing/releasing.md, "Package managers".
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          The published release to send, such as 0.1.0. Leave empty for the
+          latest release.
+        required: false
+        type: string
+      winget_pull_request:
+        description: >-
+          Also open the pull request to microsoft/winget-pkgs (as a draft).
+          Off: only push the branch to your fork, and print the link to open
+          it yourself.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-managers
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # The token reaches the three repositories below; the run's own token
+  # cannot leave this repository.
+  GH_TOKEN: ${{ secrets.MERIDIAN_PACKAGING_TOKEN }}
+  OWNER: ${{ github.repository_owner }}
+  TAP: ${{ github.repository_owner }}/homebrew-meridian
+  BUCKET: ${{ github.repository_owner }}/scoop-meridian
+  WINGET_FORK: ${{ github.repository_owner }}/winget-pkgs
+  WINGET_UPSTREAM: microsoft/winget-pkgs
+
+jobs:
+  send:
+    name: send the manifests to the tap, the bucket and winget
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the token is set
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::the repository secret MERIDIAN_PACKAGING_TOKEN is not set; see docs/contributing/releasing.md, Package managers"
+            exit 1
+          fi
+          gh auth setup-git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch the release's manifests
+        id: release
+        env:
+          ASKED: ${{ inputs.version }}
+        run: |
+          if [ -n "$ASKED" ]; then
+            tag="v${ASKED#v}"
+          else
+            tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          fi
+          version="${tag#v}"
+          if gh release view --repo "$GITHUB_REPOSITORY" "$tag" --json isDraft --jq .isDraft | grep -qx true; then
+            echo "::error::$tag is still a draft; the manifests point at files nobody can download yet"
+            exit 1
+          fi
+          gh release download --repo "$GITHUB_REPOSITORY" "$tag" \
+            --pattern "meridian-$version-package-manifests.tar.gz" --dir release
+          python3 tools/release/package_managers.py \
+            --manifests "release/meridian-$version-package-manifests.tar.gz" --out trees
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # The tap and the bucket get the same treatment: an empty repository
+      # gets its first commit on main; one with history gets a branch and a
+      # draft pull request, so a change to a formula is read before it lands.
+      - name: Send the Homebrew formula
+        id: homebrew
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: tools/release/send_tree.sh "$TAP" trees/homebrew "Meridian $VERSION" "meridian-$VERSION"
+
+      - name: Send the Scoop manifest
+        id: scoop
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: tools/release/send_tree.sh "$BUCKET" trees/scoop "Meridian $VERSION" "meridian-$VERSION"
+
+      # winget-pkgs takes one pull request per version, from a fork, on a
+      # branch of its own. The fork's default branch is brought up to date
+      # with Microsoft's first so the pull request holds only these files.
+      - name: Push the winget manifests to your fork
+        id: winget
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          OPEN_PR: ${{ inputs.winget_pull_request }}
+        run: |
+          if ! gh repo view "$WINGET_FORK" --json isFork --jq .isFork | grep -qx true; then
+            echo "::error::$WINGET_FORK is not a fork of $WINGET_UPSTREAM; fork it on GitHub first (Fork, keep the name winget-pkgs)"
+            exit 1
+          fi
+          gh repo sync "$WINGET_FORK" --source "$WINGET_UPSTREAM" --force
+          default="$(gh repo view "$WINGET_UPSTREAM" --json defaultBranchRef --jq .defaultBranchRef.name)"
+          git clone --quiet --depth 1 --branch "$default" "https://github.com/$WINGET_FORK" fork
+          branch="meridian-$VERSION"
+          dir="manifests/z/$OWNER/Meridian/$VERSION"
+          if git -C fork ls-remote --exit-code --heads origin "$branch" > /dev/null; then
+            echo "::notice::branch $branch exists already on $WINGET_FORK; nothing pushed"
+            echo "branch=$branch" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git -C fork checkout --quiet -b "$branch"
+          mkdir -p "fork/$dir"
+          cp "trees/winget/$dir"/*.yaml "fork/$dir/"
+          git -C fork add "$dir"
+          git -C fork commit --quiet -m "New package: $OWNER.Meridian version $VERSION"
+          git -C fork push --quiet origin "$branch"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          compare="https://github.com/$WINGET_UPSTREAM/compare/$default...$OWNER:winget-pkgs:$branch?expand=1"
+          echo "compare=$compare" >> "$GITHUB_OUTPUT"
+          if [ "$OPEN_PR" = true ]; then
+            url="$(gh pr create --repo "$WINGET_UPSTREAM" --draft \
+              --head "$OWNER:$branch" --base "$default" \
+              --title "New package: $OWNER.Meridian version $VERSION" \
+              --body "Adds Meridian $VERSION, a portable zip for x64 and arm64, from https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION. Manifests are generated by the project's release pipeline.")"
+            echo "pr=$url" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          HOMEBREW: ${{ steps.homebrew.outputs.result }}
+          SCOOP: ${{ steps.scoop.outputs.result }}
+          WINGET_BRANCH: ${{ steps.winget.outputs.branch }}
+          WINGET_COMPARE: ${{ steps.winget.outputs.compare }}
+          WINGET_PR: ${{ steps.winget.outputs.pr }}
+        run: |
+          {
+            echo "## Meridian $VERSION sent to the package managers"
+            echo
+            echo "- Homebrew tap \`$TAP\`: $HOMEBREW"
+            echo "- Scoop bucket \`$BUCKET\`: $SCOOP"
+            if [ -n "$WINGET_PR" ]; then
+              echo "- winget: draft pull request $WINGET_PR"
+            elif [ -n "$WINGET_COMPARE" ]; then
+              echo "- winget: branch \`$WINGET_BRANCH\` pushed to \`$WINGET_FORK\`; open the pull request when ready: $WINGET_COMPARE"
+            else
+              echo "- winget: branch \`$WINGET_BRANCH\` was already on \`$WINGET_FORK\`"
+            fi
+            echo
+            echo "While the tap and the bucket are private, only you can install from them. Make them public under each repository's Settings when you are ready."
+          } >> "$GITHUB_STEP_SUMMARY"
