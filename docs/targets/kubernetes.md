@@ -217,6 +217,23 @@ wins. See the [plugin settings reference](../reference/plugin-settings.md#kubern
 
 Objects in a namespace the document creates cannot be dry-run first; that plan is unknown.
 
+### Reading a failure
+
+When `kubectl` fails, each error on its standard error is a
+[resource failure](../reference/state.md#resource-failures) on the object it names
+(`Deployment.apps "web"`), by the id the author wrote:
+
+| API server reason or message | Cause | Tool code |
+|---|---|---|
+| `Invalid`, `BadRequest`, or a webhook that `denied the request` | `invalid-config` | the reason |
+| `Forbidden`, `Unauthorized`, `You must be logged in` | `auth-failed` | the reason |
+| `NotFound` (a namespace), `no matches for kind` (a missing CRD) | `dependency-missing` | the reason |
+| `AlreadyExists`, `Conflict` | `resource-failed` | the reason |
+| `Unable to connect to the server` | `unreachable` | |
+
+An apply does not wait for rollouts, so a Pod that fails after `kubectl apply` returns is not
+a failure of the run.
+
 CI tests a real `kubectl` and [kind](https://kind.sigs.k8s.io) cluster: plan, apply,
 in-sync, notify restart and a refused manifest. Managed clusters and admission webhooks are
 untested. See [Real-tool tests](../contributing/real-tool-tests.md).

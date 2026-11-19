@@ -185,6 +185,26 @@ fn a_failed_apply_keeps_what_kubectl_said() {
         .unwrap_err();
     assert_eq!(err.msg, "kubectl could not apply the manifests");
     assert!(err.output.contains("unable to connect"), "{}", err.output);
+    assert_eq!(err.failures.len(), 1, "{:?}", err.failures);
+    assert_eq!(err.failures[0].cause.as_str(), "unreachable");
+    assert_eq!(err.failures[0].resource, "");
+}
+
+#[test]
+fn a_refused_object_is_named_by_the_id_the_author_wrote() {
+    let dir = scratch(TMP, "refused-object");
+    let cases = r#"apply*) echo 'service/web unchanged'
+  echo 'Error from server (Invalid): error when creating "manifests.yaml": Deployment.apps "web" is invalid: spec.replicas: Invalid value: -1' >&2
+  exit 1 ;;"#;
+    let err = runner(&dir, cases)
+        .apply(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap_err();
+    let named: Vec<(&str, &str, &str)> = err
+        .failures
+        .iter()
+        .map(|f| (f.resource.as_str(), f.cause.as_str(), f.tool_code.as_str()))
+        .collect();
+    assert_eq!(named, [("web", "invalid-config", "Invalid")]);
 }
 
 #[test]

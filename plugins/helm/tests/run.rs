@@ -140,7 +140,7 @@ status)
 get) cat "{d}/installed" ;;
 upgrade)
   cat > "{d}/values-upgrade"
-  if [ -e "{d}/fail-upgrade" ]; then echo 'Error: UPGRADE FAILED: timed out waiting for the condition' >&2; exit 1; fi
+  if [ -e "{d}/fail-upgrade" ]; then cat "{d}/fail-upgrade" >&2; exit 1; fi
   echo 'Release "web-app" has been upgraded. Happy Helming!' ;;
 esac"#
         ),
@@ -415,7 +415,11 @@ fn what_kustomize_prints_is_installed_as_it_stands() {
 fn a_failed_install_says_what_helm_said() {
     let dir = scratch(TMP, "failed-install");
     let helm = runner(&dir, "", "");
-    fs::write(dir.join("fail-upgrade"), "").unwrap();
+    fs::write(
+        dir.join("fail-upgrade"),
+        "Error: UPGRADE FAILED: timed out waiting for the condition\n",
+    )
+    .unwrap();
     let err = helm
         .apply(&context(&dir), &compiled(false), &KeptLog::default())
         .unwrap_err();
@@ -427,6 +431,49 @@ fn a_failed_install_says_what_helm_said() {
     assert_eq!(err.exit_code, Some(1));
     assert!(err.output.contains("timed out waiting for the condition"));
     assert!(err.command.contains("upgrade --install web-app chart"));
+    let named: Vec<(&str, &str)> = err
+        .failures
+        .iter()
+        .map(|f| (f.resource.as_str(), f.cause.as_str()))
+        .collect();
+    assert_eq!(named, [("", "timed-out")]);
+}
+
+#[test]
+fn a_failed_install_names_what_was_not_ready_or_refused() {
+    let dir = scratch(TMP, "failed-objects");
+    let helm = runner(&dir, "", "");
+    fs::write(
+        dir.join("fail-upgrade"),
+        "Error: INSTALLATION FAILED: resource not ready, name: web, kind: Deployment, status: InProgress\n\
+         context deadline exceeded\n",
+    )
+    .unwrap();
+    let err = helm
+        .apply(&context(&dir), &compiled(false), &KeptLog::default())
+        .unwrap_err();
+    let named: Vec<(&str, &str, &str)> = err
+        .failures
+        .iter()
+        .map(|f| (f.resource.as_str(), f.cause.as_str(), f.tool_code.as_str()))
+        .collect();
+    assert_eq!(named, [("web", "timed-out", "InProgress")]);
+
+    fs::write(
+        dir.join("fail-upgrade"),
+        "Error: INSTALLATION FAILED: 1 error occurred:\n\
+         \t* ConfigMap \"web-config\" is invalid: data: Invalid value\n",
+    )
+    .unwrap();
+    let err = helm
+        .apply(&context(&dir), &compiled(false), &KeptLog::default())
+        .unwrap_err();
+    let named: Vec<(&str, &str)> = err
+        .failures
+        .iter()
+        .map(|f| (f.resource.as_str(), f.cause.as_str()))
+        .collect();
+    assert_eq!(named, [("web_config", "invalid-config")]);
 }
 
 #[test]

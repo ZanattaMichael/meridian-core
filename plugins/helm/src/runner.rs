@@ -16,6 +16,7 @@ use meridian_sdk::{
     RunError, Runner, Value, Written,
 };
 use meridian_sdk::{settings, Setting};
+use meridian_target_kubernetes::failures::{read_errors, same_kind};
 use meridian_yaml::Yaml;
 
 use crate::emit::RENDERED_FILE;
@@ -231,6 +232,44 @@ impl Release {
 
     /// The id of the resource an object was declared by, or the tool's own
     /// name for an object no resource accounts for.
+    /// The id of an object Helm named by kind and name, or Helm's name for
+    /// it when the document has no such object. With no name, the one
+    /// object of that kind.
+    fn resource_named(&self, kind: &str, name: &str) -> String {
+        let mut matching = self
+            .resources
+            .iter()
+            .filter(|(_, t)| same_kind(kind, &t.kind) && (name.is_empty() || t.name == name));
+        match (matching.next(), matching.next()) {
+            (Some((id, _)), None) => id.clone(),
+            _ if name.is_empty() => kind.to_owned(),
+            _ => format!("{kind}/{name}"),
+        }
+    }
+
+    /// `helm` run to its end, its failure carrying the objects it named.
+    fn run_ok(&self, tool: Tool, what: &str, log: &dyn Log) -> Result<(), RunError> {
+        let finished = tool.run(log)?;
+        if finished.success() {
+            return Ok(());
+        }
+        let failures = read_errors(&finished.stderr)
+            .into_iter()
+            .map(|found| {
+                let mut failure = found.failure;
+                failure.resource = if found.kind.is_empty() {
+                    String::new()
+                } else {
+                    self.resource_named(&found.kind, &found.name)
+                };
+                failure
+            })
+            .collect();
+        let mut err = finished.into_error(what);
+        err.failures = failures;
+        Err(err)
+    }
+
     fn resource_of(&self, key: &Key) -> String {
         let mut candidates = self.resources.iter().filter(|(_, t)| {
             t.api_version == key.api_version && t.kind == key.kind && t.name == key.name
@@ -658,7 +697,8 @@ impl Runner for HelmRunner {
                 upgrade = upgrade.args(["--timeout", &release.timeout]);
             }
             let upgrade = with_values(upgrade, context, artifact, CHART_DIR)?;
-            upgrade.run_ok(
+            release.run_ok(
+                upgrade,
                 "helm could not install the release; `helm status` and `helm history` say what \
                  state it was left in",
                 log,
@@ -713,7 +753,7 @@ impl Runner for HelmRunner {
         if !release.timeout.is_empty() {
             uninstall = uninstall.args(["--timeout", &release.timeout]);
         }
-        uninstall.run_ok("helm could not uninstall the release", log)?;
+        release.run_ok(uninstall, "helm could not uninstall the release", log)?;
         Ok(removals)
     }
 }

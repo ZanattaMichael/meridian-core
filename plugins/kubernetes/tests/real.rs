@@ -305,6 +305,12 @@ fn what_the_api_server_refuses_fails_the_plan_with_its_reason() {
     assert_eq!(error.msg, "kubectl could not preview the apply");
     assert!(error.exit_code.is_some_and(|code| code != 0));
     assert!(error.output.contains("ConfigMap"), "{}", error.output);
+    let named: Vec<(&str, &str)> = error
+        .failures
+        .iter()
+        .map(|f| (f.resource.as_str(), f.cause.as_str()))
+        .collect();
+    assert_eq!(named, [("broken", "invalid-config")], "{error}");
     assert!(
         kubectl(&[
             "get",
