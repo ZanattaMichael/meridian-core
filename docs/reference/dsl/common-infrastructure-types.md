@@ -22,8 +22,8 @@ targets do.
 
 | Target | Clouds | How the cloud is chosen |
 |---|---|---|
-| `terraform` | AWS (`aws` provider), Azure (`azurerm` provider) | `spec.settings.cloud`, or the one cloud whose provider the document configures |
-| `opentofu` | AWS, Azure | the same as `terraform`: the two read the same providers, and compile a common resource to the same blocks |
+| `terraform` | AWS (`aws` provider), Azure (`azurerm` provider), Google Cloud (`google` provider) | `spec.settings.cloud`, or the one cloud whose provider the document configures |
+| `opentofu` | AWS, Azure, Google Cloud | the same as `terraform`: the two read the same providers, and compile a common resource to the same blocks |
 | `pulumi` | AWS (`aws` package), Azure (`azure-native` package) | `spec.settings.cloud`, or the one cloud whose package the document already uses, in a resource type or a `config` name such as `aws:region` |
 | `cloudformation` | AWS | always AWS, in the stack's region |
 | `bicep` | Azure | always Azure |
@@ -209,41 +209,59 @@ On AWS `name` is refused; the `Name` tag is the id unless `tags.Name` is given.
 On AWS `user` is refused: the image decides it (`ubuntu`, `admin` on Debian). On Azure
 `sshKey` is required (`missing-param`).
 
+### Google Cloud
+
+On Terraform and OpenTofu with `cloud: gcp`, a network is global, a subnet
+and an address are in a region, and a vm is in a zone.
+
+| Common type | Becomes |
+|---|---|
+| `network` | `google_compute_network` with no automatic subnets. `cidr` is required as on every cloud, but a Google Cloud network has no range of its own, so it is written as the network's `description`; its subnets' ranges are the real ones. `location` and `tags` are refused |
+| `subnet` | `google_compute_subnetwork` in the region of its `location` or `spec.settings.location`. `public: true` and `tags` are refused, as on Azure |
+| `firewall` | one `google_compute_firewall` per rule (`<fw>_rule_<n>` after the first), applied to the machines that carry the tag `meridian-<fw>`. With an `out` rule, a deny-all egress rule (`<fw>_out_deny`) below it for the same machines. A firewall with no rules is refused as `missing-param`, since a Google Cloud firewall is its rules |
+| `address` | `google_compute_address`, regional, `tags` as labels |
+| `vm` | `google_compute_instance` in the zone of its `location`, or zone `b` of the region (`europe-west1-b`). The firewalls' tags, an `access_config` for an `address`, and `sshKey` as the `ssh-keys` metadata of `user` (`gceuser` unless given) |
+
+Names on Google Cloud are lower case with hyphens, so an id's `_` becomes
+`-` (`web_ip` is named `web-ip`). `spec.settings.resourceGroup` is refused on
+Google Cloud, where the google provider's `project` decides where resources
+go.
+
 ### Sizes
 
 `{cpus, memoryGb}` becomes the smallest size below with at least that much; larger is
 refused. Text, such as `t3.small`, is passed through.
 
-| Processors | Memory (GB) | AWS | Azure |
-|---|---|---|---|
-| 2 | 0.5 | `t3.nano` | |
-| 1 | 1 | | `Standard_B1s` |
-| 2 | 1 | `t3.micro` | |
-| 1 | 2 | | `Standard_B1ms` |
-| 2 | 2 | `t3.small` | |
-| 2 | 4 | `t3.medium` | `Standard_B2s` |
-| 2 | 8 | `t3.large` | `Standard_B2ms` |
-| 4 | 16 | `t3.xlarge` | `Standard_B4ms` |
-| 8 | 32 | `t3.2xlarge` | `Standard_B8ms` |
-| 16 | 64 | `m6i.4xlarge` | `Standard_D16s_v5` |
-| 32 | 128 | `m6i.8xlarge` | `Standard_D32s_v5` |
+| Processors | Memory (GB) | AWS | Azure | Google Cloud |
+|---|---|---|---|---|
+| 2 | 0.5 | `t3.nano` | | |
+| 1 | 1 | | `Standard_B1s` | |
+| 2 | 1 | `t3.micro` | | `e2-micro` |
+| 1 | 2 | | `Standard_B1ms` | |
+| 2 | 2 | `t3.small` | | `e2-small` |
+| 2 | 4 | `t3.medium` | `Standard_B2s` | `e2-medium` |
+| 2 | 8 | `t3.large` | `Standard_B2ms` | `e2-standard-2` |
+| 4 | 16 | `t3.xlarge` | `Standard_B4ms` | `e2-standard-4` |
+| 8 | 32 | `t3.2xlarge` | `Standard_B8ms` | `e2-standard-8` |
+| 16 | 64 | `m6i.4xlarge` | `Standard_D16s_v5` | `e2-standard-16` |
+| 32 | 128 | `m6i.8xlarge` | `Standard_D32s_v5` | `e2-standard-32` |
 
 ### Images
 
 `{family, version}` must be one of these. Quote the version (`"24.04"`).
 
-| Family | Version | AWS | Azure |
-|---|---|---|---|
-| `ubuntu` | `"24.04"` | newest AMI owned by Canonical (`099720109477`) named `ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*` | `Canonical` / `ubuntu-24_04-lts` / `server` |
-| `ubuntu` | `"22.04"` | the same owner, `ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*` | `Canonical` / `0001-com-ubuntu-server-jammy` / `22_04-lts-gen2` |
-| `debian` | `"12"` | newest AMI owned by Debian (`136693071363`) named `debian-12-amd64-*` | `Debian` / `debian-12` / `12-gen2` |
-| `debian` | `"11"` | the same owner, `debian-11-amd64-*` | `Debian` / `debian-11` / `11-gen2` |
+| Family | Version | AWS | Azure | Google Cloud |
+|---|---|---|---|---|
+| `ubuntu` | `"24.04"` | newest AMI owned by Canonical (`099720109477`) named `ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*` | `Canonical` / `ubuntu-24_04-lts` / `server` | family `ubuntu-os-cloud/ubuntu-2404-lts-amd64` |
+| `ubuntu` | `"22.04"` | the same owner, `ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*` | `Canonical` / `0001-com-ubuntu-server-jammy` / `22_04-lts-gen2` | family `ubuntu-os-cloud/ubuntu-2204-lts` |
+| `debian` | `"12"` | newest AMI owned by Debian (`136693071363`) named `debian-12-amd64-*` | `Debian` / `debian-12` / `12-gen2` | family `debian-cloud/debian-12` |
+| `debian` | `"11"` | the same owner, `debian-11-amd64-*` | `Debian` / `debian-11` / `11-gen2` | family `debian-cloud/debian-11` |
 
 Terraform, OpenTofu and Pulumi look up the AMI in the publisher's own account. CloudFormation reads the
 vendor's public SSM parameter as `{{resolve:ssm:...}}`:
 `/aws/service/debian/release/<version>/latest/amd64` or
 `/aws/service/canonical/ubuntu/server/<version>/stable/current/amd64/hvm/ebs-gp3/ami-id`
-(`ebs-gp2` for 22.04). Other images are text: an AMI id or an Azure image id.
+(`ebs-gp2` for 22.04). Other images are text: an AMI id, an Azure image id, or a Google Cloud image or family path.
 
 ## What a common type adds
 
@@ -255,7 +273,7 @@ others are named from it:
 | `<vm>_image`, `<vm>_key`, `<vm>_address` | AWS: the AMI lookup, the key pair, the address association |
 | `<vm>_nic`, `<vm>_nic_firewall` | Azure: the network interface, and its firewall |
 | `<net>_gateway`, `<net>_gateway_link` (CloudFormation), `<subnet>_routes`, `<subnet>_routes_internet`, `<subnet>_routes_link` | AWS: a public subnet's way out |
-| `<fw>_in_<n>`, `<fw>_out_<n>`, `<fw>_out_all`, `<fw>_rule_<n>` | a firewall's rules |
+| `<fw>_in_<n>`, `<fw>_out_<n>`, `<fw>_out_all`, `<fw>_rule_<n>`, `<fw>_out_deny` | a firewall's rules |
 
 A document that already uses one of these ids is refused as `duplicate-resource`.
 
@@ -265,8 +283,8 @@ Terraform, OpenTofu and Pulumi read these [`spec.settings`](index.md#settings) k
 
 | Key | |
 |---|---|
-| `cloud` | `aws` or `azure`. Needed only when the document configures both providers or neither |
-| `location` | Azure: the location of every common resource that gives none |
+| `cloud` | `aws`, `azure`, or `gcp` (Terraform and OpenTofu only). Needed only when the document configures more than one provider or none |
+| `location` | Azure: the location of every common resource that gives none. Google Cloud: the region of every subnet and address that gives none, and zone `b` of it for a vm |
 | `resourceGroup` | Azure: the resource group every common resource is created in. Required on Azure |
 
 `location` and `resourceGroup` are refused on a document with no common resources.

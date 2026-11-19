@@ -9,7 +9,7 @@ with `tofu`.
 
 | | |
 |---|---|
-| Resource types | OpenTofu's own: any `<provider>_<type>`, plus `data.<type>`, `ephemeral.<type>`, `module`, `variable`, `local`, `provider`, `backend` and `encryption`. Also the [common infrastructure types](#common-infrastructure-types), on AWS and Azure |
+| Resource types | OpenTofu's own: any `<provider>_<type>`, plus `data.<type>`, `ephemeral.<type>`, `module`, `variable`, `local`, `provider`, `backend` and `encryption`. Also the [common infrastructure types](#common-infrastructure-types), on AWS, Azure and Google Cloud |
 | State and plan encryption | Yes, with `type: encryption`, checked at compile time. See [State and plan encryption](#state-and-plan-encryption) |
 | `dependsOn` | Yes, as `depends_on`, unless a reference already implies the order |
 | `notifies` | Synthetic, and blunt: the action `replace` only. See [Notifications](#notifications) |
@@ -211,7 +211,7 @@ arrives the same way under its name. Non-strings are passed as JSON.
 
 ## Common infrastructure types
 
-`network`, `subnet`, `firewall`, `address` and `vm` compile to the AWS or Azure
+`network`, `subnet`, `firewall`, `address` and `vm` compile to the AWS, Azure or Google
 provider's own resources exactly as on the
 [Terraform target](terraform.md#common-infrastructure-types), with the same
 `spec.settings` keys (`cloud`, `location`, `resourceGroup`), because both tools

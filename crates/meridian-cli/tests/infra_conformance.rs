@@ -52,6 +52,12 @@ const COLUMNS: &[Column] = &[
         preamble: "",
     },
     Column {
+        title: "terraform (gcp)",
+        target: "terraform",
+        settings: "  settings:\n    cloud: gcp\n    location: europe-west1\n",
+        preamble: "",
+    },
+    Column {
         title: "opentofu (aws)",
         target: "opentofu",
         settings: "  settings:\n    cloud: aws\n",
@@ -62,6 +68,12 @@ const COLUMNS: &[Column] = &[
         target: "opentofu",
         settings:
             "  settings:\n    cloud: azure\n    location: westeurope\n    resourceGroup: rg\n",
+        preamble: "",
+    },
+    Column {
+        title: "opentofu (gcp)",
+        target: "opentofu",
+        settings: "  settings:\n    cloud: gcp\n    location: europe-west1\n",
         preamble: "",
     },
     Column {
@@ -166,7 +178,7 @@ const CASES: &[Case] = &[
     case(
         "network",
         "name and tags",
-        Same,
+        Varies,
         "    - id: net\n      type: network\n      params: {cidr: 10.0.0.0/16, name: prod, tags: {team: web}}\n",
     ),
     case(
@@ -277,7 +289,7 @@ const CASES: &[Case] = &[
     case(
         "firewall",
         "no rules",
-        Same,
+        Varies,
         with_net!("    - id: fw\n      type: firewall\n      params: {network: \"${net}\"}\n"),
     ),
     case(
@@ -335,13 +347,13 @@ const CASES: &[Case] = &[
         "vm",
         "an address and a firewall",
         Same,
-        with_subnet!("    - id: fw\n      type: firewall\n      params: {network: \"${net}\"}\n    - id: ip\n      type: address\n    - id: vm\n      type: vm\n      params:\n        subnet: \"${sub}\"\n        address: \"${ip}\"\n        firewalls: [\"${fw}\"]\n        size: {cpus: 1, memoryGb: 1}\n        image: {family: debian, version: \"12\"}\n        sshKey: ssh-ed25519 AAAAexample\n"),
+        with_subnet!("    - id: fw\n      type: firewall\n      params: {network: \"${net}\", rules: [{port: \"22\", cidr: 0.0.0.0/0}]}\n    - id: ip\n      type: address\n    - id: vm\n      type: vm\n      params:\n        subnet: \"${sub}\"\n        address: \"${ip}\"\n        firewalls: [\"${fw}\"]\n        size: {cpus: 1, memoryGb: 1}\n        image: {family: debian, version: \"12\"}\n        sshKey: ssh-ed25519 AAAAexample\n"),
     ),
     case(
         "vm",
         "two firewalls",
         Varies,
-        with_subnet!("    - id: a\n      type: firewall\n      params: {network: \"${net}\"}\n    - id: b\n      type: firewall\n      params: {network: \"${net}\"}\n    - id: vm\n      type: vm\n      params:\n        subnet: \"${sub}\"\n        firewalls: [\"${a}\", \"${b}\"]\n        size: {cpus: 1, memoryGb: 1}\n        image: {family: debian, version: \"12\"}\n        sshKey: ssh-ed25519 AAAAexample\n"),
+        with_subnet!("    - id: a\n      type: firewall\n      params: {network: \"${net}\", rules: [{port: \"22\", cidr: 0.0.0.0/0}]}\n    - id: b\n      type: firewall\n      params: {network: \"${net}\", rules: [{port: \"80\", cidr: 0.0.0.0/0}]}\n    - id: vm\n      type: vm\n      params:\n        subnet: \"${sub}\"\n        firewalls: [\"${a}\", \"${b}\"]\n        size: {cpus: 1, memoryGb: 1}\n        image: {family: debian, version: \"12\"}\n        sshKey: ssh-ed25519 AAAAexample\n"),
     ),
     case(
         "vm",
