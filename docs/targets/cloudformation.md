@@ -20,6 +20,7 @@ with `aws` through a change set, so what is applied is what was previewed.
 | Plan | Yes: a change set, described and then discarded |
 | Apply | Yes: the same change set, executed |
 | Outputs | Yes: the template's `Outputs`, read back from the stack |
+| Destroy | Yes: the stack is deleted. See [Destroying](../operations/destroying.md) |
 | Editor schemas | Yes: `meridian schema sync` reads the resource provider schemas CloudFormation publishes for the stack's region, with no account and no `aws`. See [Editor schemas](#editor-schemas) |
 | Compiles to | `template.yaml` and `stack.json` |
 | Runs with | `aws cloudformation` |
@@ -233,6 +234,7 @@ Both use a change set named `meridian-<time>`.
 | Apply | the same preview, then `execute-change-set`, `wait stack-create-complete` or `stack-update-complete`, and `describe-stacks` for the outputs. A preview with nothing to change is discarded and nothing is executed |
 | Saved plan | `meridian plan --out` keeps the change set instead of discarding it and records its name; `meridian apply --plan` executes that change set, so what is applied is what the reviewer read. The change set's values stay with CloudFormation; the plan file holds only its name ([a saved plan](../operations/pull-requests.md)) |
 | Outputs later | `describe-stacks` |
+| Destroy | `describe-stacks`, `list-stack-resources`, `delete-stack`, then `wait stack-delete-complete`; `plan --destroy` stops after `list-stack-resources`. No stack: nothing to remove. A resource with `DeletionPolicy: Retain` is left in the account |
 
 `Add` is a create, `Remove` a delete, `Modify` an update or replace, reported by id. A
 `FAILED` change set with no changes is nothing to do; any other `FAILED` fails the stage and
