@@ -181,6 +181,30 @@ pub(crate) const CLOUD_TAKES: CloudTakes = CloudTakes {
 
 /// Refuses a credential the tool cannot take, at compile, so that nothing
 /// is fetched for it.
+/// A notify copies the notifier's properties into the notified resource's
+/// `replacementTrigger`, a resource option; a secret is kept out of the
+/// options.
+fn refuse_secret_in_trigger(graph: &ResourceGraph) -> Result<(), CompileError> {
+    for edge in graph.edges_of_kind(meridian_sdk::EdgeKind::Notify) {
+        let Some(r) = graph.resources.iter().find(|r| r.id == edge.from) else {
+            continue;
+        };
+        if let Some((key, _)) = r.params.iter().find(|(_, v)| holds_secret(v)) {
+            return Err(refuse(
+                r,
+                &rules::UNSUPPORTED_SECRET_PLACE,
+                format!(
+                    "param {key:?} holds a secret, and this resource notifies {:?}: the notify \
+                     copies its properties into the resource option replacementTrigger, and a \
+                     secret is never written into an option",
+                    edge.to
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
     let Some(credential) = &graph.credential else {
         return Ok(());
@@ -278,10 +302,10 @@ impl Emitter for Pulumi {
         .to_vec()
     }
 
-    /// Pulumi has no handler to run when something changes, and nothing in a
-    /// Pulumi YAML program makes one resource react to a change in another.
-    /// `replaceOnChanges` watches a resource's own properties only. So no
-    /// notify is claimed, and a document that uses one is refused.
+    /// Pulumi has no handler to run when something changes. The nearest it
+    /// has is the `replacementTrigger` option, which replaces a resource
+    /// when a value changes: a notify with action `replace` compiles to it,
+    /// a synthetic notify with a real cost, warned about each time.
     ///
     /// There is no apply-time conditional either: Pulumi YAML has no way to
     /// leave a resource out depending on what it finds.
@@ -290,6 +314,7 @@ impl Emitter for Pulumi {
     /// value, set from the tool's standard input.
     fn capabilities(&self) -> Capabilities {
         Capabilities {
+            synthetic_notify: true,
             secrets: true,
             cloud_credentials: true,
             adopt: Adoption::Import,
@@ -322,15 +347,16 @@ impl Emitter for Pulumi {
         // A secret in a param is written as a reference to a secret
         // configuration value, which the runner sets from standard input.
         refuse_secret_in(graph, &["stack", "config"], "the stack's settings are the command line `pulumi` is given and a configuration value's declaration is written into the program")?;
+        refuse_secret_in_trigger(graph)?;
         let graph = &graph.secrets_written_as(secret_reference);
         let mut program = transform::transform(graph)?;
-        sort::apply_ordering(graph, &mut program)?;
+        let warnings = sort::apply_ordering(graph, &mut program)?;
         validate::validate(&program)?;
         Ok(Emitted {
             artifact: Artifact {
                 files: emit::serialise(&program),
             },
-            warnings: Vec::new(),
+            warnings,
         })
     }
 }

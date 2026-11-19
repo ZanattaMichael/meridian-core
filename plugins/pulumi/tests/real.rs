@@ -461,3 +461,50 @@ fn a_secret_reaches_the_program_as_secret_configuration_and_is_in_nothing_kept_i
         }
     }
 }
+
+#[ignore = "needs a real pulumi; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_replace_notify_replaces_the_notified_resource_when_the_notifier_changes() {
+    if !enabled("a_replace_notify_replaces_the_notified_resource_when_the_notifier_changes") {
+        return;
+    }
+    let dir = scratch(TMP, "real-replace");
+    let runner = runner();
+    let log = KeptLog::default();
+    let fail = |what: &str, err: meridian_sdk::RunError| -> ! {
+        panic!("{what}: {err}\n--- log ---\n{}", log.text().join("\n"))
+    };
+    let document = |length: u32| {
+        compiled(&format!(
+            "  resources:\n    - id: name\n      type: random:index:RandomPet\n      params: {{length: {length}}}\n      notifies:\n        - resource: seed\n          action: replace\n    - id: seed\n      type: random:index:RandomInteger\n      params: {{min: 1, max: 1000000}}\n"
+        ))
+    };
+    let ctx = context(&dir, &[]);
+    runner
+        .apply(&ctx, &document(2), &log)
+        .unwrap_or_else(|e| fail("the first apply", e));
+    let plan = runner
+        .plan(&ctx, &document(2), &log)
+        .unwrap_or_else(|e| fail("the plan with nothing changed", e));
+    assert!(plan.in_sync(), "{:?}", plan.changes);
+
+    let applied = runner
+        .apply(&ctx, &document(3), &log)
+        .unwrap_or_else(|e| fail("the apply with the notifier changed", e));
+    let mut replaced: Vec<(&str, ChangeAction)> = applied
+        .changes
+        .iter()
+        .map(|c| (c.resource.as_str(), c.action))
+        .collect();
+    replaced.sort_by_key(|(id, _)| *id);
+    assert_eq!(
+        replaced,
+        [
+            ("name", ChangeAction::Replace),
+            ("seed", ChangeAction::Replace)
+        ]
+    );
+    runner
+        .destroy(&ctx, &document(3), &log)
+        .unwrap_or_else(|e| fail("the destroy", e));
+}

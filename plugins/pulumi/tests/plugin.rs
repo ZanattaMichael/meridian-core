@@ -75,6 +75,7 @@ fn the_binary_reports_what_the_plugin_is() {
     assert_eq!(
         info.capabilities,
         Capabilities {
+            synthetic_notify: true,
             secrets: true,
             cloud_credentials: true,
             adopt: meridian_sdk::Adoption::Import,

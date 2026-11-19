@@ -98,7 +98,10 @@ A target accepts only actions its tool can perform on that type.
 | `podman` | native | a unit | `restart` |
 | `kubernetes`, `helm` | synthetic | a Deployment, StatefulSet or DaemonSet | `restart` |
 | `terraform`, `opentofu` | synthetic | a managed resource | `replace` |
-| `cloudformation`, `bicep`, `arm`, `pulumi`, `packer` | refused | | |
+| `pulumi` | synthetic | a resource | `replace` |
+| `cloudformation`, `pulumi` | [Meridian-run](../../concepts/dependencies.md#meridian-run-notifies) | an EC2 instance, ECS service or Lambda function | `restart`, `start`, `stop`; `redeploy`; `run` |
+| `bicep`, `arm` | Meridian-run | a web app, VM or container group | `restart`, `start`, `stop` and others ([bicep](../../targets/bicep.md#notifications)) |
+| `packer` | refused | | |
 
 An action is never substituted. `reload` on Puppet is refused:
 

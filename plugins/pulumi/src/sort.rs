@@ -1,11 +1,17 @@
 //! Stage two: Pulumi's ordering semantics.
 
+use std::collections::BTreeSet;
+
 use meridian_sdk::rules;
-use meridian_sdk::{CompileError, EdgeKind, ResourceGraph, Value};
+use meridian_sdk::{CompileError, EdgeKind, ResourceGraph, Value, Warning};
 
-use crate::{refuse_at, Kind, Program};
+use crate::{refuse_at, Kind, Program, NAME};
 
-/// Turns dependency edges into the `dependsOn` resource option.
+/// The resource option a notify with action `replace` compiles to.
+const REPLACEMENT_TRIGGER: &str = "replacementTrigger";
+
+/// Turns dependency edges into the `dependsOn` resource option, and a
+/// notify with action `replace` into the `replacementTrigger` option.
 ///
 /// Pulumi builds its own graph from the references between resources, so an
 /// edge that a reference already implies is left out: the program then reads
@@ -14,7 +20,10 @@ use crate::{refuse_at, Kind, Program};
 pub(crate) fn apply_ordering(
     graph: &ResourceGraph,
     program: &mut Program,
-) -> Result<(), CompileError> {
+) -> Result<Vec<Warning>, CompileError> {
+    let mut warnings = Vec::new();
+    // The resources whose replacementTrigger a notify wrote.
+    let mut triggered: BTreeSet<String> = BTreeSet::new();
     let stack = program.settings.declared.clone();
     for edge in &graph.edges {
         if let Some((id, _)) = &stack {
@@ -90,21 +99,86 @@ pub(crate) fn apply_ordering(
                 }
             }
             EdgeKind::Notify => {
-                return Err(refuse_at(
-                    &edge.from,
-                    &edge.pos,
-                    &rules::UNSUPPORTED_ACTION,
-                    format!(
-                        "notifies resource {:?} with action {:?}, which this target cannot \
-                         express: nothing in a Pulumi YAML program makes one resource react to \
-                         a change in another. Where a change must replace a resource, pass the \
-                         changing value into one of its properties and name that property in \
-                         the resource option replaceOnChanges",
-                        edge.to, edge.action
+                if edge.action != "replace" {
+                    return Err(refuse_at(
+                        &edge.from,
+                        &edge.pos,
+                        &rules::UNSUPPORTED_ACTION,
+                        format!(
+                            "notifies resource {:?} with action {:?}, which this target cannot \
+                             express: the one reaction a Pulumi YAML program can be given is \
+                             to replace a resource, with the option replacementTrigger \
+                             (supported: replace)",
+                            edge.to, edge.action
+                        ),
+                    ));
+                }
+                if to.kind != Kind::Managed {
+                    return Err(refuse_at(
+                        &edge.from,
+                        &edge.pos,
+                        &rules::UNSUPPORTED_ACTION,
+                        format!(
+                            "notifies resource {:?}, a {}: only a resource can be replaced",
+                            to.id,
+                            to.kind.noun()
+                        ),
+                    ));
+                }
+                // The trigger is what the notifier is made of: a resource's
+                // properties, references and all, or a configuration value.
+                let watched = match from.kind {
+                    Kind::Managed => Value::Map(from.body.clone()),
+                    Kind::Config => Value::String(format!("${{{}}}", from.name)),
+                    Kind::Invoke => {
+                        return Err(refuse_at(
+                            &edge.from,
+                            &edge.pos,
+                            &rules::UNSUPPORTED_ACTION,
+                            format!(
+                                "{:?} is a function call, which does not change; notify from \
+                                 the resource whose change matters",
+                                from.id
+                            ),
+                        ))
+                    }
+                };
+                let (from_name, to_id) = (from.name.clone(), to.id.clone());
+                let index = program
+                    .entries
+                    .iter()
+                    .position(|e| e.id == edge.to)
+                    .expect("the entry was just found");
+                let options = &mut program.entries[index].options;
+                if !triggered.contains(&to_id) && options.contains_key(REPLACEMENT_TRIGGER) {
+                    return Err(refuse_at(
+                        &edge.to,
+                        &edge.pos,
+                        &rules::INVALID_PARAM,
+                        format!(
+                            "sets the resource option {REPLACEMENT_TRIGGER}, which a notify \
+                             with action replace writes; use one or the other"
+                        ),
+                    ));
+                }
+                let trigger = options
+                    .entry(REPLACEMENT_TRIGGER.to_owned())
+                    .or_insert_with(|| Value::Map(Default::default()));
+                if let Value::Map(trigger) = trigger {
+                    trigger.insert(from_name.clone(), watched);
+                }
+                triggered.insert(to_id.clone());
+                warnings.push(Warning {
+                    target: NAME.to_owned(),
+                    resource: to_id,
+                    msg: format!(
+                        "is replaced whenever {:?} changes: Pulumi has no handlers, so the \
+                         resource option {REPLACEMENT_TRIGGER} holds what {from_name} is made of",
+                        edge.from
                     ),
-                ));
+                });
             }
         }
     }
-    Ok(())
+    Ok(warnings)
 }

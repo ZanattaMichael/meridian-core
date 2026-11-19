@@ -63,6 +63,9 @@ compile warning:
   ([terraform](../targets/terraform.md#notifications))
 - OpenTofu: the same `replace_triggered_by`.
   ([opentofu](../targets/opentofu.md#notifications))
+- Pulumi: `replacementTrigger` on the notified resource, holding the notifier's
+  properties, which replaces it when they change.
+  ([pulumi](../targets/pulumi.md#notifications))
 - cloud-init: the action as a command that runs once, after every other first-boot
   command, unconditionally. ([cloud-init](../targets/cloud-init.md#notifications))
 
@@ -78,9 +81,10 @@ refused, never substituted:
 - Podman: only `restart`.
 - ARM and Bicep: Meridian-run, for the actions their pages list
   ([arm](../targets/arm.md#notifications), [bicep](../targets/bicep.md#notifications)).
-- CloudFormation and Pulumi: Meridian-run on AWS, for the actions their pages list
-  ([cloudformation](../targets/cloudformation.md#notifications),
-  [pulumi](../targets/pulumi.md#notifications)).
+- Pulumi: `replace` on any resource; other actions Meridian-run on AWS, as its page
+  lists ([pulumi](../targets/pulumi.md#notifications)).
+- CloudFormation: Meridian-run on AWS, for the actions its page lists
+  ([cloudformation](../targets/cloudformation.md#notifications)).
 - Packer: every notify is refused.
 
 ## Meridian-run notifies
