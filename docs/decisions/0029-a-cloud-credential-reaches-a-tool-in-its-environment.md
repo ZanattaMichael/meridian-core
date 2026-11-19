@@ -76,7 +76,7 @@ Proposed, with the owner's direction of 2026-11-19 to be built:
   provider such as workload identity federation, which hands the tool a short-lived token
   instead of a secret. Until then they refuse a cloud credential.
 - A password is never stored or handled unless the document explicitly asks for it. See
-  [0046](0046-credentials-come-from-providers-and-passwords-only-on-request.md).
+  [0047](0047-credentials-come-from-providers-and-passwords-only-on-request.md).
 - The environment route above stays for the tools that read a login nowhere else.
 
 Still open: which providers come first, and whether the plan line's wording is the right

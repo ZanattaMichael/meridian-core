@@ -28,9 +28,12 @@ owner set three rules on top of that:
    plugin answers "give me this value" over the plugin protocol and holds no state.
 3. **Passwords on request**: a `usernamePassword` credential, or a `password` or
    `passphrase` field, is refused at validate unless the credential says
-   `allowPassword: true`. The plan line names a credential that does.
+   `allowPassword: true`. The plan line names a credential that does. Using a password is
+   not best practice: the reference docs and the plan warning say so and point to a key,
+   a token or a federated login instead.
 4. **Command line on request**: a credential that a tool can only take on its command line
-   is refused unless the credential says `allowCommandLine: true`. The plan line names it.
+   is refused unless the credential says `allowCommandLine: true`. The plan line names it
+   and, as for passwords, the docs mark it as not best practice.
 5. **Federated cloud logins**: a cloud credential can be a workload identity federation
    token (an OIDC token file the provider exchanges for a short-lived login). This is how
    `bicep` and `arm` will authenticate, instead of `az login`.
