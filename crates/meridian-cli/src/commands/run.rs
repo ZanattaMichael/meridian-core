@@ -83,11 +83,27 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
     }
     let planned = plan_file.as_ref().map(|plan| &plan.asked);
     let path_text = |path: &PathBuf| path.display().to_string();
+    // `meridian` is Meridian's own key in the data; the run id is carried
+    // there as one more --set, so a saved plan holds it too.
+    let reserved = meridian_ir::RESERVED_DATA_KEY;
+    if let Some(set) = workflow.set.iter().find(|set| {
+        let key = set.split('=').next().unwrap_or("");
+        key == reserved || key.starts_with(&format!("{reserved}."))
+    }) {
+        return Err(Failure::Message(format!(
+            "--set {set}: data.{reserved} is Meridian's own; give the run id with --run-id"
+        )));
+    }
+    let mut given_sets = workflow.set.clone();
+    if let Some(id) = &workflow.run_id {
+        meridian_ir::check_run_id(id).map_err(|e| Failure::Message(format!("--run-id: {e}")))?;
+        given_sets.push(format!("{reserved}.run.id={id:?}"));
+    }
     let (files, data_files, sets, selectors) = match planned {
         None => (
             workflow.files.clone(),
             workflow.data.clone(),
-            workflow.set.clone(),
+            given_sets,
             workflow.selector.clone(),
         ),
         Some(asked) => (
@@ -103,7 +119,7 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
                 &asked.data.iter().map(PathBuf::from).collect::<Vec<_>>(),
                 path_text,
             )?,
-            from_the_plan("--set", &workflow.set, &asked.set, String::clone)?,
+            from_the_plan("--set", &given_sets, &asked.set, String::clone)?,
             if workflow.selector.is_empty() && !asked.selector.is_empty() {
                 vec![asked.selector.clone()]
             } else {
@@ -139,6 +155,12 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
         }
     }
     let mut data = read_data(&data_files, &workflow.state.state_dir)?;
+    if data.contains_key(reserved) {
+        return Err(Failure::Message(format!(
+            "a --data file sets {reserved}, which is Meridian's own key; give the run id with \
+             --run-id"
+        )));
+    }
     apply_sets(&mut data, &sets)?;
     if selected(&bundle, &selector, &data) == 0 {
         // Doing nothing and reporting success would read as "all applied".

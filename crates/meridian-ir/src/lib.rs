@@ -25,7 +25,8 @@ pub use meridian_value::{canonical_map, PlacedEscape, Value};
 pub use migrate::{migrate, Decisions, MigrateError, Migrated, Step, STEPS};
 pub use parse::{parse, parse_file, parse_stream, parse_value};
 pub use resolve::{
-    resolve, resolve_for, resolve_with, resolved_labels, Removed, Resolution, Secrets,
+    check_run_id, resolve, resolve_for, resolve_with, resolved_labels, set_run_id, Removed,
+    Resolution, Secrets, RESERVED_DATA_KEY,
 };
 pub use retarget::{retarget, Moved, Retarget, Retargeted};
 pub use types::{

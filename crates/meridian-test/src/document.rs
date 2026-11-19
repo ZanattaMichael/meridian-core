@@ -258,10 +258,18 @@ impl Reader<'_> {
     }
 
     fn data(&self, value: Option<&Value>, path: &str) -> Result<Data, String> {
-        match value {
-            None | Some(Value::Null) => Ok(Data::new()),
-            Some(value) => self.map(value, path).cloned(),
+        let data = match value {
+            None | Some(Value::Null) => Data::new(),
+            Some(value) => self.map(value, path).cloned()?,
+        };
+        let reserved = meridian_ir::RESERVED_DATA_KEY;
+        if data.contains_key(reserved) {
+            return Err(self.refuse(
+                &format!("{path}.{reserved}"),
+                "Meridian's own key: meridian test gives each case its run id",
+            ));
         }
+        Ok(data)
     }
 
     fn only(
