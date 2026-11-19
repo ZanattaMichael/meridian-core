@@ -10,10 +10,10 @@ seed = 1
 
 [seconds]
 compile = 2
-plan = 100
-apply = 135
-destroy = 50
+plan = 10
+apply = 25
+destroy = 18
 
 [megabytes]
-meridian = 100
+meridian = 90
 plugin = 10

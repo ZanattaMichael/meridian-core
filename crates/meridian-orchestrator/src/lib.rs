@@ -256,6 +256,7 @@ pub fn run_selected(
             steps: Vec::new(),
         },
         events: Vec::new(),
+        unwritten: String::new(),
         warnings: Vec::new(),
     };
     if persist {

@@ -69,6 +69,9 @@ pub(crate) struct Journal {
     pub(crate) persist: bool,
     pub(crate) record: RunRecord,
     pub(crate) events: Vec<Event>,
+    /// The lines of `events.jsonl` not yet written. A flush appends them, so
+    /// a run of many stages does not write its whole log at each one.
+    pub(crate) unwritten: String,
     pub(crate) warnings: Vec<String>,
     /// At what severity a finding fails a stage, for what the analysis
     /// events say.
@@ -108,6 +111,10 @@ impl Journal {
             detail,
         };
         observer.event(&event);
+        if self.persist {
+            self.unwritten.push_str(&event.to_json());
+            self.unwritten.push('\n');
+        }
         self.events.push(event);
     }
 
@@ -123,10 +130,12 @@ impl Journal {
             .backend
             .put(&record::run_key(&id), self.record.to_json().as_bytes())
             .and_then(|()| {
-                self.backend.put(
-                    &record::events_key(&id),
-                    event::to_jsonl(&self.events).as_bytes(),
-                )
+                if self.unwritten.is_empty() {
+                    return Ok(());
+                }
+                self.backend
+                    .append(&record::events_key(&id), self.unwritten.as_bytes())
+                    .map(|()| self.unwritten.clear())
             });
         if let Err(why) = wrote {
             let warning = format!("the record of run {id} could not be written: {why}");

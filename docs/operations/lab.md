@@ -151,15 +151,13 @@ cargo test --release -p meridian-cli --test scale -- --ignored --nocapture
 | Measure | Budget |
 |---|---|
 | compile | 2 s |
-| plan | 100 s |
-| apply | 135 s |
-| destroy | 50 s |
-| `meridian` peak memory | 100 MB |
+| plan | 10 s |
+| apply | 25 s |
+| destroy | 18 s |
+| `meridian` peak memory | 90 MB |
 | a plugin's peak memory | 10 MB |
 
-Plan and apply grow with the square of the number of stages: the run record's event log is
-written whole each time a stage starts and ends
-([issue 240](https://github.com/ZanattaMichael/meridian-core/issues/240)).
+See [decision 0058](../decisions/0058-a-run-appends-its-events-and-is-held-to-scale-budgets.md).
 
 ## What is not here yet
 

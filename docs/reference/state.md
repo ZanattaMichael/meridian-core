@@ -238,7 +238,8 @@ These words are never reused. See also
 
 ## Events
 
-`runs/<id>/events.jsonl` has one JSON object per line.
+`runs/<id>/events.jsonl` has one JSON object per line. Each flush appends the events since the last
+one; a crash can leave a partial last line, which readers skip.
 
 ```json
 {"attempt":1,"detail":{"artifact":"sha256:41d0...","changes":2,"kind":"ResourceSet","reason":"tool-failed"},"endpoint":"203.0.113.10","instance":"web","run":"2026-11-17T09-14-03Z-0cc7","seq":14,"step":"web","target":"ansible","time":"2026-11-17T09:15:11.204Z","type":"step.failed","workflow":""}
@@ -340,7 +341,8 @@ operation.
   as `_`).
 - Keys are relative paths such as `runs/2026-11-17T09-14-03Z-0cc7/run.json`. Refuse any that
   climb out.
-- `put` replaces the blob atomically.
+- `put` replaces the blob atomically. Meridian adds to `events.jsonl` with a `get` and a `put`; the
+  built-in backend appends to the file instead.
 - **`create` must be atomic**: exactly one of two callers gets `0` (`O_EXCL`,
   `If-None-Match: *`, a conditional put). Without that, a store cannot be a backend.
 

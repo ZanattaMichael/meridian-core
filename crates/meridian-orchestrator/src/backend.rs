@@ -49,6 +49,15 @@ pub trait Backend: Send + Sync + fmt::Debug {
     fn delete(&self, key: &str) -> Result<(), String>;
     /// Every key that starts with `prefix`, sorted.
     fn list(&self, prefix: &str) -> Result<Vec<String>, String>;
+    /// Adds bytes to the end of the blob, making it if there is none. A
+    /// crash may leave part of the added bytes; a reader of a log of lines
+    /// skips a line it cannot read. A store with no append of its own reads
+    /// the blob and puts it back whole.
+    fn append(&self, key: &str, bytes: &[u8]) -> Result<(), String> {
+        let mut whole = self.get(key)?.unwrap_or_default();
+        whole.extend_from_slice(bytes);
+        self.put(key, &whole)
+    }
 }
 
 /// Whether `key` is one a backend should accept: relative, with no part that
@@ -93,6 +102,10 @@ impl LocalBackend {
         } else {
             options.create(true).truncate(true);
         }
+        Self::private(options, path)
+    }
+
+    fn private(mut options: std::fs::OpenOptions, path: &Path) -> std::io::Result<std::fs::File> {
         // Nothing in the record is secret. Keeping it private anyway costs
         // nothing, and means a mistake elsewhere is not also a leak.
         #[cfg(unix)]
@@ -199,6 +212,21 @@ impl Backend for LocalBackend {
         keys.sort();
         Ok(keys)
     }
+
+    fn append(&self, key: &str, bytes: &[u8]) -> Result<(), String> {
+        let path = self.path(key)?;
+        let wrote = (|| {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            let mut options = std::fs::OpenOptions::new();
+            options.append(true).create(true);
+            let mut file = Self::private(options, &path)?;
+            file.write_all(bytes)?;
+            file.sync_data()
+        })();
+        wrote.map_err(|e| format!("writing {}: {e}", path.display()))
+    }
 }
 
 /// A store in memory, for tests and for a caller that wants a run recorded
@@ -242,6 +270,15 @@ impl Backend for MemoryBackend {
         }
         blobs.insert(key.to_owned(), bytes.to_vec());
         Ok(true)
+    }
+
+    fn append(&self, key: &str, bytes: &[u8]) -> Result<(), String> {
+        check(key)?;
+        self.blobs()
+            .entry(key.to_owned())
+            .or_default()
+            .extend_from_slice(bytes);
+        Ok(())
     }
 
     fn delete(&self, key: &str) -> Result<(), String> {
@@ -502,9 +539,17 @@ mod tests {
         assert_eq!(backend.list("runs/b/").unwrap(), ["runs/b/run.json"]);
         assert!(backend.list("nothing/").unwrap().is_empty());
 
+        backend.append("runs/c/events.jsonl", b"one\n").unwrap();
+        backend.append("runs/c/events.jsonl", b"two\n").unwrap();
+        assert_eq!(
+            backend.get("runs/c/events.jsonl").unwrap().unwrap(),
+            b"one\ntwo\n"
+        );
+
         for bad in ["", "../escape", "/etc/passwd", "runs/../../x", "runs/"] {
             assert!(backend.put(bad, b"x").is_err(), "{bad:?} was accepted");
             assert!(backend.get(bad).is_err(), "{bad:?} was accepted");
+            assert!(backend.append(bad, b"x").is_err(), "{bad:?} was accepted");
         }
     }
 
