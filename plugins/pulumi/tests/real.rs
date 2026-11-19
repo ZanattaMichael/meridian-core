@@ -168,6 +168,14 @@ fn a_document_is_planned_applied_and_changed() {
         .unwrap_or_else(|e| fail("reading outputs", e));
     assert_eq!(read, applied.outputs);
 
+    // What it manages is reported by resource id, for `meridian retarget`;
+    // the stack and the provider are not resources of the document.
+    let found = runner
+        .identifiers(&first)
+        .unwrap_or_else(|e| fail("reading identifiers", e));
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(found.values().all(|id| !id.is_empty()), "{found:?}");
+
     // A value handed over from an earlier stage replaces the default of the
     // configuration value the document declares. A pet cannot be renamed, so
     // Pulumi replaces it, and the password is left alone.

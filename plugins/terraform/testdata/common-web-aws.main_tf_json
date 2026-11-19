@@ -1,0 +1,172 @@
+{
+  "data": {
+    "aws_ami": {
+      "vm_image": {
+        "filter": [
+          {
+            "name": "name",
+            "values": [
+              "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"
+            ]
+          },
+          {
+            "name": "architecture",
+            "values": [
+              "x86_64"
+            ]
+          }
+        ],
+        "most_recent": true,
+        "owners": [
+          "099720109477"
+        ]
+      }
+    }
+  },
+  "output": {
+    "address": {
+      "value": "${aws_eip.web_ip.public_ip}"
+    },
+    "private_address": {
+      "value": "${aws_instance.vm.private_ip}"
+    }
+  },
+  "provider": {
+    "aws": {
+      "region": "eu-west-1"
+    }
+  },
+  "resource": {
+    "aws_eip": {
+      "web_ip": {
+        "domain": "vpc",
+        "tags": {
+          "Name": "web_ip"
+        }
+      }
+    },
+    "aws_eip_association": {
+      "vm_address": {
+        "allocation_id": "${aws_eip.web_ip.id}",
+        "instance_id": "${aws_instance.vm.id}"
+      }
+    },
+    "aws_instance": {
+      "vm": {
+        "ami": "${data.aws_ami.vm_image.id}",
+        "instance_type": "t3.medium",
+        "key_name": "${aws_key_pair.vm_key.key_name}",
+        "subnet_id": "${aws_subnet.web.id}",
+        "tags": {
+          "Name": "vm"
+        },
+        "vpc_security_group_ids": [
+          "${aws_security_group.web_fw.id}"
+        ]
+      }
+    },
+    "aws_internet_gateway": {
+      "net_gateway": {
+        "vpc_id": "${aws_vpc.net.id}"
+      }
+    },
+    "aws_key_pair": {
+      "vm_key": {
+        "key_name": "vm",
+        "public_key": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCy3ccG4bHhpvuPdv4+wFBzkP+U7qF4nTg+rghAkKjOLbSJa/yUPZ0EwpJaXm+rtItFerUJK41JH4bArOJJazkHMdWR6iXYQtu5BB/CZALQHiS0LYg5zUhKMxISCESlzNDWFBza28pPjfpj3gnmrPc8D1bAsnKSaHGOffZxtJ62q3Rq0ESwzN/9ahvaiBW707kT/9NC9GqMcSk1HS1Z7Wz6sJEiCC/qIfbS3TAjJ+SloXlTC8+FIdptsxJ3KgWczg4q6Z1aiv9agASdEXMJTo+sUNt7C6qNKY1W03VxFf0cj59Zh6YIo2/ZQ1NyyUOB3rO2U2pbVGLaTvEnF6GSc0TH admin@example.com"
+      }
+    },
+    "aws_route": {
+      "web_routes_internet": {
+        "destination_cidr_block": "0.0.0.0/0",
+        "gateway_id": "${aws_internet_gateway.net_gateway.id}",
+        "route_table_id": "${aws_route_table.web_routes.id}"
+      }
+    },
+    "aws_route_table": {
+      "web_routes": {
+        "tags": {
+          "Name": "web"
+        },
+        "vpc_id": "${aws_vpc.net.id}"
+      }
+    },
+    "aws_route_table_association": {
+      "web_routes_link": {
+        "route_table_id": "${aws_route_table.web_routes.id}",
+        "subnet_id": "${aws_subnet.web.id}"
+      }
+    },
+    "aws_s3_bucket": {
+      "logs": {
+        "bucket_prefix": "web-logs-"
+      }
+    },
+    "aws_security_group": {
+      "web_fw": {
+        "name": "web_fw",
+        "tags": {
+          "Name": "web_fw"
+        },
+        "vpc_id": "${aws_vpc.net.id}"
+      }
+    },
+    "aws_subnet": {
+      "web": {
+        "cidr_block": "10.0.1.0/24",
+        "map_public_ip_on_launch": true,
+        "tags": {
+          "Name": "web"
+        },
+        "vpc_id": "${aws_vpc.net.id}"
+      }
+    },
+    "aws_vpc": {
+      "net": {
+        "cidr_block": "10.0.0.0/16",
+        "enable_dns_hostnames": true,
+        "tags": {
+          "Name": "net"
+        }
+      }
+    },
+    "aws_vpc_security_group_egress_rule": {
+      "web_fw_out_all": {
+        "cidr_ipv4": "0.0.0.0/0",
+        "ip_protocol": "-1",
+        "security_group_id": "${aws_security_group.web_fw.id}"
+      }
+    },
+    "aws_vpc_security_group_ingress_rule": {
+      "web_fw_in_0": {
+        "cidr_ipv4": "203.0.113.0/24",
+        "from_port": 22,
+        "ip_protocol": "tcp",
+        "security_group_id": "${aws_security_group.web_fw.id}",
+        "to_port": 22
+      },
+      "web_fw_in_1": {
+        "cidr_ipv4": "0.0.0.0/0",
+        "from_port": 80,
+        "ip_protocol": "tcp",
+        "security_group_id": "${aws_security_group.web_fw.id}",
+        "to_port": 80
+      },
+      "web_fw_in_2": {
+        "cidr_ipv4": "0.0.0.0/0",
+        "from_port": 443,
+        "ip_protocol": "tcp",
+        "security_group_id": "${aws_security_group.web_fw.id}",
+        "to_port": 443
+      }
+    }
+  },
+  "terraform": {
+    "required_providers": {
+      "aws": {
+        "source": "hashicorp/aws",
+        "version": "~> 5.0"
+      }
+    }
+  }
+}

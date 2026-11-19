@@ -40,7 +40,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 use meridian_sdk::{
-    canonical_map, decode_map, serve, Applied, Artifact, Capabilities, Category, Change,
+    canonical_map, decode_map, serve, Adoption, Applied, Artifact, Capabilities, Category, Change,
     ChangeAction, CompileError, Data, DocumentKind, Emitted, Emitter, ImportError, ImportFormat,
     ImportNote, ImportSource, Imported, ImportedDocument, ImportedResource, Importer, Log,
     NoteLevel, Operations, Output, ParamKind, ParamSchema, Plan, Plugin, ResourceGraph,
@@ -51,9 +51,24 @@ use meridian_sdk::{
 /// The compiling half: each `file` resource becomes one artifact file.
 pub struct Fake;
 
+/// `fake`, or for a copy of the plugin installed as
+/// `meridian-target-fake-<more>`, `fake-<more>`: a second target, for a test
+/// that moves a document from one tool to another.
+fn name() -> &'static str {
+    static NAME: OnceLock<String> = OnceLock::new();
+    NAME.get_or_init(|| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|path| path.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            .and_then(|stem| stem.strip_prefix("meridian-target-").map(str::to_owned))
+            .filter(|name| name.starts_with("fake"))
+            .unwrap_or_else(|| "fake".to_owned())
+    })
+}
+
 impl Emitter for Fake {
     fn name(&self) -> &str {
-        "fake"
+        name()
     }
 
     fn supported_resource_types(&self) -> Vec<String> {
@@ -67,6 +82,15 @@ impl Emitter for Fake {
             runtime_condition: false,
             secrets: std::env::var("FAKE_SECRETS").as_deref() != Ok("none"),
             credentials: std::env::var("FAKE_SECRETS").as_deref() != Ok("none"),
+            // Adopts as a stateful tool does: the identifier is written
+            // beside the file, and the first plan reports an adoption.
+            // FAKE_ADOPT stands it in for a target that adopts by
+            // converging, or for one that cannot adopt.
+            adopt: match std::env::var("FAKE_ADOPT").as_deref() {
+                Ok("none") => Adoption::None,
+                Ok("converge") => Adoption::Converge,
+                _ => Adoption::Import,
+            },
         }
     }
 
@@ -120,6 +144,12 @@ impl Emitter for Fake {
                 .artifact
                 .files
                 .insert(format!("files/{}", resource.id), content);
+            if !resource.adopt.is_empty() && self.capabilities().adopt == Adoption::Import {
+                emitted.artifact.files.insert(
+                    format!("{ADOPT_DIR}{}", resource.id),
+                    resource.adopt.clone(),
+                );
+            }
         }
         // The credential the host is reached with: what a compile knows of
         // it, which is never a value.
@@ -334,10 +364,21 @@ fn read_state(work_dir: &Path) -> Result<BTreeMap<String, Value>, RunError> {
     }
 }
 
+/// Where a compile writes the identifier a resource adopts. It is the
+/// tool's import, not a file it manages, so a plan never reports it.
+const ADOPT_DIR: &str = "adopt/";
+
 fn diff(state: &BTreeMap<String, Value>, artifact: &Artifact) -> Vec<Change> {
     let mut changes = Vec::new();
     for (path, content) in &artifact.files {
+        if path.starts_with(ADOPT_DIR) {
+            continue;
+        }
+        let adopted = path
+            .strip_prefix("files/")
+            .is_some_and(|id| artifact.files.contains_key(&format!("{ADOPT_DIR}{id}")));
         let action = match state.get(path) {
+            None if adopted => ChangeAction::Adopt,
             None => ChangeAction::Create,
             Some(Value::String(old)) if old == content => continue,
             Some(_) => ChangeAction::Update,
@@ -349,7 +390,7 @@ fn diff(state: &BTreeMap<String, Value>, artifact: &Artifact) -> Vec<Change> {
         });
     }
     for path in state.keys() {
-        if !artifact.files.contains_key(path) {
+        if !path.starts_with(ADOPT_DIR) && !artifact.files.contains_key(path) {
             changes.push(Change {
                 resource: path.clone(),
                 action: ChangeAction::Delete,
@@ -587,6 +628,26 @@ impl Runner for FakeRunner {
             return Err(RunError::new("nothing has been applied yet"));
         }
         Ok(outputs_of(&state, context))
+    }
+
+    /// `FAKE_IDENTIFIERS=off` stands it in for a plugin that cannot report
+    /// what it manages.
+    fn reads_identifiers(&self) -> bool {
+        std::env::var("FAKE_IDENTIFIERS").as_deref() != Ok("off")
+    }
+
+    /// Each file the state holds, by its resource id; its identifier is
+    /// `fake-<id>`, as a cloud's would be some id of its own.
+    fn identifiers(&self, context: &RunContext) -> Result<BTreeMap<String, String>, RunError> {
+        let state = read_state(&context.work_dir)?;
+        if state.is_empty() {
+            return Err(RunError::new("nothing has been applied yet"));
+        }
+        Ok(state
+            .keys()
+            .filter_map(|path| path.strip_prefix("files/"))
+            .map(|id| (id.to_owned(), format!("fake-{id}")))
+            .collect())
     }
 }
 

@@ -128,6 +128,21 @@ fn an_apply_with_an_older_runner_tests_first_in_the_same_powershell() {
     assert_eq!(applied.changes[0].resource, "site_config");
 }
 
+/// DscPipelineRunner 1.4.0 gives `"Drifted": null` for a resource it never
+/// tested, such as one a condition skipped: that is an answer, not a runner
+/// too old to give one.
+#[test]
+fn an_apply_takes_a_skipped_resources_null_drift_as_no_change() {
+    let dir = scratch(TMP, "apply-skipped");
+    let set_said = r#"{"ResourceType":"PSDscResources/File","InstanceName":"site_config","Status":"OK","ErrorMessage":null,"Drifted":true,"SetInvoked":true},{"ResourceType":"PSDscResources/Service","InstanceName":"w3svc","Status":"SKIP","ErrorMessage":"Resource skipped due to preCondition","Drifted":null,"SetInvoked":false}"#;
+    let cases = format!("*'-Mode Set'*) {} ;;", result(set_said));
+    let applied = runner(&dir, &cases)
+        .apply(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(applied.changes.len(), 1);
+    assert_eq!(applied.changes[0].resource, "site_config");
+}
+
 #[test]
 fn an_apply_whose_set_says_nothing_about_drift_is_an_error() {
     let dir = scratch(TMP, "apply-unknown");

@@ -24,6 +24,7 @@
 // A refusal carries its position and resource by value, as the SDK's does.
 #![allow(clippy::result_large_err)]
 
+mod common;
 mod emit;
 mod runner;
 pub mod schemas;
@@ -35,8 +36,8 @@ use std::collections::BTreeSet;
 
 use meridian_sdk::rules::{self, Rule};
 use meridian_sdk::{
-    holds_secret, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
-    Resource, ResourceGraph,
+    holds_secret, Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter,
+    Position, Resource, ResourceGraph,
 };
 
 /// The parameter the secret `name` is handed over as: `meridian_secret_<name>`.
@@ -53,6 +54,25 @@ pub fn secret_reference(name: &str) -> String {
 pub use emit::{DEPLOYMENT_PATH, TEMPLATE_PATH};
 pub use runner::BicepRunner;
 pub use schemas::{AzureSchemas, Dialect};
+
+/// Replaces the common infrastructure types with Azure resources written in
+/// `dialect`, refusing as `target`. The ARM target lowers through this.
+pub fn lower_common(
+    graph: &ResourceGraph,
+    dialect: Dialect,
+    target: &'static str,
+) -> Result<ResourceGraph, CompileError> {
+    common::lower_for(graph, dialect, target)
+}
+
+/// The common infrastructure types as the Azure targets take them, described
+/// for editors.
+pub fn common_schemas() -> Vec<meridian_sdk::ResourceSchema> {
+    meridian_sdk::infra::common_type_names()
+        .into_iter()
+        .map(|name| meridian_sdk::infra::common_schema(name, &common::params(name)))
+        .collect()
+}
 
 /// The target name a document selects with `spec.target`.
 pub const NAME: &str = "bicep";
@@ -173,9 +193,17 @@ impl Emitter for Bicep {
     }
 
     fn supported_resource_types(&self) -> Vec<String> {
-        ["<Namespace>/<type>@<api-version>", "deployment"]
-            .map(str::to_owned)
-            .to_vec()
+        [
+            "<Namespace>/<type>@<api-version>",
+            "address",
+            "deployment",
+            "firewall",
+            "network",
+            "subnet",
+            "vm",
+        ]
+        .map(str::to_owned)
+        .to_vec()
     }
 
     /// A deployment cannot act on one resource because another changed, and
@@ -185,6 +213,7 @@ impl Emitter for Bicep {
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             secrets: true,
+            adopt: Adoption::Converge,
             ..Capabilities::default()
         }
     }
@@ -193,7 +222,19 @@ impl Emitter for Bicep {
         Category::InfrastructureAsCode
     }
 
+    /// The common infrastructure types, described for editors. Azure's own
+    /// types come from `meridian schema sync`.
+    fn resource_schemas(&self) -> Vec<meridian_sdk::ResourceSchema> {
+        meridian_sdk::infra::common_type_names()
+            .into_iter()
+            .map(|name| meridian_sdk::infra::common_schema(name, &common::params(name)))
+            .collect()
+    }
+
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        // The common types become Azure's own resources first, so every later
+        // stage sees a document of Azure types only.
+        let graph = &common::lower(graph)?;
         // A secret in a param is written as a reference to a secure
         // parameter, which the runner gives its value from a private file.
         refuse_secret_in(

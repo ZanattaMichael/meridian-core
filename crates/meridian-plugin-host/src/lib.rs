@@ -70,6 +70,10 @@ pub struct Info {
     /// asked to save one, and applies exactly that plan when handed it. A
     /// plugin built before the field says no.
     pub saves_plans: bool,
+    /// Whether the target reads its tool's own identifier of each thing it
+    /// manages, which `meridian retarget` writes as `adopt`. A plugin built
+    /// before the field says no.
+    pub reads_identifiers: bool,
     /// The versions of its tool the target compiles for; empty when it does
     /// not say.
     pub target_versions: Vec<String>,
@@ -375,6 +379,7 @@ pub fn to_sdk(graph: &meridian_ast::ResourceGraph) -> meridian_sdk::ResourceGrap
                 state: r.state.clone(),
                 params: r.params.clone(),
                 runtime_when: r.runtime_when.clone(),
+                adopt: r.adopt.clone(),
                 index: r.index,
                 pos: position(&r.pos),
             })

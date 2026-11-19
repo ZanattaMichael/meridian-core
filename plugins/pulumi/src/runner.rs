@@ -1,7 +1,7 @@
 //! The half that hands a program to `pulumi`. It sits outside the compile
 //! chain: nothing here is reached by a compile.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use meridian_sdk::tool::{write_artifact, Tool};
@@ -435,6 +435,57 @@ impl Runner for PulumiRunner {
         let stack = Stack::read(&settings)?;
         self.read_outputs(context, &stack, &meridian_sdk::NoLog)
     }
+
+    fn reads_identifiers(&self) -> bool {
+        true
+    }
+
+    fn identifiers(&self, context: &RunContext) -> Result<BTreeMap<String, String>, RunError> {
+        let Ok(settings) = std::fs::read_to_string(context.work_dir.join(STACK_PATH)) else {
+            return Err(RunError::new(
+                "nothing has been applied for this document yet, so there is nothing to read",
+            ));
+        };
+        let stack = Stack::read(&settings)?;
+        // The export holds secrets encrypted, never in the clear; only the
+        // ids are read from it.
+        let exported = self
+            .on_stack(context, &stack, &["stack", "export"])
+            .capture_stdout()
+            .run_ok("pulumi could not export the stack", &meridian_sdk::NoLog)?;
+        read_identifiers(&exported.stdout)
+    }
+}
+
+/// Reads `pulumi stack export` into the cloud id of each resource of the
+/// document, by the resource's id. The stack itself and providers are left
+/// out: they are not resources of the document.
+fn read_identifiers(json: &str) -> Result<BTreeMap<String, String>, RunError> {
+    let export = decode_value(json.as_bytes()).map_err(|e| unreadable("stack export", e))?;
+    let resources = export
+        .as_map()
+        .and_then(|m| m.get("deployment"))
+        .and_then(Value::as_map)
+        .and_then(|m| m.get("resources"))
+        .and_then(Value::as_list)
+        .unwrap_or(&[]);
+    let mut found = BTreeMap::new();
+    for resource in resources {
+        let Some(resource) = resource.as_map() else {
+            continue;
+        };
+        let text = |key: &str| resource.get(key).and_then(Value::as_str).unwrap_or("");
+        let urn = text("urn");
+        let kind = urn_type(urn);
+        if kind == "pulumi:pulumi:Stack" || kind.starts_with("pulumi:providers:") {
+            continue;
+        }
+        let id = text("id");
+        if !id.is_empty() {
+            found.insert(urn_name(urn).to_owned(), id.to_owned());
+        }
+    }
+    Ok(found)
 }
 
 /// The URL of a backend that keeps state in the project directory itself.
@@ -504,7 +555,9 @@ fn read_preview(json: &str) -> Result<Preview, RunError> {
         };
         let text = |key: &str| step.get(key).and_then(Value::as_str).unwrap_or("");
         let action = match text("op") {
-            "create" | "import" => ChangeAction::Create,
+            "create" => ChangeAction::Create,
+            // A resource's adopt, or Pulumi's own import option.
+            "import" => ChangeAction::Adopt,
             "update" => ChangeAction::Update,
             "delete" => ChangeAction::Delete,
             "replace" => ChangeAction::Replace,
@@ -774,5 +827,18 @@ mod tests {
                 .msg
                 .contains("was not compiled by this plugin"));
         }
+    }
+
+    #[test]
+    fn the_export_is_read_into_identifiers_by_resource_id() {
+        let export = r#"{"version":3,"deployment":{"resources":[
+            {"urn":"urn:pulumi:dev::p::pulumi:pulumi:Stack::p-dev","type":"pulumi:pulumi:Stack"},
+            {"urn":"urn:pulumi:dev::p::pulumi:providers:aws::default","id":"abc"},
+            {"urn":"urn:pulumi:dev::p::aws:s3/bucket:Bucket::logs","id":"logs-1234"},
+            {"urn":"urn:pulumi:dev::p::aws:s3/bucket:Bucket::pending"}
+        ]}}"#;
+        let found = read_identifiers(export).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found["logs"], "logs-1234");
     }
 }

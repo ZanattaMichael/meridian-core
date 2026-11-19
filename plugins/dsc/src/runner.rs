@@ -66,6 +66,10 @@ struct Outcome {
     /// Whether the resource was out of its desired state before the run,
     /// when the runner says so (DscPipelineRunner after its PR 100).
     drifted: Option<bool>,
+    /// Whether the record carries `Drifted` at all. A runner that reports
+    /// drift gives it as `null` for a resource it never tested: one a
+    /// condition skipped, or one that failed before its test answered.
+    reports_drift: bool,
 }
 
 impl DscRunner {
@@ -167,7 +171,7 @@ impl DscRunner {
         let drifted = match marked(&finished.stdout, TEST_MARK) {
             Some(test) => drift(&read_result(test)?),
             None => {
-                if let Some(unknown) = outcomes.iter().find(|o| o.drifted.is_none()) {
+                if let Some(unknown) = outcomes.iter().find(|o| !o.reports_drift) {
                     return Err(RunError::new(format!(
                         "DscPipelineRunner's Set result does not say whether {:?} had drifted, \
                          and no Test was run first",
@@ -246,6 +250,7 @@ fn read_result(json: &str) -> Result<Vec<Outcome>, RunError> {
                     Some(Value::Bool(drifted)) => Some(*drifted),
                     _ => None,
                 },
+                reports_drift: result.get("Drifted").is_some(),
             });
         }
     }

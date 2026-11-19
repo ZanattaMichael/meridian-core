@@ -36,6 +36,7 @@
 // A refusal carries its position and resource by value, as the SDK's does.
 #![allow(clippy::result_large_err)]
 
+mod common;
 mod emit;
 mod import;
 mod runner;
@@ -48,11 +49,32 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::rules::Rule;
 use meridian_sdk::{
-    Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position, Resource,
-    ResourceGraph, Value,
+    Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
+    Resource, ResourceGraph, Value,
 };
 
+pub use common::{CLOUDS, SETTINGS_KEYS as COMMON_SETTINGS_KEYS};
 pub use emit::CONFIG_PATH;
+
+/// Replaces the common infrastructure types of a tree with the AWS or Azure
+/// provider's own resources, as this target does before it compiles. The
+/// OpenTofu target reads the same providers and calls this too; a refusal
+/// is stamped with `target`.
+pub fn lower_common(graph: &ResourceGraph, target: &str) -> Result<ResourceGraph, CompileError> {
+    common::lower(graph).map_err(|e| CompileError {
+        target: target.to_owned(),
+        ..e
+    })
+}
+
+/// The common infrastructure types as this target and OpenTofu take them,
+/// described for editors.
+pub fn common_schemas() -> Vec<meridian_sdk::ResourceSchema> {
+    meridian_sdk::infra::common_type_names()
+        .into_iter()
+        .map(|name| meridian_sdk::infra::common_schema(name, &common::params(name)))
+        .collect()
+}
 pub use import::TerraformImporter;
 pub use runner::TerraformRunner;
 pub use schemas::{TerraformSchemas, PROBE_PATH};
@@ -161,6 +183,9 @@ pub(crate) struct Config {
     pub blocks: Vec<Block>,
     /// `required_providers`, by local name.
     pub required_providers: BTreeMap<String, Value>,
+    /// The `import` blocks a resource's `adopt` compiles to: the address it
+    /// is taken under and the tool's own identifier, in declaration order.
+    pub imports: Vec<(String, String)>,
     /// Output name to its value expression.
     pub outputs: Vec<(String, Value, Position)>,
 }
@@ -202,12 +227,17 @@ impl Emitter for Terraform {
     fn supported_resource_types(&self) -> Vec<String> {
         [
             "<provider>_<type>",
+            "address",
             "backend",
             "data.<type>",
+            "firewall",
             "local",
             "module",
+            "network",
             "provider",
+            "subnet",
             "variable",
+            "vm",
         ]
         .map(str::to_owned)
         .to_vec()
@@ -227,6 +257,7 @@ impl Emitter for Terraform {
             runtime_condition: false,
             secrets: true,
             credentials: false,
+            adopt: Adoption::Import,
         }
     }
 
@@ -234,7 +265,22 @@ impl Emitter for Terraform {
         Category::InfrastructureAsCode
     }
 
+    /// `cloud`, `location` and `resourceGroup`: where the common
+    /// infrastructure types are mapped to. See the target's page.
+    fn settings_keys(&self) -> Vec<String> {
+        common::SETTINGS_KEYS.map(str::to_owned).to_vec()
+    }
+
+    /// The common infrastructure types, described for editors. The tool's
+    /// own types come from `meridian schema sync`.
+    fn resource_schemas(&self) -> Vec<meridian_sdk::ResourceSchema> {
+        common_schemas()
+    }
+
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        // The common types become the cloud's own resources first, so every
+        // later stage sees a document of Terraform types only.
+        let graph = &common::lower(graph)?;
         // A secret in a param is written as a reference to a sensitive input
         // variable, which the runner gives its value from a private file.
         let graph = &graph.secrets_written_as(secret_reference);

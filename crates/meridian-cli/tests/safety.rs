@@ -482,7 +482,22 @@ fn the_record_can_live_in_a_backend_program() {
     assert!(shared.join("runs").is_dir());
     assert!(!shared.join("lock").exists());
     assert!(!dir.join(".meridian/state.json").exists());
-    assert!(!dir.join(".meridian/runs").exists());
+    // Only the tool logs, which never leave this machine, are under runs/
+    // here; the run's record is not, and the logs are not in the backend.
+    let local_runs: Vec<_> = fs::read_dir(dir.join(".meridian/runs"))
+        .unwrap()
+        .flatten()
+        .collect();
+    assert_eq!(local_runs.len(), 1);
+    let local_run = local_runs[0].path();
+    assert!(local_run.join("logs").is_dir());
+    assert!(!local_run.join("run.json").exists());
+    assert!(!local_run.join("events.jsonl").exists());
+    assert!(!shared
+        .join("runs")
+        .join(local_runs[0].file_name())
+        .join("logs")
+        .exists());
     assert!(dir
         .join(".meridian/infrastructure/network/fake/state.json")
         .is_file());

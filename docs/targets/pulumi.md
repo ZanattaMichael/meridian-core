@@ -4,7 +4,7 @@
 
 `target: pulumi` compiles a `kind: Infrastructure` document into a
 [Pulumi YAML](https://www.pulumi.com/docs/iac/languages-sdks/yaml/) program and runs it
-with the `pulumi` command line. The plugin's category is **infrastructure as code**.
+with the `pulumi` command line.
 
 ## What it does and does not support
 
@@ -18,31 +18,29 @@ with the `pulumi` command line. The plugin's category is **infrastructure as cod
 | References between resources, checked at compile time | Yes. `${id.property}`. |
 | `dependsOn` | Yes, between resources. Left out where a reference already implies the order. |
 | Outputs, handed to later stages | Yes. Secret outputs are marked sensitive and masked. |
+| The [common infrastructure types](#common-infrastructure-types) | Yes, on AWS (`aws`) and Azure (`azure-native`). |
 | Plan, apply and outputs | Yes: `pulumi preview`, `pulumi up`, `pulumi stack output`. |
 | `notifies` | **No.** Refused at compile time. See [Notifications](#notifications). |
 | `runtimeWhen` | **No.** Refused at compile time. |
+| `adopt` | Yes: the `import` resource option. See [Adopting what exists](#adopting-what-exists) |
 | `state: absent` | **No.** Refused: remove the resource from the document instead. |
 | Expressions inside `${}` | **No.** Pulumi YAML reads a name and its properties there, nothing computed. Use Pulumi's `fn::` functions. |
 | Reading an existing resource (`get`) and component packages | **Not yet.** `resourceOptions.import` adopts an existing resource. |
 | `kind: ResourceSet` documents | **No.** Pulumi provisions infrastructure; it does not configure a host. |
 
-Nothing is degraded silently. A document that asks for something in the "No" rows does
-not compile, and the refusal says what to do instead.
+The "No" rows are refused at compile, with what to do instead.
 
 ## What you need
 
-- `pulumi` on the `PATH` of the machine that runs Meridian, or its path in
-  `MERIDIAN_PULUMI`. Pulumi YAML ships inside the `pulumi` binary, so no language runtime
-  is needed.
-- Credentials for whichever providers the document uses, supplied the way those providers
-  expect (for AWS: the usual environment variables or profile).
-- Nothing else. No Pulumi account and no `pulumi login` are needed unless you choose a
-  backend that wants them; see [The stack and its state](#the-stack-and-its-state).
+- `pulumi` on `PATH`, or `MERIDIAN_PULUMI`. No language runtime is needed.
+- Provider credentials, the way each provider expects.
+- No Pulumi account unless your backend needs one
+  ([The stack and its state](#the-stack-and-its-state)).
 
 ## A first document
 
-[`examples/pulumi/pets.yaml`](../../examples/pulumi/pets.yaml) needs no cloud account.
-Pulumi's random provider makes up a name and a password:
+[`examples/pulumi/pets.yaml`](../../examples/pulumi/pets.yaml) uses the random provider; no
+cloud account:
 
 ```yaml
 apiVersion: meridian/v1
@@ -87,7 +85,7 @@ meridian plan examples/pulumi/pets.yaml                  # pulumi preview
 meridian apply examples/pulumi/pets.yaml                 # pulumi up
 ```
 
-`compile` writes this program, which is what `pulumi` is then given:
+It compiles to:
 
 ```yaml
 name: pets
@@ -117,8 +115,8 @@ outputs:
   password: ${password.result}
 ```
 
-[`examples/pulumi/web-vm.yaml`](../../examples/pulumi/web-vm.yaml) is a fuller document: a
-virtual machine on AWS with a fixed public address, using every resource type below.
+[`examples/pulumi/web-vm.yaml`](../../examples/pulumi/web-vm.yaml) is an AWS VM using every
+type below.
 
 ## Resource types
 
@@ -130,9 +128,8 @@ virtual machine on AWS with a fixed public address, using every resource type be
 | `config` | an entry under `config` | the declaration: `type`, `default`, `secret`, `description`, `items`, or `value` |
 | `stack` | nothing in the program | the deployment's settings: `name`, `backend`, `secretsProvider` |
 
-Meridian does not keep a list of Pulumi's types. Any well-formed type token compiles,
-and Pulumi itself says so if the provider has no such type. Property names are Pulumi's
-(`instanceType`, `vpcSecurityGroupIds`), not Terraform's (`instance_type`).
+Any well-formed type token compiles; Pulumi checks it. Property names are Pulumi's
+(`instanceType`).
 
 ### Resources and their options
 
@@ -147,10 +144,8 @@ and Pulumi itself says so if the provider has no such type. Property names are P
       ignoreChanges: [ami]
 ```
 
-Everything under `params` is a property except `resourceOptions`, which holds
-[Pulumi's resource options](https://www.pulumi.com/docs/iac/concepts/options/) and is
-written to the resource's `options`. The key is `resourceOptions` and not `options`
-because some resource types have a property of their own called `options`.
+`params` are properties, except `resourceOptions`, which holds
+[resource options](https://www.pulumi.com/docs/iac/concepts/options/).
 
 ### Function calls
 
@@ -162,8 +157,7 @@ because some resource types have a property of their own called `options`.
     owners: ["099720109477"]
 ```
 
-The result is read like a resource: `${ubuntu.id}`. Options of the call (`provider`,
-`version`, ...) go under `invokeOptions`.
+Read as `${ubuntu.id}`. Call options go under `invokeOptions`.
 
 ### Explicit providers
 
@@ -182,10 +176,7 @@ The result is read like a resource: `${ubuntu.id}`. Options of the call (`provid
 
 ### Configuration
 
-A `config` resource is one of two things, told apart by its name.
-
-A plain name declares a value the program takes. It needs a `type` or a `default`, and
-the rest of the document reads it as `${id}`:
+A plain name declares a value (with `type` or `default`), read as `${id}`:
 
 ```yaml
 - id: instance_type
@@ -195,9 +186,7 @@ the rest of the document reads it as `${id}`:
     default: t3.small
 ```
 
-A name with a package in front is that provider's setting, takes only `value`, and is
-read by the provider alone. Because such a name cannot be a resource id, it is given
-with `name`:
+A package-prefixed name is a provider setting, given with `name` and `value`:
 
 ```yaml
 - id: region
@@ -207,15 +196,37 @@ with `name`:
     value: us-east-1
 ```
 
-`name` also renames a plain value, when the name Pulumi should know differs from the id.
+`name` also renames a plain value.
+
+## Common infrastructure types
+
+`network`, `subnet`, `firewall`, `address` and `vm` are Meridian's own types,
+and this target turns each into the `aws` or `azure-native` package's own
+([the common infrastructure types](../reference/dsl/common-infrastructure-types.md)
+has every param and mapping). They make the same resources the Terraform
+target makes on that cloud, with the same sizes, images, refusals and outputs.
+
+The cloud is `spec.settings.cloud`, or the one whose package the document
+already uses: a `config` named `aws:region` or `azure-native:location`, or a
+resource of either package. On Azure, `spec.settings.resourceGroup` is
+required and `spec.settings.location` is optional; a resource without a
+location goes to its resource group's.
+
+| Common type | AWS | Azure |
+|---|---|---|
+| `network` | `aws:ec2:Vpc` | `azure-native:network:VirtualNetwork` |
+| `subnet` | `aws:ec2:Subnet`; with `public: true`, an `aws:ec2:InternetGateway` per network, an `aws:ec2:RouteTable`, `aws:ec2:Route` and `aws:ec2:RouteTableAssociation` | `azure-native:network:Subnet` |
+| `firewall` | `aws:ec2:SecurityGroup`, an `aws:vpc:SecurityGroupIngressRule` or `...EgressRule` per rule, and an allow-all egress rule when no `out` rule is given | `azure-native:network:NetworkSecurityGroup`, the rules inside it |
+| `address` | `aws:ec2:Eip` | `azure-native:network:PublicIPAddress`, Standard and static |
+| `vm` | `aws:ec2:Instance`, an `aws:ec2:KeyPair`, an `invoke.aws:ec2:getAmi` lookup for an image by name, an `aws:ec2:EipAssociation` | `azure-native:compute:VirtualMachine` and an `azure-native:network:NetworkInterface` (`<id>_nic`) |
+
+Compare [`examples/common/web-pulumi-aws.yaml`](../../examples/common/web-pulumi-aws.yaml)
+and [`web-pulumi-azure.yaml`](../../examples/common/web-pulumi-azure.yaml) with
+the Terraform documents beside them.
 
 ## References
 
-`${id.property}` in a param or an output refers to another resource of the document by
-its id. Pulumi YAML spells a reference the same way, so the compiled program carries it
-unchanged. What Meridian adds is the check: a reference to an id the document does not
-declare is refused when the document is compiled, with the file and line of the
-resource, not discovered when Pulumi runs.
+`${id.property}` passes through unchanged; unknown ids are refused at compile.
 
 | You write | Meaning |
 |---|---|
@@ -226,9 +237,8 @@ resource, not discovered when Pulumi runs.
 | `${pulumi.stack}`, `${pulumi.project}`, `${pulumi.cwd}` | Pulumi's own names, handed over as written |
 | `$${HOME}` | the literal text `${HOME}` |
 
-Anything computed is not a reference and is refused inside `${}`. Use Pulumi YAML's
-[built-in functions](https://www.pulumi.com/docs/iac/languages-sdks/yaml/yaml-language-reference/#built-in-functions),
-which are ordinary keys and pass through as written:
+Computation inside `${}` is refused. Use Pulumi YAML's
+[built-in functions](https://www.pulumi.com/docs/iac/languages-sdks/yaml/yaml-language-reference/#built-in-functions):
 
 ```yaml
 params:
@@ -241,9 +251,7 @@ params:
 
 ## Ordering
 
-Pulumi orders resources by the references between them. `dependsOn` in a document
-becomes the `dependsOn` resource option only where no reference already implies the
-order, so the compiled program reads the way a Pulumi author would have written it:
+`dependsOn` becomes the `dependsOn` option only where no reference implies the order:
 
 ```yaml
 - id: web_ip
@@ -261,22 +269,13 @@ order, so the compiled program reads the way a Pulumi author would have written 
     - resource: web_ip         # nothing above says so: becomes dependsOn: [${web_ip}]
 ```
 
-Only resources can be ordered by hand. A function call runs when its arguments are
-known and configuration is read before anything runs, so a `dependsOn` to or from
-either is refused unless a reference already implies it.
+A `dependsOn` to or from a function call or config is refused unless a reference implies
+it.
 
 ## Notifications
 
-`notifies` is refused on this target, with the rule `unsupported-action`. Nothing in a
-Pulumi YAML program makes one resource react to a change in another: there are no
-handlers, and the `replaceOnChanges` option watches only a resource's own properties.
-Meridian does not fake a reaction it cannot guarantee, so the plugin claims neither a
-native nor a synthetic notify in the
-[capability matrix](../reference/capability-matrix.md).
-
-What Pulumi does offer is replacement when a resource's own input changes. Pass the
-value that changes into a property of the resource that must react, and name that
-property in `replaceOnChanges`:
+`notifies` is refused (`unsupported-action`). Instead, pass the changing value into a
+property and name it in `replaceOnChanges`:
 
 ```yaml
 - id: cert
@@ -295,8 +294,7 @@ property in `replaceOnChanges`:
 
 ## The stack and its state
 
-A document deploys to one Pulumi stack in a project named after the document. Without a
-`stack` resource the stack is called `dev`:
+One stack per document, in a project named after it; `dev` by default:
 
 ```yaml
 - id: deployment
@@ -307,34 +305,20 @@ A document deploys to one Pulumi stack in a project named after the document. Wi
     secretsProvider: awskms://alias/pulumi  # default: the backend's own
 ```
 
-Where state lives is decided in this order:
+State location, first match wins:
 
-1. `PULUMI_BACKEND_URL` in the environment of the machine running Meridian. This is
-   Pulumi's own rule: the variable wins over a project's `backend`.
-2. `backend` on the `stack` resource, which is written to the project file.
-   `https://api.pulumi.com` is Pulumi Cloud and needs `PULUMI_ACCESS_TOKEN`.
-3. Otherwise, the document's work directory under Meridian's state directory
-   (`.meridian/infrastructure/<document>/pulumi/` by default), beside the program. No
-   account and no login are needed, which is how the Terraform target behaves too.
+1. `PULUMI_BACKEND_URL`.
+2. `backend` on the `stack` resource (`https://api.pulumi.com` needs `PULUMI_ACCESS_TOKEN`).
+3. `.meridian/infrastructure/<document>/pulumi/`.
 
-When state is kept in a file and no secrets provider is named, Pulumi protects secrets
-with a passphrase. If neither `PULUMI_CONFIG_PASSPHRASE` nor
-`PULUMI_CONFIG_PASSPHRASE_FILE` is set, the plugin sets an **empty** passphrase so that
-Pulumi does not stop to ask for one. An empty passphrase protects nothing: treat the
-state directory as you would a Terraform state file, or set a passphrase or a
-`secretsProvider`.
-
-The stack is created the first time it is planned or applied. `secretsProvider` is used
-only then; Pulumi does not change an existing stack's provider this way.
+With file state, no secrets provider and no `PULUMI_CONFIG_PASSPHRASE` or
+`PULUMI_CONFIG_PASSPHRASE_FILE`, the plugin sets an **empty** passphrase, which protects
+nothing. Set one, or a `secretsProvider`, which applies only when the stack is created.
 
 ## Editor schemas
 
-`meridian schema sync` reads each package's schema with `pulumi package
-get-schema <package>`, fetching the provider plugin if it is not installed,
-so an editor completes and checks a resource's properties
-([Tool schemas](../tooling/schema-sync.md)). The packages are the ones the
-documents' type tokens and `pulumi:providers:<package>` resources name; a
-`resourceOptions.version` chooses the package version asked for.
+`meridian schema sync` runs `pulumi package get-schema <package>` for the packages documents
+name, at `resourceOptions.version` if set ([Tool schemas](../tooling/schema-sync.md)).
 
 | | |
 |---|---|
@@ -342,9 +326,8 @@ documents' type tokens and `pulumi:providers:<package>` resources name; a
 | Listed by name | every other resource and function of those packages, with the first paragraph of its description |
 | Pinned | each package's version |
 
-A token is matched by meaning, so `random:index:RandomPet`,
-`random:RandomPet` and `random:index/randomPet:RandomPet` are one type
-however the document writes it.
+`random:index:RandomPet`, `random:RandomPet` and `random:index/randomPet:RandomPet` match
+the same type.
 
 ## Running
 
@@ -354,47 +337,31 @@ however the document writes it.
 | `apply` | the same two, then `pulumi up --yes --skip-preview` |
 | outputs | `pulumi stack output --json`, once masked and once with `--show-secrets` |
 
-Each change is reported under the id the document gave the resource, with Pulumi's type
-beside it (`create web_vm: aws:ec2/instance:Instance`). A replacement is reported as
-`replace`, apart from an update, because it is the one that loses data. Pulumi's own
-stack resource and the providers it loads by itself are not reported: neither is
-something the document declares.
+Changes are reported by id and type (`create web_vm: aws:ec2/instance:Instance`);
+`replace` is separate from update. The stack resource and default providers are not
+reported.
 
-A plain `apply` previews and then updates, and if something changes between the two,
-the update follows the infrastructure, not the preview. With a
-[saved plan](../operations/pull-requests.md), the plan is taken with
-`preview --save-plan` and the apply runs `up --plan` on it, so the update is constrained
-to what was reviewed (Pulumi's update plans are experimental, and the plugin sets
-`PULUMI_EXPERIMENTAL` for those two calls). The plan is not saved when the run handed
-Pulumi a secret, because an update plan holds every input; the apply then previews
-again for that stage, with the artifact hash as the check.
+A plain `apply` previews, then updates. With a [saved plan](../operations/pull-requests.md)
+it uses `preview --save-plan` and `up --plan`, with `PULUMI_EXPERIMENTAL` set. A run with a
+secret saves no plan and previews again, checked by the artifact hash.
 
-When a preview fails, what Pulumi said is returned with the failure, together with the
-command that was run.
+A failed preview returns Pulumi's output and the command.
 
 ### Outputs and secrets
 
-A document's `outputs` become the program's `outputs`. After an apply they are read
-back with their types intact: a number stays a number, a list a list.
-
-An output Pulumi treats as a secret, such as a `RandomPassword`'s `result` or anything
-wrapped in `fn::secret`, is reported as sensitive. Meridian masks a sensitive value
-wherever it prints or logs it, and still hands the real value to the stage that needs
-it.
+`outputs` become program outputs, read back with types intact. Pulumi secrets
+(`RandomPassword.result`, `fn::secret`) are sensitive: masked in logs, passed on in full.
 
 ### Values from earlier stages
 
-Values Meridian hands to this stage are passed to `pulumi preview` and `pulumi up` as
-`--config <name>=<value>`, so a `config` resource with that name receives them in place
-of its default. Text is passed as it is and anything else as JSON. The values never
-appear in a log or an error message, since one may be a secret another tool produced.
-Pulumi saves them in the stack's settings file in the work directory.
+Handed-over values go to `preview` and `up` as `--config <name>=<value>` (JSON unless
+text), set the same-named `config`, are never logged, and are saved in the stack settings
+file.
 
 ## Secrets
 
-A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) in a resource's params
-reaches the program as a secret configuration value, set from the tool's standard input,
-and through nothing else.
+A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) becomes a secret config
+value, set from stdin.
 
 ```yaml
 spec:
@@ -414,8 +381,7 @@ spec:
         password: ${{ secret.db_password }}
 ```
 
-**What the compile writes.** The param becomes `${meridian_secret_db_password}`, and the
-program declares the value under `config`:
+The param becomes `${meridian_secret_db_password}`, declared under `config`:
 
 ```yaml
 config:
@@ -424,51 +390,68 @@ config:
     type: string
 ```
 
-The compiled program holds the key and never the value. Pulumi keeps a secret
-configuration value as a secret wherever it is handed on as it is: the resource input it
-becomes, the output property of the same name and a stack output of either are encrypted
-in the state and printed as `[secret]`. What a provider makes *from* it is not followed:
-an output property built from a secret input is an ordinary output unless the resource
-names it in `resourceOptions.additionalSecretOutputs` or the stack output wraps it in
-`fn::secret`; a secret inside a map input is not followed into the map that comes back;
-and a resource's ID is never a secret, so a secret should not shape one: a `RandomPet`
-whose prefix is a secret has its name in the open in the state. A document that hands
-Pulumi a secret should say which outputs the secret shapes.
+The input, the same-named output and stack outputs of either stay `[secret]`. Not
+followed:
 
-**How the value reaches the tool.** When a stage runs, after the stack is selected and
-before anything else, the runner runs `pulumi config set --secret
-meridian_secret_<name>` for each secret with the value on standard input, so that it is
-on no command line and in no environment. Pulumi encrypts it with the stack's secrets
-provider and writes the ciphertext into the stack's settings file beside the program.
-`preview` and `up` then read it as any configuration value. When the stage is over, and
-also when the preview fails, the runner runs `pulumi config rm meridian_secret_<name>` for
-each, so the settings file in the work directory names no secret between runs. The
-command line names the key and nothing more.
+- outputs derived from a secret input, unless listed in
+  `resourceOptions.additionalSecretOutputs` or wrapped in `fn::secret`;
+- secrets inside map inputs;
+- resource IDs, which are never secret.
 
-**What Pulumi keeps.** The state keeps what the resources were given, encrypted with the
-stack's secrets provider, as it keeps every secret. The protection is the provider's:
-with no passphrase and no `secretsProvider` chosen, the runner sets an empty passphrase
-(see [The stack and its state](#the-stack-and-its-state)), and an empty passphrase
-protects the ciphertext from nobody who can read the state file. A document that hands
-Pulumi a secret should name a `secretsProvider`, or the operator should set
-`PULUMI_CONFIG_PASSPHRASE` or `PULUMI_CONFIG_PASSPHRASE_FILE`, and keep the state in a
-backend that protects it.
+When a stage runs, the runner pipes each value to
+`pulumi config set --secret meridian_secret_<name>`, Pulumi encrypts it into the stack
+settings file, and `pulumi config rm` removes it after the stage or a failed preview.
 
-**What is refused.** A secret in the `stack` resource's settings, or in a `config`
-resource's declaration (`default`, `value`), is refused at compile, rule
-`unsupported-secret-place`: the settings are the command line `pulumi` is given, and a
-declaration is written into the program as it stands.
+State encryption is the secrets provider's; an empty passphrase
+([see](#the-stack-and-its-state)) protects nothing. Set a `secretsProvider` or passphrase.
 
-The handover is tested against a stand-in `pulumi` that keeps what it reads on standard
-input, its arguments and its environment (`plugins/pulumi/tests/run.rs`), and against
-the real `pulumi` in CI (`plugins/pulumi/tests/real.rs`), where a secret is a string
-input of a random string: it comes back as a secret output holding the value, the string
-does not, the value is in nothing Pulumi printed and in no file in the work directory in
-the open, and the settings file no longer names the key when the run is over.
+A secret in `stack` settings or a `config` declaration is refused
+(`unsupported-secret-place`).
+
+Tested against a stand-in (`plugins/pulumi/tests/run.rs`) and real `pulumi` in CI
+(`plugins/pulumi/tests/real.rs`).
+
+## Adopting what exists
+
+A resource's `adopt` is the provider's own import identifier of a thing that
+already exists. The target writes it as the resource's `import` option, so
+`pulumi up` takes the thing into the stack instead of creating it:
+
+```yaml
+    - id: logs
+      type: aws:s3/bucket:Bucket
+      adopt: example-logs
+      params:
+        bucket: example-logs
+```
+
+```yaml
+  logs:
+    type: aws:s3/bucket:Bucket
+    properties:
+      bucket: example-logs
+    options:
+      import: example-logs
+```
+
+- `meridian plan` reports the resource as `adopt`.
+- Pulumi refuses the import when the properties differ from what exists, and
+  `pulumi preview` says which. Make the params match, then change them once the
+  resource is in the stack.
+- Only a resource can be adopted: `adopt` on a `config`, an `invoke.<function>`,
+  a `stack` or a `pulumi:providers:<name>` is refused with `invalid-adopt`, and
+  so is an `adopt` that names another identifier than `resourceOptions.import`.
+
+### Moving to another tool
+
+The plugin reports what it manages, read from `pulumi stack export`: each
+resource's `id`, by resource id, leaving out the stack and providers.
+[`meridian retarget`](../operations/retargeting.md) uses it to write
+`adopt:` when a document moves to another tool.
 
 ## What is refused
 
-Every refusal carries a rule and, where it is about one resource, that resource with its file and line.
+Each names the rule, and the resource with file and line where there is one.
 
 | Rule | When | What to do |
 |---|---|---|
@@ -476,6 +459,7 @@ Every refusal carries a rule and, where it is about one resource, that resource 
 | `invalid-reference` | `${...}` names an id the document does not declare, holds something computed, reads a provider setting, or appears in a `config` declaration. | Fix the id, or use a `fn::` function. |
 | `unsupported-action` | The resource has `notifies`. Nothing in a Pulumi YAML program makes one resource react to a change in another. | Pass the changing value into a property of the other resource and name that property in its `replaceOnChanges` option. |
 | `unsupported-runtime-condition` | The resource has `runtimeWhen`. A Pulumi YAML program has no conditional. | Decide before compiling, with `when`. |
+| `invalid-adopt` | `adopt` on something that is not a resource, or beside a `resourceOptions.import` that names another identifier. | Put `adopt` on the resource, and remove the option. |
 | `unsupported-state` | `state: absent`. | Remove the resource from the document; Pulumi deletes what its program no longer declares. |
 | `unsupported-dependency` | A `dependsOn` to or from a `config`, a `stack` or an `invoke.<function>` that no reference implies. | Make the dependent refer to what it needs. |
 | `invalid-param` | `resourceOptions` or `invokeOptions` is not a map, an unknown setting on a `stack` or `config`, or a `stack` setting that is not plain text. | |
@@ -494,22 +478,15 @@ Every refusal carries a rule and, where it is about one resource, that resource 
 | `PULUMI_CONFIG_PASSPHRASE`, `PULUMI_CONFIG_PASSPHRASE_FILE` | The passphrase for a stack's secrets. Set either and the plugin sets none. |
 | `PULUMI_ACCESS_TOKEN` and provider credentials | Passed through to `pulumi` untouched. |
 
-Every setting can also be written in the project's `meridian.yaml` under
-`spec.settings.pulumi`, by its short name; the environment variable still wins.
-The names, defaults and the splitting rule for argument lists are in the
-[plugin settings reference](../reference/plugin-settings.md#pulumi).
+Settings can also go in `meridian.yaml` under `spec.settings.pulumi`; the environment wins.
+See the [plugin settings reference](../reference/plugin-settings.md#pulumi).
 
 ## How it is tested
 
-- `plugins/pulumi/tests/compile.rs` compiles the examples to golden files in
-  `plugins/pulumi/testdata/` and exercises every mapping and every refusal above.
-- `plugins/pulumi/tests/run.rs` runs the runner against a stand-in for `pulumi` and
-  checks the exact commands, the environment and how failures are reported.
-- `plugins/pulumi/tests/plugin.rs` starts the real plugin binary and drives it through
-  the plugin protocol, as the `meridian` command does.
-- `plugins/pulumi/tests/real.rs` plans, applies, changes and reads outputs with the real
-  `pulumi` and its random provider. It runs in the `pulumi` workflow, or locally with
+- `tests/compile.rs`: golden files in `plugins/pulumi/testdata/`, every mapping and refusal.
+- `tests/run.rs`: a stand-in `pulumi`.
+- `tests/plugin.rs`: the binary over the plugin protocol.
+- `tests/real.rs`: real `pulumi` with the random provider, in the `pulumi` workflow or with
   `MERIDIAN_TEST_REAL_PULUMI=1 cargo test -p meridian-target-pulumi --test real`.
 
-To record the golden files again after an intended change:
-`UPDATE_GOLDEN=1 cargo test -p meridian-target-pulumi`.
+Re-record golden files: `UPDATE_GOLDEN=1 cargo test -p meridian-target-pulumi`.

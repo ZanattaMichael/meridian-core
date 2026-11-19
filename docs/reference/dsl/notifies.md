@@ -9,11 +9,9 @@
       action: restart
 ```
 
-"When this resource really changes, do that to the other one." On a run where
-the file is already right, nothing is restarted.
-
-A notify is a reaction. It is not an order ([`dependsOn`](dependson.md)) and it
-does not carry data (a [reference](references.md)).
+When the notifier changes, the action runs on the notified resource. Otherwise nothing
+runs. It sets no order ([`dependsOn`](dependson.md)) and carries no data
+([references](references.md)).
 
 ## Fields
 
@@ -23,7 +21,7 @@ does not carry data (a [reference](references.md)).
 |---|---|---|
 | `resource` | yes | the `id` of the resource to act on, in the same document |
 | `action` | yes | what to do to it. One word, from the list the target accepts for that type of resource |
-| `on` | no | `changed`, which is also what leaving it out means. It is the one event a notify can fire on: every tool's mechanism fires when the notifier really changed and on nothing else, so any other value is refused by `validate` (`unknown event "always" (expected "changed", ...)`) |
+| `on` | no | `changed`, the default and only value. Any other is refused by `validate` (`unknown event "always" (expected "changed", ...)`) |
 | `when` | no | a [condition](conditions.md#where-a-when-can-be-written) on the notify itself. False, and the entry is dropped; both resources stay |
 | `ifMissing` | no | `error` (the default) or `skip`: what happens when a [`when`](conditions.md#when) removed the notified resource. See [`ifMissing`](conditions.md#ifmissing) |
 
@@ -39,16 +37,11 @@ the **notified** resource.
 | `action` must be given | `validate` | `missing required field` |
 | The target must be able to perform that action on that type of resource | `compile` | `[unsupported-action]`, with the reason |
 
-A notify is **not part of the order**. It is left out of the sort that
-`dependsOn` drives, which has two effects:
+A notify is not part of the sort:
 
-- Two resources may notify each other. A loop of notifies is legal where a loop
-  of dependencies is not.
-- A notify alone does not put the notifier first. If the notified resource must
-  also exist first, or run after, say so with `dependsOn`. (Some tools order a
-  notifier before what it notifies by themselves; Puppet does. The reaction
-  itself happens when the tool decides: an Ansible handler and a delayed Chef
-  notification run at the end of the run.)
+- Two resources may notify each other.
+- A notify does not order the two; use `dependsOn`. (Puppet orders a notifier first by
+  itself. Ansible handlers and delayed Chef notifications run at the end.)
 
 ```mermaid
 flowchart LR
@@ -58,8 +51,6 @@ flowchart LR
 ```
 
 ## Native and synthetic
-
-Tools differ more here than anywhere else, and Meridian is strict about it.
 
 ```mermaid
 flowchart TD
@@ -74,15 +65,13 @@ flowchart TD
 `notify`, Chef's `notifies`, the DSC runner's `notify`, Compose's `depends_on`
 with `restart: true`.
 
-**Synthetic** means the tool has no such mechanism, and the plugin builds the
-reaction from something the tool does have. It is real, and it shows up in the
-tool's own output, so the compile always warns and says what it will look like:
+**Synthetic** means the plugin builds it from something else. The compile warns:
 
 ```
 warning: kubernetes: web: restarts by rolling its pods whenever the content of "web_config" changes; the trigger is the annotation meridian.dev/restart-on-web-config on its pod template
 ```
 
-**Refused** means there is nothing honest to build:
+**Refused** otherwise:
 
 ```
 cfn.yaml:9:18: cloudformation: resource "a" [unsupported-action]: notifies resource "b" with action "restart", which this target cannot express: CloudFormation has no way to act on one resource because another changed
@@ -90,8 +79,7 @@ cfn.yaml:9:18: cloudformation: resource "a" [unsupported-action]: notifies resou
 
 ## Actions, by target
 
-The action is a word the target understands, and a target accepts only what its
-tool can really do to that type of resource.
+A target accepts only actions its tool can perform on that type.
 
 | Target | Kind | Notified resource | Actions |
 |---|---|---|---|
@@ -112,8 +100,7 @@ tool can really do to that type of resource.
 | `terraform`, `opentofu` | synthetic | a managed resource | `replace` |
 | `cloudformation`, `bicep`, `arm`, `pulumi`, `packer` | refused | | |
 
-**The action is kept, never approximated.** `reload` on Puppet is refused, not
-turned into a restart, because a restart does more than the document asked for:
+An action is never substituted. `reload` on Puppet is refused:
 
 ```
 puppet: resource "nginx_conf" [unsupported-action]: notifies resource "nginx_svc" with action "reload", which this target cannot express: Puppet's refresh restarts a service; it takes no argument and cannot be told to reload instead. ...
@@ -127,9 +114,8 @@ na.yaml:12:7: ansible: resource "b" [unsupported-action]: resource type "package
 
 ## What a notify becomes
 
-On Ansible, a handler, named after the action and the notified resource, run
-once at the end of the play and only if a task that notifies it changed
-something:
+Ansible: a handler named after the action and resource, run once at the end of the play
+if a notifier changed:
 
 ```yaml
 tasks:
@@ -144,9 +130,8 @@ handlers:
       state: reloaded
 ```
 
-On Kubernetes, a checksum of the notifier in an annotation on the notified
-workload's pod template. The content changes, the checksum changes, the template
-changes, and the workload's controller rolls its pods:
+Kubernetes: a checksum of the notifier in an annotation on the workload's pod template, so
+a change rolls the pods:
 
 ```yaml
 spec:
@@ -156,11 +141,10 @@ spec:
         meridian.dev/restart-on-web-config: 3e7aa8895791e35c
 ```
 
-On Terraform, `replace_triggered_by` on the notified resource, which destroys
-and recreates it. `terraform plan` shows it as "must be replaced". That is the
-notify working, and the reason the only action accepted there is `replace`.
+Terraform: `replace_triggered_by`, which replaces the resource. The only action is
+`replace`.
 
-Each target's page shows its own form.
+Each target page shows its form.
 
 ## When to use it
 
@@ -171,6 +155,5 @@ Each target's page shows its own form.
 | pods roll when a ConfigMap changes | `notifies` the workload with `restart` |
 | B simply runs after A, every time | [`dependsOn`](dependson.md) |
 
-The [capability matrix](../capability-matrix.md) has the one-line summary for
-every target, and
-[dependencies and notifications](../../concepts/dependencies.md) the concept.
+See the [capability matrix](../capability-matrix.md) and
+[dependencies and notifications](../../concepts/dependencies.md).

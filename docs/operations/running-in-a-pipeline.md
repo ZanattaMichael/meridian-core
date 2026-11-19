@@ -2,46 +2,17 @@
 
 <p align="center"><img src="../graphics/meridian-in-a-pipeline.svg" alt="Meridian inside a pipeline engine: the engine's band (trigger, runner and identity, secret release, approval, logs and artifacts) above Meridian's band (workflow, orchestrator, target plugins, secret delivery); the engine's job runs meridian apply, and Meridian's events come back as annotations and a job summary" width="100%"></p>
 
-Every pipeline engine can run Meridian as one job, today, with no plugin and
-no new language: the job runs `meridian apply`, and Meridian does the rest.
-This page is the one to copy from. It says what the engine owns and what
-Meridian owns, gives a snippet for each engine, and describes what `meridian`
-does differently when it finds itself inside one.
+Any engine can run Meridian as one job running `meridian apply`, with no plugin.
 
-The GitHub Actions snippet is run for real on every change, against the
-fake target, by [`.github/workflows/pipeline-shell.yml`](https://github.com/ZanattaMichael/meridian-core/blob/main/.github/workflows/pipeline-shell.yml):
-two jobs sharing one record, a plan, an apply, a failure, and
-`apply --resume`. A test holds the page to that workflow, command by command.
-**The other snippets were reviewed by hand and have not been executed**; each
-says so where it starts. If one of them is wrong for your engine, an issue
-with the fix is welcome.
-
-## Contents
-
-- [Who owns what](#who-owns-what)
-- [The shape of every job](#the-shape-of-every-job)
-- [GitHub Actions](#github-actions) (executed in CI)
-- [Azure Pipelines](#azure-pipelines)
-- [GitLab CI](#gitlab-ci)
-- [Buildkite](#buildkite)
-- [Jenkins](#jenkins)
-- [Argo Workflows](#argo-workflows)
-- [Tekton](#tekton)
-- [Octopus Deploy](#octopus-deploy)
-- [What `meridian` does inside an engine](#what-meridian-does-inside-an-engine)
-- [Checking the job's identity first](#checking-the-jobs-identity-first)
-- [Sharing the record between jobs](#sharing-the-record-between-jobs)
-- [Approvals](#approvals)
-
-[A saved plan, and applying it from a pull request](pull-requests.md) builds
-on these jobs: a plan on every push, posted as one comment, and applied
-after the approval by a job that can apply nothing else.
+The GitHub Actions snippet runs in CI
+([`pipeline-shell.yml`](https://github.com/ZanattaMichael/meridian-core/blob/main/.github/workflows/pipeline-shell.yml)),
+and a test keeps it in line with this page. **The other snippets are reviewed but not
+executed.** For pull request plans, see [saved plans](pull-requests.md).
 
 ## Who owns what
 
-An engine and Meridian divide the work along one line: the engine decides
-*when and as whom* a run happens and keeps what the run produced; Meridian
-decides *what* happens and in what order, and keeps the record of it.
+The engine decides *when and as whom* and keeps artifacts. Meridian decides *what*, in what
+order, and keeps the record.
 
 | The engine owns | Meridian owns |
 |---|---|
@@ -51,51 +22,29 @@ decides *what* happens and in what order, and keeps the record of it.
 | **Environments, reviewers and approvals**: who may deploy to production, and the pause before it | **Resume and rollback**: `apply --resume` continues a failed apply from the step that failed; `--on-failure rollback` and `meridian rollback` put one back |
 | **Logs and artifacts**: the job's log, its summary page, and the files it keeps | **Drift and policy**: `meridian drift` says whether what was applied is still there; `--policy` asks a policy before anything is applied |
 
-The engine never sees a value Meridian holds, so there is nothing for it to
-mask: no secret is ever printed, by construction
-([how a secret is held](../concepts/secrets-in-memory.md)). Rely on that,
-not on the engine's masking, which only hides what it already knows.
+The engine never sees a value Meridian holds, and none is printed
+([how](../concepts/secrets-in-memory.md)).
 
 ## The shape of every job
 
-The snippets below all do the same six things. Read them once here, and the
-snippets become easy to follow.
+Every snippet:
 
-1. **Install a pinned `meridian` and its plugins** from the release's files,
-   and check what was downloaded. The [install script](../quickstart/install.md#linux-and-macos)
-   takes `MERIDIAN_VERSION`, and with `MERIDIAN_VERIFY=cosign` refuses to
-   install unless the release's signature verifies. A released `meridian`
-   already starts only [signed plugins](../reference/plugin-signatures.md);
-   `MERIDIAN_PLUGIN_SIGNATURES=require` in the job's environment says so
-   out loud, and makes a build from source behave the same way.
-2. **Pin the modules**: `meridian module install --locked` fails if
-   `meridian.lock` would have to change, so a job never fetches a module
-   the repository did not pin.
-3. **Check before running**: `meridian validate` reads the documents and
-   loads no plugin; `meridian secret check` says whether every declared
-   secret, and every credential declared `from: ambient`, would be found
-   on this runner, without reading a value.
-4. **`plan` on a pull request, `apply` on the protected branch.** With
-   `--detailed-exitcode`, a plan exits `2` when there is something to apply,
-   so a job can tell "nothing to do" from "changes waiting".
-5. **Share the record**: the lock, the run-state and the runs must be where
-   the next job, on another runner, can reach them, so a failed apply can be
-   resumed and a plan can see the last apply. See
-   [sharing the record between jobs](#sharing-the-record-between-jobs).
-6. **Keep the events**: `--events json` writes every event of the run to
-   standard output, one per line, for the engine to keep as an artifact.
-   `meridian report --from FILE` makes a report from that file anywhere,
-   later. The report for people moves to standard error, where the job's log
-   shows it.
+1. **Installs a pinned release** with the [install script](../quickstart/install.md#linux-and-macos)
+   (`MERIDIAN_VERSION`, `MERIDIAN_VERIFY=cosign`). Releases start only
+   [signed plugins](../reference/plugin-signatures.md); `MERIDIAN_PLUGIN_SIGNATURES=require`
+   enforces it for source builds.
+2. **Pins modules** with `meridian module install --locked`.
+3. **Checks first** with `meridian validate` and `meridian secret check`.
+4. **Plans on pull requests, applies on the protected branch.** `--detailed-exitcode`
+   exits `2` when there are changes.
+5. **Shares the record** ([how](#sharing-the-record-between-jobs)).
+6. **Keeps the events** with `--events json` (stdout; the report goes to stderr).
+   `meridian report --from FILE` rebuilds a report.
 
-Secrets reach `spec.secrets` through the [`env` provider](../reference/dsl/secrets.md#the-providers):
-the engine puts the secret in the job's environment, the document names the
-variable, and Meridian removes the variable from its own environment as soon
-as it has read it, so no plugin or tool started afterwards inherits it. The
-engine's identity reaches `spec.credentials` as
-[`from: ambient`](../reference/dsl/credentials.md#from-ambient): the engine's
-own action or service connection signs the job in, and the tool finds that
-sign-in as it would on a laptop. No value is in any file the engine keeps.
+Secrets come from the job environment through the
+[`env` provider](../reference/dsl/secrets.md#the-providers), removed from Meridian's
+environment once read. The engine's identity is
+[`from: ambient`](../reference/dsl/credentials.md#from-ambient).
 
 ```yaml
 spec:
@@ -111,13 +60,9 @@ spec:
 
 ## GitHub Actions
 
-Executed on every change by `pipeline-shell.yml`, against the fake target.
-`id-token: write` is what lets the job exchange its OIDC token for a cloud
-identity; `aws-actions/configure-aws-credentials`, `azure/login` and
-`google-github-actions/auth` each leave a sign-in that `from: ambient` finds.
-Two jobs share one record: `plan` keeps the state directory as an artifact,
-`apply` takes it back. The `concurrency` group keeps two runs of the
-workflow from racing for it.
+Executed in CI. `id-token: write` enables OIDC; `aws-actions/configure-aws-credentials`,
+`azure/login` and `google-github-actions/auth` leave a sign-in `from: ambient` finds. The
+state directory passes as an artifact; `concurrency` prevents races.
 
 <!-- github-actions-snippet -->
 ```yaml
@@ -209,20 +154,14 @@ jobs:
           include-hidden-files: true
 ```
 
-What the job page shows, with nothing more in the workflow: a refused
-document as an annotation at its line, a failed step as an annotation at its
-document, and the run's report as the step summary. When the apply fails, fix
-the cause, then run the workflow by hand with `resume` ticked: the job takes
-the record of the failed run from the artifact and continues from the step
-that failed.
+Refusals and failed steps appear as annotations, the report as the step summary. After a
+failure, rerun with `resume` ticked to continue from the failed step.
 
 ## Azure Pipelines
 
-Reviewed, not executed. A [workload identity federation service
+Not executed. A [workload identity federation service
 connection](https://learn.microsoft.com/azure/devops/pipelines/library/connect-to-azure)
-signs the job in without a secret; `AzureCLI@2` leaves the Azure CLI logged
-in, which `from: ambient` finds. The record is carried between stages as a
-pipeline artifact.
+and `AzureCLI@2` sign in for `from: ambient`. The record is a pipeline artifact.
 
 ```yaml
 trigger:
@@ -306,19 +245,13 @@ stages:
                   condition: always()
 ```
 
-Inside Azure Pipelines, `meridian` writes each problem as a
-`##vso[task.logissue]` line, which the job shows as an issue, and the run's
-report as a summary tab through `task.uploadsummary`. A re-run after a
-failure is `meridian apply site.yaml --resume`, with the record from the
-failed run downloaded first; a pipeline that takes a `resume` parameter can
-choose between the two commands as the GitHub snippet does.
+Problems become `##vso[task.logissue]` lines; the report a `task.uploadsummary` tab. To
+resume, restore the record and run `meridian apply site.yaml --resume`.
 
 ## GitLab CI
 
-Reviewed, not executed. `id_tokens` gives the job an OIDC token that the
-cloud's CLI exchanges for an identity. GitLab has no annotation syntax and
-no job summary; the JUnit report shows the steps on the merge request as
-tests, and the `markdown` report is a file to read from the artifacts.
+Not executed. `id_tokens` provides OIDC. GitLab has no annotations; the JUnit report shows
+steps as tests and the `markdown` report is an artifact.
 
 ```yaml
 variables:
@@ -378,21 +311,14 @@ apply:
       junit: meridian-apply.xml
 ```
 
-The `.oidc-token` file holds the job's OIDC token, which is the engine's
-own and short-lived; it is not a Meridian secret, and the job's
-`SITE_DB_PASSWORD` comes from a masked CI variable as on every engine.
-`.meridian/` is passed from `plan` to `apply` as an artifact; a
-[shared backend](#sharing-the-record-between-jobs) is the better answer once
-more than one pipeline touches the same documents.
+`.oidc-token` is GitLab's token. `SITE_DB_PASSWORD` is a masked CI variable. Use a
+[shared backend](#sharing-the-record-between-jobs) when several pipelines share documents.
 
 ## Buildkite
 
-Reviewed, not executed. Buildkite runs each job's command in a pseudo-terminal
-by default, which makes `meridian` think a person is watching; set
-`MERIDIAN_ANNOTATIONS=on` so it writes for the engine anyway. The report
-reaches the build page through `buildkite-agent annotate`, which `meridian`
-runs itself when the agent is on the `PATH`. The OIDC token comes from
-`buildkite-agent oidc request-token`.
+Not executed. Buildkite uses a pseudo-terminal, so set `MERIDIAN_ANNOTATIONS=on`. The
+report goes through `buildkite-agent annotate`; OIDC from `buildkite-agent oidc
+request-token`.
 
 ```yaml
 env:
@@ -447,11 +373,8 @@ steps:
 
 ## Jenkins
 
-Reviewed, not executed. A declarative pipeline, with the secret from the
-credentials store and the record stashed between stages; on one agent, the
-workspace itself carries it. `JENKINS_URL` is how `meridian` knows where it
-is. Jenkins has no annotation syntax of its own; the JUnit report puts the
-steps on the build page, and the `html` report is a page to publish.
+Not executed. Secrets from the credentials store; the record is stashed between stages.
+Detected by `JENKINS_URL`. Use the JUnit and `html` reports.
 
 ```groovy
 pipeline {
@@ -502,20 +425,12 @@ pipeline {
 }
 ```
 
-The cloud identity on Jenkins is whatever the agent has: an instance role, a
-credentials-binding step that exports the cloud's variables, or an OIDC
-plugin. `from: ambient` finds any of them, and `meridian secret check` says
-which.
+`from: ambient` finds the agent's identity; `meridian secret check` says which.
 
 ## Argo Workflows
 
-Reviewed, not executed. A workflow template whose steps run the released
-container image; the record lives on a volume the steps share, and the
-events are an output artifact. Argo sets `ARGO_*` variables in the
-container, which is how `meridian` knows where it is. The cloud identity is
-the pod's: a service account with workload identity (IRSA, Azure Workload
-Identity, GKE Workload Identity) leaves the token file `from: ambient`
-finds.
+Not executed. Steps run the release image; the record is on a shared volume. Detected by
+`ARGO_*`. Identity is the pod's workload identity (IRSA, Azure, GKE).
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -591,9 +506,7 @@ spec:
 
 ## Tekton
 
-Reviewed, not executed. One task with a step per command, a workspace for
-the record, and a result for the run. Tekton sets `TEKTON_*` variables in
-each step's container. The identity is the pod's service account, as on
+Not executed. One task, a workspace for the record. Detected by `TEKTON_*`. Identity as on
 Argo.
 
 ```yaml
@@ -632,20 +545,13 @@ spec:
         meridian $(params.command) site.yaml --events json > events/run.jsonl
 ```
 
-A `PipelineRun` chains a `plan` run of the task, a manual approval (a
-`custom task`, or a pipeline that stops and is started again), and an
-`apply` run; the second `apply` after a failure passes
+A `PipelineRun` chains `plan`, an approval and `apply`; resume with
 `command: apply --resume`.
 
 ## Octopus Deploy
 
-Reviewed, not executed. A script step in a deployment process. Octopus holds
-the environments, the targets, the sensitive variables and the approval
-(a manual intervention step before this one), and runs the script on a
-worker or a target. The environment variable `OCTOPUS_*` is not one
-`meridian` detects, so set `MERIDIAN_ANNOTATIONS=off` or leave the default,
-which writes nothing for the engine; the markdown report is attached as an
-artifact with Octopus's own service message.
+Not executed. A script step after a manual intervention. `OCTOPUS_*` is not detected;
+attach the markdown report as an artifact.
 
 ```bash
 #!/bin/bash
@@ -672,9 +578,7 @@ new_octopusartifact "$PWD/events/apply.jsonl" "events.jsonl"
 
 ## What `meridian` does inside an engine
 
-Every engine sets one well-known variable in the jobs it runs. When
-`meridian` finds one, and its standard output is not a terminal, it writes
-for the engine as well as for the person reading the log:
+When an engine's variable is set and stdout is not a terminal, `meridian` also writes:
 
 | Engine | Detected by | Annotations | Summary |
 |---|---|---|---|
@@ -686,31 +590,18 @@ for the engine as well as for the person reading the log:
 | Argo Workflows | any `ARGO_*` | none | none: keep the events as an output artifact |
 | Tekton | any `TEKTON_*` | none | none: keep the events on a workspace |
 
-What is written comes from two places only. An annotation is a document's
-diagnostic, as `validate` reports it, or a step of the run's report, which is
-folded from the run's [events](../reference/state.md#events); the summary is
-the Markdown report that `--report markdown=FILE` writes, followed by where
-the record is kept. There is no third place that formats an error, so the
-annotation and the log never disagree
+Annotations come only from diagnostics and the report's steps (built from
+[events](../reference/state.md#events)); the summary is the `--report markdown` output
 ([decision 0033](../decisions/0033-annotations-come-from-events-and-the-report-only.md)).
-An event never holds a value, so neither does an annotation or a summary.
+Neither holds values. Annotations go to stderr; stdout is unchanged. No colour.
 
-Annotations go to standard error, beside the error for a person; the
-engines read their commands from either stream, and standard output stays
-the command's result, so `--events json` and `--output json` are unaffected.
-Output is never coloured or animated, inside an engine or out of it.
-
-`--annotations off`, or `MERIDIAN_ANNOTATIONS=off`, turns all of this off.
-`--annotations on` keeps it on when standard output is a terminal, which is
-how Buildkite runs a job. The option is in
-[the command reference](../reference/cli.md#inside-a-pipeline-engine).
+`--annotations off|on` (or `MERIDIAN_ANNOTATIONS`) overrides detection
+([reference](../reference/cli.md#inside-a-pipeline-engine)).
 
 ## Checking the job's identity first
 
-A missing or wrong identity shows up late, from the tool, after the plan has
-started. [`meridian secret check`](../reference/cli.md#secret-check) looks
-for every credential declared `from: ambient` where the tool would look,
-before anything runs, and reads no value:
+[`meridian secret check`](../reference/cli.md#secret-check) looks for each `from: ambient`
+credential where the tool would, without reading a value:
 
 ```
 $ meridian secret check site.yaml
@@ -728,54 +619,31 @@ site (site.yaml)
 | `kubeconfig` | the files `KUBECONFIG` names, or `~/.kube/config` |
 | any other | not checked: the tool finds it in its own way |
 
-A metadata service is asked one question with a one-second timeout, and
-only when nothing in the environment or the files answered first. A
-credential that would not be found is `MISSING`, fails the check, and is
-annotated like any other problem. Run the check as the first step of every
-job, as the snippets do.
+A metadata service is asked last, with a one-second timeout. `MISSING` fails the check.
 
 ## Sharing the record between jobs
 
-Meridian's record (the lock, the run-state and the runs) is what makes a run
-resumable and a plan comparable with the last apply. A job's runner is gone
-when the job ends, so the record must be somewhere the next job can reach:
+The record (lock, run-state, runs) must reach the next job:
 
-- **Carry the state directory as an artifact**, as the GitHub, Azure, GitLab
-  and Buildkite snippets do: the plan job keeps `.meridian/`, the apply job
-  takes it, a resume takes the failed run's. It is simple and it is enough
-  while one pipeline owns the documents and runs one job at a time (every
-  snippet has a concurrency group for that). It carries no secret: the
-  record names things and never holds a value.
-- **A shared backend**, `--backend NAME`, keeps the record in a store every
-  runner reaches, and holds the lock there, so two pipelines, or a pipeline
-  and a laptop, cannot apply the same documents at once. A backend is a
-  small program named `meridian-backend-<name>`;
+- **As an artifact** (`.meridian/`), enough for one pipeline running one job at a time. It
+  holds no secret. It also holds each step's [tool output](../reference/state.md#runsidlogs),
+  masked as the job's log is; exclude `.meridian/runs/*/logs/` or use `--no-logs` to leave
+  it out.
+- **A shared backend** (`--backend NAME`, a program `meridian-backend-<name>`) locks across
+  pipelines and laptops.
   [`meridian-backend-dir`](https://github.com/ZanattaMichael/meridian-core/tree/main/examples/backends)
-  keeps the record in a directory such as a mounted share, and
-  [the contract](../reference/state.md#writing-a-backend) is short enough to
-  write one around your object store's CLI in an afternoon. No backend for
-  an object store ships yet.
+  uses a directory; see [the contract](../reference/state.md#writing-a-backend). No
+  object-store backend ships yet.
 
-Each tool's own state (a Terraform backend, a Pulumi backend) is the tool's,
-set in the document, and is not part of Meridian's record.
-[Sharing the record](../concepts/run-safety.md#sharing-the-record) has the
-whole picture.
+Tool state (Terraform or Pulumi backends) is separate. See
+[Sharing the record](../concepts/run-safety.md#sharing-the-record).
 
 ## Approvals
 
-An approval belongs to the engine: its environment, its reviewers, its
-audit trail, its pause before production. `meridian apply` asks no question
-and needs no `--auto-approve`; the engine's gate stands in front of the job
-that runs it, as every snippet above shows (`environment: production`, a
-`deployment` job, a protected environment, a `block` step, an `input`, a
-`suspend`, a manual intervention). Letting a document name the gate it
-expects the engine to hold is the subject of
-[issue 185](https://github.com/ZanattaMichael/meridian-core/issues/185),
-and generating the pipeline file from the workflow is
-[issue 186](https://github.com/ZanattaMichael/meridian-core/issues/186);
-neither is needed to run Meridian in a pipeline today.
+Approvals are the engine's gates. `meridian apply` asks nothing and needs no
+`--auto-approve`. Planned:
+[issue 185](https://github.com/ZanattaMichael/meridian-core/issues/185) (documents naming
+their gate) and [issue 186](https://github.com/ZanattaMichael/meridian-core/issues/186)
+(generating pipeline files).
 
-What the reviewers approved and what the job applies are tied together by a
-[saved plan](pull-requests.md): the plan job writes `plan --out`, and the
-job behind the gate runs `apply --plan`, which refuses if anything has
-changed since.
+A [saved plan](pull-requests.md) ties the approved plan to the apply.

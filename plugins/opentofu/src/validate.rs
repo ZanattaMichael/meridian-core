@@ -205,6 +205,7 @@ mod tests {
                 block(Kind::Managed, "aws_instance", "web", &[]),
             ],
             required_providers: Default::default(),
+            imports: Vec::new(),
             outputs: vec![output("address")],
         }
     }
