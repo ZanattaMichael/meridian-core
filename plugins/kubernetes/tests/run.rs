@@ -301,3 +301,55 @@ fn a_debug_level_raises_kubectls_verbosity_and_level_0_adds_nothing() {
         assert_eq!(calls(&dir), [expected], "level {level}");
     }
 }
+
+const DELETED: &str =
+    "delete*) echo 'deployment.apps \"web\" deleted'; echo 'service \"web\" deleted' ;;";
+
+#[test]
+fn a_destroy_deletes_every_object_and_waits() {
+    let dir = scratch(TMP, "destroy");
+    let runner = runner(&dir, DELETED);
+    assert!(runner.destroys());
+    let removed = runner
+        .destroy(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        ["delete --ignore-not-found --wait --filename manifests.yaml --context prod --namespace web"]
+    );
+    let shown: Vec<String> = removed.iter().map(ToString::to_string).collect();
+    assert_eq!(
+        shown,
+        [
+            "delete web: deployment.apps/web",
+            "delete web_svc: service/web"
+        ]
+    );
+}
+
+#[test]
+fn a_destroy_preview_is_a_server_side_dry_run() {
+    let dir = scratch(TMP, "destroy-preview");
+    let cases = "delete*) echo 'deployment.apps \"web\" deleted (server dry run)' ;;";
+    let plan = runner(&dir, cases)
+        .plan_destroy(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        ["delete --ignore-not-found --dry-run=server --filename manifests.yaml --context prod --namespace web"]
+    );
+    assert_eq!(
+        plan.changes[0].to_string(),
+        "delete web: deployment.apps/web"
+    );
+}
+
+#[test]
+fn a_failed_delete_says_so() {
+    let dir = scratch(TMP, "destroy-fails");
+    let cases = "delete*) echo 'error: forbidden' >&2; exit 1 ;;";
+    let err = runner(&dir, cases)
+        .destroy(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap_err();
+    assert_eq!(err.msg, "kubectl could not delete the objects");
+}

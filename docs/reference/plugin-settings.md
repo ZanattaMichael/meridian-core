@@ -163,7 +163,7 @@ for each target by name.
 | Setting | Variable | Default | What it does |
 |---|---|---|---|
 | `program` | `MERIDIAN_PULUMI` | `pulumi` | The `pulumi` program to run, when it is not on `PATH`. |
-| `args` | `MERIDIAN_PULUMI_ARGS` | none | Extra arguments for `pulumi preview` and `pulumi up`, split like a shell command line: `--parallel 4`. The calls that select the stack or read its outputs get none. Pulumi's own `PULUMI_BACKEND_URL` and `PULUMI_CONFIG_PASSPHRASE` are read as Pulumi reads them. |
+| `args` | `MERIDIAN_PULUMI_ARGS` | none | Extra arguments for `pulumi preview`, `pulumi up` and `pulumi destroy`, split like a shell command line: `--parallel 4`. The calls that select the stack or read its outputs get none. Pulumi's own `PULUMI_BACKEND_URL` and `PULUMI_CONFIG_PASSPHRASE` are read as Pulumi reads them. |
 
 ## [puppet](../targets/puppet.md)
 

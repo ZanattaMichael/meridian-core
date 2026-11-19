@@ -574,3 +574,65 @@ fn a_plan_that_handed_over_a_secret_saves_no_update_plan() {
     assert!(plan.saved.is_none());
     assert!(!calls(&dir).iter().any(|c| c.contains("--save-plan")));
 }
+
+const DESTROYING: &str = r#""stack select") echo "Selected stack 'prod'" ;;
+"stack export") echo '{"version":3,"deployment":{"resources":[
+  {"urn":"urn:pulumi:prod::web-vm::pulumi:pulumi:Stack::web-vm-prod","type":"pulumi:pulumi:Stack"},
+  {"urn":"urn:pulumi:prod::web-vm::pulumi:providers:aws::default_6","type":"pulumi:providers:aws","id":"p1"},
+  {"urn":"urn:pulumi:prod::web-vm::aws:ec2/vpc:Vpc::net","type":"aws:ec2/vpc:Vpc","id":"vpc-1"},
+  {"urn":"urn:pulumi:prod::web-vm::aws:ec2/instance:Instance::web_vm","type":"aws:ec2/instance:Instance","id":"i-1"}]}}' ;;
+"destroy "*) echo 'Destroying (prod):'; echo '    - 2 deleted' ;;"#;
+
+#[test]
+fn a_destroy_reads_the_stack_and_destroys_it_last_created_first() {
+    let dir = scratch(TMP, "destroy");
+    let runner = runner(&dir, DESTROYING);
+    assert!(runner.destroys());
+    let removed = runner
+        .destroy(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        [
+            "stack select prod --create",
+            "stack export --stack prod",
+            "destroy --stack prod --yes --skip-preview",
+        ]
+    );
+    let said: Vec<String> = removed.iter().map(ToString::to_string).collect();
+    assert_eq!(
+        said,
+        [
+            "delete web_vm: aws:ec2/instance:Instance",
+            "delete net: aws:ec2/vpc:Vpc",
+        ]
+    );
+}
+
+#[test]
+fn a_destroy_preview_reads_the_stack_and_destroys_nothing() {
+    let dir = scratch(TMP, "destroy-preview");
+    let plan = runner(&dir, DESTROYING)
+        .plan_destroy(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        ["stack select prod --create", "stack export --stack prod"]
+    );
+    assert_eq!(plan.changes.len(), 2);
+    assert!(plan.saved.is_none());
+}
+
+#[test]
+fn a_failed_destroy_says_so() {
+    let dir = scratch(TMP, "destroy-fails");
+    let cases = DESTROYING.replace(
+        r#""destroy "*) echo 'Destroying (prod):'; echo '    - 2 deleted' ;;"#,
+        r#""destroy "*) echo 'error: resource web_vm is protected' >&2; exit 255 ;;"#,
+    );
+    let err = runner(&dir, &cases)
+        .destroy(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap_err();
+    assert_eq!(err.msg, "pulumi destroy failed");
+    assert!(err.output.contains("is protected"), "{err:?}");
+}

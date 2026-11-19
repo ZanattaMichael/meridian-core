@@ -119,6 +119,9 @@ pub struct Tool {
     secret_env: Vec<(String, Arc<SecretValue>)>,
     stdin: Option<Stdin>,
     relay_stdout: bool,
+    /// For a tool that prints one JSON object a line: what of each line a
+    /// person is shown, or `None` to show nothing for it.
+    show_stdout: Option<fn(&str) -> Option<String>>,
 }
 
 /// What a tool is given on its standard input.
@@ -142,6 +145,7 @@ impl Tool {
             secret_env: Vec::new(),
             stdin: None,
             relay_stdout: true,
+            show_stdout: None,
         }
     }
 
@@ -264,6 +268,16 @@ impl Tool {
         self
     }
 
+    /// Treats standard output as one record a line, such as Terraform's
+    /// `-json`: it is kept whole in [`Finished::stdout`], and each line is
+    /// relayed as `show` reads it, or not at all where `show` returns
+    /// `None`.
+    pub fn show_stdout_as(mut self, show: fn(&str) -> Option<String>) -> Self {
+        self.relay_stdout = false;
+        self.show_stdout = Some(show);
+        self
+    }
+
     /// The command as a person would type it, with secret arguments hidden.
     pub fn command_line(&self) -> String {
         let mut line = display_word(&self.program);
@@ -352,6 +366,7 @@ impl Tool {
         let stderr = child.stderr.take().expect("stderr is piped");
         let tail = Mutex::new(Tail::default());
         let relay_stdout = self.relay_stdout;
+        let show_stdout = self.show_stdout;
 
         // Read until the pipes close, and meanwhile watch for the process
         // to end or for the host to ask for the run to stop. A stopped tool
@@ -372,6 +387,9 @@ impl Tool {
                     if relay_stdout {
                         log.out(line);
                         tail.lock().expect("no panic holds the tail").push(line);
+                    } else if let Some(shown) = show_stdout.and_then(|show| show(line)) {
+                        log.out(&shown);
+                        tail.lock().expect("no panic holds the tail").push(&shown);
                     }
                 })
             });
@@ -402,6 +420,7 @@ impl Tool {
                     exit_code: status.and_then(|s| s.code()),
                     output: tail,
                     changes: Vec::new(),
+                    failures: Vec::new(),
                 });
             }
             Waited::Failed(err) => {
@@ -559,6 +578,7 @@ impl Finished {
             exit_code: self.code,
             output: self.tail,
             changes: Vec::new(),
+            failures: Vec::new(),
         }
     }
 }

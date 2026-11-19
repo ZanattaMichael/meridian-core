@@ -959,3 +959,38 @@ fn a_debug_level_shows_more_of_the_journal_systemds_status_and_quadlets_units() 
         log.text()
     );
 }
+
+#[test]
+fn a_destroy_stops_and_removes_every_unit_it_installed_and_nothing_else() {
+    let dir = scratch(TMP, "destroy");
+    let runner = host(&dir);
+    assert!(runner.destroys());
+    runner
+        .apply(&context(&dir), &shop(), &KeptLog::default())
+        .unwrap();
+    fs::write(dir.join("units/theirs.container"), "[Container]\n").unwrap();
+    fs::remove_file(dir.join("systemctl.calls")).unwrap();
+
+    let preview = runner
+        .plan_destroy(&context(&dir), &shop(), &KeptLog::default())
+        .unwrap();
+    let expected = [
+        "delete data: stop data-volume.service and remove data.volume",
+        "delete web: stop web.service and remove web.container",
+    ];
+    assert_eq!(shown(&preview.changes), expected);
+    assert!(systemctl(&dir).is_empty(), "a preview changes nothing");
+
+    let removed = runner
+        .destroy(&context(&dir), &shop(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(shown(&removed), expected);
+    assert_eq!(installed(&dir), ["theirs.container"]);
+    assert!(systemctl(&dir).contains(&"--user daemon-reload".to_owned()));
+
+    // Nothing is left to remove.
+    let again = runner
+        .destroy(&context(&dir), &shop(), &KeptLog::default())
+        .unwrap();
+    assert!(again.is_empty(), "{again:?}");
+}

@@ -150,6 +150,17 @@ exit 2";
         .ends_with("--inventory inventory.ini --user deploy playbook.yml"));
     assert_eq!(err.changes.len(), 1);
     assert_eq!(err.changes[0].resource, "nginx_pkg");
+    assert_eq!(err.failures.len(), 1);
+    let failure = &err.failures[0];
+    assert_eq!(
+        (failure.resource.as_str(), failure.endpoint.as_str()),
+        ("nginx_svc", "web01")
+    );
+    assert_eq!(failure.cause.as_str(), "resource-failed");
+    assert_eq!(
+        failure.summary,
+        "Could not find the requested service nginx"
+    );
 }
 
 #[test]
@@ -159,6 +170,8 @@ fn an_unreachable_host_is_named_as_that() {
         .plan(&context(&dir), &compiled(), &KeptLog::default())
         .unwrap_err();
     assert_eq!(err.msg, "ansible-playbook could not reach the host");
+    assert_eq!(err.failures[0].cause.as_str(), "unreachable");
+    assert_eq!(err.failures[0].endpoint, "web01");
 }
 
 #[test]

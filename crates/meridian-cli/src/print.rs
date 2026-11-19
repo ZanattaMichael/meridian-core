@@ -457,6 +457,11 @@ impl Printer<'_> {
                 for line in lines {
                     writeln!(out, "    {line}")?;
                 }
+                // Each resource the tool named: where, what, why, and where
+                // the document declares it.
+                for failed in &report.failures {
+                    writeln!(out, "    {}", failure_line(failed, &report.host))?;
+                }
             }
             Outcome::NotRun { because_of } => {
                 writeln!(out, "  not run, because {because_of} failed")?
@@ -464,6 +469,35 @@ impl Printer<'_> {
         }
         Ok(())
     }
+}
+
+/// `endpoint  resource  cause  summary  (file:line)`, with `-` for what the
+/// tool did not say.
+pub(crate) fn failure_line(failed: &meridian_orchestrator::ResourceFailure, host: &str) -> String {
+    let f = &failed.failure;
+    let or_dash = |text: &str| {
+        if text.is_empty() {
+            "-".to_owned()
+        } else {
+            text.to_owned()
+        }
+    };
+    let endpoint = if f.endpoint.is_empty() {
+        host
+    } else {
+        f.endpoint.as_str()
+    };
+    let mut line = format!(
+        "{}  {}  {}  {}",
+        or_dash(endpoint),
+        or_dash(&f.resource),
+        f.cause,
+        f.summary.lines().next().unwrap_or_default()
+    );
+    if !failed.at.is_empty() {
+        line.push_str(&format!("  ({})", failed.at));
+    }
+    line
 }
 
 pub(crate) fn change_line(change: &meridian_sdk::Change) -> String {

@@ -169,7 +169,7 @@ not known is `null`) and `measures` (each with `name`, `value` and `unit`).
 | `destroyed` | `destroy` removed what the tool made | `changes` |
 | `kept` | `destroy` or `plan --destroy` left the stage in place | `kept`: `cannot-destroy` or `never-applied` |
 | `left-out` | the document's own `spec.when` was false | `condition` |
-| `failed` | the stage failed and the run stopped here | `error`, the text; `changes`, what the tool had already done before failing; `reason`, the code |
+| `failed` | the stage failed and the run stopped here | `error`, the text; `changes`, what the tool had already done before failing; `reason`, the code; `failures`, each resource the tool named as failed: `resource`, `endpoint`, `cause` (a [cause word](failure-causes.md)), `toolCode`, `summary` and `at` (`file:line`), empty strings for what the tool did not say |
 | `not-run` | an earlier stage failed | `becauseOf` (`name` and `kind`) |
 
 A `change` is `resource`, `action` (`create`, `update`, `delete`,

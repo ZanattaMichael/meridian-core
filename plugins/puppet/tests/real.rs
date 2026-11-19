@@ -210,6 +210,19 @@ fn a_failed_resource_fails_the_apply_and_keeps_what_was_already_done() {
         .expect_err("the apply fails");
     assert!(matches!(err.exit_code, Some(4 | 6)), "{err}");
     assert!(err.output.contains("returned 3"), "{err}");
+    let failed: Vec<(&str, &str, &str)> = err
+        .failures
+        .iter()
+        .map(|f| (f.resource.as_str(), f.cause.as_str(), f.tool_code.as_str()))
+        .collect();
+    assert_eq!(
+        failed,
+        [
+            ("broken", "resource-failed", "rc=3"),
+            ("after", "dependency-failed", "")
+        ],
+        "{err}"
+    );
     assert!(
         dir.join("app.conf").is_file(),
         "what came before the failure was done"

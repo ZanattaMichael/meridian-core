@@ -20,6 +20,7 @@ with the `pulumi` command line.
 | Outputs, handed to later stages | Yes. Secret outputs are marked sensitive and masked. |
 | The [common infrastructure types](#common-infrastructure-types) | Yes, on AWS (`aws`) and Azure (`azure-native`). |
 | Plan, apply and outputs | Yes: `pulumi preview`, `pulumi up`, `pulumi stack output`. |
+| Destroy | Yes: `pulumi destroy`; the stack and its history are kept. See [Destroying](../operations/destroying.md) |
 | `notifies` | **No.** Refused at compile time. See [Notifications](#notifications). |
 | `runtimeWhen` | **No.** Refused at compile time. |
 | `adopt` | Yes: the `import` resource option. See [Adopting what exists](#adopting-what-exists) |
@@ -338,6 +339,7 @@ the same type.
 | `plan` | `pulumi stack select <stack> --create`, then `pulumi preview --json` |
 | `apply` | the same two, then `pulumi up --yes --skip-preview` |
 | outputs | `pulumi stack output --json`, once masked and once with `--show-secrets` |
+| `destroy` | `pulumi stack select`, `pulumi stack export` (what goes, last created first), then `pulumi destroy --yes --skip-preview`; `plan --destroy` stops after `stack export` |
 
 Changes are reported by id and type (`create web_vm: aws:ec2/instance:Instance`);
 `replace` is separate from update. The stack resource and default providers are not
@@ -541,7 +543,7 @@ Each names the rule, and the resource with file and line where there is one.
 | Variable | Effect |
 |---|---|
 | `MERIDIAN_PULUMI` | The program to run, when it is not `pulumi` on `PATH`. |
-| `MERIDIAN_PULUMI_ARGS` | Arguments added to `pulumi preview` and `pulumi up`, split like a shell command line (quotes hold a word together): `--parallel 4`. The calls that select the stack and read its outputs get none. |
+| `MERIDIAN_PULUMI_ARGS` | Arguments added to `pulumi preview`, `pulumi up` and `pulumi destroy`, split like a shell command line (quotes hold a word together): `--parallel 4`. The calls that select the stack and read its outputs get none. |
 | `PULUMI_BACKEND_URL` | Where state lives; wins over the document. |
 | `PULUMI_CONFIG_PASSPHRASE`, `PULUMI_CONFIG_PASSPHRASE_FILE` | The passphrase for a stack's secrets. Set either and the plugin sets none. |
 | `PULUMI_ACCESS_TOKEN` and provider credentials | Passed through to `pulumi` untouched. |

@@ -231,6 +231,13 @@ See the [plugin settings reference](../reference/plugin-settings.md#dsc).
 
 In `Test` mode, drift and untestable resources both show as changes.
 
+### Reading a failure
+
+Each result a `Set` marks `FAIL` is a [resource failure](../reference/state.md#resource-failures): `InstanceName` is the
+resource, the first line of `ErrorMessage` the summary, `FAIL` the tool code,
+and the cause `resource-failed`, or `unreachable`, `auth-failed`, `timed-out` or `reboot-required` when the message says so. A run that stops with
+`AbortedByException` is `tool-crashed` on no resource.
+
 ### How long a run takes
 
 A DSC v3 run's time is mostly process starts: one PowerShell (about 1 s on a hosted Windows

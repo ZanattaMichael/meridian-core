@@ -9,6 +9,7 @@
 
 use std::path::PathBuf;
 
+use meridian_sdk::failure::{Cause, Failure};
 use meridian_sdk::tool::{absolute_path, write_artifact, Tool};
 use meridian_sdk::{
     agent_for, credential_for_this_machine, AgentPrograms, Applied, Artifact, Change, ChangeAction,
@@ -196,7 +197,9 @@ impl ChefRunner {
         if finished.success() {
             return Ok(changes);
         }
+        let failures = read_failures(&finished.stdout);
         let mut error = finished.into_error("chef-client could not converge the cookbook");
+        error.failures = failures;
         if !why_run {
             error.changes = changes;
         }
@@ -291,6 +294,74 @@ fn read_report(stdout: &str) -> Vec<Change> {
         }
     }
     changes
+}
+
+/// Reads the failures chef-client's formatter prints. A failed resource is
+///
+/// ```text
+/// Error executing action `run` on resource 'execute[migrate]'
+/// ======================================================================
+///
+/// Mixlib::ShellOut::ShellCommandFailed
+/// ------------------------------------
+/// Expected process to exit with [0], but received '3'
+/// ```
+///
+/// and a recipe that did not compile is `Recipe Compile Error in ...`
+/// followed the same way by the exception and its message.
+fn read_failures(stdout: &str) -> Vec<Failure> {
+    let mut failures: Vec<Failure> = Vec::new();
+    // The resource the error is about ("" for the recipe), and the
+    // exception once read.
+    let mut pending: Option<(String, Option<String>)> = None;
+    for line in stdout.lines().map(str::trim) {
+        if let Some(rest) = line.strip_prefix("Error executing action `") {
+            let name = rest
+                .split_once("on resource '")
+                .and_then(|(_, r)| r.strip_suffix('\''))
+                .and_then(|r| r.split_once('['))
+                .and_then(|(_, r)| r.strip_suffix(']'))
+                .unwrap_or_default();
+            // A user's group memberships are named after the user.
+            let id = name.split_once(':').map_or(name, |(id, _)| id);
+            pending = Some((id.to_owned(), None));
+            continue;
+        }
+        if line.starts_with("Recipe Compile Error") {
+            pending = Some((String::new(), None));
+            continue;
+        }
+        let Some((resource, exception)) = &mut pending else {
+            continue;
+        };
+        if line.is_empty() || line.starts_with('=') || line.starts_with('-') {
+            continue;
+        }
+        let Some(class) = exception else {
+            *exception = Some(line.to_owned());
+            continue;
+        };
+        let cause = if resource.is_empty() {
+            Cause::InvalidConfig
+        } else if class.contains("CommandTimeout") {
+            Cause::TimedOut
+        } else {
+            Cause::from_message(line).unwrap_or(Cause::ResourceFailed)
+        };
+        let mut failure = Failure::new(cause, resource.clone(), line).code(class.clone());
+        if let Some(code) = line
+            .split_once("but received '")
+            .and_then(|(_, r)| r.split_once('\''))
+            .map(|(code, _)| code)
+        {
+            failure = failure.code(format!("rc={code}"));
+        }
+        if !failures.iter().any(|f| f.resource == failure.resource) {
+            failures.push(failure);
+        }
+        pending = None;
+    }
+    failures
 }
 
 impl Runner for ChefRunner {
@@ -503,6 +574,47 @@ Recipe: meridian_site::default
 ";
         let shown: Vec<String> = read_report(report).iter().map(|c| c.to_string()).collect();
         assert_eq!(shown, ["update team: create", "update deploy: modify"]);
+    }
+
+    #[test]
+    fn a_failed_resource_and_a_recipe_that_did_not_compile_are_read_from_the_formatter() {
+        let output = "\
+  * execute[migrate] action run
+    ================================================================================
+    Error executing action `run` on resource 'execute[migrate]'
+    ================================================================================
+
+    Mixlib::ShellOut::ShellCommandFailed
+    ------------------------------------
+    Expected process to exit with [0], but received '3'
+    ---- Begin output of /bin/false ----
+";
+        let failures = read_failures(output);
+        assert_eq!(failures.len(), 1);
+        let f = &failures[0];
+        assert_eq!(
+            (f.resource.as_str(), f.cause),
+            ("migrate", Cause::ResourceFailed)
+        );
+        assert_eq!(f.tool_code, "rc=3");
+        assert_eq!(
+            f.summary,
+            "Expected process to exit with [0], but received '3'"
+        );
+
+        let output = "\
+================================================================================
+Recipe Compile Error in /work/cookbooks/meridian_web/recipes/default.rb
+================================================================================
+
+NoMethodError
+-------------
+undefined method `no_such_resource' for cookbook: meridian_web
+";
+        let failures = read_failures(output);
+        assert_eq!(failures[0].cause, Cause::InvalidConfig);
+        assert_eq!(failures[0].resource, "");
+        assert_eq!(failures[0].tool_code, "NoMethodError");
     }
 
     #[test]

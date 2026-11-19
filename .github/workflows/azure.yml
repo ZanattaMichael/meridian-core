@@ -85,12 +85,12 @@ jobs:
         run: cargo test -p meridian-target-arm --locked --test real -- --ignored --nocapture
 
   subscription:
-    if: github.event.pull_request.draft != true
     name: what-if and deploy in a real subscription
-    # Runs only when the repository names a resource group to use, and never
-    # for a pull request from a fork, which cannot sign in.
+    # Runs only when the repository names a resource group to use, never on a
+    # draft, and never for a pull request from a fork, which cannot sign in.
     if: >-
       vars.AZURE_RESOURCE_GROUP != '' &&
+      github.event.pull_request.draft != true &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest

@@ -372,8 +372,8 @@ As on [Terraform](terraform.md#editor-schemas), with `tofu init -backend=false` 
 | Step | Command |
 |---|---|
 | Prepare | writes `main.tofu.json` into the work directory, then `tofu init -input=false` |
-| Plan | `tofu plan -input=false -out=meridian.tfplan`, then `tofu show -json meridian.tfplan` to read the changes |
-| Apply | the plan steps, then `tofu apply -input=false meridian.tfplan`, then `tofu output -json` |
+| Plan | `tofu plan -input=false -json -out=meridian.tfplan`, then `tofu show -json meridian.tfplan` to read the changes |
+| Apply | the plan steps, then `tofu apply -input=false -json meridian.tfplan`, then `tofu output -json` |
 | Outputs | `tofu output -json` |
 
 An apply applies the plan it just showed. Keep the work directory,
@@ -400,6 +400,12 @@ Settings can also go in `meridian.yaml` under `spec.settings.opentofu`; the envi
 wins. See the [plugin settings reference](../reference/plugin-settings.md#opentofu).
 
 [`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) sets `TF_LOG` to `INFO`, `DEBUG` or `TRACE` on every `tofu` call; the log goes to standard error, beside the JSON.
+
+## Reading a failure
+
+Read as for [Terraform](terraform.md#reading-a-failure): each error diagnostic
+of `-json` output is a [resource failure](../reference/state.md#resource-failures)
+on the resource its `address` names.
 
 ## Credentials
 

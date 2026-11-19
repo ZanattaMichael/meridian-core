@@ -563,3 +563,48 @@ fn secrets_reach_helm_as_a_values_file_on_standard_input_and_no_file_holds_them(
         .unwrap()
         .contains("hunter2"));
 }
+
+#[test]
+fn a_destroy_uninstalls_the_release_and_waits() {
+    let dir = scratch(TMP, "destroy");
+    let runner = runner(&dir, "deployed", INSTALLED);
+    assert!(runner.destroys());
+    let removed = runner
+        .destroy(&context(&dir), &compiled(false), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        [
+            "helm status web-app --output json",
+            "helm get manifest web-app",
+            "helm uninstall web-app --wait --timeout 5m",
+        ]
+    );
+    let mut said = shown(&removed);
+    said.sort();
+    assert_eq!(
+        said,
+        [
+            "delete ConfigMap/old-settings: ConfigMap old-settings",
+            "delete web: Deployment web",
+            "delete web_config: ConfigMap web-config",
+        ]
+    );
+}
+
+#[test]
+fn a_destroy_preview_uninstalls_nothing_and_a_missing_release_has_nothing_to_remove() {
+    let dir = scratch(TMP, "destroy-preview");
+    let plan = runner(&dir, "deployed", INSTALLED)
+        .plan_destroy(&context(&dir), &compiled(false), &KeptLog::default())
+        .unwrap();
+    assert_eq!(plan.changes.len(), 3);
+    assert!(!calls(&dir).iter().any(|c| c.contains("uninstall")));
+
+    let dir = scratch(TMP, "destroy-missing");
+    let removed = runner(&dir, "", "")
+        .destroy(&context(&dir), &compiled(false), &KeptLog::default())
+        .unwrap();
+    assert!(removed.is_empty());
+    assert_eq!(calls(&dir), ["helm status web-app --output json"]);
+}

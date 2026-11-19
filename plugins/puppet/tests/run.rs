@@ -547,3 +547,77 @@ OUT"#;
         ["create app_pkg: ensure: created"]
     );
 }
+
+#[test]
+fn a_failed_resource_and_what_it_held_back_are_named_from_puppets_errors() {
+    let dir = scratch(TMP, "local-failures");
+    let body = r#"cat >&2 <<'OUT'
+Error: /Stage[main]/Meridian_web/Exec[migrate]/returns: change from 'notrun' to ['0'] failed: '/bin/false' returned 3 instead of one of [0]
+Warning: /Stage[main]/Meridian_web/Service[app_svc]: Skipping because of failed dependencies
+OUT
+exit 4"#;
+    let err = runner(&dir, body, "exit 9")
+        .apply(
+            &context(&dir, "localhost"),
+            &compiled(),
+            &KeptLog::default(),
+        )
+        .unwrap_err();
+    let got: Vec<(&str, &str, &str)> = err
+        .failures
+        .iter()
+        .map(|f| (f.resource.as_str(), f.cause.as_str(), f.tool_code.as_str()))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("migrate", "resource-failed", "rc=3"),
+            ("app_svc", "dependency-failed", "")
+        ]
+    );
+    assert_eq!(
+        err.failures[0].summary,
+        "'/bin/false' returned 3 instead of one of [0]"
+    );
+
+    let err = runner(
+        &dir,
+        "echo \"Error: Evaluation Error: Unknown variable: 'nope'. (file: apply.pp, line: 3, column: 9) on node web01\" >&2\nexit 1",
+        "exit 9",
+    )
+    .plan(&context(&dir, "localhost"), &compiled(), &KeptLog::default())
+    .unwrap_err();
+    assert_eq!(err.failures[0].cause.as_str(), "invalid-config");
+    assert_eq!(err.failures[0].resource, "");
+}
+
+#[test]
+fn bolt_names_the_failed_resource_on_its_target_and_a_target_it_could_not_reach() {
+    let dir = scratch(TMP, "bolt-failures");
+    let failed = r#"cat <<'OUT'
+[{"target":"web01","action":"apply","object":null,"status":"failure","value":{"report":{"status":"failed","resource_statuses":{"Package[app_pkg]":{"failed":true,"events":[{"property":"ensure","message":"change from 'purged' to 'present' failed: Execution of '/usr/bin/apt-get -q -y install app' returned 100: E: Unable to locate package app","status":"failure"}]}}}}}]
+OUT
+exit 1"#;
+    let err = runner(&dir, "exit 9", failed)
+        .apply(&context(&dir, "web01"), &compiled(), &KeptLog::default())
+        .unwrap_err();
+    let f = &err.failures[0];
+    assert_eq!(
+        (f.resource.as_str(), f.endpoint.as_str(), f.cause.as_str()),
+        ("app_pkg", "web01", "resource-failed")
+    );
+    assert!(f.summary.starts_with("Execution of"), "{}", f.summary);
+
+    let unreached = r#"cat <<'OUT'
+[{"target":"web01","action":"apply","object":null,"status":"failure","value":{"_error":{"kind":"puppetlabs.tasks/connect-error","msg":"Failed to connect to web01: Connection refused","details":{}}}}]
+OUT
+exit 2"#;
+    let err = runner(&dir, "exit 9", unreached)
+        .apply(&context(&dir, "web01"), &compiled(), &KeptLog::default())
+        .unwrap_err();
+    let f = &err.failures[0];
+    assert_eq!(
+        (f.endpoint.as_str(), f.cause.as_str(), f.tool_code.as_str()),
+        ("web01", "unreachable", "puppetlabs.tasks/connect-error")
+    );
+}

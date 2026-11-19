@@ -338,6 +338,33 @@ fn a_project_is_brought_up_changed_and_kept_in_step_with_its_document() {
     let (changes, outputs) = session.apply(&second);
     assert_eq!(changes, ["update web"]);
     assert_eq!(get(value(&outputs, "url")).trim(), "goodbye");
+
+    // A destroy previews what goes, then takes the project down, its
+    // network and volume with it.
+    let stop = meridian_plugin_host::Stop::default();
+    let mut lines: Vec<LogLine> = Vec::new();
+    let preview = session
+        .client
+        .plan_destroy_with(&session.context, &second, &mut |l| lines.push(l), &stop)
+        .unwrap_or_else(|e| panic!("the destroy preview runs: {e}\n{lines:#?}"));
+    let mut expected = vec!["delete default", "delete site", "delete web"];
+    let mut previewed = shown(&preview.changes);
+    previewed.sort();
+    assert_eq!(previewed, expected);
+    assert_eq!(
+        containers(&project).len(),
+        1,
+        "a preview must change nothing"
+    );
+    let removed = session
+        .client
+        .destroy_with(&session.context, &second, &mut |l| lines.push(l), &stop)
+        .unwrap_or_else(|e| panic!("the destroy runs: {e}\n{lines:#?}"));
+    let mut removed = shown(&removed);
+    removed.sort();
+    expected.sort();
+    assert_eq!(removed, expected);
+    assert!(containers(&project).is_empty(), "the project is down");
 }
 
 #[ignore = "needs a real Docker; see docs/contributing/real-tool-tests.md"]

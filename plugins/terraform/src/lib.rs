@@ -39,6 +39,7 @@
 mod common;
 mod emit;
 mod import;
+pub mod machine;
 mod runner;
 mod schemas;
 mod sort;

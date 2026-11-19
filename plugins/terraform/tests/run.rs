@@ -42,7 +42,7 @@ fn runner(dir: &Path, cases: &str) -> TerraformRunner {
 }
 
 const HAPPY: &str = r#"init) echo 'Terraform has been successfully initialized!' ;;
-plan) echo 'Plan: 1 to add, 0 to change, 0 to destroy.' ;;
+plan) echo '{"@level":"info","@message":"Plan: 1 to add, 0 to change, 0 to destroy.","type":"change_summary"}' ;;
 show) echo '{"resource_changes":[{"address":"aws_instance.web_vm","mode":"managed","type":"aws_instance","name":"web_vm","change":{"actions":["create"]}}]}' ;;
 apply) echo 'Apply complete! Resources: 1 added, 0 changed, 0 destroyed.' ;;
 output) echo '{"web_vm_ip":{"sensitive":false,"type":"string","value":"203.0.113.7"},"admin_password":{"sensitive":true,"type":"string","value":"hunter2"}}' ;;"#;
@@ -66,7 +66,7 @@ fn a_plan_initialises_plans_and_reads_the_saved_plan() {
         calls(&dir),
         [
             "init -input=false -no-color",
-            "plan -input=false -no-color -out=meridian.tfplan",
+            "plan -input=false -no-color -json -out=meridian.tfplan",
             "show -json meridian.tfplan",
         ]
     );
@@ -97,7 +97,7 @@ fn an_apply_applies_the_plan_it_just_showed_and_reports_outputs() {
     assert_eq!(
         calls(&dir)[3..],
         [
-            "apply -input=false -no-color meridian.tfplan",
+            "apply -input=false -no-color -json meridian.tfplan",
             "output -json -no-color"
         ]
     );
@@ -144,7 +144,7 @@ fn a_failed_step_says_which_and_stops_there() {
     assert!(err.output.contains("No valid credential sources found"));
     assert!(err
         .command
-        .ends_with("plan -input=false -no-color -out=meridian.tfplan"));
+        .ends_with("plan -input=false -no-color -json -out=meridian.tfplan"));
     assert_eq!(calls(&dir).len(), 2, "nothing runs after the failure");
 }
 
@@ -193,7 +193,7 @@ fn secrets_reach_the_tool_in_a_private_variables_file_and_the_saved_plan_is_scru
     );
     let made = calls(&dir);
     assert!(
-        made[1].starts_with("plan -input=false -no-color -out=meridian.tfplan -var-file="),
+        made[1].starts_with("plan -input=false -no-color -json -out=meridian.tfplan -var-file="),
         "{made:?}"
     );
     assert!(!made.iter().any(|c| c.contains("hunter2")), "{made:?}");
@@ -387,7 +387,7 @@ fn a_plan_asked_to_save_hands_back_the_plan_file_and_an_apply_handed_it_applies_
         [
             "init -input=false -no-color",
             "show -json meridian.tfplan",
-            "apply -input=false -no-color meridian.tfplan",
+            "apply -input=false -no-color -json meridian.tfplan",
             "output -json -no-color",
         ]
     );
@@ -448,10 +448,33 @@ fn a_debug_level_sets_tf_log_on_every_call_and_level_0_sets_nothing() {
     }
 }
 
+#[test]
+fn a_failed_apply_names_the_resource_and_its_cause_from_the_json_diagnostic() {
+    let dir = scratch(TMP, "diagnostic");
+    let cases = r#"init) echo ok ;;
+plan) echo '{"@message":"Plan: 1 to add","type":"change_summary"}' ;;
+show) echo '{"resource_changes":[{"address":"aws_instance.web_vm","mode":"managed","type":"aws_instance","name":"web_vm","change":{"actions":["create"]}}]}' ;;
+apply) echo '{"@level":"error","@message":"Error: creating EC2 Instance: InvalidAMIID.NotFound","diagnostic":{"severity":"error","summary":"creating EC2 Instance: InvalidAMIID.NotFound","detail":"The image id does not exist","address":"aws_instance.web_vm"},"type":"diagnostic"}'; exit 1 ;;"#;
+    let log = KeptLog::default();
+    let err = runner(&dir, cases)
+        .apply(&context(&dir), &compiled(), &log)
+        .unwrap_err();
+    assert_eq!(err.msg, "terraform apply failed");
+    assert_eq!(err.failures.len(), 1);
+    assert_eq!(err.failures[0].resource, "web_vm");
+    assert_eq!(err.failures[0].cause.as_str(), "resource-failed");
+    assert_eq!(err.failures[0].detail, "The image id does not exist");
+    // A person reads each line's message, not the JSON.
+    assert!(log.text().contains(
+        &"Error: creating EC2 Instance: InvalidAMIID.NotFound: The image id does not exist"
+            .to_owned()
+    ));
+}
+
 const DESTROYING: &str = r#"init) echo 'initialized' ;;
-plan) echo 'Plan: 0 to add, 0 to change, 1 to destroy.' ;;
+plan) echo '{"@message":"Plan: 0 to add, 0 to change, 1 to destroy.","type":"change_summary"}' ;;
 show) echo '{"resource_changes":[{"address":"aws_instance.web_vm","mode":"managed","type":"aws_instance","name":"web_vm","change":{"actions":["delete"]}}]}' ;;
-apply) echo 'Destroy complete! Resources: 1 destroyed.' ;;"#;
+apply) echo '{"@message":"Destroy complete! Resources: 1 destroyed.","type":"apply_complete"}' ;;"#;
 
 #[test]
 fn a_destroy_plans_with_destroy_and_applies_that_plan() {
@@ -465,9 +488,9 @@ fn a_destroy_plans_with_destroy_and_applies_that_plan() {
         calls(&dir),
         [
             "init -input=false -no-color",
-            "plan -input=false -no-color -out=meridian.tfplan -destroy",
+            "plan -input=false -no-color -json -out=meridian.tfplan -destroy",
             "show -json meridian.tfplan",
-            "apply -input=false -no-color meridian.tfplan",
+            "apply -input=false -no-color -json meridian.tfplan",
         ]
     );
     assert_eq!(removed.len(), 1);
@@ -484,7 +507,7 @@ fn a_destroy_preview_plans_with_destroy_and_applies_nothing() {
         calls(&dir),
         [
             "init -input=false -no-color",
-            "plan -input=false -no-color -out=meridian.tfplan -destroy",
+            "plan -input=false -no-color -json -out=meridian.tfplan -destroy",
             "show -json meridian.tfplan",
         ]
     );

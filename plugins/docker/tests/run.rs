@@ -509,3 +509,42 @@ fn a_plan_with_secrets_gives_compose_the_file_too_and_removes_it_after() {
     );
     assert!(dir.join("env").exists());
 }
+
+#[test]
+fn a_destroy_takes_the_project_down_with_its_volumes() {
+    let dir = scratch(TMP, "destroy");
+    let runner = runner(&dir, &format!("{CONFIG}\n{RUNNING}"));
+    assert!(runner.destroys());
+    let removed = runner
+        .destroy(&context(&dir), &compiled(""), &KeptLog::default())
+        .unwrap();
+    let mut expected = SURVEY.to_vec();
+    expected.push("compose down --volumes --remove-orphans");
+    assert_eq!(calls(&dir), expected);
+    assert_eq!(
+        shown(&removed),
+        [
+            "delete db: container",
+            "delete app: container",
+            "delete backend: network shop_backend",
+            "delete data: volume shop_data",
+        ]
+    );
+}
+
+#[test]
+fn a_destroy_preview_changes_nothing_and_an_empty_project_is_not_taken_down() {
+    let dir = scratch(TMP, "destroy-preview");
+    let plan = runner(&dir, &format!("{CONFIG}\n{RUNNING}"))
+        .plan_destroy(&context(&dir), &compiled(""), &KeptLog::default())
+        .unwrap();
+    assert_eq!(calls(&dir), SURVEY);
+    assert_eq!(plan.changes.len(), 4);
+
+    let dir = scratch(TMP, "destroy-nothing");
+    let removed = runner(&dir, CONFIG)
+        .destroy(&context(&dir), &compiled(""), &KeptLog::default())
+        .unwrap();
+    assert!(removed.is_empty());
+    assert_eq!(calls(&dir), SURVEY);
+}

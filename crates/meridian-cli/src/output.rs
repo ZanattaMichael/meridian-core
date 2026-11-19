@@ -313,6 +313,10 @@ pub(crate) fn stage(stage: &StageReport, mode: Mode, out: Option<&Path>) -> Json
         Outcome::Failed(why) => {
             object.insert("changes".to_owned(), changes(&stage.done_before_failing));
             object.insert("error".to_owned(), Json::from(why.as_str()));
+            object.insert(
+                "failures".to_owned(),
+                Json::Array(stage.failures.iter().map(failure).collect()),
+            );
         }
         Outcome::NotRun { because_of } => {
             object.insert("becauseOf".to_owned(), stage_id(because_of));
@@ -570,4 +574,18 @@ pub(crate) fn violation(violation: &meridian_rules::Violation) -> Json {
         "key": text_or_null(&violation.key),
         "message": violation.text,
     })
+}
+
+/// One resource a stage's tool failed on, masked: what `--output json`
+/// shows of it. The detail is left to `failures.jsonl`.
+fn failure(failed: &meridian_orchestrator::ResourceFailure) -> Json {
+    let f = &failed.failure;
+    let mut object = serde_json::Map::new();
+    object.insert("resource".to_owned(), text_or_null(&f.resource));
+    object.insert("endpoint".to_owned(), text_or_null(&f.endpoint));
+    object.insert("cause".to_owned(), Json::from(f.cause.as_str()));
+    object.insert("toolCode".to_owned(), text_or_null(&f.tool_code));
+    object.insert("summary".to_owned(), Json::from(f.summary.as_str()));
+    object.insert("at".to_owned(), text_or_null(&failed.at));
+    Json::Object(object)
 }

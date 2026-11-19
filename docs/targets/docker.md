@@ -22,6 +22,7 @@ There is no separate `compose` target.
 | `state: absent` | No. Remove the resource from the document; bringing the project up removes services the document no longer declares |
 | Plan | Yes: the file is compared with what Docker is running. See [Running](#running) |
 | Outputs | Yes: a published port, or a path into `docker inspect` |
+| Destroy | Yes: `docker compose down --volumes --remove-orphans`. See [Destroying](../operations/destroying.md) |
 | Compose variables (`${VAR}` from the shell or a `.env` file) | No. A `$` is written literally. See [References](#references) |
 | Several Compose files, `include`, top-level `models` | No. One document is one Compose file |
 
@@ -683,8 +684,12 @@ with:
 | `--project-directory`, `--profile` | when the project sets `directory` or `profiles`; these go on every call |
 
 Set `wait: false` when services are meant to exit. Outputs are read with `docker compose
-port`, `ps` and `docker inspect`. Nothing takes a project down; run
-`docker compose --project-name <name> down [--volumes]`.
+port`, `ps` and `docker inspect`.
+
+`meridian destroy` makes the same comparison, reports a `delete` for each service with
+containers and each network and volume of the project, then runs
+`docker compose down --volumes --remove-orphans`. Volumes and the data in them go; images
+are kept. A project with nothing running is not taken down.
 
 | Variable | Meaning |
 |---|---|

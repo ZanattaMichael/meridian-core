@@ -282,6 +282,9 @@ pub struct RunError {
     /// What an apply or a destroy had already done before it failed, as far
     /// as the tool reported it. Always empty for a plan.
     pub changes: Vec<Change>,
+    /// Each resource the tool failed on, as its report says. See
+    /// [`crate::failure`].
+    pub failures: Vec<crate::failure::Failure>,
 }
 
 impl RunError {

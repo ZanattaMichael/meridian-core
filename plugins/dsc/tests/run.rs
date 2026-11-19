@@ -178,6 +178,11 @@ fn a_resource_that_could_not_be_set_fails_the_apply() {
         "PSDscResources/File/site_config: Access is denied"
     );
     assert!(err.changes.is_empty());
+    let f = &err.failures[0];
+    assert_eq!(
+        (f.resource.as_str(), f.cause.as_str(), f.summary.as_str()),
+        ("site_config", "resource-failed", "Access is denied")
+    );
 }
 
 #[test]

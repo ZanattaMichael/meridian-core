@@ -166,6 +166,16 @@ pub enum Drift {
     Unknown,
 }
 
+/// One resource a stage's tool failed on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResourceFailure {
+    /// As the plugin reported it, with every known secret value masked.
+    pub failure: meridian_sdk::failure::Failure,
+    /// Where the document declares the resource, as `file:line`; empty when
+    /// the failure does not trace back to one.
+    pub at: String,
+}
+
 /// What one stage did.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StageReport {
@@ -193,6 +203,10 @@ pub struct StageReport {
     /// What a failed apply had already done before it failed, as far as the
     /// tool reported it.
     pub done_before_failing: Vec<Change>,
+    /// For a stage whose tool failed: each resource it failed on, as its
+    /// report says, masked. The summary and detail are for the terminal and
+    /// this machine only; events keep the resource and the cause.
+    pub failures: Vec<ResourceFailure>,
     /// For a stage an apply reached its tool with: the artifact hash of the
     /// stage's last successful apply before this run, which is what a
     /// rollback goes back to. Empty when there was none.

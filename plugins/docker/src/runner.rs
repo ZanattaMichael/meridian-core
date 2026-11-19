@@ -245,6 +245,19 @@ impl DockerRunner {
             "project {}: comparing the file with what Docker is running",
             project.name
         ));
+        let (desired, actual) = self.inventory(context, project, secrets, log)?;
+        let plan = diff(&desired, &actual);
+        Ok((desired, plan))
+    }
+
+    /// What the compiled file declares, and what Docker has for the project.
+    fn inventory(
+        &self,
+        context: &RunContext,
+        project: &Project,
+        secrets: Option<&SecretFile>,
+        log: &dyn Log,
+    ) -> Result<(Desired, Actual), RunError> {
         // Compose's own reading of the file, which is also its validation.
         let config = self
             .compose(context, project, secrets)
@@ -273,8 +286,7 @@ impl DockerRunner {
             networks: lines(self.listing(context, project, &["network", "ls"], "{{.Name}}")?),
             volumes: lines(self.listing(context, project, &["volume", "ls"], "{{.Name}}")?),
         };
-        let plan = diff(&desired, &actual);
-        Ok((desired, plan))
+        Ok((desired, actual))
     }
 
     fn prepare(&self, context: &RunContext, artifact: &Artifact) -> Result<Project, RunError> {
@@ -695,6 +707,99 @@ impl Runner for DockerRunner {
         let project = Project::read(&settings)?;
         self.read_outputs(context, &project)
     }
+
+    fn destroys(&self) -> bool {
+        true
+    }
+
+    fn plan_destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Plan, RunError> {
+        let project = self.prepare(context, artifact)?;
+        let secrets = secrets_file(context)?;
+        let (desired, actual) = self.inventory(context, &project, secrets.as_ref(), log)?;
+        Ok(Plan {
+            changes: removals(&desired, &actual),
+            unknown: false,
+            saved: None,
+        })
+    }
+
+    /// `docker compose down --volumes --remove-orphans`: the project's
+    /// containers, networks and volumes go. Images are kept.
+    fn destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Vec<Change>, RunError> {
+        let project = self.prepare(context, artifact)?;
+        let secrets = secrets_file(context)?;
+        let (desired, actual) = self.inventory(context, &project, secrets.as_ref(), log)?;
+        let removed = removals(&desired, &actual);
+        if removed.is_empty() {
+            log.out(&format!("project {}: nothing to remove", project.name));
+            return Ok(removed);
+        }
+        log.out(&format!("project {}: taking it down", project.name));
+        self.compose(context, &project, secrets.as_ref())
+            .args(["down", "--volumes", "--remove-orphans"])
+            .run_ok("docker compose could not take the project down", log)?;
+        drop(secrets);
+        Ok(removed)
+    }
+}
+
+/// What taking the project down removes: each service that has containers,
+/// and each network and volume of the project, by the key in the file where
+/// it has one.
+pub(crate) fn removals(desired: &Desired, actual: &Actual) -> Vec<Change> {
+    let mut changes = Vec::new();
+    let mut services: Vec<&str> = Vec::new();
+    for container in &actual.containers {
+        if !services.contains(&container.service.as_str()) {
+            services.push(&container.service);
+        }
+    }
+    for service in services {
+        let count = actual
+            .containers
+            .iter()
+            .filter(|c| c.service == service)
+            .count();
+        changes.push(Change {
+            resource: service.to_owned(),
+            action: ChangeAction::Delete,
+            summary: match count {
+                1 => "container".to_owned(),
+                n => format!("{n} containers"),
+            },
+        });
+    }
+    let key_of = |declared: &[(String, String)], name: &str| {
+        declared
+            .iter()
+            .find(|(_, n)| n == name)
+            .map_or_else(|| name.to_owned(), |(key, _)| key.clone())
+    };
+    for name in &actual.networks {
+        changes.push(Change {
+            resource: key_of(&desired.networks, name),
+            action: ChangeAction::Delete,
+            summary: format!("network {name}"),
+        });
+    }
+    for name in &actual.volumes {
+        changes.push(Change {
+            resource: key_of(&desired.volumes, name),
+            action: ChangeAction::Delete,
+            summary: format!("volume {name}"),
+        });
+    }
+    changes
 }
 
 #[cfg(test)]

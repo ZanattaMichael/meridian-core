@@ -245,6 +245,27 @@ Changes are read from chef-client's report. A why-run plan touches nothing; why-
 assumptions are not changes. Through `chef-run` a plan is **unknown** and an apply reports
 no list. A failed resource fails the stage, with what had changed.
 
+### Reading a failure
+
+`chef-client`'s formatter names the failed resource; it is a
+[resource failure](../reference/state.md#resource-failures):
+
+```
+Error executing action `run` on resource 'execute[migrate]'
+Mixlib::ShellOut::ShellCommandFailed
+Expected process to exit with [0], but received '3'
+```
+
+| From the output | Becomes |
+|---|---|
+| `resource 'execute[migrate]'` | the resource, `migrate` |
+| the exception's message | the summary |
+| `received 'N'`, else the exception class | the tool code, `rc=3` |
+| `Recipe Compile Error` | no resource, `invalid-config` |
+| anything else | `resource-failed`, `timed-out` for a command timeout, or `unreachable`, `auth-failed`, `timed-out` or `reboot-required` when the message says so |
+
+`chef-run` reports no failures; its own error stands.
+
 ## Settings
 
 | Variable | Meaning |

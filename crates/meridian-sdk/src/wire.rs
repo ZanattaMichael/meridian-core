@@ -829,6 +829,29 @@ fn run_error_to_wire(e: RunError) -> pb::RunError {
         exit_code: e.exit_code.unwrap_or_default(),
         exited: e.exit_code.is_some(),
         output: e.output,
+        failures: e.failures.into_iter().map(failure_to_wire).collect(),
+    }
+}
+
+fn failure_to_wire(f: crate::failure::Failure) -> pb::Failure {
+    pb::Failure {
+        resource: f.resource,
+        endpoint: f.endpoint,
+        cause: f.cause.as_str().to_owned(),
+        tool_code: f.tool_code,
+        summary: f.summary,
+        detail: f.detail,
+    }
+}
+
+fn failure_from_wire(f: pb::Failure) -> crate::failure::Failure {
+    crate::failure::Failure {
+        resource: f.resource,
+        endpoint: f.endpoint,
+        cause: crate::failure::Cause::read(&f.cause),
+        tool_code: f.tool_code,
+        summary: f.summary,
+        detail: f.detail,
     }
 }
 
@@ -839,6 +862,7 @@ fn run_error_from_wire(e: pb::RunError, changes: Vec<Change>) -> RunError {
         exit_code: e.exited.then_some(e.exit_code),
         output: e.output,
         changes,
+        failures: e.failures.into_iter().map(failure_from_wire).collect(),
     }
 }
 
@@ -1322,6 +1346,40 @@ mod tests {
             ]
         );
         assert_eq!(graph_from_wire(wire).unwrap(), graph);
+    }
+
+    #[test]
+    fn a_run_errors_failures_cross_the_wire_and_an_unknown_cause_word_reads_as_unknown() {
+        use crate::failure::{Cause, Failure};
+        let error = RunError {
+            msg: "terraform apply failed".to_owned(),
+            exit_code: Some(1),
+            failures: vec![
+                Failure::new(Cause::ResourceFailed, "web", "quota exceeded")
+                    .endpoint("eastus")
+                    .code("QuotaExceeded")
+                    .detail("the subscription allows 10 cores"),
+                Failure::new(Cause::Unreachable, "", "no route to host"),
+            ],
+            ..RunError::default()
+        };
+        let back = apply_result_from_wire(apply_result(Err(error.clone())))
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(back, error);
+
+        let none = RunError::new("plain");
+        let back = plan_result_from_wire(plan_result(Err(none.clone())))
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(back, none);
+
+        let mut wire = run_error_to_wire(error);
+        wire.failures[0].cause = "melted".to_owned();
+        assert_eq!(
+            run_error_from_wire(wire, Vec::new()).failures[0].cause,
+            Cause::Unknown
+        );
     }
 
     #[test]

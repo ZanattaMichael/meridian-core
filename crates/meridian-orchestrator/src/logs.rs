@@ -18,7 +18,7 @@ use std::fs::{File, OpenOptions};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
-use meridian_sdk::{LogLine, LogStream};
+use meridian_sdk::{LogLine, LogStream, Value};
 
 use crate::rollback::{RollbackOutcome, RollbackReport};
 use crate::{time, Event, Observer, Outcome, StageId, StageKind, StageReport};
@@ -32,6 +32,25 @@ pub const DEFAULT_LOG_LIMIT: u64 = 10 * 1024 * 1024;
 /// Where a run's logs are kept.
 pub fn run_dir(state_dir: &Path, run: &str) -> PathBuf {
     state_dir.join("runs").join(run).join(LOGS_DIR)
+}
+
+/// `runs/<id>/failures.jsonl`: each resource a run's tools failed on, one
+/// JSON object a line, masked, on this machine only.
+pub fn failures_file(state_dir: &Path, run: &str) -> PathBuf {
+    state_dir.join("runs").join(run).join(FAILURES_FILE)
+}
+
+/// The name of [`failures_file`] inside a run's directory.
+pub const FAILURES_FILE: &str = "failures.jsonl";
+
+/// Reads [`failures_file`]: each line as its fields. A line that does not
+/// read is left out.
+pub fn read_failures(state_dir: &Path, run: &str) -> Vec<BTreeMap<String, Value>> {
+    std::fs::read_to_string(failures_file(state_dir, run))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| meridian_sdk::decode_map(line.as_bytes()).ok())
+        .collect()
 }
 
 /// A step's log file, relative to [`run_dir`]: `resourceset/web@10.0.0.5.log`.
@@ -137,6 +156,11 @@ pub fn prune(state_dir: &Path, keep: &[String]) -> Result<(), String> {
         if logs.is_dir() {
             std::fs::remove_dir_all(&logs)
                 .map_err(|e| format!("removing {}: {e}", logs.display()))?;
+        }
+        let failures = runs.join(&id).join(FAILURES_FILE);
+        if failures.is_file() {
+            std::fs::remove_file(&failures)
+                .map_err(|e| format!("removing {}: {e}", failures.display()))?;
         }
         // Only an empty directory goes; a local record may still be in it.
         let _ = std::fs::remove_dir(runs.join(&id));
@@ -307,6 +331,62 @@ impl<'a> Keeper<'a> {
 
     /// Closes a step's file and, when the step's endpoint is now known,
     /// moves the file to the name that carries it.
+    /// Adds a failed step's resource failures to `runs/<id>/failures.jsonl`,
+    /// one JSON object a line. They are masked already; the file is the
+    /// owner's only and is never sent anywhere.
+    fn keep_failures(&mut self, report: &StageReport) {
+        if self.broken || self.run.is_empty() || report.failures.is_empty() {
+            return;
+        }
+        let path = failures_file(&self.state_dir, &self.run);
+        let mut text = String::new();
+        for failed in &report.failures {
+            let f = &failed.failure;
+            let endpoint = if f.endpoint.is_empty() {
+                &report.host
+            } else {
+                &f.endpoint
+            };
+            let map: BTreeMap<String, Value> = [
+                ("time", time::now()),
+                ("step", report.id.name.clone()),
+                ("kind", report.id.kind.as_str().to_owned()),
+                ("target", report.target.clone()),
+                ("endpoint", endpoint.clone()),
+                ("resource", f.resource.clone()),
+                ("cause", f.cause.as_str().to_owned()),
+                ("toolCode", f.tool_code.clone()),
+                ("summary", f.summary.clone()),
+                ("detail", f.detail.clone()),
+                ("at", failed.at.clone()),
+            ]
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), Value::String(value)))
+            .collect();
+            text.push_str(&meridian_sdk::canonical_map(&map));
+            text.push('\n');
+        }
+        let written = (|| -> std::io::Result<()> {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let mut options = OpenOptions::new();
+            options.create(true).append(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt as _;
+                options.mode(0o600);
+            }
+            options.open(&path)?.write_all(text.as_bytes())
+        })();
+        if let Err(e) = written {
+            self.warnings.push(format!(
+                "could not keep the failures in {}: {e}",
+                path.display()
+            ));
+        }
+    }
+
     fn finish(&mut self, id: &StageId, host: Option<&str>) {
         if let Some(host) = host.filter(|h| !h.is_empty()) {
             self.hosts.insert(id.clone(), host.to_owned());
@@ -369,6 +449,20 @@ impl Observer for Keeper<'_> {
                 "meridian",
                 &format!("step failed ({reason}): {why}"),
             );
+            for failed in &report.failures {
+                let f = &failed.failure;
+                let resource = if f.resource.is_empty() {
+                    "-"
+                } else {
+                    f.resource.as_str()
+                };
+                self.write(
+                    &report.id,
+                    "meridian",
+                    &format!("resource {resource} failed ({}): {}", f.cause, f.summary),
+                );
+            }
+            self.keep_failures(report);
         }
         self.finish(&report.id, Some(&report.host));
         self.inner.stage_finished(report);
@@ -471,6 +565,7 @@ mod tests {
             warnings: Vec::new(),
             removed: Vec::new(),
             done_before_failing: Vec::new(),
+            failures: Vec::new(),
             previous_good: String::new(),
             policy: None,
             analyses: Vec::new(),
@@ -499,8 +594,10 @@ mod tests {
             let logs = run_dir(&dir, run).join("resourceset");
             std::fs::create_dir_all(&logs).unwrap();
             std::fs::write(logs.join("web.log"), "x\n").unwrap();
+            std::fs::write(failures_file(&dir, run), "{}\n").unwrap();
         }
         prune(&dir, &["2026-11-18T09-00-01Z-0002".to_owned()]).unwrap();
+        assert!(failures_file(&dir, "2026-11-18T09-00-01Z-0002").is_file());
         assert!(list(&dir, "2026-11-18T09-00-00Z-0001").is_empty());
         assert!(!dir.join("runs/2026-11-18T09-00-00Z-0001").exists());
         assert_eq!(

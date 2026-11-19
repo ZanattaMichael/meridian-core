@@ -447,26 +447,42 @@ impl HelmRunner {
                     .stdout
             }
         };
-        let changes = manifest::diff(
-            &manifest::objects(&installed),
-            &manifest::objects(&rendered.manifests),
-        )
-        .into_iter()
-        .map(|(action, key)| Change {
-            resource: release.resource_of(&key),
-            action,
-            summary: if key.namespace.is_empty() {
-                format!("{} {}", key.kind, key.name)
-            } else {
-                format!("{} {} in namespace {}", key.kind, key.name, key.namespace)
-            },
-        })
-        .collect();
+        let changes = changes_between(release, &installed, &rendered.manifests);
         Ok(Preview {
             rendered,
             changes,
             status,
         })
+    }
+
+    /// The release an artifact installs, with the artifact written out.
+    fn release_of(context: &RunContext, artifact: &Artifact) -> Result<Release, RunError> {
+        let Some(settings) = artifact.files.get(RELEASE_PATH) else {
+            return Err(RunError::new(format!(
+                "the artifact has no {RELEASE_PATH}; it was not compiled by this plugin"
+            )));
+        };
+        let release = Release::read(settings)?;
+        write_artifact(&context.work_dir, artifact)?;
+        Ok(release)
+    }
+
+    /// What uninstalling the release would remove: every object of the
+    /// manifest Helm last installed. `None` when it is not installed.
+    fn removals(
+        &self,
+        context: &RunContext,
+        release: &Release,
+    ) -> Result<Option<Vec<Change>>, RunError> {
+        if self.status(context, release)?.is_none() {
+            return Ok(None);
+        }
+        let installed = self
+            .helm(context, release, &["get", "manifest", &release.name])
+            .capture_stdout()
+            .run_ok("helm could not read what the release holds", &NoLog)?
+            .stdout;
+        Ok(Some(changes_between(release, &installed, "")))
     }
 
     /// Reads one object from the cluster.
@@ -660,4 +676,61 @@ impl Runner for HelmRunner {
         })?;
         self.read_outputs(context, &Release::read(&settings)?)
     }
+
+    fn destroys(&self) -> bool {
+        true
+    }
+
+    fn plan_destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        _log: &dyn Log,
+    ) -> Result<Plan, RunError> {
+        let release = Self::release_of(context, artifact)?;
+        Ok(Plan {
+            changes: self.removals(context, &release)?.unwrap_or_default(),
+            unknown: false,
+            saved: None,
+        })
+    }
+
+    /// `helm uninstall`, waiting until the release's objects are gone. A
+    /// release that is not installed has nothing to remove.
+    fn destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Vec<Change>, RunError> {
+        let release = Self::release_of(context, artifact)?;
+        let Some(removals) = self.removals(context, &release)? else {
+            log.out(&format!("release {}: not installed", release.name));
+            return Ok(Vec::new());
+        };
+        log.out(&format!("release {}: uninstalling", release.name));
+        let mut uninstall = self.helm(context, &release, &["uninstall", &release.name, "--wait"]);
+        if !release.timeout.is_empty() {
+            uninstall = uninstall.args(["--timeout", &release.timeout]);
+        }
+        uninstall.run_ok("helm could not uninstall the release", log)?;
+        Ok(removals)
+    }
+}
+
+/// The changes that take the objects of one manifest to those of another,
+/// by the ids the author wrote.
+fn changes_between(release: &Release, old: &str, new: &str) -> Vec<Change> {
+    manifest::diff(&manifest::objects(old), &manifest::objects(new))
+        .into_iter()
+        .map(|(action, key)| Change {
+            resource: release.resource_of(&key),
+            action,
+            summary: if key.namespace.is_empty() {
+                format!("{} {}", key.kind, key.name)
+            } else {
+                format!("{} {} in namespace {}", key.kind, key.name, key.namespace)
+            },
+        })
+        .collect()
 }

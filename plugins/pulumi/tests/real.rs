@@ -206,6 +206,21 @@ fn a_document_is_planned_applied_and_changed() {
         .plan(&second, &smaller, &log)
         .unwrap_or_else(|e| fail("the plan without the password", e));
     assert_eq!(changes(&plan), ["delete password"]);
+
+    // A destroy previews what it would remove, removes it, and leaves the
+    // stack with nothing to remove.
+    let preview = runner
+        .plan_destroy(&second, &pets(), &log)
+        .unwrap_or_else(|e| fail("the destroy preview", e));
+    assert_eq!(changes(&preview), ["delete password", "delete pet"]);
+    let removed = runner
+        .destroy(&second, &pets(), &log)
+        .unwrap_or_else(|e| fail("the destroy", e));
+    assert_eq!(removed.len(), 2, "{removed:?}");
+    let after = runner
+        .plan_destroy(&second, &pets(), &log)
+        .unwrap_or_else(|e| fail("the preview after the destroy", e));
+    assert!(after.changes.is_empty(), "{:?}", after.changes);
 }
 
 #[ignore = "needs a real pulumi; see docs/contributing/real-tool-tests.md"]
