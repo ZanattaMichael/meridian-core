@@ -67,7 +67,12 @@ impl Editor {
         };
         let mut params = json!({ "capabilities": {} });
         if let Some(root) = root {
-            let uri = lsp_types::Url::from_directory_path(root).unwrap();
+            // A temporary directory's path needs no percent-encoding.
+            let path = root.to_string_lossy().replace('\\', "/");
+            let uri = format!(
+                "file://{}{path}/",
+                if path.starts_with('/') { "" } else { "/" }
+            );
             params["workspaceFolders"] = json!([{ "uri": uri, "name": "project" }]);
         }
         let reply = editor.request("initialize", params);
@@ -109,13 +114,11 @@ impl Editor {
         loop {
             if let Message::Response(Response {
                 id: got,
-                result,
-                error,
+                response_result,
             }) = self.receive()
             {
                 assert_eq!(got, id);
-                assert!(error.is_none(), "{method}: {error:?}");
-                return result.unwrap_or(Value::Null);
+                return response_result.unwrap_or_else(|error| panic!("{method}: {error:?}"));
             }
         }
     }
