@@ -363,6 +363,33 @@ what the runner does itself at that level, and the runner reads `context.debug_l
 runner parses. Test the command at each level and that
 level 0 adds nothing.
 
+### Reporting failures
+
+When the tool fails, read its structured output and add one `Failure` per resource to the
+`RunError`:
+
+```rust
+use meridian_sdk::failure::{Cause, Failure};
+
+let mut error = finished.into_error("mytool apply failed");
+error.failures.push(
+    Failure::new(Cause::ResourceFailed, "logs", "bucket name is taken")
+        .endpoint("eu-west-1")
+        .code("BucketAlreadyExists")
+        .detail(full_message),
+);
+```
+
+- `resource` is the document's id where the tool's address maps to one.
+- Pick the [cause word](../reference/failure-causes.md) from the tool's own fields or codes;
+  `unknown` when it does not say.
+- Read JSON where the tool offers it. `Tool::show_stdout_as` keeps one-record-a-line output
+  whole for reading and shows a person each line's message.
+- Leave masking to the host. Never parse the text you show a person.
+
+Test each cause the parser picks with a stand-in and, where a real tool can fail on purpose,
+assert the failure in its real test.
+
 ### Settings
 
 Every operator option (program, args, transport) is a setting, declared in `settings()` and

@@ -40,6 +40,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 use meridian_sdk::debug::DebugLevel;
+use meridian_sdk::failure::{Cause, Failure};
 use meridian_sdk::{
     canonical_map, decode_map, serve, Adoption, Applied, Artifact, Capabilities, Category, Change,
     ChangeAction, CompileError, Data, DocumentKind, Emitted, Emitter, ImportError, ImportFormat,
@@ -613,12 +614,27 @@ impl Runner for FakeRunner {
             }
             if content.contains("FAIL") {
                 save(&state)?;
+                // A failure the way a real tool's structured report gives
+                // one. Its detail echoes the inputs, so a host's masking
+                // has something to catch there too.
+                let failure = Failure::new(
+                    Cause::ResourceFailed,
+                    change
+                        .resource
+                        .strip_prefix("files/")
+                        .unwrap_or(&change.resource),
+                    format!("could not write {}: disk on fire", change.resource),
+                )
+                .endpoint(context.host.as_str())
+                .code("EFIRE")
+                .detail(format!("inputs: {}", canonical_map(&context.inputs)));
                 return Err(RunError {
                     msg: format!("could not write {}", change.resource),
                     command: "fake-tool apply --password=***".to_owned(),
                     exit_code: Some(3),
                     output: "disk on fire\n".to_owned(),
                     changes: done,
+                    failures: vec![failure],
                 });
             }
             if content.contains("HANG") {
@@ -708,6 +724,7 @@ fn hang(log: &dyn Log) -> Result<(), RunError> {
         exit_code: None,
         output: "stopped while waiting\n".to_owned(),
         changes: Vec::new(),
+        failures: Vec::new(),
     })
 }
 
@@ -855,6 +872,7 @@ impl SchemaSource for FakeSchemas {
                 exit_code: Some(3),
                 output: "no such library".to_owned(),
                 changes: Vec::new(),
+                failures: Vec::new(),
             });
         }
         // What was asked for, left where a test can read it.

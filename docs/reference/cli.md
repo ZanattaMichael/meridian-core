@@ -107,8 +107,14 @@ shown (sensitive ones masked) and handed on. Holds the
 web (ResourceSet, target ansible on 203.0.113.10)
   ~ update nginx_conf
   FAILED: the play failed (ran `ansible-playbook ...`, exit status 2)
+    203.0.113.10  nginx_svc  resource-failed  Could not find the requested service nginx  (site.yaml:14)
 run 2026-11-17T09-14-03Z-0cc7 failed. Once the cause is fixed, `meridian apply --resume site.yaml` continues from the stage that failed
 ```
+
+Each resource the tool named as failed gets a line: endpoint, resource,
+[cause](failure-causes.md), the tool's message and where the resource is
+declared, `-` for what the tool did not say. They are
+[kept](state.md#resource-failures) in `runs/<id>/failures.jsonl`.
 
 `--resume` continues the last failed or interrupted apply; `--resume=<run>` a named one
 (always with `=`). Stages already applied with unchanged artifacts are skipped
@@ -227,6 +233,7 @@ by its owner.
 |---|---|
 | `run.json`, `events.jsonl` | the run's [record](state.md#runsidrunjson) and [events](state.md#events) |
 | `logs/<kind>/<document>[@<endpoint>].log` | the tool output this machine kept, masked |
+| `failures.jsonl` | the [resource failures](state.md#resource-failures) this machine kept, masked |
 | `version.txt` | what `meridian version` prints |
 | `plugins.json` | the plugins of the run's targets, as `meridian plugins --output json` lists them |
 

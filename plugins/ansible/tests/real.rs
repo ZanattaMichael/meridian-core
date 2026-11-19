@@ -260,6 +260,12 @@ fn a_failed_task_fails_the_run_with_ansibles_own_reason_and_what_changed_before_
     assert_eq!(err.msg, "ansible-playbook reported a failed task");
     assert_eq!(err.exit_code, Some(2));
     assert!(err.output.contains("no such upstream"), "{}", err.output);
+    assert_eq!(err.failures.len(), 1, "{:?}", err.failures);
+    let failure = &err.failures[0];
+    assert_eq!(failure.resource, "broken");
+    assert_eq!(failure.cause.as_str(), "resource-failed");
+    assert_eq!(failure.tool_code, "rc=3");
+    assert_eq!(failure.summary, "no such upstream");
     assert_eq!(changes(&err.changes), [("before", ChangeAction::Update)]);
     assert!(dir.join("before").exists());
     assert!(

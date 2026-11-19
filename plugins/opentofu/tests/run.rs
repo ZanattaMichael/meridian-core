@@ -73,7 +73,7 @@ fn runner(dir: &Path, cases: &str) -> OpenTofuRunner {
 }
 
 const HAPPY: &str = r#"init) echo 'OpenTofu has been successfully initialized!' ;;
-plan) echo 'Plan: 1 to add, 0 to change, 0 to destroy.' ;;
+plan) echo '{"@level":"info","@message":"Plan: 1 to add, 0 to change, 0 to destroy.","type":"change_summary"}' ;;
 show) echo '{"resource_changes":[{"address":"aws_instance.web_vm","mode":"managed","type":"aws_instance","name":"web_vm","change":{"actions":["create"]}}]}' ;;
 apply) echo 'Apply complete! Resources: 1 added, 0 changed, 0 destroyed.' ;;
 output) echo '{"web_vm_ip":{"sensitive":false,"type":"string","value":"203.0.113.7"},"admin_password":{"sensitive":true,"type":"string","value":"hunter2"}}' ;;"#;
@@ -97,7 +97,7 @@ fn a_plan_initialises_plans_and_reads_the_saved_plan() {
         calls(&dir),
         [
             "init -input=false -no-color",
-            "plan -input=false -no-color -out=meridian.tfplan",
+            "plan -input=false -no-color -json -out=meridian.tfplan",
             "show -json meridian.tfplan",
         ]
     );
@@ -143,7 +143,7 @@ fn an_apply_applies_the_plan_it_just_showed_and_reports_outputs() {
     assert_eq!(
         calls(&dir)[3..],
         [
-            "apply -input=false -no-color meridian.tfplan",
+            "apply -input=false -no-color -json meridian.tfplan",
             "output -json -no-color"
         ]
     );
@@ -275,7 +275,7 @@ fn a_failure_names_the_command_that_failed() {
     assert_eq!(err.exit_code, Some(3));
     assert!(err
         .command
-        .ends_with("plan -input=false -no-color -out=meridian.tfplan"));
+        .ends_with("plan -input=false -no-color -json -out=meridian.tfplan"));
 }
 
 #[test]
@@ -354,7 +354,7 @@ fn secrets_reach_the_tool_in_a_private_variables_file_and_the_saved_plan_is_scru
     );
     let made = calls(&dir);
     assert!(
-        made[1].starts_with("plan -input=false -no-color -out=meridian.tfplan -var-file="),
+        made[1].starts_with("plan -input=false -no-color -json -out=meridian.tfplan -var-file="),
         "{made:?}"
     );
     assert!(!made.iter().any(|c| c.contains("hunter2")), "{made:?}");

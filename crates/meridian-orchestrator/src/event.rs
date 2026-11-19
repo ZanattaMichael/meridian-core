@@ -25,6 +25,7 @@ pub const STEP_SKIPPED: &str = "step.skipped";
 pub const STEP_DEFERRED: &str = "step.deferred";
 pub const RESOURCE_PLANNED: &str = "resource.planned";
 pub const RESOURCE_CHANGED: &str = "resource.changed";
+pub const RESOURCE_FAILED: &str = "resource.failed";
 pub const OUTPUT_PRODUCED: &str = "output.produced";
 pub const DRIFT_DETECTED: &str = "drift.detected";
 pub const DRIFT_NONE: &str = "drift.none";

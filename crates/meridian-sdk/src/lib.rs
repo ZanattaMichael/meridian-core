@@ -48,6 +48,7 @@ pub mod cloud;
 mod credential;
 pub mod debug;
 pub mod expr;
+pub mod failure;
 pub mod fetch;
 mod import;
 pub mod infra;

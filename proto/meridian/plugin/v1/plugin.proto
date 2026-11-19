@@ -656,6 +656,28 @@ message RunError {
   // output is the end of what the tool printed, enough to explain the failure
   // without the whole log.
   string output = 5;
+  // failures is each resource the tool failed on, as its structured report
+  // says. A plugin that predates it sends none.
+  repeated Failure failures = 6;
+}
+
+// Failure is one resource the tool failed on.
+message Failure {
+  // resource is the IR resource id when the tool's report traces back to
+  // one, otherwise the tool's own name; empty for the document as a whole.
+  string resource = 1;
+  // endpoint is the machine it failed on, when the tool names one.
+  string endpoint = 2;
+  // cause is one fixed word: unreachable, auth-failed, invalid-config,
+  // dependency-missing, resource-failed, dependency-failed, timed-out,
+  // reboot-required, tool-crashed or unknown. A word the host does not know
+  // reads as unknown.
+  string cause = 3;
+  // tool_code is the tool's own code or status, such as CREATE_FAILED.
+  string tool_code = 4;
+  // summary is one line; detail is the rest. Either can quote a value.
+  string summary = 5;
+  string detail = 6;
 }
 
 // LogLine is one line of the tool's own output, relayed while it runs.

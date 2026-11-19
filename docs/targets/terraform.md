@@ -242,8 +242,8 @@ Round-trip test: [`web-vm/`](../../plugins/terraform/testdata/import/web-vm),
 
 | | |
 |---|---|
-| Plan | `terraform init`, then `terraform plan -out=meridian.tfplan`, then `terraform show -json` to read it |
-| Apply | the same plan, then `terraform apply meridian.tfplan`, then `terraform output -json` |
+| Plan | `terraform init`, then `terraform plan -json -out=meridian.tfplan`, then `terraform show -json` to read it |
+| Apply | the same plan, then `terraform apply -json meridian.tfplan`, then `terraform output -json` |
 | `MERIDIAN_TERRAFORM` | the program to run, when it is not `terraform` on `PATH`; set it to `tofu` for OpenTofu |
 | `MERIDIAN_TERRAFORM_ARGS` | arguments added to `init`, `plan` and `apply`, split like a shell command line (quotes hold a word together): `-parallelism=4`, `-lock-timeout=30s`. The calls that read the saved plan and the outputs get none |
 
@@ -260,6 +260,18 @@ use. A [saved plan](../operations/pull-requests.md) keeps no plan file for such 
 apply plans again. State holds the arguments, so use a `backend` that protects it.
 
 [`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) sets `TF_LOG` to `INFO`, `DEBUG` or `TRACE` on every `terraform` call; the log goes to standard error, beside the JSON.
+
+## Reading a failure
+
+`plan` and `apply` run with `-json`. The terminal shows each line's message;
+an error diagnostic becomes a [resource failure](../reference/state.md#resource-failures):
+
+| From the diagnostic | Becomes |
+|---|---|
+| `address` | the resource: `aws_s3_bucket.logs` is `logs`; a module, data source or indexed address is kept whole |
+| `summary` | the summary |
+| `detail` | the detail |
+| words in either | the cause: `unreachable` (no such host, connection refused), `auth-failed` (credentials, 401/403), `dependency-missing` (provider or module not installed), `timed-out`; otherwise `resource-failed` with an address, `invalid-config` in a plan without one, `unknown` |
 
 ## Credentials
 

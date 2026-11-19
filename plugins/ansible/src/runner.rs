@@ -1,12 +1,13 @@
 //! The half that hands a playbook to `ansible-playbook`. It sits outside the
 //! compile chain: nothing here is reached by a compile.
 
+use meridian_sdk::failure::{Cause, Failure};
 use meridian_sdk::tool::{write_artifact, Tool};
-use meridian_sdk::{settings, Setting};
 use meridian_sdk::{
-    Applied, Artifact, Change, ChangeAction, Log, LogLine, Operations, Part, Plan, RunContext,
-    RunError, Runner, SecretFile, Value,
+    decode_value, Applied, Artifact, Change, ChangeAction, Log, LogLine, Operations, Part, Plan,
+    RunContext, RunError, Runner, SecretFile, Value,
 };
+use meridian_sdk::{settings, Setting};
 
 use crate::{INVENTORY_PATH, PLAYBOOK_PATH};
 
@@ -155,6 +156,7 @@ impl AnsibleRunner {
             _ => "ansible-playbook failed",
         };
         let mut error = finished.into_error(what);
+        error.failures = report.failures;
         if !check {
             error.changes = report.changes;
         }
@@ -276,6 +278,18 @@ struct Report {
     task: String,
     changes: Vec<Change>,
     skipped: bool,
+    /// The failed and unreachable task results, one per task and host.
+    failures: Vec<Failure>,
+    /// A failed result whose JSON runs over several lines (`-vvv` indents
+    /// it): the line's start and the JSON read so far.
+    pending: Option<(Outcome, String, String)>,
+}
+
+/// What a `fatal:` or `failed:` line said of its task.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    Failed,
+    Unreachable,
 }
 
 /// Relays every line to the host's log and reads the task results out of
@@ -304,6 +318,36 @@ impl Log for Reader<'_> {
 }
 
 fn read_line(report: &mut Report, text: &str, check: bool) {
+    if let Some((outcome, host, mut json)) = report.pending.take() {
+        json.push('\n');
+        json.push_str(text);
+        match decode_value(json.as_bytes()) {
+            Ok(result) => fail(report, outcome, &host, Some(&result)),
+            // The JSON never closed: the result is still a failure.
+            Err(_) if text.starts_with("TASK [") || text.starts_with("PLAY ") => {
+                fail(report, outcome, &host, None);
+                return read_line(report, text, check);
+            }
+            Err(_) => report.pending = Some((outcome, host, json)),
+        }
+        return;
+    }
+    if let Some((outcome, host, payload)) = failed_line(text) {
+        match payload.map(|json| (json, decode_value(json.as_bytes()))) {
+            Some((_, Ok(result))) => fail(report, outcome, &host, Some(&result)),
+            Some((json, Err(_))) if json.starts_with('{') => {
+                report.pending = Some((outcome, host, json.to_owned()))
+            }
+            _ => fail(report, outcome, &host, None),
+        }
+        return;
+    }
+    if text.trim() == "...ignoring" {
+        // `ignore_errors`: the task's failure did not fail the play.
+        let task = report.task.clone();
+        report.failures.retain(|f| f.resource != task);
+        return;
+    }
     for banner in ["TASK [", "RUNNING HANDLER ["] {
         if let Some(rest) = text.strip_prefix(banner) {
             // The name ends at the last `]` before the row of asterisks, so a
@@ -327,6 +371,118 @@ fn read_line(report: &mut Report, text: &str, check: bool) {
         }
     } else if text.starts_with("skipping: [") && check {
         report.skipped = true;
+    }
+}
+
+/// The outcome, host and JSON result of a failed task's line:
+///
+/// ```text
+/// fatal: [web01]: FAILED! => {"changed": false, "msg": "..."}
+/// fatal: [web01]: UNREACHABLE! => {"msg": "...", "unreachable": true}
+/// failed: [web01] (item=nginx) => {"ansible_loop_var": "item", "msg": "..."}
+/// ```
+fn failed_line(text: &str) -> Option<(Outcome, String, Option<&str>)> {
+    let rest = text
+        .strip_prefix("fatal: [")
+        .or_else(|| text.strip_prefix("failed: ["))?;
+    let end = rest.find(']')?;
+    // A delegated task names both hosts: `web01 -> localhost`. The failure is
+    // the play host's.
+    let host = rest[..end]
+        .split(" -> ")
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_owned();
+    let after = &rest[end + 1..];
+    let outcome = if after.contains("UNREACHABLE!") {
+        Outcome::Unreachable
+    } else {
+        Outcome::Failed
+    };
+    let payload = after.split_once("=> ").map(|(_, json)| json.trim());
+    Some((outcome, host, payload))
+}
+
+/// Records one failed result on the current task, once per task and host: a
+/// looped task's first failed item gives the reason, and the `fatal:` line
+/// that follows it adds nothing.
+fn fail(report: &mut Report, outcome: Outcome, host: &str, result: Option<&Value>) {
+    if report
+        .failures
+        .iter()
+        .any(|f| f.resource == report.task && f.endpoint == host)
+    {
+        return;
+    }
+    let field = |name: &str| {
+        result
+            .and_then(Value::as_map)
+            .and_then(|m| m.get(name))
+            .map(|v| match v {
+                Value::String(s) => s.trim().to_owned(),
+                Value::Int(n) => n.to_string(),
+                Value::Uint(n) => n.to_string(),
+                _ => String::new(),
+            })
+            .unwrap_or_default()
+    };
+    let msg = field("msg");
+    let stderr = field("stderr");
+    let rc = field("rc");
+    // A command's own failure reads `non-zero return code`; its stderr says why.
+    let summary = if !stderr.is_empty() && (msg.is_empty() || msg == "non-zero return code") {
+        stderr.clone()
+    } else {
+        msg.clone()
+    };
+    let summary = summary.lines().next().unwrap_or("").to_owned();
+    let cause = cause(outcome, &msg);
+    let mut failure = Failure::new(cause, report.task.clone(), summary).endpoint(host);
+    if !rc.is_empty() {
+        failure = failure.code(format!("rc={rc}"));
+    }
+    if !stderr.is_empty() {
+        failure = failure.detail(stderr);
+    }
+    report.failures.push(failure);
+}
+
+/// The cause word for a failed result, from its outcome and Ansible's message.
+fn cause(outcome: Outcome, msg: &str) -> Cause {
+    let msg = msg.to_ascii_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| msg.contains(w));
+    if has(&[
+        "permission denied (publickey",
+        "authentication failed",
+        "invalid/incorrect password",
+        "missing sudo password",
+        "incorrect sudo password",
+    ]) {
+        return Cause::AuthFailed;
+    }
+    if outcome == Outcome::Unreachable {
+        return Cause::Unreachable;
+    }
+    if has(&["timed out", "timeout"]) {
+        Cause::TimedOut
+    } else if has(&[
+        "couldn't resolve module",
+        "unsupported parameters",
+        "is not a valid attribute",
+        "missing required arguments",
+        "value of",
+    ]) {
+        Cause::InvalidConfig
+    } else if has(&[
+        "no module named",
+        "failed to import",
+        "is required for this module",
+        "python interpreter",
+    ]) {
+        Cause::DependencyMissing
+    } else {
+        Cause::ResourceFailed
     }
 }
 
@@ -356,5 +512,93 @@ mod tests {
         assert_eq!(names, ["nginx_pkg", "restart nginx_svc"]);
         assert_eq!(report.task, "restart nginx_svc");
         assert!(!report.skipped);
+    }
+
+    fn read(lines: &[&str]) -> Report {
+        let mut report = Report::default();
+        for line in lines {
+            read_line(&mut report, line, false);
+        }
+        report
+    }
+
+    #[test]
+    fn a_failed_task_is_a_failure_of_that_task_on_that_host() {
+        let report = read(&[
+            "TASK [nginx_svc] ***",
+            r#"fatal: [web01]: FAILED! => {"changed": false, "msg": "Could not find the requested service nginx: host"}"#,
+        ]);
+        let f = &report.failures[0];
+        assert_eq!(
+            (f.resource.as_str(), f.endpoint.as_str(), f.cause),
+            ("nginx_svc", "web01", Cause::ResourceFailed)
+        );
+        assert_eq!(
+            f.summary,
+            "Could not find the requested service nginx: host"
+        );
+    }
+
+    #[test]
+    fn a_command_failure_is_summarised_by_its_stderr_and_coded_by_its_return_code() {
+        let report = read(&[
+            "TASK [migrate] ***",
+            r#"fatal: [db01 -> localhost]: FAILED! => {"changed": true, "msg": "non-zero return code", "rc": 3, "stderr": "no such upstream\nsecond line"}"#,
+        ]);
+        let f = &report.failures[0];
+        assert_eq!(f.endpoint, "db01");
+        assert_eq!(f.summary, "no such upstream");
+        assert_eq!(f.tool_code, "rc=3");
+        assert_eq!(
+            f.detail,
+            "no such upstream
+second line"
+        );
+    }
+
+    #[test]
+    fn an_unreachable_host_and_a_refused_login_have_their_own_causes() {
+        let report = read(&[
+            "TASK [Gathering Facts] ***",
+            r#"fatal: [web01]: UNREACHABLE! => {"changed": false, "msg": "Failed to connect to the host via ssh: connect to host web01 port 22: Connection timed out", "unreachable": true}"#,
+            r#"fatal: [web02]: UNREACHABLE! => {"changed": false, "msg": "Failed to connect to the host via ssh: deploy@web02: Permission denied (publickey,password).", "unreachable": true}"#,
+            "fatal: [web03]: UNREACHABLE!",
+        ]);
+        let causes: Vec<Cause> = report.failures.iter().map(|f| f.cause).collect();
+        assert_eq!(
+            causes,
+            [Cause::Unreachable, Cause::AuthFailed, Cause::Unreachable]
+        );
+    }
+
+    #[test]
+    fn a_looped_task_keeps_its_first_failed_items_reason() {
+        let report = read(&[
+            "TASK [packages] ***",
+            r#"failed: [web01] (item=nginx) => {"ansible_loop_var": "item", "item": "nginx", "msg": "No package matching 'nginx' is available"}"#,
+            r#"fatal: [web01]: FAILED! => {"msg": "One or more items failed"}"#,
+        ]);
+        assert_eq!(report.failures.len(), 1);
+        assert_eq!(
+            report.failures[0].summary,
+            "No package matching 'nginx' is available"
+        );
+    }
+
+    #[test]
+    fn an_indented_result_is_read_across_its_lines_and_an_ignored_failure_is_dropped() {
+        let report = read(&[
+            "TASK [conf] ***",
+            "fatal: [web01]: FAILED! => {",
+            r#"    "changed": false,"#,
+            r#"    "msg": "Unsupported parameters for (ansible.builtin.copy) module: no_such_argument""#,
+            "}",
+            "TASK [optional] ***",
+            r#"fatal: [web01]: FAILED! => {"msg": "absent"}"#,
+            "...ignoring",
+        ]);
+        assert_eq!(report.failures.len(), 1);
+        assert_eq!(report.failures[0].resource, "conf");
+        assert_eq!(report.failures[0].cause, Cause::InvalidConfig);
     }
 }

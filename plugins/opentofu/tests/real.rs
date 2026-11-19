@@ -335,6 +335,15 @@ fn a_configuration_opentofu_rejects_fails_the_plan_with_its_reason() {
             assert_eq!(e.msg, "tofu plan failed");
             assert!(e.output.contains("no_such_argument"), "{}", e.output);
             assert!(e.changes.is_empty());
+            // The JSON diagnostic names no resource for a configuration
+            // error, so it is the document's, and the cause says so.
+            assert_eq!(e.failures.len(), 1, "{:?}", e.failures);
+            assert_eq!(e.failures[0].cause.as_str(), "invalid-config");
+            assert!(
+                e.failures[0].detail.contains("no_such_argument"),
+                "{:?}",
+                e.failures
+            );
         }
         other => panic!("expected the plan to fail, got {other:?}"),
     }

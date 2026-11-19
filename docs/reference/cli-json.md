@@ -167,7 +167,7 @@ not known is `null`) and `measures` (each with `name`, `value` and `unit`).
 | `skipped` | a resumed run found it already applied from the same artifact | `appliedIn`, the run |
 | `drift` | what a drift check found | `drift`: `never-applied`, `in-sync`, `drifted`, `pending` or `unknown`; `changes`, the differences for `drifted` and `pending`; `lastApplyFailed` for `pending` |
 | `left-out` | the document's own `spec.when` was false | `condition` |
-| `failed` | the stage failed and the run stopped here | `error`, the text; `changes`, what the tool had already done before failing; `reason`, the code |
+| `failed` | the stage failed and the run stopped here | `error`, the text; `changes`, what the tool had already done before failing; `reason`, the code; `failures`, each resource the tool named as failed: `resource`, `endpoint`, `cause` (a [cause word](failure-causes.md)), `toolCode`, `summary` and `at` (`file:line`), empty strings for what the tool did not say |
 | `not-run` | an earlier stage failed | `becauseOf` (`name` and `kind`) |
 
 A `change` is `resource`, `action` (`create`, `update`, `delete`,

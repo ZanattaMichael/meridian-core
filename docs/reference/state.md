@@ -11,6 +11,7 @@ flowchart TB
         W2["resourceset/&lt;document&gt;/&lt;target&gt;/<br/>the tool's working directory"]
         H["history/&lt;kind&gt;/&lt;document&gt;/&lt;hash&gt;.json<br/>snapshots for rollback"]
         G["runs/&lt;id&gt;/logs/&lt;kind&gt;/&lt;document&gt;[@&lt;endpoint&gt;].log<br/>tool output, masked"]
+        F["runs/&lt;id&gt;/failures.jsonl<br/>failed resources, masked"]
     end
     subgraph BE["the backend (--backend; local means the state directory too)"]
         L["lock"]
@@ -33,7 +34,8 @@ The local backend writes files atomically, mode `0600`.
 
 **The record holds no secret value.** Only names, ids, hashes, counts and times; never a
 param, output value, data file or tool output. Tool output is kept apart, masked, on this
-machine only: [`runs/<id>/logs/`](#runsidlogs).
+machine only: [`runs/<id>/logs/`](#runsidlogs) and
+[`runs/<id>/failures.jsonl`](#resource-failures).
 
 ## `history/`
 
@@ -83,6 +85,39 @@ the step's file.
 
 [`meridian logs`](cli.md#logs) reads these files, and
 [`meridian bug-report`](cli.md#bug-report) packs them with the run's record.
+
+## Resource failures
+
+When a tool fails, its plugin reads the tool's structured output and names
+each resource that failed, the machine it failed on, and why. Each one is
+
+- a `resource.failed` [event](#events) in the record: the resource and a
+  [cause word](failure-causes.md), nothing else;
+- a line under the failed step on the terminal, and in the step's
+  [`--output json`](cli-json.md) `failures`;
+- a line in `runs/<id>/failures.jsonl` under the state directory, with the
+  tool's own words.
+
+```json
+{"at":"site.yaml:14","cause":"resource-failed","detail":"","endpoint":"web01","kind":"ResourceSet","resource":"nginx_svc","step":"web","summary":"Could not find the requested service nginx","target":"ansible","time":"2026-11-17T09:15:11.204Z","toolCode":""}
+```
+
+| Field | Value |
+|---|---|
+| `time` | when the step ended, in UTC |
+| `step`, `kind`, `target` | the step |
+| `endpoint` | the machine or region the tool named; the step's endpoint when it named none |
+| `resource` | the document's resource id; the tool's own address when it maps to none |
+| `cause` | a [cause word](failure-causes.md) |
+| `toolCode` | the tool's own code: an HTTP status, an error code, `rc=3` |
+| `summary` | the tool's message, one line |
+| `detail` | the rest of what the tool said about it |
+| `at` | `file:line` of the resource in the document; empty when not found |
+
+The file is masked, local only and mode `0600`, like the logs, and goes with
+them: `--keep-runs` removes it, `--no-logs` keeps none, and `meridian
+bug-report` packs it. A plugin that reports no failures leaves only the
+step's own error.
 
 ## `lock`
 
@@ -237,6 +272,7 @@ These words are never reused. See also
 | `analysis.passed` | an analyzer looked and nothing it found reaches `--fail-on` | `kind`, `analyzer`, `asked`, `findings`, `critical`, `high`, `medium`, `low`, `info`, `accepted`, `failing`, `measures` |
 | `analysis.failed` | a finding reaches `--fail-on`, or the analyzer could not look | the same; `asked` is `false` when it could not look |
 | `step.succeeded` | the step did what was asked | `kind`, `artifact`, `changes`; a plan also has `unknown` |
+| `resource.failed` | the tool named a resource it failed on; one per resource, before `step.failed` | `kind`, `resource`, `cause` (a [cause word](failure-causes.md)). Never the tool's message |
 | `step.failed` | the step failed | `kind`, `reason`, `artifact`, `changes` |
 | `step.skipped` | the step was not run | `kind`, `reason`: `already-applied` (with `artifact`, `appliedIn`) `earlier-step-failed` (with `becauseOf`), or `when-false`: the document's own `spec.when` left it out. The condition is not recorded |
 | `step.deferred` | the step waits on an output | `kind`, `waitingOn`, `output` |
@@ -265,7 +301,7 @@ sequenceDiagram
         M->>B: put run.json, events.jsonl
         Note over M: the tool runs
         M->>B: put state.json
-        Note over M: resource.changed..., output.produced..., step.succeeded or step.failed
+        Note over M: resource.changed..., output.produced..., resource.failed..., step.succeeded or step.failed
         M->>B: put run.json, events.jsonl
     end
     Note over M: run.succeeded or run.failed, lock.released
