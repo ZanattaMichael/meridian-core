@@ -476,6 +476,9 @@ fn a_container_that_cannot_start_fails_the_apply_and_says_why() {
     let err = runner.apply(&debug, &artifact, &log).unwrap_err();
     assert_eq!(err.msg, "a unit did not start", "{err}");
     assert_eq!(err.exit_code, Some(75));
+    assert_eq!(err.failures.len(), 1, "{:?}", err.failures);
+    assert_eq!(err.failures[0].resource, "meridian-ci-broken");
+    assert_eq!(err.failures[0].cause.as_str(), "resource-failed");
     assert_eq!(
         shown(&err.changes),
         ["create meridian-ci-broken: install meridian-ci-broken.container and start meridian-ci-broken.service"],

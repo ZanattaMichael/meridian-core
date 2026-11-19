@@ -785,6 +785,22 @@ The round-trip test uses
 [`shop/compose.yaml`](../../plugins/docker/testdata/import/shop/compose.yaml) and
 [`shop.meridian.yaml`](../../plugins/docker/testdata/import/shop.meridian.yaml).
 
+## Reading a failure
+
+When `docker compose up` fails, each of the project's containers is inspected
+(`docker inspect`), and each broken one is a [resource failure](../reference/state.md#resource-failures) of its service:
+
+| Container state | Summary | Tool code |
+|---|---|---|
+| `State.Error` set, such as a port already allocated | the error | |
+| `OOMKilled` | killed: out of memory | `OOMKilled` |
+| exited with a status other than 0 | the container exited with status N | `rc=N` |
+| health `unhealthy` | the last health check's output | `unhealthy` |
+| created and never started | created and not started (`dependency-failed`) | |
+
+The rest are `resource-failed`. When no container got that far, an image Compose could
+not pull is `dependency-missing`.
+
 ## Troubleshooting
 
 | What you see | What to do |

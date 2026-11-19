@@ -28,7 +28,8 @@
 - **Part 1 covers the SDK, protocol, Terraform, OpenTofu and Ansible; part 2
   the configuration management targets** (Salt, Puppet, OpenVox, Chef,
   DSC); **part 3 the other infrastructure targets** (CloudFormation, Bicep,
-  ARM, Pulumi, Packer, cloud-init). Containers and orchestration follow.
+  ARM, Pulumi, Packer, cloud-init); **part 4 containers** (Docker from
+  `docker inspect`, Podman from systemd's `Result`). Orchestration follows.
 - **A target whose failing command says too little asks the tool again**:
   CloudFormation's stack events, Azure's deployment operations.
 - **Where a tool has no structured output, its fixed lines are read**:
