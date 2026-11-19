@@ -13,7 +13,7 @@ overlay, which is applied to what the chart renders before Helm installs it.
 | Resource types | Kubernetes' own: API version and kind, such as `apps/v1/Deployment` or `v1/Service`, custom resources included. Plus four settings types, at most one of each: `values`, `chart`, `release` and `kustomization`. See [Resource types](#resource-types) |
 | References | Chart values, the release, the chart, and the name and namespace of another object. Each becomes a Helm template action. See [References](#references) |
 | Kustomize overlay | Yes, with inline patches. An overlay cannot name other files. See [Kustomize overlays](#kustomize-overlays) |
-| `dependsOn` | Only where Helm's own install order already agrees; otherwise refused. See [Ordering](#ordering) |
+| `dependsOn` | Where Helm's own install order agrees; otherwise refused, or with `ordering: releases` one release per wave. See [Ordering](#ordering) |
 | `notifies` | Synthetic: the action `restart`, aimed at a Deployment, StatefulSet or DaemonSet. Any other action is refused. See [Notifications](#notifications) |
 | `runtimeWhen` | No. Refused |
 | `adopt` | No. Refused: Helm refuses an object that no release of its own owns |
@@ -42,7 +42,7 @@ Both take the same objects; switch with `spec.target` and the settings resource.
 | What is installed | One Helm release, with history and rollback | Plain manifests, with `kubectl apply` |
 | Removing a resource from the document | Helm deletes the object | The object stays until you delete it |
 | Values and overlays | Yes | No |
-| `dependsOn` | Accepted only where Helm's order agrees | Orders the manifest file |
+| `dependsOn` | Where Helm's order agrees, or one release per wave | Applied in waves, waiting for each |
 | Plan | Against the last release | A server-side dry run |
 
 ## What a document looks like
@@ -175,6 +175,7 @@ Install settings; all optional.
 | `wait` | `false` | Wait until the release's workloads are ready (`--wait`). |
 | `atomic` | `false` | Roll back a failed install or upgrade (`--atomic`). |
 | `timeout` | Helm's own | How long to wait, as a duration: `90s`, `5m`, `1h30m`. |
+| `ordering` | `kind` | `kind`: Helm's own order. `releases`: one release per `dependsOn` wave. See [Ordering](#ordering). |
 
 ### `kustomization`
 
@@ -255,6 +256,38 @@ and last every kind Helm does not know, custom resources among them.
 `dependsOn` is accepted where this order honours it, and writes nothing. Otherwise, or
 between the same kind, it is refused (`unsupported-dependency`); Kubernetes retries, so it
 can usually be removed. `wait: true` on the release waits for readiness.
+
+### Ordered releases
+
+With `ordering: releases` on the release, a `dependsOn` Helm's order does not honour splits
+the chart into one release per wave: an object goes one wave after the latest object it
+depends on. Meridian installs `<release>-1`, `<release>-2`, ... in order, each with `--wait`,
+and uninstalls them last first
+([decision 0057](../decisions/0057-kubernetes-applies-depends-on-in-waves-and-waits-between.md)).
+The compile warns.
+
+```yaml
+- id: release
+  type: release
+  params: {name: shop, ordering: releases}
+- id: db
+  type: apps/v1/StatefulSet
+  params: {...}
+- id: api
+  type: apps/v1/Deployment
+  params: {...}
+  dependsOn:
+    - resource: db        # shop-1 holds db, shop-2 holds api
+```
+
+| Trade-off | Effect |
+|---|---|
+| Release identity | `helm list` shows each release; `helm rollback` of one does not roll back the others |
+| A document installed as one release | Refused until it is uninstalled: moving objects between releases needs `adopt` ([#269](https://github.com/ZanattaMichael/meridian-core/issues/269)) |
+| A notify between two releases | Refused (`unsupported-action`): the checksum reads a template of the same chart |
+| A Kustomize overlay | Refused (`unsupported-dependency`) |
+
+A `dependsOn` Helm's order already honours keeps one release.
 
 ## Kustomize overlays
 
@@ -500,7 +533,7 @@ use your kubeconfig or `KUBECONFIG`; point both at the same cluster.
 | `duplicate-resource` | Two resources are the same object. | Give one a different `metadata.name`. |
 | `duplicate-output` | Two outputs share a name. | Rename one. |
 | `empty-document` | The document has no Kubernetes object. | Add one. |
-| `unsupported-dependency` | A `dependsOn` Helm's install order does not honour, or one on a settings resource. | Remove it; see [Ordering](#ordering). |
+| `unsupported-dependency` | A `dependsOn` Helm's install order does not honour, or one on a settings resource; `ordering: releases` with a `kustomization`. | Remove it, or set `ordering: releases`; see [Ordering](#ordering). |
 | `unsupported-action` | A notification other than a restart of a workload, or two objects that notify each other. | See [Notifications](#notifications). |
 | `unsupported-state`, `unsupported-runtime-condition` | `state: absent` or `runtimeWhen`. | Remove the resource or the condition. |
 | `unsupported-secret-place` | A secret anywhere but the `values`, or in the values of a document with a Kustomize overlay. | See [Secrets](#secrets). |

@@ -408,6 +408,7 @@ fn read_release(r: &Resource, release: &mut ReleaseSettings) -> Result<(), Compi
             "createNamespace",
             "name",
             "namespace",
+            "ordering",
             "timeout",
             "wait",
         ],
@@ -425,6 +426,20 @@ fn read_release(r: &Resource, release: &mut ReleaseSettings) -> Result<(), Compi
     release.create_namespace = params.flag("createNamespace")?.unwrap_or(false);
     release.wait = params.flag("wait")?.unwrap_or(false);
     release.atomic = params.flag("atomic")?.unwrap_or(false);
+    match params.text("ordering")?.as_deref() {
+        None | Some("kind") => {}
+        Some("releases") => release.ordered_releases = true,
+        Some(other) => {
+            return Err(refuse(
+                r,
+                &rules::INVALID_PARAM,
+                format!(
+                    "param \"ordering\" of the release is {other:?}; it is \"kind\" (Helm's \
+                     own order, the default) or \"releases\" (one release per dependsOn wave)"
+                ),
+            ))
+        }
+    }
     Ok(())
 }
 

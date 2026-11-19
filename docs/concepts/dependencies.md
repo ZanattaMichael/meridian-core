@@ -22,7 +22,7 @@ hands each plugin the sorted list. What the plugin writes depends on the tool:
 | its own rules | `docker` | `depends_on` between services, waiting for the other to be healthy when it declares a healthcheck; everything else Compose already creates first |
 | the stages of a build | `packer` | the order of the provisioners, and post-processors chained into a sequence; a dependency against the fixed shape of a build is refused |
 | nothing | `kubernetes` | Meridian-run: the order of the manifests, applied in waves with a wait for each wave's workloads, Jobs and CRDs ([kubernetes](../targets/kubernetes.md#ordering)) |
-| the kind of each object | `helm` | nothing written where Helm's own install order already agrees; refused where it does not ([helm](../targets/helm.md#ordering)) |
+| the kind of each object | `helm` | nothing written where Helm's own install order already agrees; refused where it does not, or with `ordering: releases` one release per wave ([helm](../targets/helm.md#ordered-releases)) |
 | the stages of a first boot | `cloud-init` | nothing written; each resource is placed at the step cloud-init handles it, a file that has to wait is deferred, and a dependency that points backwards through those steps is refused |
 
 Where a reference already implies order (`${web_vm.id}` in Terraform,

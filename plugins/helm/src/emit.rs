@@ -25,7 +25,30 @@ pub(crate) const RENDERED_FILE: &str = "helm-rendered.yaml";
 /// document always renders to the same bytes.
 pub(crate) fn serialise(chart: &Chart) -> BTreeMap<String, String> {
     let mut files = BTreeMap::new();
+    let all: Vec<&Manifest> = chart.manifests.iter().collect();
+    chart_files(chart, CHART_DIR, &all, &mut files);
+    // With ordering: releases, each release's own chart beside the whole one,
+    // which a render reads.
+    for (n, part) in chart.parts.iter().enumerate() {
+        let manifests: Vec<&Manifest> = chart
+            .manifests
+            .iter()
+            .filter(|m| part.contains(&m.id))
+            .collect();
+        chart_files(chart, &part_dir(n + 1), &manifests, &mut files);
+    }
+    finish(chart, &mut files);
+    files
+}
 
+/// The files of one chart in `dir`: its metadata, its values and a template
+/// for each of `manifests`.
+fn chart_files(
+    chart: &Chart,
+    dir: &str,
+    manifests: &[&Manifest],
+    files: &mut BTreeMap<String, String>,
+) {
     let mut about = vec![
         ("apiVersion".to_owned(), Yaml::str("v2")),
         ("name".to_owned(), Yaml::str(&chart.chart.name)),
@@ -40,23 +63,35 @@ pub(crate) fn serialise(chart: &Chart) -> BTreeMap<String, String> {
         about.push(("appVersion".to_owned(), Yaml::str(&chart.chart.app_version)));
     }
     files.insert(
-        format!("{CHART_DIR}/Chart.yaml"),
+        format!("{dir}/Chart.yaml"),
         meridian_yaml::write(&Yaml::Map(about)),
     );
     files.insert(
-        format!("{CHART_DIR}/values.yaml"),
+        format!("{dir}/values.yaml"),
         meridian_yaml::write(&values_yaml(
             &Value::Map(chart.values.clone()),
             &chart.secrets,
         )),
     );
-    for manifest in &chart.manifests {
+    for manifest in manifests {
         files.insert(
-            format!("{CHART_DIR}/templates/{}.yaml", manifest.id),
+            format!("{dir}/templates/{}.yaml", manifest.id),
             template_text(manifest),
         );
     }
+}
 
+/// The chart of ordered release `n`, counted from 1.
+pub fn part_dir(n: usize) -> String {
+    format!("{CHART_DIR}-{n}")
+}
+
+/// The release name of ordered release `n` of `release`.
+pub fn part_release(release: &str, n: usize) -> String {
+    format!("{release}-{n}")
+}
+
+fn finish(chart: &Chart, files: &mut BTreeMap<String, String>) {
     if let Some(kustomization) = &chart.kustomization {
         let mut fields = vec![
             (
@@ -77,7 +112,6 @@ pub(crate) fn serialise(chart: &Chart) -> BTreeMap<String, String> {
     }
 
     files.insert(RELEASE_PATH.to_owned(), release(chart).pretty());
-    files
 }
 
 /// One object as a template: YAML in which a reference is a template action
@@ -186,7 +220,15 @@ fn release(chart: &Chart) -> Value {
             .collect(),
     );
 
-    map(vec![
+    let parts: Vec<Value> = (1..=chart.parts.len())
+        .map(|n| {
+            map(vec![
+                ("release", text(&part_release(&chart.release.name, n))),
+                ("chart", text(&part_dir(n))),
+            ])
+        })
+        .collect();
+    let mut release = vec![
         ("release", text(&chart.release.name)),
         ("namespace", text(&chart.release.namespace)),
         (
@@ -206,5 +248,9 @@ fn release(chart: &Chart) -> Value {
         ("kustomize", Value::Bool(overlay.is_some())),
         ("resources", resources),
         ("outputs", outputs),
-    ])
+    ];
+    if !parts.is_empty() {
+        release.push(("parts", Value::List(parts)));
+    }
+    map(release)
 }

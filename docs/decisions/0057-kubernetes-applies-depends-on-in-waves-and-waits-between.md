@@ -5,7 +5,7 @@
 | Area | Runs |
 | Status | **proposed**: made during the work, not yet accepted or changed by the owner |
 | Made in | the pull requests for issue 263: part 1 (Kubernetes), part 2 (Helm) |
-| Where it shows | [kubernetes: Ordering](../targets/kubernetes.md#ordering), [Dependencies and notifications](../concepts/dependencies.md), [plugin settings](../reference/plugin-settings.md#kubernetes) |
+| Where it shows | [kubernetes: Ordering](../targets/kubernetes.md#ordering), [helm: Ordered releases](../targets/helm.md#ordered-releases), [Dependencies and notifications](../concepts/dependencies.md), [plugin settings](../reference/plugin-settings.md#kubernetes) |
 
 ## Kubernetes (part 1)
 
@@ -23,3 +23,17 @@
   resource (`resource-failed` for a failed Job), and the changes already made are reported.
 - **Plan and destroy are unchanged**: one server-side dry run, one `kubectl delete`.
 - The compile warning that `kubectl` does not wait is gone.
+
+## Helm (part 2)
+
+- **Opt in on the release**: `ordering: releases` (default `kind`, Helm's own order). A
+  release param, not a plugin setting, as it changes what the compile writes.
+- **Split only when needed**: a `dependsOn` Helm's order does not honour makes one release
+  per wave, `<release>-<n>`, by the same depth as Kubernetes. Otherwise one release.
+- **Compiled**: `chart-<n>/` per release beside the whole `chart/` (which a render reads);
+  `release.json` lists `parts` in install order.
+- **Apply** installs each with `--wait`, in order; a failure stops it with the changes made
+  so far. **Destroy** uninstalls last first. **Plan** sums each release's changes.
+- **Refused**: a document still installed as one release (moving objects needs adopt,
+  #269); a notify between two releases (the checksum reads a template of the same chart);
+  a Kustomize overlay.

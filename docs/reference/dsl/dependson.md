@@ -120,7 +120,7 @@ flowchart TD
 | the fixed shape of a build | `packer` | the order of the provisioners and the chain of post-processors; a dependency that contradicts the shape is refused |
 | the stages of a first boot | `cloud-init` | nothing written; a dependency that points backwards through the stages is refused |
 | nothing | `kubernetes` | Meridian applies the manifests in waves and waits for each wave |
-| the kind of each object | `helm` | nothing written where Helm's own install order already agrees; refused where it does not |
+| the kind of each object | `helm` | nothing written where Helm's own install order already agrees; refused where it does not, or with `ordering: releases` one release per wave |
 
 - **File-ordered tools run independent resources in sequence**, with a warning:
 
