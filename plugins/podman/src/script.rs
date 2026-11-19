@@ -187,11 +187,14 @@ impl Settings<'_> {
     pub fn apply(&self, steps: &Steps) -> String {
         let mut out = self.preamble();
         out.push_str(&format!("status={}\n", u8::from(self.debug >= 2)));
-        out.push_str(
-            "fail() {\n\
+        out.push_str(&format!(
+            "fail() {{\n\
              \x20 code=$1; shift\n\
              \x20 for s in \"$@\"; do\n\
              \x20   if ! look is-active --quiet \"$s\" 2>/dev/null; then\n\
+             \x20     r=$(look show -p Result --value \"$s\" 2>/dev/null)\n\
+             \x20     x=$(look show -p ExecMainStatus --value \"$s\" 2>/dev/null)\n\
+             \x20     echo \"{MARK}failed $s ${{r:-unknown}} ${{x:-}}\"\n\
              \x20     echo \"--- the journal of $s ---\" >&2\n\
              \x20     if [ -n \"$mode\" ]; then run \"$journalctl\" \"$mode\" -u \"$s\" -n \"$lines\" --no-pager >&2\n\
              \x20     else run \"$journalctl\" -u \"$s\" -n \"$lines\" --no-pager >&2; fi\n\
@@ -199,9 +202,9 @@ impl Settings<'_> {
              \x20   fi\n\
              \x20 done\n\
              \x20 exit \"$code\"\n\
-             }\n\
+             }}\n\
              run mkdir -p \"$dir\" >&2 || exit 71\n",
-        );
+        ));
         for (file, service) in &steps.remove {
             // A unit that is already stopped, or was never started, is not a
             // reason to leave its file behind.
@@ -434,6 +437,21 @@ pub(crate) fn read_done(stdout: &str) -> Done {
         }
     }
     done
+}
+
+/// The units an apply script found not running when a start or restart
+/// failed: the service, systemd's `Result` (`exit-code`, `timeout`,
+/// `signal`, ...) and the main process's exit status.
+pub(crate) fn read_failed(stdout: &str) -> Vec<(String, String, String)> {
+    stdout
+        .lines()
+        .filter_map(|line| line.strip_prefix(MARK)?.strip_prefix("failed "))
+        .map(|rest| {
+            let mut parts = rest.splitn(3, ' ');
+            let mut next = || parts.next().unwrap_or_default().trim().to_owned();
+            (next(), next(), next())
+        })
+        .collect()
 }
 
 /// The values an inspect script read, by position.

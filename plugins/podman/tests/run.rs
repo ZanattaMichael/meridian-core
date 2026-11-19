@@ -465,6 +465,13 @@ fn a_unit_that_does_not_start_fails_the_apply_with_its_journal() {
         "{}",
         err.output
     );
+    assert_eq!(err.failures.len(), 1, "{:?}", err.failures);
+    let f = &err.failures[0];
+    assert_eq!(
+        (f.resource.as_str(), f.cause.as_str()),
+        ("web", "resource-failed"),
+        "{f:?}"
+    );
     // Both files were written before the start failed, and the failure says so.
     assert_eq!(shown(&err.changes).len(), 2);
     assert_eq!(installed(&dir), ["data.volume", "web.container"]);
