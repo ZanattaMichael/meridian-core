@@ -326,6 +326,8 @@ Each names the resource, line and rule:
 | `az could not preview the deployment` | what-if failed before it could analyse; the reason is Azure's | read the output above the message |
 | an output is reported as sensitive and not printed | it is of a secure type | expected; read it with `meridian outputs` into a stage that needs it |
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `--verbose` to `az` at level 1 and `--debug` from level 2.
+
 ## How it is tested
 
 - **Golden files** in `plugins/bicep/testdata/`, refusals included.

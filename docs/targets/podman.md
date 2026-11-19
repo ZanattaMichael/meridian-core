@@ -547,6 +547,8 @@ A capitalised key not in [Known keys](#known-keys) is a warning.
 
 `meridian compile <file> --out build` shows the unit files without touching the host.
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) shows more of what systemd and Quadlet say. Level 1: 100 journal lines of a unit that fails, not 30. Level 2: also `systemctl status` of that unit. Level 3: also every unit Quadlet generates, on a plan.
+
 ## Examples
 
 - [`examples/podman/web-app.yaml`](../../examples/podman/web-app.yaml): a web server and a

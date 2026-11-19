@@ -716,6 +716,8 @@ the document.
 
 **Unexpected `defer: true`.** See [the order of a first boot](#the-order-of-a-first-boot).
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `--debug` to the local `cloud-init schema` check.
+
 ## How this plugin is tested
 
 - Golden files in `plugins/cloud-init/testdata` for the examples, an all-keys document and

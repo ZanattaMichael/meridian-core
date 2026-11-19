@@ -723,6 +723,24 @@ pub(crate) struct Workflow {
     /// are kept, and a line says how much was cut between them
     #[arg(long, value_name = "SIZE", default_value = "10MiB", value_parser = parse_size)]
     pub(crate) log_limit: u64,
+    /// Ask each tool for more of its own output: 1, 2 or 3, more each time;
+    /// `--tool-debug` alone is 1. What each level does per target is listed
+    /// by `meridian plugins`. The output is masked as every tool line is
+    #[arg(
+        long,
+        value_name = "LEVEL",
+        env = "MERIDIAN_TOOL_DEBUG",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "1",
+        default_value = "0",
+        value_parser = clap::value_parser!(u32).range(0..=3)
+    )]
+    pub(crate) tool_debug: u32,
+    /// Give --tool-debug only to the step of this document; may be given
+    /// more than once
+    #[arg(long, value_name = "NAME")]
+    pub(crate) tool_debug_step: Vec<String>,
     /// Keep no tool output in the state directory; it is still printed
     #[arg(long, env = "MERIDIAN_NO_LOGS")]
     pub(crate) no_logs: bool,

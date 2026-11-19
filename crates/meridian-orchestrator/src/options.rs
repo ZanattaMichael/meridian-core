@@ -69,6 +69,12 @@ pub struct Options {
     /// compiles to what was planned, or was applied since, and hand each
     /// tool the plan it saved. Only an apply takes one.
     pub from_plan: Option<Arc<crate::PlanFile>>,
+    /// How much of its own debug output each tool is asked for: 0 for none,
+    /// up to [`meridian_sdk::debug::MAX_LEVEL`]. The run's `run.started`
+    /// event records it.
+    pub tool_debug: u32,
+    /// The documents whose tools get [`Options::tool_debug`]; empty is all.
+    pub tool_debug_steps: Vec<String>,
 }
 
 /// What an apply does when a stage fails.
@@ -104,7 +110,14 @@ impl Options {
             stop: Stop::default(),
             save_plan: false,
             from_plan: None,
+            tool_debug: 0,
+            tool_debug_steps: Vec::new(),
         }
+    }
+
+    /// Whether the stage's tool is asked for debug output.
+    pub(crate) fn debugs(&self, id: &StageId) -> bool {
+        self.tool_debug_steps.is_empty() || self.tool_debug_steps.contains(&id.name)
     }
 
     /// Where the record is kept.

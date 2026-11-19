@@ -359,3 +359,74 @@ fn the_types_schemas_are_exported_for_an_editor() {
         export.notes
     );
 }
+
+#[ignore = "needs a real puppet; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn a_debug_level_brings_puppets_own_debug_output_and_changes_no_result() {
+    let Some(puppet) = puppet() else { return };
+    let dir = scratch(TMP, "real-debug");
+    let runner = runner(&puppet, &dir);
+    let artifact = site(&dir, "workers = 2\\n", "0640");
+    let quiet = runner
+        .plan(&context(&dir), &artifact, &KeptLog::default())
+        .unwrap();
+
+    let log = KeptLog::default();
+    let loud = runner
+        .plan(
+            &RunContext {
+                debug_level: 2,
+                ..context(&dir)
+            },
+            &artifact,
+            &log,
+        )
+        .unwrap();
+    let text = log.text().join("\n");
+    assert!(text.contains("Debug: "), "{text}");
+    assert_eq!(resources(&loud), resources(&quiet));
+}
+
+/// The real `bolt`, or `None` when this test is not asked for.
+fn bolt() -> Option<String> {
+    real_tool_program("BOLT", "bolt")
+}
+
+#[ignore = "needs a real bolt; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn over_bolt_a_debug_level_brings_bolts_log_and_the_report_is_still_read() {
+    let Some(bolt) = bolt() else { return };
+    let dir = scratch(TMP, "real-bolt-debug");
+    let runner = PuppetRunner {
+        bolt,
+        transport: Some(Transport::Bolt),
+        extra_args: Vec::new(),
+        ..runner("puppet", &dir)
+    };
+    let artifact = site(&dir, "workers = 2\\n", "0640");
+
+    let log = KeptLog::default();
+    let plan = runner
+        .plan(
+            &RunContext {
+                debug_level: 2,
+                ..context(&dir)
+            },
+            &artifact,
+            &log,
+        )
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    let text = log.text().join("\n");
+    assert!(!plan.unknown, "{text}");
+    assert_eq!(
+        resources(&plan),
+        [
+            ("app_dir", ChangeAction::Create),
+            ("app_conf", ChangeAction::Create),
+            ("stamp", ChangeAction::Update),
+        ],
+        "{text}"
+    );
+    assert!(text.to_lowercase().contains("debug"), "{text}");
+    assert!(!dir.join("app").exists(), "a plan must change nothing");
+}

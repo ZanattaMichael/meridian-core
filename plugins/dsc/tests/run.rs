@@ -194,3 +194,30 @@ fn a_run_that_throws_keeps_what_powershell_said() {
         err.output
     );
 }
+
+#[test]
+fn a_debug_level_sets_powershells_preferences_before_the_module_loads() {
+    let cases = format!("*'-Mode Test'*) {} ;;", result(OK));
+    for (level, expected) in [
+        (0, "$ErrorActionPreference = 'Stop'; $module = "),
+        (
+            1,
+            "$ErrorActionPreference = 'Stop'; $VerbosePreference = 'Continue'; $module = ",
+        ),
+        (
+            3,
+            "$ErrorActionPreference = 'Stop'; $VerbosePreference = 'Continue'; $DebugPreference = 'Continue'; $module = ",
+        ),
+    ] {
+        let dir = scratch(TMP, &format!("debug-{level}"));
+        let context = RunContext {
+            debug_level: level,
+            ..context(&dir)
+        };
+        runner(&dir, &cases)
+            .plan(&context, &compiled(), &KeptLog::default())
+            .unwrap();
+        let script = fs::read_to_string(dir.join("calls")).unwrap();
+        assert!(script.starts_with(expected), "level {level}: {script}");
+    }
+}

@@ -382,6 +382,10 @@ message DescribeResponse {
   // `meridian retarget` writes them as the resources' adopt for the new
   // target. A plugin built before this field reads none.
   bool reads_identifiers = 27;
+  // debug_levels says what each debug level does to the tool, first level
+  // first, as a person reads it: "TF_LOG=DEBUG", "-vvv". Empty when the
+  // plugin has no debug output to give.
+  repeated string debug_levels = 28;
 }
 
 // Setting is one thing an operator can configure about a runner.
@@ -556,6 +560,11 @@ message RunContext {
   // plan and nothing else, and fails when the tool finds it stale. The host
   // sends it only to a plugin whose Describe says saves_plans.
   SavedPlan saved_plan = 8;
+  // debug_level asks the tool for more of its own output: 0 is none, the
+  // default; 1, 2 and 3 ask for more each, as the plugin's Describe
+  // debug_levels say. A plugin that declares fewer levels uses its highest
+  // for a level above it, and one that declares none ignores it.
+  uint32 debug_level = 9;
 }
 
 // SavedPlan is a tool's own saved plan, as the plugin chose to keep it: a

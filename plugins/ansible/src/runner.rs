@@ -10,6 +10,13 @@ use meridian_sdk::{
 
 use crate::{INVENTORY_PATH, PLAYBOOK_PATH};
 
+/// What `--tool-debug` adds to the tool, level 1 first. The verbose lines are interleaved with the play's own output.
+pub const DEBUG: &[meridian_sdk::debug::DebugLevel] = &[
+    meridian_sdk::debug::DebugLevel::args(&["-v"]),
+    meridian_sdk::debug::DebugLevel::args(&["-vvv"]),
+    meridian_sdk::debug::DebugLevel::args(&["-vvvv"]),
+];
+
 /// Names the `ansible-playbook` program to run, when it is not on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_ANSIBLE_PLAYBOOK";
 /// Extra arguments for every run, split like a shell command line: how to
@@ -101,7 +108,8 @@ impl AnsibleRunner {
             .env("ANSIBLE_FORCE_COLOR", "0")
             .env("ANSIBLE_DISPLAY_OK_HOSTS", "1")
             .env("ANSIBLE_DISPLAY_SKIPPED_HOSTS", "1")
-            .env("ANSIBLE_RETRY_FILES_ENABLED", "0");
+            .env("ANSIBLE_RETRY_FILES_ENABLED", "0")
+            .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level));
         if check {
             tool = tool.args(["--check", "--diff"]);
         }
@@ -214,6 +222,10 @@ fn private_key_file(context: &RunContext) -> Result<Option<SecretFile>, RunError
 }
 
 impl Runner for AnsibleRunner {
+    fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
+        DEBUG
+    }
+
     fn settings(&self) -> Vec<Setting> {
         settings()
     }

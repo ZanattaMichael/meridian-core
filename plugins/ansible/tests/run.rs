@@ -373,3 +373,31 @@ fn an_agent_or_ambient_credential_hands_nothing_over() {
     );
     assert!(!dir.join("key").exists() && !dir.join("vars").exists());
 }
+
+#[test]
+fn a_debug_level_adds_ansibles_verbosity_and_level_0_adds_nothing() {
+    for (level, flag) in [
+        (0, None),
+        (1, Some("-v")),
+        (2, Some("-vvv")),
+        (3, Some("-vvvv")),
+    ] {
+        let dir = scratch(TMP, &format!("debug-{level}"));
+        let context = RunContext {
+            debug_level: level,
+            ..context(&dir)
+        };
+        runner(&dir, TWO_CHANGES)
+            .plan(&context, &compiled(), &KeptLog::default())
+            .unwrap();
+        let args = fs::read_to_string(dir.join("args")).unwrap();
+        let words: Vec<&str> = args.split_whitespace().collect();
+        let verbose: Vec<&&str> = words.iter().filter(|w| w.starts_with("-v")).collect();
+        match flag {
+            None => assert!(verbose.is_empty(), "{args}"),
+            Some(flag) => assert_eq!(verbose, [&flag], "{args}"),
+        }
+        // The playbook is still the last word.
+        assert_eq!(words.last(), Some(&"playbook.yml"), "{args}");
+    }
+}

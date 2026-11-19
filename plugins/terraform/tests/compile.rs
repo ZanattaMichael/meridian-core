@@ -309,7 +309,7 @@ fn a_credential_the_providers_cannot_take_is_refused_with_what_to_do_instead() {
 
 #[test]
 fn the_common_types_compile_to_their_golden_configuration_on_aws_and_azure() {
-    for name in ["web-aws", "web-azure"] {
+    for name in ["web-aws", "web-azure", "web-gcp"] {
         let graph = graph_from_file(&format!("examples/common/{name}.yaml"), "terraform");
         assert_golden(&golden(), &format!("common-{name}"), &emit(&graph).unwrap());
     }
@@ -335,7 +335,7 @@ fn a_document_that_does_not_say_its_cloud_is_refused_with_how_to_say_it() {
     assert_eq!(err.rule, "missing-resource");
     assert_eq!(err.target, "terraform");
     assert!(
-        err.msg.contains("spec.settings.cloud (aws, azure)"),
+        err.msg.contains("spec.settings.cloud (aws, azure, gcp)"),
         "{}",
         err.msg
     );
@@ -344,10 +344,10 @@ fn a_document_that_does_not_say_its_cloud_is_refused_with_how_to_say_it() {
 #[test]
 fn a_cloud_this_target_does_not_map_is_refused() {
     let err = refusal(&format!(
-        "  settings:\n    cloud: gcp\n  resources:\n{COMMON_NET}"
+        "  settings:\n    cloud: oracle\n  resources:\n{COMMON_NET}"
     ));
     assert_eq!(err.rule, "invalid-setting");
-    assert!(err.msg.contains("aws, azure"), "{}", err.msg);
+    assert!(err.msg.contains("aws, azure, gcp"), "{}", err.msg);
 }
 
 #[test]
@@ -428,4 +428,39 @@ fn adopt_on_a_data_source_or_a_provider_is_refused() {
 fn the_adopt_example_compiles_to_its_golden_configuration() {
     let graph = graph_from_file("examples/terraform/adopt.yaml", "terraform");
     assert_golden(&golden(), "adopt", &emit(&graph).unwrap());
+}
+
+// ---- the common types on Google Cloud ----
+
+const GCP: &str = "  settings:\n    cloud: gcp\n    location: europe-west1\n  resources:\n";
+
+#[test]
+fn a_gcp_firewall_rule_applies_to_the_machines_that_carry_its_tag() {
+    let text = config(&format!(
+        "{GCP}{COMMON_NET}    - id: web_fw\n      type: firewall\n      params:\n        network: \"${{net}}\"\n        rules: [{{port: \"80\", cidr: 0.0.0.0/0}}, {{direction: out, protocol: any, cidr: 10.0.0.0/8}}]\n    - id: s\n      type: subnet\n      params: {{network: \"${{net}}\", cidr: 10.0.1.0/24}}\n    - id: vm\n      type: vm\n      params: {{subnet: \"${{s}}\", size: e2-small, image: my-image, firewalls: [\"${{web_fw}}\"]}}\n"
+    ));
+    assert_eq!(text.matches("\"meridian-web-fw\"").count(), 4, "{text}");
+    assert!(text.contains("\"EGRESS\""), "{text}");
+    assert!(text.contains("\"priority\": 65534"), "{text}");
+    assert!(text.contains("\"zone\": \"europe-west1-b\""), "{text}");
+}
+
+#[test]
+fn a_gcp_network_takes_no_location_and_a_firewall_needs_a_rule() {
+    let err = refusal(&format!(
+        "{GCP}    - id: net\n      type: network\n      params: {{cidr: 10.0.0.0/16, location: europe-west1}}\n"
+    ));
+    assert_eq!(err.rule, "unsupported-param");
+    let err = refusal(&format!(
+        "{GCP}{COMMON_NET}    - id: fw\n      type: firewall\n      params: {{network: \"${{net}}\"}}\n"
+    ));
+    assert_eq!(err.rule, "missing-param");
+}
+
+#[test]
+fn a_gcp_resource_group_setting_is_refused() {
+    let err = refusal(&format!(
+        "  settings:\n    cloud: gcp\n    location: europe-west1\n    resourceGroup: rg\n  resources:\n{COMMON_NET}"
+    ));
+    assert_eq!(err.rule, "invalid-setting");
 }

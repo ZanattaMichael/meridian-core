@@ -114,6 +114,10 @@ pub struct RunContext {
     /// plan and nothing else, and fails when its tool finds the plan stale.
     /// Sent only to a runner whose [`Runner::saves_plans`] is true.
     pub saved_plan: Option<SavedPlan>,
+    /// How much of its own debug output the tool is asked for: 0 for none,
+    /// up to [`crate::debug::MAX_LEVEL`]. A runner reads it through
+    /// [`crate::debug::pick`] with its [`Runner::debug_levels`].
+    pub debug_level: u32,
 }
 
 /// A tool's own saved plan, as the plugin chose to keep it: a Terraform plan
@@ -414,6 +418,21 @@ pub trait Runner: Send + Sync {
     /// settings were declared reports.
     fn settings(&self) -> Vec<Setting> {
         Vec::new()
+    }
+
+    /// What each debug level does to the tool, first level first: the
+    /// arguments and environment [`RunContext::debug_level`] adds. The host
+    /// lists them with `meridian plugins` and on the capability matrix. The
+    /// default is none: `--tool-debug` then changes nothing for this target.
+    fn debug_levels(&self) -> &'static [crate::debug::DebugLevel] {
+        &[]
+    }
+
+    /// The debug levels of the other tools this runner may run instead of
+    /// its main one, each named: Bolt beside `puppet apply`. Listed after
+    /// the main table by `meridian plugins`.
+    fn more_debug_levels(&self) -> &'static [(&'static str, &'static [crate::debug::DebugLevel])] {
+        &[]
     }
 
     /// Previews what `apply` would change. It must change nothing.

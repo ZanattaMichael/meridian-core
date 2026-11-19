@@ -9,7 +9,7 @@ with `tofu`.
 
 | | |
 |---|---|
-| Resource types | OpenTofu's own: any `<provider>_<type>`, plus `data.<type>`, `ephemeral.<type>`, `module`, `variable`, `local`, `provider`, `backend` and `encryption`. Also the [common infrastructure types](#common-infrastructure-types), on AWS and Azure |
+| Resource types | OpenTofu's own: any `<provider>_<type>`, plus `data.<type>`, `ephemeral.<type>`, `module`, `variable`, `local`, `provider`, `backend` and `encryption`. Also the [common infrastructure types](#common-infrastructure-types), on AWS, Azure and Google Cloud |
 | State and plan encryption | Yes, with `type: encryption`, checked at compile time. See [State and plan encryption](#state-and-plan-encryption) |
 | `dependsOn` | Yes, as `depends_on`, unless a reference already implies the order |
 | `notifies` | Synthetic, and blunt: the action `replace` only. See [Notifications](#notifications) |
@@ -211,7 +211,7 @@ arrives the same way under its name. Non-strings are passed as JSON.
 
 ## Common infrastructure types
 
-`network`, `subnet`, `firewall`, `address` and `vm` compile to the AWS or Azure
+`network`, `subnet`, `firewall`, `address` and `vm` compile to the AWS, Azure or Google
 provider's own resources exactly as on the
 [Terraform target](terraform.md#common-infrastructure-types), with the same
 `spec.settings` keys (`cloud`, `location`, `resourceGroup`), because both tools
@@ -398,6 +398,8 @@ plans again. [Encrypt the state](#state-and-plan-encryption), which holds the ar
 Settings can also go in `meridian.yaml` under `spec.settings.opentofu`; the environment
 wins. See the [plugin settings reference](../reference/plugin-settings.md#opentofu).
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) sets `TF_LOG` to `INFO`, `DEBUG` or `TRACE` on every `tofu` call; the log goes to standard error, beside the JSON.
+
 ## Credentials
 
 `spec.endpoint` names the [credential](../reference/dsl/credentials.md#reaching-a-cloud-as-a-credential)
@@ -462,6 +464,7 @@ The compiled files hold nothing of the credential, and the plan and the run reco
 name it (`prod (aws, region eu-west-1)`) and nothing more. Outputs read on their own
 (`meridian outputs`) are read with no credential; a backend that needs the cloud's
 login to read the state is read right after the apply, inside it.
+
 ## Adopting what exists
 
 A resource's `adopt` is the provider's own import identifier of a thing that

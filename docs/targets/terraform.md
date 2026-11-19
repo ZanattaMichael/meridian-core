@@ -9,7 +9,7 @@ with `terraform`. OpenTofu's `tofu` takes the same commands.
 
 | | |
 |---|---|
-| Resource types | Terraform's own: any `<provider>_<type>`, plus `data.<type>`, `module`, `variable`, `local`, `provider` and `backend`. Also the [common infrastructure types](#common-infrastructure-types), on AWS and Azure |
+| Resource types | Terraform's own: any `<provider>_<type>`, plus `data.<type>`, `module`, `variable`, `local`, `provider` and `backend`. Also the [common infrastructure types](#common-infrastructure-types), on AWS, Azure and Google Cloud |
 | Import | Yes: `*.tf` and `*.tf.json`. See [Importing](#importing) |
 | `dependsOn` | Yes, as `depends_on`, unless a reference already implies the order |
 | `notifies` | Synthetic, and blunt: the action `replace` only. See [Notifications](#notifications) |
@@ -80,7 +80,7 @@ creates a machine with the user-data a cloud-init document compiles to.
 ## Common infrastructure types
 
 `network`, `subnet`, `firewall`, `address` and `vm` are Meridian's own types,
-and this target turns each into the resources of the AWS or the Azure provider
+and this target turns each into the resources of the AWS, Azure or Google provider
 ([the common infrastructure types](../reference/dsl/common-infrastructure-types.md)
 has every param and mapping). They are mixed freely with Terraform's own
 types. The cloud is the one named in `spec.settings`, or the one whose provider
@@ -90,24 +90,24 @@ the document configures:
 spec:
   target: terraform
   settings:
-    cloud: azure            # or aws; optional when only one provider is configured
+    cloud: azure            # or aws, gcp; optional when only one provider is configured
     location: westeurope    # Azure: where a common resource goes unless it says
     resourceGroup: web-prod # Azure: required
 ```
 
-| Common type | AWS | Azure |
-|---|---|---|
-| `network` | `aws_vpc` | `azurerm_virtual_network` |
-| `subnet` | `aws_subnet`; when public, an internet gateway, a route table and a route | `azurerm_subnet` |
-| `firewall` | `aws_security_group` and one rule resource per rule | `azurerm_network_security_group` and one `azurerm_network_security_rule` per rule |
-| `address` | `aws_eip` | `azurerm_public_ip` |
-| `vm` | `aws_instance`, an `aws_key_pair`, a `data.aws_ami` lookup, an `aws_eip_association` | `azurerm_linux_virtual_machine`, an `azurerm_network_interface` and its firewall association |
+| Common type | AWS | Azure | Google Cloud |
+|---|---|---|---|
+| `network` | `aws_vpc` | `azurerm_virtual_network` | `google_compute_network` |
+| `subnet` | `aws_subnet`; when public, an internet gateway, a route table and a route | `azurerm_subnet` | `google_compute_subnetwork` |
+| `firewall` | `aws_security_group` and one rule resource per rule | `azurerm_network_security_group` and one `azurerm_network_security_rule` per rule | one `google_compute_firewall` per rule, plus a deny-all egress rule when there are out rules |
+| `address` | `aws_eip` | `azurerm_public_ip` | `google_compute_address` |
+| `vm` | `aws_instance`, an `aws_key_pair`, a `data.aws_ami` lookup, an `aws_eip_association` | `azurerm_linux_virtual_machine`, an `azurerm_network_interface` and its firewall association | `google_compute_instance`, tagged for its firewalls |
 
 The rules and routes are separate resources rather than the inline
 `ingress`, `route` or `security_rule` blocks. Those are "attributes as blocks"
 in the providers, which Terraform's JSON syntax would need written out in full.
 Examples: [`examples/common/web-aws.yaml`](../../examples/common/web-aws.yaml)
-and [`web-azure.yaml`](../../examples/common/web-azure.yaml). The OpenTofu target
+[`web-azure.yaml`](../../examples/common/web-azure.yaml) and [`web-gcp.yaml`](../../examples/common/web-gcp.yaml). The OpenTofu target
 takes the common types too, with the same mapping and settings.
 
 ## References
@@ -259,6 +259,8 @@ variables file passed as `-var-file`, removed after planning; the plan file is r
 use. A [saved plan](../operations/pull-requests.md) keeps no plan file for such a stage, so
 apply plans again. State holds the arguments, so use a `backend` that protects it.
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) sets `TF_LOG` to `INFO`, `DEBUG` or `TRACE` on every `terraform` call; the log goes to standard error, beside the JSON.
+
 ## Credentials
 
 `spec.endpoint` names the [credential](../reference/dsl/credentials.md#reaching-a-cloud-as-a-credential)
@@ -323,6 +325,7 @@ The compiled files hold nothing of the credential, and the plan and the run reco
 name it (`prod (aws, region eu-west-1)`) and nothing more. Outputs read on their own
 (`meridian outputs`) are read with no credential; a backend that needs the cloud's
 login to read the state is read right after the apply, inside it.
+
 
 ## Editor schemas
 
