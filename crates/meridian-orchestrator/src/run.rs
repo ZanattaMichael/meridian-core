@@ -1015,7 +1015,11 @@ impl Run<'_> {
         name_secrets(&mut graph, declared_secrets);
         let failed =
             |reason: Reason, why: String, host: String| NotCompiled::Failed { reason, why, host };
-        match target.emit(&graph, &options.data) {
+        // The run id reached every value through the resolve; the plugin is
+        // handed the person's data only.
+        let mut data = options.data.clone();
+        data.remove(meridian_ir::RESERVED_DATA_KEY);
+        match target.emit(&graph, &data) {
             Ok(emitted) => Ok(Compiled {
                 graph,
                 emitted,

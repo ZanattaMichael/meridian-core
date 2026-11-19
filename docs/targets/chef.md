@@ -434,3 +434,16 @@ Each names the resource, line and rule:
   `MERIDIAN_TEST_REAL_CHEF=1 cargo test -p meridian-target-chef --test real -- --ignored`.
   A Chef server and `chef-run` have only met stand-ins. See
   [Real-tool tests](../contributing/real-tool-tests.md).
+
+## Inspecting one resource
+
+Chef cannot read one resource alone. [`meridian inspect`](../reference/cli.md#inspect) runs
+`chef-client --local-mode --why-run` on this machine.
+
+| Answer | From |
+|---|---|
+| actual | the lines why-run prints under the resource, as `wouldChange` |
+| as declared | yes when why-run would not change the resource |
+
+On another machine `chef-run` has no why-run mode, and inspect is refused with
+`unsupported-inspect`.

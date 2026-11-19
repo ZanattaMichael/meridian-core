@@ -525,3 +525,24 @@ fn the_types_schemas_are_exported_for_an_editor() {
         .iter()
         .any(|s| s.r#type == "notify" && s.open));
 }
+
+#[ignore = "needs a real OpenVox; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn inspect_reads_one_resource_with_openvox() {
+    let Some(puppet) = openvox() else { return };
+    let dir = scratch(TMP, "real-inspect");
+    let runner = runner(&puppet, &dir);
+    let artifact = site(&dir, "port = 80\\n", "0640");
+    runner
+        .apply(&context(&dir), &artifact, &KeptLog::default())
+        .unwrap_or_else(|e| panic!("{e}"));
+    let read = runner
+        .inspect(&context(&dir), &artifact, "app_conf", "localhost")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(true));
+    assert_eq!(
+        read.actual.get("mode"),
+        Some(&meridian_sdk::Value::from("0640"))
+    );
+}

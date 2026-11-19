@@ -78,6 +78,10 @@ pub struct CaseResult {
     /// Why it failed or could not run, one line each; empty when it passed.
     pub failures: Vec<String>,
     pub stages: Vec<StageSummary>,
+    /// What the documents read as `meridian.run.id`: `test` for a compile
+    /// or plan case, a new id for each run of a lifecycle case. Empty when
+    /// the case could not run.
+    pub run_id: String,
     /// A lifecycle case's phases, in the order they ran; empty for the
     /// other levels.
     pub phases: Vec<PhaseResult>,
@@ -119,7 +123,7 @@ pub fn run_file(file: &TestFile, runner: &Runner<'_>, filter: Option<&str>) -> F
             continue;
         }
         let started = Instant::now();
-        let (status, failures, stages, phases) = match run_case(file, case, index, runner) {
+        let (status, failures, stages, phases, run_id) = match run_case(file, case, index, runner) {
             Ok(ran) => {
                 let failed = !ran.failures.is_empty()
                     || ran.phases.iter().any(|p| p.status == Status::Failed);
@@ -128,9 +132,15 @@ pub fn run_file(file: &TestFile, runner: &Runner<'_>, filter: Option<&str>) -> F
                 } else {
                     Status::Passed
                 };
-                (status, ran.failures, ran.stages, ran.phases)
+                (status, ran.failures, ran.stages, ran.phases, ran.run_id)
             }
-            Err(why) => (Status::Error, vec![why], Vec::new(), Vec::new()),
+            Err(why) => (
+                Status::Error,
+                vec![why],
+                Vec::new(),
+                Vec::new(),
+                String::new(),
+            ),
         };
         cases.push(CaseResult {
             name: case.name.clone(),
@@ -138,6 +148,7 @@ pub fn run_file(file: &TestFile, runner: &Runner<'_>, filter: Option<&str>) -> F
             status,
             failures,
             stages,
+            run_id,
             phases,
             millis: started.elapsed().as_millis(),
         });
@@ -155,7 +166,12 @@ struct Ran {
     failures: Vec<String>,
     stages: Vec<StageSummary>,
     phases: Vec<PhaseResult>,
+    run_id: String,
 }
+
+/// The run id of a compile or plan case: the same every time, so what a
+/// file is expected to hold does not change from run to run.
+pub const TEST_RUN_ID: &str = "test";
 
 fn run_case(
     file: &TestFile,
@@ -188,6 +204,13 @@ fn run_case(
             Err(e) => return Err(e.to_string()),
         }
     }
+    let reserved = meridian_ir::RESERVED_DATA_KEY;
+    if data.contains_key(reserved) {
+        return Err(format!(
+            "a data file sets {reserved}, which is Meridian's own key: meridian test gives each \
+             case its run id"
+        ));
+    }
     merge_into(&mut data, &file.set);
     merge_into(&mut data, &case.set);
     let selector = match case.select.as_deref().or(file.select.as_deref()) {
@@ -202,6 +225,7 @@ fn run_case(
     if case.run == Run::Lifecycle {
         return lifecycle(file, case, runner, &bundle, &data, &selector, &scratch);
     }
+    meridian_ir::set_run_id(&mut data, TEST_RUN_ID);
     // A directory of the case's own, emptied first: a plan is always against
     // nothing applied, so what a tool would do is the same on every run.
     let _ = std::fs::remove_dir_all(&scratch);
@@ -235,6 +259,7 @@ fn run_case(
         failures: check(case, &report.stages, &data),
         stages: summaries(&report),
         phases: Vec::new(),
+        run_id: TEST_RUN_ID.to_owned(),
     })
 }
 
@@ -268,6 +293,11 @@ fn lifecycle(
     selector: &Selector,
     scratch: &Path,
 ) -> Result<Ran, String> {
+    // One id for every phase, so destroy finds what provision named.
+    let run_id = new_run_id(scratch);
+    let mut data = data.clone();
+    meridian_ir::set_run_id(&mut data, &run_id);
+    let data = &data;
     // A target that cannot destroy would leave the environment behind.
     let mut cannot: Vec<String> = Vec::new();
     for document in &bundle.documents {
@@ -294,15 +324,22 @@ fn lifecycle(
     }
     // What an earlier run left behind is not thrown away unseen.
     if scratch.exists() {
+        let earlier = std::fs::read_to_string(scratch.join(RUN_ID_FILE))
+            .map(|id| format!(" --run-id {}", id.trim()))
+            .unwrap_or_default();
         return Err(format!(
             "{} holds an environment an earlier run kept or did not destroy; destroy it \
-             with `meridian destroy --yes --state-dir {}` and the same documents and data, \
-             then remove the directory",
+             with `meridian destroy --yes --state-dir {}{earlier}` and the same documents and \
+             data, then remove the directory",
             scratch.display(),
             scratch.display()
         ));
     }
     create(scratch)?;
+    // Written first, so whoever cleans up after a failure knows the id the
+    // environment's names and tags carry.
+    std::fs::write(scratch.join(RUN_ID_FILE), format!("{run_id}\n"))
+        .map_err(|e| format!("cannot write {}: {e}", scratch.join(RUN_ID_FILE).display()))?;
     let options = |mode_stop: Stop| Options {
         data: data.clone(),
         backend: Some(Arc::new(LocalBackend::new(scratch)) as Arc<_>),
@@ -315,7 +352,10 @@ fn lifecycle(
         run_selected(bundle, runner.registry, mode, options, selector, &mut Quiet)
     };
 
-    let mut ran = Ran::default();
+    let mut ran = Ran {
+        run_id: run_id.clone(),
+        ..Ran::default()
+    };
     let timer = case.timeout.map(Timer::start);
     let stop = || match &timer {
         Some(t) => Stop::when(Arc::clone(&t.flag)),
@@ -361,7 +401,7 @@ fn lifecycle(
         ran.skip(
             "destroy",
             format!(
-                "kept by --keep: the environment's state is in {}",
+                "kept by --keep: the environment's state is in {}, its run id is {run_id}",
                 scratch.display()
             ),
         );
@@ -381,7 +421,7 @@ fn lifecycle(
         let _ = std::fs::remove_dir_all(scratch);
     } else {
         failures.push(format!(
-            "what is left is recorded in {}, which is kept",
+            "what is left is recorded in {}, which is kept; its run id is {run_id}",
             scratch.display()
         ));
     }
@@ -429,6 +469,20 @@ fn stage_failures(report: &RunReport) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+/// The file in a lifecycle case's scratch directory that holds its run id.
+const RUN_ID_FILE: &str = "run-id";
+
+/// A run id no other run is likely to have: `t` and 8 hex digits, from the
+/// time, the process and the case's directory.
+fn new_run_id(scratch: &Path) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::time::SystemTime::now().hash(&mut hasher);
+    std::process::id().hash(&mut hasher);
+    scratch.hash(&mut hasher);
+    format!("t{:08x}", hasher.finish() as u32)
 }
 
 /// A plan after provision that would change anything.

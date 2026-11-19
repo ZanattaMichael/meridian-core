@@ -76,3 +76,4 @@ page it affects. The pull request template asks for it.
 | [A lifecycle case provisions, verifies and always destroys](0050-a-lifecycle-case-provisions-verifies-and-always-destroys.md) | Testing | proposed |
 | [`meridian diagnose` reads the record and runs nothing](0051-diagnose-reads-the-record-and-runs-nothing.md) | Runs | proposed |
 | [`meridian inspect` reads one resource through an optional plugin call](0052-inspect-reads-one-resource-through-an-optional-plugin-call.md) | Runs | proposed |
+| [The run id is carried in the data and read as `meridian.run.id`](0053-the-run-id-is-carried-in-the-data-and-read-as-meridian-run-id.md) | Language | proposed |

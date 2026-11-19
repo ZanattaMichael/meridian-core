@@ -105,7 +105,7 @@ fn a_condition_that_is_not_in_the_language_is_refused_when_it_is_read() {
         ("data.a & data.b", "unexpected \"&\""),
         (
             "param.x == 1",
-            "unknown name \"param\" (an expression reads data.<key>, var.<name>, cond.<name> or secret.<name>; text is quoted)",
+            "unknown name \"param\" (an expression reads data.<key>, var.<name>, cond.<name>, secret.<name> or meridian.run.id; text is quoted)",
         ),
         ("nosuch(data.a)", "unknown function \"nosuch\""),
         (

@@ -160,6 +160,7 @@ fn file_json(result: &FileResult) -> serde_json::Value {
             "name": c.name,
             "run": c.run.as_str(),
             "status": c.status.as_str(),
+            "runId": c.run_id,
             "failures": c.failures,
             "documents": c.stages.iter().map(|s| serde_json::json!({
                 "name": s.name,

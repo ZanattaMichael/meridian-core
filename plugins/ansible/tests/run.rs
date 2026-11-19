@@ -414,3 +414,135 @@ fn a_debug_level_adds_ansibles_verbosity_and_level_0_adds_nothing() {
         assert_eq!(words.last(), Some(&"playbook.yml"), "{args}");
     }
 }
+
+const PLAYBOOK: &str = "---
+- name: web
+  hosts: web01
+  become: true
+  tasks:
+    - name: nginx_pkg
+      ansible.builtin.package:
+        name: nginx
+        state: present
+    - name: nginx_conf
+      ansible.builtin.copy:
+        dest: /etc/nginx/nginx.conf
+        content: hi
+      notify:
+        - restart nginx_svc
+  handlers:
+    - name: restart nginx_svc
+      ansible.builtin.service:
+        name: nginx
+        state: restarted
+";
+
+const ONE_TASK: &str = r#"cat <<'OUT'
+PLAY [web] *******
+
+TASK [Gathering Facts] *******
+ok: [web01]
+
+TASK [nginx_conf] *******
+ok: [web01] => {"changed": false, "checksum": "c22b5f9178342609428d6f51b2c5af4c0bde6a42", "dest": "/etc/nginx/nginx.conf", "mode": "0644", "owner": "root", "state": "file", "invocation": {"module_args": {}}}
+
+PLAY RECAP *******
+web01 : ok=2 changed=0 unreachable=0 failed=0
+OUT"#;
+
+fn inspected() -> Artifact {
+    artifact(&[
+        ("playbook.yml", PLAYBOOK),
+        ("inventory.ini", "[meridian]\nweb01\n"),
+    ])
+}
+
+#[test]
+fn inspect_runs_the_one_task_in_check_mode_and_reads_its_result() {
+    let dir = scratch(TMP, "inspect");
+    let read = runner(&dir, ONE_TASK)
+        .inspect(&context(&dir), &inspected(), "nginx_conf", "web01")
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.join("args")).unwrap().trim(),
+        "--inventory inventory.ini --check --diff --user deploy -v inspect.yml"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("work/inspect.yml")).unwrap(),
+        "---
+- name: web
+  hosts: web01
+  become: true
+  tasks:
+    - name: nginx_conf
+      ansible.builtin.copy:
+        dest: /etc/nginx/nginx.conf
+        content: hi
+      notify:
+        - restart nginx_svc
+"
+    );
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(true));
+    assert_eq!(
+        read.actual.get("mode"),
+        Some(&meridian_sdk::Value::from("0644"))
+    );
+    assert!(!read.actual.contains_key("changed"));
+    assert!(!read.actual.contains_key("invocation"));
+    assert_eq!(
+        read.command,
+        "ansible-playbook --check --diff -v playbook.yml, task nginx_conf only"
+    );
+}
+
+#[test]
+fn inspect_reads_a_change_check_mode_would_make_as_not_as_declared() {
+    let dir = scratch(TMP, "inspect-changed");
+    let body = "cat <<'OUT'
+TASK [nginx_pkg] *******
+changed: [web01] => {\"changed\": true, \"msg\": \"\"}
+OUT";
+    let read = runner(&dir, body)
+        .inspect(&context(&dir), &inspected(), "nginx_pkg", "web01")
+        .unwrap();
+    assert_eq!(read.in_desired_state, Some(false));
+    assert!(!read.actual.contains_key("state"));
+
+    let ok = "cat <<'OUT'
+TASK [nginx_pkg] *******
+ok: [web01] => {\"changed\": false, \"msg\": \"\"}
+OUT";
+    let read = runner(&dir, ok)
+        .inspect(&context(&dir), &inspected(), "nginx_pkg", "web01")
+        .unwrap();
+    // Nothing to change: the state the task gives its module holds.
+    assert_eq!(
+        read.actual.get("state"),
+        Some(&meridian_sdk::Value::from("present"))
+    );
+}
+
+#[test]
+fn inspect_names_a_failed_task_and_an_unknown_one() {
+    let dir = scratch(TMP, "inspect-failed");
+    let body = "cat <<'OUT'
+TASK [nginx_pkg] *******
+fatal: [web01]: FAILED! => {\"changed\": false, \"msg\": \"No package matching 'nginx' is available\"}
+OUT
+exit 2";
+    let error = runner(&dir, body)
+        .inspect(&context(&dir), &inspected(), "nginx_pkg", "web01")
+        .unwrap_err();
+    assert!(
+        error
+            .msg
+            .contains("No package matching 'nginx' is available"),
+        "{}",
+        error.msg
+    );
+    let error = runner(&dir, ONE_TASK)
+        .inspect(&context(&dir), &inspected(), "nothing", "web01")
+        .unwrap_err();
+    assert_eq!(error.msg, "playbook.yml has no task \"nothing\"");
+}

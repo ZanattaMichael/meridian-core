@@ -175,6 +175,7 @@ cases:
   the case is an error: destroy what it holds with `meridian destroy --yes --state-dir DIR`
   and the same documents and data, then remove it.
 - `--keep` skips destroy and leaves the environment and its directory, to look at.
+- See [the run id](#the-run-id) for naming what the case makes.
 - `timeout` stops the running tool; destroy then runs with the same limit per tool.
 
 ```
@@ -187,6 +188,24 @@ tests/site.test.yaml (site)
         - verify: assert stages.network.outputs.address != '': false
 1 case: 1 failed
 ```
+
+### The run id
+
+Documents read `${{ meridian.run.id }}` ([names](dsl/expressions.md#names)):
+
+| Case | `meridian.run.id` |
+|---|---|
+| `compile`, `plan` | `test`, so expected files stay the same |
+| `lifecycle` | a new id per run, `t` and 8 hex digits (`t3f9a2c1d`), written to `run-id` in the scratch directory and named in a kept or failed-destroy message |
+
+Name and tag what a lifecycle case makes with it, so two runs never share a resource:
+
+```yaml
+params:
+  name: "web-${{ meridian.run.id }}"
+```
+
+`set` and data files may not set `meridian`.
 
 ## Expectations
 
@@ -300,11 +319,10 @@ Run before the plan ([pipelines](../operations/running-in-a-pipeline.md)):
 ## What is not here yet
 
 - **`break` and `diagnose` phases** ([issue 237](https://github.com/ZanattaMichael/meridian-core/issues/237)).
-- **A run id** (`${{ meridian.run.id }}`) for names and tags, so lifecycle cases can run side
-  by side ([issue 235](https://github.com/ZanattaMichael/meridian-core/issues/235)).
 - **Disposable machines** ([issue 123](https://github.com/ZanattaMichael/meridian-core/issues/123)).
 - **Expectations on events.**
 - **Line numbers** for test-file mistakes (paths only, such as `spec.cases[2]`).
 
 See [decision 0037](../decisions/0037-a-test-is-a-document-of-cases-over-compile-and-plan.md)
-and [decision 0050](../decisions/0050-a-lifecycle-case-provisions-verifies-and-always-destroys.md).
+[decision 0050](../decisions/0050-a-lifecycle-case-provisions-verifies-and-always-destroys.md)
+and [decision 0053](../decisions/0053-the-run-id-is-carried-in-the-data-and-read-as-meridian-run-id.md).

@@ -2,12 +2,12 @@
 
 ```
 meridian validate <files>...
-meridian compile  <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--out DIR]
-meridian plan     <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets] [--detailed-exitcode] [--destroy]
-meridian apply    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--strict-secrets] [--resume | --resume=RUN] [--on-failure stop|rollback] [--stage-timeout DURATION]
-meridian drift    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE]
+meridian compile  <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--run-id ID] [--out DIR]
+meridian plan     <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--run-id ID] [--strict-secrets] [--detailed-exitcode] [--destroy]
+meridian apply    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--run-id ID] [--strict-secrets] [--resume | --resume=RUN] [--on-failure stop|rollback] [--stage-timeout DURATION]
+meridian drift    <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--run-id ID]
 meridian rollback <files>... [--run RUN]
-meridian destroy  <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--yes]
+meridian destroy  <files>... [-l SELECTOR] [--data FILE] [--set KEY=VALUE] [--run-id ID] [--yes]
 meridian status
 meridian runs
 meridian events   [RUN] [--type TYPE]
@@ -666,6 +666,7 @@ meridian signing verify --trusted-key acme.pub meridian-target-acme
 | `--data FILE` | | no data | `compile`, `plan`, `apply`: a YAML or JSON mapping of values that [`when`](dsl/index.md#when-and-runtimewhen) conditions and [interpolations](dsl/interpolation.md) read as `data.<key>`. May be repeated; a later file's key replaces an earlier file's |
 | `--strict-secrets` | `MERIDIAN_STRICT_SECRETS` | off | `plan`, `apply`: stop a stage whose secret cannot be [locked in memory](#secrets), instead of warning once and going on |
 | `--set KEY=VALUE` | | | `compile`, `plan`, `apply`: one value for `when` conditions and interpolations, applied after every `--data` file, so it wins. `KEY` may be dotted to set one key inside a mapping (`region.name=eu-west-1`). The value is typed as YAML types it. May be repeated. See [giving the data](dsl/conditions.md#giving-the-data) |
+| `--run-id ID` | `MERIDIAN_RUN_ID` | unset | `compile`, `plan`, `apply`, `drift`, `destroy`: what documents read as `meridian.run.id`, to name and tag what one environment makes. 1 to 32 lowercase letters, digits and `-`, starting with a letter. Kept in a saved plan. `data.meridian` is reserved for it: a `--data` file or `--set` that sets it is refused |
 | `--annotations MODE` | `MERIDIAN_ANNOTATIONS` | `auto` | any command: inside a [pipeline engine](#inside-a-pipeline-engine), also write each problem in the engine's annotation syntax and the run's report as the job's summary. `auto` does so when standard output is not a terminal, `on` does so regardless, `off` never does |
 
 ### Inside a pipeline engine

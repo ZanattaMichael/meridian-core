@@ -456,3 +456,17 @@ Each names the resource, line and rule:
   `MERIDIAN_TEST_REAL_ANSIBLE=1 cargo test -p meridian-target-ansible --test real -- --ignored`.
   SSH and the package, service, user and group modules have only met stand-ins. See
   [Real-tool tests](../contributing/real-tool-tests.md).
+
+## Inspecting one resource
+
+[`meridian inspect`](../reference/cli.md#inspect) cuts the playbook to the resource's task,
+writes it as `inspect.yml`, and runs it with `ansible-playbook --check --diff -v`. Check mode
+changes nothing.
+
+| Answer | From |
+|---|---|
+| actual | the module's result, less `changed`, `diff`, `invocation`, `warnings`, `deprecations`, `ansible_facts`, `failed`, `skipped` and keys starting `_`. A result with nothing to change also carries the task's `state` |
+| as declared | `ok` yes, `changed` no, `skipping` not given. A failed task fails the command |
+
+What a module returns depends on the module: `copy` returns `mode` and `owner`, `package`
+returns little.

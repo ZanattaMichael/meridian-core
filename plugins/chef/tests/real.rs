@@ -474,3 +474,29 @@ fn the_resources_schemas_are_exported_for_an_editor() {
         export.notes
     );
 }
+
+#[ignore = "needs a real chef-client; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn inspect_is_a_why_run_that_changes_nothing() {
+    let Some(runner) = chef() else { return };
+    let dir = scratch(TMP, "real-inspect");
+    let artifact = site(&dir, "port = 80\\n", "0640");
+    apply(&runner, &dir, &artifact);
+    let read = runner
+        .inspect(&context(&dir), &artifact, "app_conf", "localhost")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(read.in_desired_state, Some(true));
+
+    let conf = dir.join("app/app.conf");
+    fs::write(&conf, "port = 1\n").unwrap();
+    let read = runner
+        .inspect(&context(&dir), &artifact, "app_conf", "localhost")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(read.in_desired_state, Some(false));
+    assert!(read.actual.contains_key("wouldChange"), "{:?}", read.actual);
+    assert_eq!(
+        fs::read_to_string(&conf).unwrap(),
+        "port = 1\n",
+        "inspect changes nothing"
+    );
+}

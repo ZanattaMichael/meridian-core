@@ -495,7 +495,8 @@ binary checked (`binary`, `verified`, `signature`). Schemas:
 
 One object per test document under `files` (`file`, `name`, `ok` and its
 `cases`), each case with `name`, `run` (`compile`, `plan` or `lifecycle`), `status`
-(`passed`, `failed`, or `error` when the case could not run), `failures`
+(`passed`, `failed`, or `error` when the case could not run), `runId` (what the documents
+read as `meridian.run.id`; empty when the case could not run), `failures`
 (one line each, empty when it passed), `documents` (each `name`, `target` and
 `outcome`: `compiled`, `refused`, `left-out`, `planned`, `deferred`, `failed`,
 `not-run` or `applied`), `phases` (a lifecycle case's `provision`, `verify` and `destroy`,
@@ -513,9 +514,9 @@ empty otherwise) and `millis`; then a `summary` of `files`, `cases`, `passed`,
       "name": "site",
       "ok": false,
       "cases": [
-        { "name": "dev compiles nginx", "run": "compile", "status": "passed", "failures": [],
+        { "name": "dev compiles nginx", "run": "compile", "status": "passed", "runId": "test", "failures": [],
           "documents": [{ "name": "web", "target": "ansible", "outcome": "compiled" }], "phases": [], "millis": 12 },
-        { "name": "production says so", "run": "compile", "status": "failed",
+        { "name": "production says so", "run": "compile", "status": "failed", "runId": "test",
           "failures": ["assert contains(stages.web.files['playbook.yml'], 'welcome to prod'): false"],
           "documents": [{ "name": "web", "target": "ansible", "outcome": "compiled" }], "phases": [], "millis": 9 }
       ]

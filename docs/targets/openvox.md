@@ -559,3 +559,8 @@ To run the real-tool tests:
 gem install openvox
 MERIDIAN_TEST_REAL_OPENVOX=1 cargo test -p meridian-target-openvox --test real
 ```
+
+## Inspecting one resource
+
+[`meridian inspect`](../reference/cli.md#inspect) works as for [Puppet](puppet.md#inspecting-one-resource),
+with OpenVox's `puppet` and OpenBolt's `bolt`, after the same check that the tool is OpenVox.

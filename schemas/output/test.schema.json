@@ -56,6 +56,10 @@
                   ],
                   "description": "passed: every expectation held; failed: one did not; error: the case could not run"
                 },
+                "runId": {
+                  "type": "string",
+                  "description": "What the documents read as meridian.run.id: test for a compile or plan case, a new id per run of a lifecycle case; empty when the case could not run"
+                },
                 "failures": {
                   "type": "array",
                   "items": {
@@ -139,6 +143,7 @@
                 "name",
                 "run",
                 "status",
+                "runId",
                 "failures",
                 "documents",
                 "phases",

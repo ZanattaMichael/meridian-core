@@ -123,7 +123,7 @@ Full language: [expressions and functions](expressions.md).
 | Rule | Checked by | Message |
 |---|---|---|
 | The condition must be written in the language | `validate` | `spec.resources[0].when: unexpected "=" (to compare two values in a condition, write ==)` |
-| Every name must be one a condition can read | `validate` | `unknown name "env" (an expression reads data.<key>, var.<name>, cond.<name> or secret.<name>; text is quoted)` |
+| Every name must be one a condition can read | `validate` | `unknown name "env" (an expression reads data.<key>, var.<name>, cond.<name>, secret.<name> or meridian.run.id; text is quoted)` |
 | Every function must exist and be given a number of arguments it takes | `validate` | `unknown function "Length" (did you mean length?)` |
 | `facts.*` is not available: nothing gathers facts from a node yet | `validate` | `facts are not available: ... a condition can only read data.<key>` |
 | A key the condition reads must be set | `compile` | `data.env is not set (give it with --data or --set, or test for it with defined(data.env))` |

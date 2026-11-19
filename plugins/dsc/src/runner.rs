@@ -401,6 +401,46 @@ impl Runner for DscRunner {
             outputs: Vec::new(),
         })
     }
+
+    fn inspects(&self) -> bool {
+        true
+    }
+
+    /// A `Test` run of the configuration, which changes nothing, and the
+    /// one resource's result in it. DscPipelineRunner's result says whether
+    /// the resource is in its desired state, not the properties it read.
+    fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        _endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunError> {
+        self.prepare(context, artifact)?;
+        let outcomes = self.invoke(context, "Test", &meridian_sdk::NoLog)?;
+        let Some(outcome) = outcomes.iter().find(|o| o.resource == resource) else {
+            return Err(RunError::new(format!(
+                "DscPipelineRunner's Test result has no resource {resource:?}"
+            )));
+        };
+        let mut actual = meridian_sdk::Data::new();
+        if !outcome.message.is_empty() {
+            actual.insert("message".to_owned(), Value::String(outcome.message.clone()));
+        }
+        Ok(meridian_sdk::Inspection {
+            found: true,
+            actual,
+            in_desired_state: match outcome.status.as_str() {
+                "OK" => Some(true),
+                "FAIL" => Some(false),
+                _ => None,
+            },
+            command: format!(
+                "Invoke-DscRunner -Mode Test, resource {}/{resource}",
+                outcome.r#type
+            ),
+        })
+    }
 }
 
 #[cfg(test)]
