@@ -43,7 +43,8 @@
                   "type": "string",
                   "enum": [
                     "compile",
-                    "plan"
+                    "plan",
+                    "lifecycle"
                   ]
                 },
                 "status": {
@@ -75,7 +76,7 @@
                       },
                       "outcome": {
                         "type": "string",
-                        "description": "compiled, refused, left-out, planned, deferred, failed or not-run"
+                        "description": "compiled, refused, left-out, planned, deferred, failed, not-run or applied"
                       }
                     },
                     "additionalProperties": false,
@@ -83,6 +84,48 @@
                       "name",
                       "target",
                       "outcome"
+                    ]
+                  }
+                },
+                "phases": {
+                  "type": "array",
+                  "description": "A lifecycle case's phases in the order they ran; empty for compile and plan",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "enum": [
+                          "provision",
+                          "verify",
+                          "destroy"
+                        ]
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "passed",
+                          "failed",
+                          "skipped"
+                        ]
+                      },
+                      "failures": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "Why it failed or was skipped, one line each"
+                      },
+                      "millis": {
+                        "type": "integer"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "name",
+                      "status",
+                      "failures",
+                      "millis"
                     ]
                   }
                 },
@@ -98,6 +141,7 @@
                 "status",
                 "failures",
                 "documents",
+                "phases",
                 "millis"
               ]
             }

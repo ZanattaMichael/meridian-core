@@ -29,12 +29,17 @@
   the configuration management targets** (Salt, Puppet, OpenVox, Chef,
   DSC); **part 3 the other infrastructure targets** (CloudFormation, Bicep,
   ARM, Pulumi, Packer, cloud-init); **part 4 containers** (Docker from
-  `docker inspect`, Podman from systemd's `Result`). Orchestration follows.
+  `docker inspect`, Podman from systemd's `Result`); **part 5 orchestration** (Kubernetes and
+  Helm from the API server's errors and Helm's wait).
 - **A target whose failing command says too little asks the tool again**:
   CloudFormation's stack events, Azure's deployment operations.
 - **Where a tool has no structured output, its fixed lines are read**:
   Pulumi's `Diagnostics:` section, Puppet's `Error:` and `Skipping because of failed dependencies` lines,
-  chef-client's `Error executing action` block. `chef-run` reports none.
+  chef-client's `Error executing action` block, kubectl's and Helm's error
+  lines. `chef-run` reports none.
+- **Kubernetes reads no kstatus**: `kubectl apply` does not wait, so nothing
+  has failed to roll out when it returns. Helm's `wait: true` uses kstatus,
+  and its `resource not ready` lines are read.
 - **Shared causes come from the message** (`Cause::from_message`): a refused
   login, a failed connection, a timeout, a reboot.
 

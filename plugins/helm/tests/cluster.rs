@@ -420,3 +420,25 @@ fn the_clusters_kinds_are_exported_for_a_chart() {
         .iter()
         .any(|s| s.r#type == "apps/v1/Deployment"));
 }
+
+/// A release whose Deployment never becomes ready: the wait runs out and
+/// the failure names the Deployment by its id.
+#[test]
+#[ignore = "needs helm, kubectl and a cluster"]
+fn a_release_that_never_becomes_ready_names_what_was_not_ready() {
+    let dir = scratch(TMP, "cluster-not-ready");
+    uninstall("meridian-helm-broken", "meridian-helm-broken");
+    let text = "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: meridian-helm-broken\nspec:\n  target: helm\n  resources:\n    - id: release\n      type: release\n      params:\n        namespace: meridian-helm-broken\n        createNamespace: true\n        wait: true\n        timeout: 20s\n    - id: web\n      type: apps/v1/Deployment\n      params:\n        metadata:\n          name: broken-web\n        spec:\n          replicas: 1\n          selector:\n            matchLabels: {app: broken}\n          template:\n            metadata:\n              labels: {app: broken}\n            spec:\n              containers:\n                - name: none\n                  image: registry.invalid/meridian/none:0\n";
+    let err = HelmRunner::from_env()
+        .apply(&context(&dir), &compile(text), &KeptLog::default())
+        .expect_err("the Deployment never becomes ready");
+    // Printed so the workflow's log shows what a real wait failure looks like.
+    eprintln!("--- helm's failure ---\n{err}\n{:?}", err.failures);
+    uninstall("meridian-helm-broken", "meridian-helm-broken");
+    let named: Vec<(&str, &str)> = err
+        .failures
+        .iter()
+        .map(|f| (f.resource.as_str(), f.cause.as_str()))
+        .collect();
+    assert_eq!(named, [("web", "timed-out")], "{err}");
+}

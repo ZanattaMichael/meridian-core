@@ -22,6 +22,9 @@ pub enum Mode {
     /// Remove what each stage's tool created, last stage first. A stage
     /// whose target cannot destroy is left in place.
     Destroy,
+    /// Compile the one step [`Options::inspect`] names and ask its tool to
+    /// read one resource. Nothing is changed, locked or recorded.
+    Inspect,
 }
 
 impl Mode {
@@ -34,6 +37,7 @@ impl Mode {
             Mode::Drift => "drift",
             Mode::Rollback => "rollback",
             Mode::Destroy => "destroy",
+            Mode::Inspect => "inspect",
         }
     }
 }
@@ -92,6 +96,8 @@ pub enum Outcome {
     Drift(Drift),
     /// The tool removed everything it had created for the stage.
     Destroyed { changes: Vec<Change> },
+    /// The tool read the resource [`Options::inspect`] named.
+    Inspected(Box<crate::inspect::Inspected>),
     /// A destroy, or its preview, left the stage in place. Nothing went
     /// wrong.
     Kept(Kept),

@@ -1,14 +1,14 @@
 # Testing documents and modules
 
-`meridian test` runs `kind: Test` documents. Each case compiles or plans the named documents
-with its data and checks outcomes, files, refusals and changes, using fields and
-[expressions](dsl/expressions.md).
+`meridian test` runs `kind: Test` documents. Each case compiles, plans, or applies and destroys
+the named documents with its data and checks outcomes, files, refusals, changes and outputs,
+using fields and [expressions](dsl/expressions.md).
 
-<p align="center"><img src="../graphics/meridian-test-flow.svg" alt="meridian test: a Test document names documents and cases; each case compiles or plans them with its data in a scratch directory and checks the outcome, the files, the refusal and the changes" width="100%"></p>
+<p align="center"><img src="../graphics/meridian-test-flow.svg" alt="meridian test: a Test document names documents and cases; each case compiles, plans, or applies and destroys them with its data in a scratch directory and checks the outcome, the files, the refusal, the changes and the outputs" width="100%"></p>
 
 It reports every failure (text, `--output json`, `--junit`) and finds `tests/*.test.yaml`
-itself. It does not apply, and plan cases need the tool (or a stand-in via
-[plugin settings](plugin-settings.md)).
+itself. Plan and lifecycle cases need the tool (or a stand-in via
+[plugin settings](plugin-settings.md)); a lifecycle case also needs somewhere to apply to.
 
 ## A first test
 
@@ -115,14 +115,17 @@ Each entry of `spec.cases` is one run with its own data and checks.
 | Field | Required | Value |
 |---|---|---|
 | `name` | yes | What the case checks, in a few words. Unique within the test |
-| `run` | no | `compile` (the default) or `plan`. See [levels](#levels) |
+| `run` | no | `compile` (the default), `plan` or `lifecycle`. See [levels](#levels) |
 | `data` | no | Data files read after the test's `spec.data` |
 | `set` | no | Values merged over the data after the test's `spec.set` |
 | `select` | no | A label selector that replaces the test's `spec.select` for this case |
 | `expect` | one of the two | What each document should have come to, by the document's `metadata.name`. See [expectations](#expectations) |
 | `assert` | one of the two | Expressions that must each be true. See [assertions](#assertions) |
+| `phases` | no | Lifecycle only. See [lifecycle cases](#lifecycle-cases) |
+| `timeout` | no | Lifecycle only. How long provision and verify may take together: `90`, `30s`, `20m`, `1h` |
 
-A case that checks nothing is refused. All fields are checked before any case runs.
+A compile or plan case that checks nothing is refused; a lifecycle case may check nothing
+beyond provisioning and destroying. All fields are checked before any case runs.
 
 ### Levels
 
@@ -133,13 +136,65 @@ directory's `tests/`; project state is untouched. Remote state (a Terraform back
 still used. Stages waiting on outputs are `deferred`. A `meridian.yaml` beside the test can
 point [plugin settings](plugin-settings.md) at a stand-in.
 
+A **lifecycle** case applies to a scratch directory, checks the result, then
+[destroys](../operations/destroying.md) it. See [lifecycle cases](#lifecycle-cases).
+
+## Lifecycle cases
+
+```yaml
+cases:
+  - name: web tier
+    run: lifecycle
+    set: {replicas: 2}
+    phases:
+      provision: {}
+      verify: {drift: none}
+      destroy: {}
+    timeout: 20m
+    expect:
+      web: {outcome: applied}
+    assert:
+      - stages.network.outputs.address != ''
+```
+
+| Phase | Does | Fails when |
+|---|---|---|
+| `provision` | `meridian apply` in the case's scratch directory | A document fails or does not run, or `timeout` passes |
+| `verify` | Checks `expect` and `assert` against the apply. With `drift: none`, plans again | A check fails; with `drift: none`, the plan would change anything or cannot say |
+| `destroy` | `meridian destroy` of the same directory, always, after any failure or timeout | A document's destroy fails. The scratch directory is then kept and named |
+
+- `phases` may be left out; `provision` and `destroy` take no fields. `verify.drift` is `none`
+  or `any` (the default).
+- Verify is skipped when provision failed.
+- `break` and `diagnose` are refused: they come with the fault catalogue
+  ([issue 237](https://github.com/ZanattaMichael/meridian-core/issues/237)).
+- Every target in the documents must [destroy](../operations/destroying.md#which-targets-destroy);
+  otherwise the case is an error before anything is applied.
+- The scratch directory is `tests/<test>/<n>-<case>` under the state directory. It is removed
+  after a destroy that succeeds. If it exists when the case starts (kept, or a destroy failed),
+  the case is an error: destroy what it holds with `meridian destroy --yes --state-dir DIR`
+  and the same documents and data, then remove it.
+- `--keep` skips destroy and leaves the environment and its directory, to look at.
+- `timeout` stops the running tool; destroy then runs with the same limit per tool.
+
+```
+$ meridian test
+tests/site.test.yaml (site)
+  FAIL  web tier (lifecycle, 2 documents)
+        provision: ok
+        verify: FAIL
+        destroy: ok
+        - verify: assert stages.network.outputs.address != '': false
+1 case: 1 failed
+```
+
 ## Expectations
 
 `expect` maps document names to what they should come to. Unknown names fail.
 
 | Field | Checks |
 |---|---|
-| `outcome` | The document's outcome is this word: `compiled`, `refused`, `left-out` (its own `spec.when` was false), `planned`, `deferred` (a plan case waiting for an output), or `failed` (the plugin or the tool failed) |
+| `outcome` | The document's outcome is this word: `compiled`, `refused`, `left-out` (its own `spec.when` was false), `planned`, `deferred` (a plan case waiting for an output), `applied` (a lifecycle case), or `failed` (the plugin or the tool failed) |
 | `rule` | The document was refused, and the refusal carries this [rule](refusal-rules.md) |
 | `resource` | The refusal names this resource |
 | `message` | The refusal's message holds this text |
@@ -181,6 +236,7 @@ Same language as `when`, checked on read. Names: `stages` ([below](#what-stages-
 | `refusal` | `null`, or a mapping of `rule`, `resource` and `message` for a refused document. A refusal the orchestrator makes itself, such as a `ResourceSet` sent to an infrastructure target, carries no rule and an empty `resource` |
 | `changes` | In a plan case, the tool's changes, each with `action`, `resource` and `summary`; `[]` otherwise |
 | `unknown` | Whether the tool could not preview, so `changes` says nothing |
+| `outputs` | In a lifecycle case, the document's outputs by name; a sensitive one reads `(sensitive)`. `{}` otherwise |
 | `condition` | The `when` that left the document out, or `null` |
 | `error` | The failure's text when the document failed or was refused, or `null` |
 
@@ -200,8 +256,10 @@ Every case runs. Exit `0` only if all pass; `1` otherwise, including unreadable 
 files, or no `--case` match.
 
 Each case prints `ok`, `FAIL` or `ERR` (could not run), its name, level and document count,
-then one line per failure. `--output json` prints [one object](cli-json.md#test); `--junit
-FILE` writes one `testsuite` per file.
+then a lifecycle case's phases, then one line per failure. `--output json` prints
+[one object](cli-json.md#test); `--junit FILE` writes one `testsuite` per file and one
+`testcase` per case, or per phase of a lifecycle case (`web tier: verify`), a skipped phase as
+`skipped`. `--keep` leaves lifecycle environments in place.
 
 ## Tests in a module
 
@@ -241,10 +299,12 @@ Run before the plan ([pipelines](../operations/running-in-a-pipeline.md)):
 
 ## What is not here yet
 
-- **Apply cases**, waiting on `destroy`
-  ([issue 127](https://github.com/ZanattaMichael/meridian-core/issues/127)) and disposable
-  machines ([issue 123](https://github.com/ZanattaMichael/meridian-core/issues/123)).
-- **Expectations on events and outputs.**
+- **`break` and `diagnose` phases** ([issue 237](https://github.com/ZanattaMichael/meridian-core/issues/237)).
+- **A run id** (`${{ meridian.run.id }}`) for names and tags, so lifecycle cases can run side
+  by side ([issue 235](https://github.com/ZanattaMichael/meridian-core/issues/235)).
+- **Disposable machines** ([issue 123](https://github.com/ZanattaMichael/meridian-core/issues/123)).
+- **Expectations on events.**
 - **Line numbers** for test-file mistakes (paths only, such as `spec.cases[2]`).
 
-See [decision 0037](../decisions/0037-a-test-is-a-document-of-cases-over-compile-and-plan.md).
+See [decision 0037](../decisions/0037-a-test-is-a-document-of-cases-over-compile-and-plan.md)
+and [decision 0050](../decisions/0050-a-lifecycle-case-provisions-verifies-and-always-destroys.md).

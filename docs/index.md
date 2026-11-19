@@ -25,6 +25,7 @@ The core knows the language; each plugin knows one tool.
 | [Adopting what exists](reference/dsl/resources.md#adopting-what-exists) | `adopt` an existing thing instead of creating another |
 | [Moving a document to another tool](operations/retargeting.md) | `meridian retarget` |
 | [Destroying what was applied](operations/destroying.md) | `meridian destroy` |
+| [Troubleshooting a failed run](operations/troubleshooting.md) | `meridian diagnose`, then `logs` and `inspect` |
 
 | Concepts | |
 |---|---|

@@ -2,7 +2,7 @@
 
 use crate::*;
 
-use meridian_test::{CaseResult, FileResult, Run, Runner, Status};
+use meridian_test::{CaseResult, FileResult, Runner, Status};
 
 pub(crate) fn test(
     files: &[PathBuf],
@@ -10,6 +10,7 @@ pub(crate) fn test(
     junit: Option<&Path>,
     plugins: &PluginDirs,
     state_dir: &Path,
+    keep: bool,
 ) -> Result<(), Failure> {
     let files = if files.is_empty() {
         let found = meridian_test::discover(Path::new("."));
@@ -40,6 +41,7 @@ pub(crate) fn test(
         registry: &registry,
         state_dir: state_dir.to_path_buf(),
         resolve: &resolve,
+        keep,
     };
     let mut results: Vec<FileResult> = Vec::new();
     for test in &tests {
@@ -117,6 +119,7 @@ fn print_file(result: &FileResult) {
             Status::Passed => "ok  ",
             Status::Failed => "FAIL",
             Status::Error => "ERR ",
+            Status::Skipped => "skip",
         };
         outln!(
             "  {word}  {} ({}, {})",
@@ -124,6 +127,18 @@ fn print_file(result: &FileResult) {
             case.run.as_str(),
             count(case.stages.len(), "document")
         );
+        for phase in &case.phases {
+            let word = match phase.status {
+                Status::Passed => "ok",
+                Status::Skipped => "skipped",
+                _ => "FAIL",
+            };
+            let why = match phase.status {
+                Status::Skipped => format!(": {}", phase.failures.join("; ")),
+                _ => String::new(),
+            };
+            outln!("        {}: {word}{why}", phase.name);
+        }
         for failure in &case.failures {
             let mut lines = failure.lines();
             if let Some(first) = lines.next() {
@@ -143,13 +158,19 @@ fn file_json(result: &FileResult) -> serde_json::Value {
         "ok": result.passed(),
         "cases": result.cases.iter().map(|c| serde_json::json!({
             "name": c.name,
-            "run": match c.run { Run::Compile => "compile", Run::Plan => "plan" },
+            "run": c.run.as_str(),
             "status": c.status.as_str(),
             "failures": c.failures,
             "documents": c.stages.iter().map(|s| serde_json::json!({
                 "name": s.name,
                 "target": s.target,
                 "outcome": s.outcome,
+            })).collect::<Vec<_>>(),
+            "phases": c.phases.iter().map(|p| serde_json::json!({
+                "name": p.name,
+                "status": p.status.as_str(),
+                "failures": p.failures,
+                "millis": p.millis as u64,
             })).collect::<Vec<_>>(),
             "millis": c.millis as u64,
         })).collect::<Vec<_>>(),

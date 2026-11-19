@@ -249,6 +249,47 @@ The steps shown, after the filters, each with the lines kept. Schema:
 `file` is `null` when this machine kept no output for the step. `stream` is
 `stdout`, `stderr` or `meridian`.
 
+### `diagnose`
+
+The failed steps, one entry per machine or group of machines, and the steps not run.
+Schema: `schemas/output/diagnose.schema.json`.
+
+```json
+{ "command": "diagnose", "ok": true,
+  "run": { "id": "2026-11-17T09-14-03Z-0cc7", "mode": "apply", "status": "failed", "resumes": null, "steps": 3 },
+  "failed": [ { "name": "web", "kind": "ResourceSet", "target": "ansible", "endpoint": null, "reason": "tool-failed",
+                "entries": [ { "cause": "resource-failed", "endpoints": ["203.0.113.10"],
+                               "failures": [ { "endpoint": "203.0.113.10", "resource": "nginx_conf", "cause": "resource-failed",
+                                               "toolCode": null, "summary": "template: 'nginx_port' is undefined", "at": "site.yaml:42" } ],
+                               "next": ["meridian logs 2026-11-17T09-14-03Z-0cc7 --step web",
+                                        "meridian inspect nginx_conf site.yaml --step web"] } ] } ],
+  "skipped": [ { "name": "app", "kind": "ResourceSet", "becauseOf": "web" } ],
+  "keptHere": true }
+```
+
+`run` is `null`, and `failed` empty, when no failed run is recorded. `summary` and `at` are
+`null` when this machine did not keep the run's failures (`keptHere: false`).
+
+### `inspect`
+
+One resource as its tool reads it now, beside what the document declares.
+Schema: `schemas/output/inspect.schema.json`.
+
+```json
+{ "command": "inspect", "ok": true,
+  "step": { "name": "web", "kind": "ResourceSet" }, "target": "fake",
+  "inspection": { "resource": "page", "type": "file", "endpoint": "web1",
+                  "found": true, "inDesiredState": false,
+                  "command": "fake-tool show files/page --on web1",
+                  "desired": { "content": "bye" }, "actual": { "content": "hello" },
+                  "differs": ["content"],
+                  "notCompared": [ { "param": "password", "why": "sensitive" } ] } }
+```
+
+`inDesiredState` is `null` when the tool cannot say. `desired` writes a secret as
+`"(sensitive)"`; `actual` masks every known secret value. `why` is `sensitive` or
+`not-reported`. `endpoint` is empty for an Infrastructure step.
+
 ### `bug-report`
 
 The archive written. Schema: `schemas/output/bug-report.schema.json`.
@@ -453,11 +494,13 @@ binary checked (`binary`, `verified`, `signature`). Schemas:
 ### `test`
 
 One object per test document under `files` (`file`, `name`, `ok` and its
-`cases`), each case with `name`, `run` (`compile` or `plan`), `status`
+`cases`), each case with `name`, `run` (`compile`, `plan` or `lifecycle`), `status`
 (`passed`, `failed`, or `error` when the case could not run), `failures`
 (one line each, empty when it passed), `documents` (each `name`, `target` and
-`outcome`: `compiled`, `refused`, `left-out`, `planned`, `deferred`, `failed`
-or `not-run`) and `millis`; then a `summary` of `files`, `cases`, `passed`,
+`outcome`: `compiled`, `refused`, `left-out`, `planned`, `deferred`, `failed`,
+`not-run` or `applied`), `phases` (a lifecycle case's `provision`, `verify` and `destroy`,
+each with `name`, `status` (`passed`, `failed` or `skipped`), `failures` and `millis`;
+empty otherwise) and `millis`; then a `summary` of `files`, `cases`, `passed`,
 `failed` and `errors`. `ok` is true only when every case passed. Schema: `schemas/output/test.schema.json`.
 
 ```json
@@ -471,10 +514,10 @@ or `not-run`) and `millis`; then a `summary` of `files`, `cases`, `passed`,
       "ok": false,
       "cases": [
         { "name": "dev compiles nginx", "run": "compile", "status": "passed", "failures": [],
-          "documents": [{ "name": "web", "target": "ansible", "outcome": "compiled" }], "millis": 12 },
+          "documents": [{ "name": "web", "target": "ansible", "outcome": "compiled" }], "phases": [], "millis": 12 },
         { "name": "production says so", "run": "compile", "status": "failed",
           "failures": ["assert contains(stages.web.files['playbook.yml'], 'welcome to prod'): false"],
-          "documents": [{ "name": "web", "target": "ansible", "outcome": "compiled" }], "millis": 9 }
+          "documents": [{ "name": "web", "target": "ansible", "outcome": "compiled" }], "phases": [], "millis": 9 }
       ]
     }
   ],

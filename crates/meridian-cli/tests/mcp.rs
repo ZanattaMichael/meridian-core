@@ -40,6 +40,7 @@ fn talk(dir: &Path, args: &[&str], messages: &[Value]) -> Vec<Value> {
         .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())
         .env_remove("MERIDIAN_STATE_DIR")
         .env_remove("MERIDIAN_MCP_ALLOW_PLAN")
+        .env_remove("MERIDIAN_MCP_ALLOW_INSPECT")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -136,4 +137,65 @@ fn plan_runs_the_command_when_allowed() {
     assert_eq!(body["exitStatus"], 0);
     let outside = &replies[2]["result"];
     assert_eq!(outside["isError"], true);
+}
+
+#[test]
+fn diagnose_reads_the_last_failed_run() {
+    let dir = scratch("mcp_diagnose");
+    std::fs::write(
+        dir.join("site.yaml"),
+        DOC.replace("content: 10.0.0.5", "content: FAIL"),
+    )
+    .unwrap();
+    let applied = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .args(["apply", "site.yaml"])
+        .current_dir(&dir)
+        .env("MERIDIAN_ANNOTATIONS", "off")
+        .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())
+        .env_remove("MERIDIAN_STATE_DIR")
+        .output()
+        .unwrap();
+    assert_eq!(applied.status.code(), Some(1));
+    let replies = talk(&dir, &[], &[initialize(), call(2, "diagnose", json!({}))]);
+    let result = &replies[1]["result"];
+    let body = &result["structuredContent"];
+    assert_eq!(result["isError"], false, "{body}");
+    assert_eq!(body["command"], "diagnose");
+    assert_eq!(body["failed"][0]["name"], "net");
+    assert_eq!(body["failed"][0]["entries"][0]["cause"], "resource-failed");
+    assert_eq!(
+        body["failed"][0]["entries"][0]["failures"][0]["resource"],
+        "vm"
+    );
+}
+
+#[test]
+fn inspect_is_offered_only_when_allowed_and_reads_one_resource() {
+    let dir = scratch("mcp_inspect");
+    let applied = Command::new(env!("CARGO_BIN_EXE_meridian"))
+        .args(["apply", "site.yaml"])
+        .current_dir(&dir)
+        .env("MERIDIAN_ANNOTATIONS", "off")
+        .env("MERIDIAN_PLUGIN_DIR", meridian_target_fake::plugin_dir())
+        .env_remove("MERIDIAN_STATE_DIR")
+        .output()
+        .unwrap();
+    assert_eq!(applied.status.code(), Some(0));
+    let args = json!({ "resource": "vm", "file": "site.yaml" });
+
+    let refused = talk(&dir, &[], &[initialize(), call(2, "inspect", args.clone())]);
+    assert_eq!(refused[1]["result"]["isError"], true);
+
+    let replies = talk(
+        &dir,
+        &["--allow-inspect"],
+        &[initialize(), call(2, "inspect", args)],
+    );
+    let result = &replies[1]["result"];
+    let body = &result["structuredContent"];
+    assert_eq!(result["isError"], false, "{body}");
+    assert_eq!(body["command"], "inspect");
+    assert_eq!(body["inspection"]["resource"], "vm");
+    assert_eq!(body["inspection"]["actual"]["content"], "10.0.0.5");
+    assert_eq!(body["inspection"]["inDesiredState"], true);
 }

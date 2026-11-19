@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use meridian_expr::{Expr, Names};
 use meridian_ir::Data;
@@ -42,6 +43,9 @@ pub enum Run {
     /// Compile, then ask each tool what it would change, from an empty
     /// state. Needs the tool, or a stand-in.
     Plan,
+    /// Apply to a scratch environment, check it, then destroy it. Needs the
+    /// tool and something to apply to.
+    Lifecycle,
 }
 
 impl Run {
@@ -49,6 +53,7 @@ impl Run {
         match self {
             Run::Compile => "compile",
             Run::Plan => "plan",
+            Run::Lifecycle => "lifecycle",
         }
     }
 }
@@ -68,6 +73,20 @@ pub struct Case {
     pub expect: BTreeMap<String, Expect>,
     /// `assert`: expressions that must each be true.
     pub assert: Vec<Assertion>,
+    /// `phases`, for a lifecycle case.
+    pub phases: Phases,
+    /// `timeout`, for a lifecycle case: how long provision and verify may
+    /// take together. Destroy runs after it, with the same limit.
+    pub timeout: Option<Duration>,
+}
+
+/// The phases of a lifecycle case. Provision and destroy always run; the
+/// checks of `expect` and `assert` are made in verify.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Phases {
+    /// `verify.drift: none`: a second plan after provision must change
+    /// nothing.
+    pub no_drift: bool,
 }
 
 /// What one document of a case is expected to come to.
@@ -353,7 +372,9 @@ fn case(r: &Reader<'_>, value: &Value, path: &str) -> Result<Case, String> {
     r.only(
         map,
         path,
-        &["name", "run", "data", "set", "select", "expect", "assert"],
+        &[
+            "name", "run", "data", "set", "select", "expect", "assert", "phases", "timeout",
+        ],
     )?;
     let name = map
         .get("name")
@@ -367,10 +388,11 @@ fn case(r: &Reader<'_>, value: &Value, path: &str) -> Result<Case, String> {
         Some(v) => match r.text(v, &format!("{path}.run"))?.as_str() {
             "compile" => Run::Compile,
             "plan" => Run::Plan,
+            "lifecycle" => Run::Lifecycle,
             other => {
                 return Err(r.refuse(
                     &format!("{path}.run"),
-                    format!("expected \"compile\" or \"plan\", found {other:?}"),
+                    format!("expected \"compile\", \"plan\" or \"lifecycle\", found {other:?}"),
                 ))
             }
         },
@@ -403,7 +425,29 @@ fn case(r: &Reader<'_>, value: &Value, path: &str) -> Result<Case, String> {
             assert.push(assertion(r, item, &format!("{path}.assert[{i}]"))?);
         }
     }
-    if expect.is_empty() && assert.is_empty() {
+    let lifecycle = run == Run::Lifecycle;
+    for key in ["phases", "timeout"] {
+        if !lifecycle && map.contains_key(key) {
+            return Err(r.refuse(
+                &format!("{path}.{key}"),
+                "only a lifecycle case takes this (run: lifecycle)",
+            ));
+        }
+    }
+    let phases = match map.get("phases") {
+        None => Phases::default(),
+        Some(value) => phases(r, value, &format!("{path}.phases"))?,
+    };
+    let timeout = map
+        .get("timeout")
+        .map(|v| {
+            let at = format!("{path}.timeout");
+            duration(&r.text(v, &at)?).map_err(|e| r.refuse(&at, e))
+        })
+        .transpose()?;
+    // A lifecycle case checks something without saying so: that the
+    // environment provisions and is destroyed.
+    if !lifecycle && expect.is_empty() && assert.is_empty() {
         return Err(r.refuse(
             path,
             "a case must expect or assert something; a case that checks nothing cannot fail",
@@ -417,11 +461,80 @@ fn case(r: &Reader<'_>, value: &Value, path: &str) -> Result<Case, String> {
         select,
         expect,
         assert,
+        phases,
+        timeout,
     })
 }
 
+fn phases(r: &Reader<'_>, value: &Value, path: &str) -> Result<Phases, String> {
+    let map = r.map(value, path)?;
+    for key in ["break", "diagnose"] {
+        if map.contains_key(key) {
+            return Err(r.refuse(
+                &format!("{path}.{key}"),
+                "not supported yet: it comes with the fault catalogue",
+            ));
+        }
+    }
+    r.only(map, path, &["provision", "verify", "destroy"])?;
+    for key in ["provision", "destroy"] {
+        if let Some(v) = map.get(key) {
+            if !matches!(v, Value::Null) {
+                r.only(
+                    r.map(v, &format!("{path}.{key}"))?,
+                    &format!("{path}.{key}"),
+                    &[],
+                )?;
+            }
+        }
+    }
+    let mut out = Phases::default();
+    if let Some(v) = map.get("verify") {
+        if matches!(v, Value::Null) {
+            return Ok(out);
+        }
+        let at = format!("{path}.verify");
+        let verify = r.map(v, &at)?;
+        r.only(verify, &at, &["drift"])?;
+        if let Some(v) = verify.get("drift") {
+            match r.text(v, &format!("{at}.drift"))?.as_str() {
+                "none" => out.no_drift = true,
+                "any" => {}
+                other => {
+                    return Err(r.refuse(
+                        &format!("{at}.drift"),
+                        format!("expected \"none\" or \"any\", found {other:?}"),
+                    ))
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// A length of time as a person writes one: `90`, `30s`, `5m`, `1h`. A
+/// bare number is seconds.
+fn duration(text: &str) -> Result<Duration, String> {
+    let text = text.trim();
+    let digits = text.chars().take_while(char::is_ascii_digit).count();
+    let (number, unit) = text.split_at(digits);
+    let number: u64 = number
+        .parse()
+        .map_err(|_| format!("{text:?} is not a duration; write one as 30s, 5m or 1h"))?;
+    let seconds = match unit {
+        "" | "s" => number,
+        "m" => number.saturating_mul(60),
+        "h" => number.saturating_mul(3600),
+        other => return Err(format!("{other:?} is not a unit of time; use s, m or h")),
+    };
+    if seconds == 0 {
+        return Err("must be longer than nothing".to_owned());
+    }
+    Ok(Duration::from_secs(seconds))
+}
+
 const OUTCOMES: &[&str] = &[
-    "compiled", "refused", "left-out", "planned", "deferred", "failed",
+    "compiled", "refused", "left-out", "planned", "deferred", "failed", "applied",
 ];
 
 fn expectation(r: &Reader<'_>, value: &Value, path: &str) -> Result<Expect, String> {
@@ -581,4 +694,19 @@ fn assertion(r: &Reader<'_>, value: &Value, path: &str) -> Result<Assertion, Str
         expr,
         message,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_duration_is_written_in_seconds_minutes_or_hours() {
+        assert_eq!(duration("90"), Ok(Duration::from_secs(90)));
+        assert_eq!(duration("20m"), Ok(Duration::from_secs(1200)));
+        assert_eq!(duration("1h"), Ok(Duration::from_secs(3600)));
+        assert!(duration("0s").is_err());
+        assert!(duration("5d").is_err());
+        assert!(duration("soon").is_err());
+    }
 }

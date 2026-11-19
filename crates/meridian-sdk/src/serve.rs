@@ -149,6 +149,7 @@ async fn serve_async(plugin: Plugin) -> Result<(), ServeError> {
             .map(|r| crate::debug::describe_all(r.debug_levels(), r.more_debug_levels()))
             .unwrap_or_default(),
         destroys: plugin.runner.as_ref().is_some_and(|r| r.destroys()),
+        inspects: plugin.runner.as_ref().is_some_and(|r| r.inspects()),
         settings: plugin
             .runner
             .as_ref()
@@ -230,6 +231,8 @@ struct EmitterHandler {
     debug_levels: Vec<String>,
     /// Whether the runner destroys what its tool created.
     destroys: bool,
+    /// Whether the runner reads one resource as it is now.
+    inspects: bool,
     /// What the runner can be configured with, for the host to list.
     settings: Vec<crate::Setting>,
     /// Kept only to describe it: importing is served by its own handler.
@@ -269,6 +272,7 @@ impl EmitterService for EmitterHandler {
             reads_identifiers: self.reads_identifiers,
             debug_levels: self.debug_levels.clone(),
             destroys: self.destroys,
+            inspects: self.inspects,
             import_formats: wire::import_formats_to_wire(
                 self.importer
                     .as_ref()
@@ -606,5 +610,25 @@ impl RunnerService for RunnerHandler {
             .await
             .map_err(|e| Status::internal(format!("the runner panicked: {e}")))?;
         Ok(Response::new(wire::identifiers_response(outcome)))
+    }
+
+    async fn inspect(
+        &self,
+        request: Request<pb::InspectRequest>,
+    ) -> Result<Response<pb::InspectResponse>, Status> {
+        if !self.runner.inspects() {
+            return Err(Status::unimplemented("this plugin does not inspect"));
+        }
+        let request = request.into_inner();
+        let context = wire::context_from_wire(request.context).map_err(Status::invalid_argument)?;
+        let artifact = wire::artifact_from_wire(request.artifact);
+        let runner = Arc::clone(&self.runner);
+        let (resource, endpoint) = (request.resource, request.endpoint);
+        let outcome = tokio::task::spawn_blocking(move || {
+            runner.inspect(&context, &artifact, &resource, &endpoint)
+        })
+        .await
+        .map_err(|e| Status::internal(format!("the runner panicked: {e}")))?;
+        Ok(Response::new(wire::inspect_response(outcome)))
     }
 }

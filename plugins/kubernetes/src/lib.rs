@@ -39,6 +39,7 @@
 #![allow(clippy::result_large_err)]
 
 mod emit;
+pub mod failures;
 mod import;
 mod runner;
 mod schemas;

@@ -90,8 +90,8 @@ pub use meridian_value::{
 };
 pub use rules::{DescribedRule, Rule};
 pub use run::{
-    Applied, Category, Change, ChangeAction, Log, LogLine, LogStream, NoLog, Operations, Output,
-    Plan, RunContext, RunError, Runner, SavedPlan,
+    Applied, Category, Change, ChangeAction, Inspection, Log, LogLine, LogStream, NoLog,
+    Operations, Output, Plan, RunContext, RunError, Runner, SavedPlan,
 };
 pub use schema::{is_shared_type, ParamKind, ParamSchema, ResourceSchema, TypeName, NATIVE_PREFIX};
 pub use schemas::{version_in, SchemaExport, SchemaRequest, SchemaSource};

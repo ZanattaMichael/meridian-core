@@ -48,15 +48,16 @@ and any client that takes the common JSON shape:
 }
 ```
 
-For `plan`, add `"--allow-plan"` ([Safety](#safety)).
+For `plan`, add `"--allow-plan"`; for `inspect`, `"--allow-inspect"` ([Safety](#safety)).
 
 ### Options
 
 | Option | Meaning |
 |---|---|
 | `--allow-plan` | offer the `plan` tool, which runs the real tool and takes the state lock. Also `MERIDIAN_MCP_ALLOW_PLAN=1` |
+| `--allow-inspect` | offer the `inspect` tool, which runs the real tool to read one resource and may reach the machine; no lock, no change. Also `MERIDIAN_MCP_ALLOW_INSPECT=1` |
 | `--root DIR` | the directory file arguments are confined to; the current directory by default |
-| `--state-dir DIR` | where `meridian schema sync` cached the tool schemas, relative to the root; `.meridian` by default |
+| `--state-dir DIR` | where `meridian schema sync` cached the tool schemas, and where `diagnose` reads the runs, relative to the root; `.meridian` by default |
 | `--plugin-dir`, `--plugin-signatures`, `--trusted-key` | the plugin options every command takes |
 
 With no plugins, documents are checked against the language only and `list_targets` is
@@ -81,6 +82,8 @@ the same JSON as text.
 | `explain` | what a rule means, why the target refuses it, and what to write instead | the lint rules explain themselves; the compiler's shared rules are described in the server; a target's own rule is named as such |
 | `import` | turns a tool's own configuration into documents, with what could not be carried over | [`meridian import`](../reference/cli.md#import) on text; `fileName` tells the importer the format |
 | `plan` | asks the tool what applying a file would change | **off unless** `--allow-plan`; runs `meridian plan --output json` on the file and returns [its object](../reference/cli-json.md#compile-plan-apply-drift-rollback-destroy) |
+| `diagnose` | why the last failed run failed: each failed step's machine, resource, cause and next command, and the steps not run | runs `meridian diagnose --output json` ([object](../reference/cli-json.md#diagnose)); reads the run record under `--state-dir`; no tool, no lock |
+| `inspect` | one resource as its tool reads it now, beside what the document declares, and what differs | **off unless** `--allow-inspect`; runs `meridian inspect --output json` ([object](../reference/cli-json.md#inspect)); `resource` and `file`, with `step` and `endpoint` as the command takes them |
 
 Give `document` (text) or `file` (under the root, may hold several documents).
 
@@ -134,7 +137,8 @@ checked; [decision 0003](../decisions/0003-editors-treat-every-when-as-true.md))
 
 - **Read-only.** `compile` emits in memory. `plan` runs the real tool, takes the
   [lock](../concepts/run-safety.md) and writes a run record, so it is opt-in; it runs
-  `meridian plan --output json`.
+  `meridian plan --output json`. `inspect` runs the real tool to read one resource and
+  may reach the machine; it takes no lock and changes nothing, and is opt-in too.
 - **Secrets.** A compile reads no environment, file or `exec`. The `literal-secret` lint
   flags passwords a model writes.
 - **No outbound connections** ([observability plan](../plans/observability.md#4-telemetry)).

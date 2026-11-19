@@ -32,6 +32,8 @@ compiled, with the reason. Each target's own page says how it does what it can.
   is checked by its artifact hash; this column says which also hand the tool
   its own plan back. See [a saved plan](../operations/pull-requests.md).
 - **outputs** are values a later stage of a workflow can read.
+- **inspect** says `meridian inspect` can read one resource of the target as
+  it is now, without changing it. See [`meridian inspect`](cli.md#inspect).
 - **inputs** says the target hands its tool the values a document's
   `spec.imports` brings from other documents, as the tool's own variables or
   parameters.
@@ -94,7 +96,7 @@ fn row(
         None => "no".to_owned(),
     };
     format!(
-        "| [{name}](../targets/{name}.md) | {category} | {types} | {notifies} | {runtime} | {plan} | {saved} | {apply} | {outputs} | {inputs} | {secrets} | {credentials} | {cloud} | {adopt} | {import} | {schemas} |\n",
+        "| [{name}](../targets/{name}.md) | {category} | {types} | {notifies} | {runtime} | {plan} | {saved} | {apply} | {outputs} | {inspect} | {inputs} | {secrets} | {credentials} | {cloud} | {adopt} | {import} | {schemas} |\n",
         schemas = yes(schemas.is_some()),
         saved = yes(runner.saves_plans()),
         credentials = yes(capabilities.credentials),
@@ -106,6 +108,7 @@ fn row(
         plan = yes(operations.plan),
         apply = yes(operations.apply),
         outputs = yes(operations.outputs),
+        inspect = yes(runner.inspects()),
         inputs = yes(runner.accepts_inputs()),
         secrets = yes(capabilities.secrets),
         adopt = match capabilities.adopt {
@@ -136,7 +139,7 @@ fn matrix() -> String {
         .collect();
     debug.sort();
     format!(
-        "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | saved plan | apply | outputs | inputs | secrets | credentials | cloud | adopt | import | schemas |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n{}",
+        "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | saved plan | apply | outputs | inspect | inputs | secrets | credentials | cloud | adopt | import | schemas |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n{}",
         rows.concat(),
     ) + DEBUG_INTRODUCTION
         + "| Target | 1 | 2 | 3 |\n|---|---|---|---|\n"

@@ -37,8 +37,10 @@
 
 pub mod analyze;
 pub mod backend;
+pub mod diagnose;
 pub mod event;
 pub mod history;
+pub mod inspect;
 mod journal;
 pub mod lock;
 pub mod logs;
@@ -132,8 +134,8 @@ pub fn run_selected(
     let run_id = time::run_id();
     let backend = options.store();
     // Compiling contacts nothing and changes nothing, so it takes no lock
-    // and leaves no record.
-    let persist = mode != Mode::Compile;
+    // and leaves no record; nor does reading one resource.
+    let persist = !matches!(mode, Mode::Compile | Mode::Inspect);
     let mut report = RunReport {
         run_id: run_id.clone(),
         ..RunReport::default()
@@ -174,7 +176,15 @@ pub fn run_selected(
     };
     let resume = match (&options.resume, mode) {
         (None, _) => None,
-        (Some(_), Mode::Compile | Mode::Plan | Mode::Drift | Mode::Rollback | Mode::Destroy) => {
+        (
+            Some(_),
+            Mode::Compile
+            | Mode::Plan
+            | Mode::Drift
+            | Mode::Rollback
+            | Mode::Destroy
+            | Mode::Inspect,
+        ) => {
             report.refused = Some(Refusal::Resume("only an apply can be resumed".to_owned()));
             return report;
         }
@@ -307,6 +317,12 @@ pub fn run_selected(
         Vec::new()
     } else {
         stages(bundle, selector, &options.data)
+    };
+    // An inspection reads one step's resource, and runs that step alone.
+    let to_run = match (&options.inspect, mode) {
+        (Some(ask), Mode::Inspect) => to_run.into_iter().filter(|s| s.id() == ask.step).collect(),
+        (None, Mode::Inspect) => Vec::new(),
+        _ => to_run,
     };
     // A destroy takes down what depends on something before the thing it
     // depends on: the reverse of the order things were made in.

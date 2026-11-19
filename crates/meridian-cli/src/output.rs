@@ -208,6 +208,7 @@ pub(crate) fn stage(stage: &StageReport, mode: Mode, out: Option<&Path>) -> Json
         Outcome::Drift(_) => "drift",
         Outcome::Destroyed { .. } => "destroyed",
         Outcome::Kept(_) => "kept",
+        Outcome::Inspected(_) => "inspected",
         Outcome::LeftOut { .. } => "left-out",
         Outcome::Failed(_) => "failed",
         Outcome::NotRun { .. } => "not-run",
@@ -307,6 +308,8 @@ pub(crate) fn stage(stage: &StageReport, mode: Mode, out: Option<&Path>) -> Json
         Outcome::Kept(kept) => {
             object.insert("kept".to_owned(), Json::from(kept.as_str()));
         }
+        // `meridian inspect` prints its own object.
+        Outcome::Inspected(_) => {}
         Outcome::LeftOut { condition } => {
             object.insert("condition".to_owned(), Json::from(condition.as_str()));
         }

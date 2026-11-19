@@ -238,6 +238,42 @@ fn run() -> ExitCode {
                 all,
             },
         ),
+        Command::Inspect {
+            resource,
+            files,
+            step,
+            endpoint,
+            data,
+            set,
+            state,
+        } => inspect(
+            &state,
+            &InspectQuery {
+                resource: &resource,
+                files: &files,
+                step: step.as_deref(),
+                endpoint: endpoint.as_deref(),
+                data: &data,
+                set: &set,
+            },
+        ),
+        Command::Diagnose {
+            run,
+            step,
+            endpoint,
+            cause,
+            state,
+        } => diagnose(
+            &state,
+            &DiagnoseQuery {
+                run: run.as_deref(),
+                filter: meridian_orchestrator::diagnose::Filter {
+                    step: step.as_deref(),
+                    endpoint: endpoint.as_deref(),
+                    cause: cause.as_deref(),
+                },
+            },
+        ),
         Command::BugReport { run, out, state } => {
             bug_report(&state, run.as_deref(), out.as_deref())
         }
@@ -320,12 +356,14 @@ fn run() -> ExitCode {
             junit,
             plugins,
             state_dir,
+            keep,
         } => test(
             &files,
             case.as_deref(),
             junit.as_deref(),
             &plugins,
             &state_dir,
+            keep,
         ),
         Command::Fmt(args) => tools::format(&args),
         Command::Lint(args) => tools::lint(&args),
