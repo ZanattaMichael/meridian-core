@@ -62,7 +62,7 @@ fn an_unknown_type_names_the_types_that_work_and_the_line() {
     assert_eq!(
         err.msg,
         "unsupported resource type \"firewall_rule\" on this target: it is not one of the \
-         shared types (exec, file, group, package, service, user), and an Ansible module is \
+         shared types (exec, file, group, package, packageRepository, service, user), and an Ansible module is \
          written by its full name, such as ansible.builtin.lineinfile"
     );
     assert_eq!((err.pos.file.as_str(), err.pos.line), ("site.yaml", 11));
@@ -172,6 +172,7 @@ fn the_schemas_offer_any_module_as_an_open_pattern() {
             "file",
             "group",
             "package",
+            "packageRepository",
             "service",
             "user"
         ]
@@ -504,4 +505,57 @@ fn what_ansible_playbook_cannot_take_of_a_credential_is_refused_with_the_reason(
     let refused = emit(&graph).unwrap_err();
     assert_eq!(refused.rule, "unsupported-credential");
     assert!(refused.msg.contains("not aws"), "{}", refused.msg);
+}
+
+const APT_REPO: &str = "    - id: repo\n      type: packageRepository\n      params:\n        name: nginx\n        format: apt\n        url: https://nginx.org/packages/debian\n        distribution: bookworm\n        key: https://nginx.org/keys/nginx_signing.key\n";
+
+const YUM_REPO: &str = "    - id: repo\n      type: packageRepository\n      params:\n        name: nginx\n        format: yum\n        url: https://nginx.org/packages/rhel/9/x86_64/\n        key: https://nginx.org/keys/nginx_signing.key\n";
+
+#[test]
+fn an_apt_repository_is_a_deb822_repository() {
+    let emitted = compile(APT_REPO).unwrap();
+    let playbook = &emitted.artifact.files["playbook.yml"];
+    assert!(
+        playbook.contains("ansible.builtin.deb822_repository:"),
+        "{playbook}"
+    );
+    for line in [
+        "name: nginx",
+        "uris: https://nginx.org/packages/debian",
+        "suites: bookworm",
+        "- main",
+        "signed_by: https://nginx.org/keys/nginx_signing.key",
+        "state: present",
+    ] {
+        assert!(playbook.contains(line), "{line} in {playbook}");
+    }
+}
+
+#[test]
+fn a_yum_repository_is_a_yum_repository() {
+    let emitted = compile(YUM_REPO).unwrap();
+    let playbook = &emitted.artifact.files["playbook.yml"];
+    assert!(
+        playbook.contains("ansible.builtin.yum_repository:"),
+        "{playbook}"
+    );
+    for line in [
+        "baseurl: https://nginx.org/packages/rhel/9/x86_64/",
+        "gpgcheck: true",
+        "gpgkey: https://nginx.org/keys/nginx_signing.key",
+        "description: nginx",
+    ] {
+        assert!(playbook.contains(line), "{line} in {playbook}");
+    }
+}
+
+#[test]
+fn a_repository_is_refused_the_same_way_as_everywhere() {
+    let err = refusal(&APT_REPO.replace("        distribution: bookworm\n", ""));
+    assert_eq!(err.rule, "missing-param");
+    assert_eq!(err.target, "ansible");
+    let err = refusal(&YUM_REPO.replace("format: yum", "format: zypper"));
+    assert_eq!(err.rule, "invalid-param");
+    let err = refusal(&format!("{YUM_REPO}        distribution: el9\n"));
+    assert_eq!(err.rule, "unsupported-param");
 }

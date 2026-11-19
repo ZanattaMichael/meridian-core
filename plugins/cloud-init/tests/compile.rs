@@ -280,7 +280,16 @@ fn the_target_declares_what_it_is_and_can_express() {
     assert_eq!(CloudInit.category(), Category::ConfigurationManagement);
     assert_eq!(
         CloudInit.supported_resource_types(),
-        ["<module>", "exec", "file", "group", "package", "service", "user"]
+        [
+            "<module>",
+            "exec",
+            "file",
+            "group",
+            "package",
+            "packageRepository",
+            "service",
+            "user"
+        ]
     );
     assert_eq!(
         CloudInit.capabilities(),
@@ -1023,7 +1032,7 @@ fn an_unknown_type_names_the_types_that_work_and_the_line() {
     assert_eq!(
         err.msg,
         "unsupported resource type \"Firewall.Rule\" on this target: it is not one of the \
-         shared types (exec, file, group, package, service, user), and a cloud-config module \
+         shared types (exec, file, group, package, packageRepository, service, user), and a cloud-config module \
          is written by its key, such as ntp or apt"
     );
     assert_eq!((err.pos.file.as_str(), err.pos.line), ("site.yaml", 11));
@@ -1212,4 +1221,49 @@ fn the_schemas_offer_any_module_as_an_open_pattern() {
         .expect("the module pattern is declared");
     assert!(pattern.open && pattern.is_pattern() && pattern.params.is_empty());
     assert!(pattern.actions.is_empty());
+}
+
+const APT_REPO: &str = "    - id: repo\n      type: packageRepository\n      params:\n        name: nginx\n        format: apt\n        url: https://nginx.org/packages/debian\n        distribution: bookworm\n";
+
+#[test]
+fn repositories_are_apt_sources_and_yum_repos_added_before_packages() {
+    let text = user_data(&format!(
+        "{APT_REPO}    - id: el\n      type: packageRepository\n      params:\n        name: nginx-el\n        format: yum\n        url: https://nginx.org/packages/rhel/9/x86_64/\n        key: https://nginx.org/keys/nginx_signing.key\n    - id: pkg\n      type: package\n      dependsOn:\n        - resource: repo\n        - resource: el\n      params:\n        name: nginx\n"
+    ));
+    let config = parsed(&text);
+    assert_eq!(
+        config["apt"],
+        Value::Map(BTreeMap::from([(
+            "sources".to_owned(),
+            Value::Map(BTreeMap::from([(
+                "nginx.list".to_owned(),
+                Value::Map(BTreeMap::from([(
+                    "source".to_owned(),
+                    Value::String("deb https://nginx.org/packages/debian bookworm main".to_owned())
+                )]))
+            )]))
+        )]))
+    );
+    let yum = section(&text, "yum_repos").join("\n");
+    for line in [
+        "baseurl: https://nginx.org/packages/rhel/9/x86_64/",
+        "gpgcheck: true",
+        "gpgkey: https://nginx.org/keys/nginx_signing.key",
+    ] {
+        assert!(yum.contains(line), "{line} in {text}");
+    }
+}
+
+#[test]
+fn a_repository_cloud_init_cannot_write_is_refused() {
+    let err = refusal(&APT_REPO.replace("      params:", "      state: absent\n      params:"));
+    assert_eq!(err.rule, "unsupported-state");
+    let err = refusal(&format!(
+        "{APT_REPO}        key: https://nginx.org/keys/nginx_signing.key\n"
+    ));
+    assert_eq!(err.rule, "unsupported-param");
+    let err = refusal(&format!(
+        "{APT_REPO}    - id: proxy\n      type: apt\n      params:\n        http_proxy: http://proxy:3128\n"
+    ));
+    assert_eq!(err.rule, "duplicate-resource");
 }

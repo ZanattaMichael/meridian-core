@@ -72,6 +72,7 @@ fn the_plugin_describes_itself_as_openvox() {
             "file",
             "group",
             "package",
+            "packageRepository",
             "service",
             "user"
         ]

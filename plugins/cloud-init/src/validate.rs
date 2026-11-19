@@ -107,6 +107,42 @@ pub(crate) fn validate(config: &CloudConfig) -> Result<(), CompileError> {
             ));
         }
     }
+    names.clear();
+    for repo in &config.repositories {
+        if let Some(previous) = names.insert(&repo.item.name, &repo.id) {
+            return Err(repo.refuse(
+                &rules::DUPLICATE_RESOURCE,
+                format!(
+                    "repository {:?} is already added by resource {:?}",
+                    repo.item.name, previous
+                ),
+            ));
+        }
+    }
+    // A repository is written under `apt` or `yum_repos`, which a module of
+    // the same key would overwrite.
+    for module in &config.modules {
+        let kind = match module.item.key.as_str() {
+            "apt" => Some(true),
+            "yum_repos" => Some(false),
+            _ => None,
+        };
+        let Some(apt) = kind else { continue };
+        if let Some(repo) = config
+            .repositories
+            .iter()
+            .find(|r| r.item.apt_line.is_some() == apt)
+        {
+            return Err(module.refuse(
+                &rules::DUPLICATE_RESOURCE,
+                format!(
+                    "module {:?} would overwrite the repository of resource {:?}; write the \
+                     repository inside the module, or drop the module",
+                    module.item.key, repo.id
+                ),
+            ));
+        }
+    }
     // cloud-init reads one mapping, so a key written twice would keep one
     // value and lose the other without a word.
     names.clear();
@@ -226,6 +262,7 @@ mod tests {
             groups: vec![group("ops", "ops")],
             users: vec![user("deploy", "deploy")],
             packages: vec![package("pkg", "nginx")],
+            repositories: Vec::new(),
             commands: Vec::new(),
             modules: Vec::new(),
         }

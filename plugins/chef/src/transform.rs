@@ -122,8 +122,16 @@ pub(crate) fn mapping(resource_type: &str) -> Option<Mapping> {
     })
 }
 
-/// The six shared types, sorted.
-const SHARED: &[&str] = &["exec", "file", "group", "package", "service", "user"];
+/// The shared types, sorted.
+const SHARED: &[&str] = &[
+    "exec",
+    "file",
+    "group",
+    "package",
+    "packageRepository",
+    "service",
+    "user",
+];
 
 /// How an editor is told that any Chef resource is a type: its name, as a
 /// recipe writes it.
@@ -153,6 +161,7 @@ pub fn resource_schemas() -> Vec<ResourceSchema> {
             m.actions,
         ))
     }));
+    meridian_sdk::schema::insert_repository_schema(&mut schemas);
     schemas
 }
 
@@ -280,6 +289,61 @@ fn native_block(r: &Resource, resource: &str) -> Result<Block, CompileError> {
     })
 }
 
+/// A `packageRepository`: `apt_repository` or `yum_repository`.
+fn repository_block(r: &Resource) -> Result<Block, CompileError> {
+    use meridian_sdk::schema::RepositoryFormat;
+    let repo = meridian_sdk::schema::package_repository(r).map_err(|e| CompileError {
+        target: NAME.to_owned(),
+        ..e
+    })?;
+    let text = |s: &str| Value::String(s.to_owned());
+    let mut properties = BTreeMap::new();
+    let (resource, action) = match &repo.format {
+        RepositoryFormat::Apt {
+            distribution,
+            components,
+        } => {
+            properties.insert("repo_name".to_owned(), text(&repo.name));
+            properties.insert("uri".to_owned(), text(&repo.url));
+            properties.insert("distribution".to_owned(), text(distribution));
+            properties.insert(
+                "components".to_owned(),
+                Value::List(components.iter().map(|c| text(c)).collect()),
+            );
+            if let Some(key) = &repo.key {
+                properties.insert("key".to_owned(), Value::List(vec![text(key)]));
+            }
+            (
+                "apt_repository",
+                if repo.present { "add" } else { "remove" },
+            )
+        }
+        RepositoryFormat::Yum => {
+            properties.insert("repositoryid".to_owned(), text(&repo.name));
+            properties.insert("description".to_owned(), text(&repo.name));
+            properties.insert("baseurl".to_owned(), text(&repo.url));
+            properties.insert("gpgcheck".to_owned(), Value::Bool(repo.key.is_some()));
+            if let Some(key) = &repo.key {
+                properties.insert("gpgkey".to_owned(), text(key));
+            }
+            (
+                "yum_repository",
+                if repo.present { "create" } else { "remove" },
+            )
+        }
+    };
+    Ok(Block {
+        resource: resource.to_owned(),
+        name: r.id.clone(),
+        properties,
+        actions: vec![action.to_owned()],
+        only_if: r.runtime_when.clone(),
+        notifies: Vec::new(),
+        resource_id: r.id.clone(),
+        pos: r.pos.clone(),
+    })
+}
+
 fn keys(pairs: &[(&str, &str)]) -> String {
     pairs.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", ")
 }
@@ -313,6 +377,9 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Cookbook, CompileError>
 fn blocks_for(r: &Resource) -> Result<Vec<Block>, CompileError> {
     if let Some(resource) = native_resource(r)? {
         return Ok(vec![native_block(r, resource)?]);
+    }
+    if r.r#type == "packageRepository" {
+        return Ok(vec![repository_block(r)?]);
     }
     let m = mapping(&r.r#type).ok_or_else(|| unsupported_type(r))?;
 

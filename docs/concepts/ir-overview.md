@@ -49,7 +49,7 @@ Every field is in [the language reference](../reference/dsl/index.md).
 What `type` and `params` mean depends on the target's category.
 
 **Configuration management targets** (`ansible`, `puppet`, `openvox`, `chef`, `salt`,
-`cloud-init`) share six types: `package`, `file`, `service`, `user`, `group` and `exec`.
+`cloud-init`) share seven types: `package`, `packageRepository`, `file`, `service`, `user`, `group` and `exec`.
 The same resource compiles for any of them. `cloud-init` applies them once, on first boot
 ([its page](../targets/cloud-init.md)). These targets also take the tool's own types
 (`ansible.builtin.lineinfile`), which compile for that target only

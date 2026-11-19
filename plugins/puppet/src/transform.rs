@@ -199,11 +199,20 @@ pub fn resource_schemas() -> Vec<ResourceSchema> {
             m.actions,
         ))
     }));
+    meridian_sdk::schema::insert_repository_schema(&mut schemas);
     schemas
 }
 
-/// The six shared types, sorted.
-const SHARED: &[&str] = &["exec", "file", "group", "package", "service", "user"];
+/// The shared types, sorted.
+const SHARED: &[&str] = &[
+    "exec",
+    "file",
+    "group",
+    "package",
+    "packageRepository",
+    "service",
+    "user",
+];
 
 /// How an editor is told that any Puppet type is a type: a defined type or
 /// a module's type by its qualified name, a core type by its bare name.
@@ -333,6 +342,9 @@ fn declaration_for(
     secrets: &[meridian_sdk::SecretName],
 ) -> Result<Declaration, CompileError> {
     let native = native_type(r)?;
+    if native.is_none() && r.r#type == "packageRepository" {
+        return repository_declaration(r);
+    }
     let m = match native {
         Some(_) => None,
         None => Some(mapping(&r.r#type).ok_or_else(|| unsupported_type(r))?),
@@ -454,6 +466,61 @@ fn declaration_for(
 
     Ok(Declaration {
         r#type: m.puppet_type.to_owned(),
+        title: r.id.clone(),
+        attrs,
+        require: Vec::new(),
+        notify: Vec::new(),
+        native: false,
+        resource_id: r.id.clone(),
+        pos: r.pos.clone(),
+    })
+}
+
+/// A `packageRepository`: a yum repository is Puppet's `yumrepo`. Puppet
+/// has no built-in apt source; that is `apt::source` from puppetlabs-apt.
+fn repository_declaration(r: &Resource) -> Result<Declaration, CompileError> {
+    use meridian_sdk::schema::RepositoryFormat;
+    let repo = meridian_sdk::schema::package_repository(r).map_err(|e| CompileError {
+        target: NAME.to_owned(),
+        ..e
+    })?;
+    if !r.runtime_when.is_empty() {
+        return Err(refuse(
+            r,
+            &rules::UNSUPPORTED_RUNTIME_CONDITION,
+            "a Puppet catalog is compiled before it reaches the node, so runtimeWhen has no \
+             apply-time conditional to compile into"
+                .to_owned(),
+        ));
+    }
+    if let RepositoryFormat::Apt { .. } = repo.format {
+        return Err(refuse(
+            r,
+            &rules::UNSUPPORTED_PARAM,
+            "format apt: Puppet has no built-in apt source; declare apt::source from the \
+             puppetlabs-apt module as a native type instead"
+                .to_owned(),
+        ));
+    }
+    let text = |s: &str| Attr::Value(Value::String(s.to_owned()));
+    let mut attrs = BTreeMap::new();
+    attrs.insert(
+        "ensure".to_owned(),
+        Attr::Bare(if repo.present { "present" } else { "absent" }),
+    );
+    attrs.insert("name".to_owned(), text(&repo.name));
+    attrs.insert("descr".to_owned(), text(&repo.name));
+    attrs.insert("baseurl".to_owned(), text(&repo.url));
+    attrs.insert("enabled".to_owned(), Attr::Value(Value::Bool(true)));
+    attrs.insert(
+        "gpgcheck".to_owned(),
+        Attr::Value(Value::Bool(repo.key.is_some())),
+    );
+    if let Some(key) = &repo.key {
+        attrs.insert("gpgkey".to_owned(), text(key));
+    }
+    Ok(Declaration {
+        r#type: "yumrepo".to_owned(),
         title: r.id.clone(),
         attrs,
         require: Vec::new(),

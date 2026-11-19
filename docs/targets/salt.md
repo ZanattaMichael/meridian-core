@@ -10,7 +10,7 @@ applies it with `salt-call --local`, or `salt-ssh` for another machine.
 | | |
 |---|---|
 | Category | Configuration management |
-| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)), and any state function beside them: `pkgrepo.managed`, `file.symlink`, `docker_container.running` ([State functions beside the six](#state-functions-beside-the-six)) |
+| Resource types | `package`, `packageRepository`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)), and any state function beside them: `pkgrepo.managed`, `file.symlink`, `docker_container.running` ([State functions beside the six](#state-functions-beside-the-six)) |
 | `dependsOn` | Yes, as `require`. The states are also written in apply order, so the dependency graph survives into the state file intact and nothing is flattened |
 | `notifies` | Native: `watch` and `onchanges`. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec, `watch` on a state function of Salt's own |
 | `runtimeWhen` | Yes: a Jinja expression over grains and pillar, which the minion evaluates when it renders the file |
@@ -327,6 +327,15 @@ Every shared type, state and param accepted. Any other type is a
 | `absent` | `pkg.removed` | `name` |
 
 `version` is refused with `latest` and `absent`.
+
+### `packageRepository`
+
+| `state` | Compiles to | Params |
+|---|---|---|
+| `present` (default) | `pkgrepo.managed` | `name`, `format`, `url` (required), `key`; apt: `distribution`, `components` |
+| `absent` | `pkgrepo.absent` | the same |
+
+apt: `name` is the `deb` line, written to `/etc/apt/sources.list.d/<name>.list`; `key` is `key_url`.
 
 ### `service`
 

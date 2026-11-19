@@ -11,7 +11,7 @@ of Puppet: `puppet apply` on the machine itself, or OpenBolt for another machine
 | | |
 |---|---|
 | Category | configuration management |
-| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md), and [below](#resource-reference) for what each becomes), and any Puppet type beside them: `cron`, `mysql::db`, `native/file` ([below](#puppet-types-beside-the-six)) |
+| Resource types | `package`, `packageRepository`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md), and [below](#resource-reference) for what each becomes), and any Puppet type beside them: `cron`, `mysql::db`, `native/file` ([below](#puppet-types-beside-the-six)) |
 | `dependsOn` | Yes, as `require`. OpenVox orders by declared relationships, so the dependency graph survives into the manifest intact |
 | `notifies` | Native: `notify`. A service can be restarted (`restart` or `refresh`); an exec can be `run`; a Puppet type of its own can be refreshed (`refresh`) |
 | Not supported | `action: reload`, `start` or `stop` on a service, and notifying a `package`, `file`, `user` or `group`. A refresh restarts a service and takes no argument, and the other types do nothing on one. The compile refuses these and says why; it does not turn a reload into a restart |
@@ -282,6 +282,17 @@ No `state` means the default.
 | `state: latest` | `ensure => latest` |
 | `state: absent` | `ensure => absent` |
 | `name` (required) | `name` |
+
+Cannot be notified.
+
+### packageRepository
+
+| In the document | In the manifest |
+|---|---|
+| `format: yum` | `yumrepo` |
+| `format: apt` | refused: no built-in apt source; use `apt::source` |
+| `state: present` (default), `state: absent` | `ensure => present`, `ensure => absent` |
+| `url`, `key` | `baseurl`, `gpgkey` (and `gpgcheck => true`) |
 
 Cannot be notified.
 

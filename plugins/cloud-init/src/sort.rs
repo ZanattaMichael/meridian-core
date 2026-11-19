@@ -5,9 +5,10 @@
 //!
 //! 1. `write_files`
 //! 2. `groups`, then `users`
-//! 3. `packages`
-//! 4. `write_files` entries marked `defer`
-//! 5. `runcmd`, top to bottom
+//! 3. `apt` sources and `yum_repos`
+//! 4. `packages`
+//! 5. `write_files` entries marked `defer`
+//! 6. `runcmd`, top to bottom
 //!
 //! This stage places every resource at one of those points and checks each
 //! `dependsOn` against the result. The only choice it has is when a file is
@@ -29,6 +30,7 @@ enum Phase {
     Files,
     Groups,
     Users,
+    Repositories,
     Packages,
     DeferredFiles,
     Commands,
@@ -42,6 +44,7 @@ impl Phase {
             Phase::Files => "writes files",
             Phase::Groups => "creates groups",
             Phase::Users => "creates users",
+            Phase::Repositories => "adds package repositories",
             Phase::Packages => "installs packages",
             Phase::DeferredFiles => "writes the files that wait for users and packages",
             Phase::Commands => "runs commands",
@@ -99,6 +102,7 @@ pub(crate) fn arrange(
             Item::Group(_) => Phase::Groups,
             Item::User(_) => Phase::Users,
             Item::Package(_) => Phase::Packages,
+            Item::Repository(_) => Phase::Repositories,
             Item::Commands(_) => Phase::Commands,
             Item::File(file) => {
                 let waits_for_owner = created_users.contains(file.owner.as_str())
@@ -113,6 +117,7 @@ pub(crate) fn arrange(
                             Some(
                                 Phase::Groups
                                     | Phase::Users
+                                    | Phase::Repositories
                                     | Phase::Packages
                                     | Phase::DeferredFiles
                             )
@@ -150,6 +155,7 @@ pub(crate) fn arrange(
             Item::Group(item) => config.groups.push(Placed { id, pos, item }),
             Item::User(item) => config.users.push(Placed { id, pos, item }),
             Item::Package(item) => config.packages.push(Placed { id, pos, item }),
+            Item::Repository(item) => config.repositories.push(Placed { id, pos, item }),
             Item::Commands(commands) => config.commands.extend(commands),
             Item::Module(item) => config.modules.push(Placed { id, pos, item }),
         }

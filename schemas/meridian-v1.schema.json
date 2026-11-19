@@ -1961,6 +1961,7 @@
                     "file",
                     "group",
                     "package",
+                    "packageRepository",
                     "service",
                     "user"
                   ]
@@ -2209,6 +2210,89 @@
                 "enum": [
                   "absent",
                   "latest",
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "packageRepository"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A repository the system's package manager installs from: apt or yum.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "components": {
+                    "description": "With `format: apt`: the archive's components. Default `[main]`.",
+                    "type": [
+                      "array",
+                      "string"
+                    ]
+                  },
+                  "distribution": {
+                    "description": "With `format: apt`: the suite, such as `bookworm` or `stable`. Required for apt.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "format": {
+                    "description": "`apt` or `yum` (yum also serves dnf).",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "key": {
+                    "description": "The URL of the key the repository is signed with.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The repository's name: its file name and id.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "url": {
+                    "description": "The repository's base URL.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "format",
+                  "name",
+                  "url"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "absent",
                   "present"
                 ]
               }
@@ -3771,6 +3855,7 @@
                     "file",
                     "group",
                     "package",
+                    "packageRepository",
                     "service",
                     "user"
                   ]
@@ -4021,6 +4106,89 @@
           "if": {
             "properties": {
               "type": {
+                "const": "packageRepository"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A repository the system's package manager installs from: apt or yum.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "components": {
+                    "description": "With `format: apt`: the archive's components. Default `[main]`.",
+                    "type": [
+                      "array",
+                      "string"
+                    ]
+                  },
+                  "distribution": {
+                    "description": "With `format: apt`: the suite, such as `bookworm` or `stable`. Required for apt.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "format": {
+                    "description": "`apt` or `yum` (yum also serves dnf).",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "key": {
+                    "description": "The URL of the key the repository is signed with.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The repository's name: its file name and id.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "url": {
+                    "description": "The repository's base URL.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "format",
+                  "name",
+                  "url"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "absent",
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
                 "const": "service"
               }
             },
@@ -4164,6 +4332,7 @@
                     "file",
                     "group",
                     "package",
+                    "packageRepository",
                     "service",
                     "user"
                   ]
@@ -4421,6 +4590,88 @@
                 "additionalProperties": false,
                 "required": [
                   "name"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "packageRepository"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A repository the system's package manager installs from: apt or yum.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "components": {
+                    "description": "With `format: apt`: the archive's components. Default `[main]`.",
+                    "type": [
+                      "array",
+                      "string"
+                    ]
+                  },
+                  "distribution": {
+                    "description": "With `format: apt`: the suite, such as `bookworm` or `stable`. Required for apt.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "format": {
+                    "description": "`apt` or `yum` (yum also serves dnf).",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "key": {
+                    "description": "The URL of the key the repository is signed with.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The repository's name: its file name and id.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "url": {
+                    "description": "The repository's base URL.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "format",
+                  "name",
+                  "url"
                 ]
               },
               "state": {
@@ -6130,6 +6381,7 @@
                     "file",
                     "group",
                     "package",
+                    "packageRepository",
                     "service",
                     "user"
                   ]
@@ -6373,6 +6625,89 @@
                 "enum": [
                   "absent",
                   "latest",
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "packageRepository"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A repository the system's package manager installs from: apt or yum.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "components": {
+                    "description": "With `format: apt`: the archive's components. Default `[main]`.",
+                    "type": [
+                      "array",
+                      "string"
+                    ]
+                  },
+                  "distribution": {
+                    "description": "With `format: apt`: the suite, such as `bookworm` or `stable`. Required for apt.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "format": {
+                    "description": "`apt` or `yum` (yum also serves dnf).",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "key": {
+                    "description": "The URL of the key the repository is signed with.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The repository's name: its file name and id.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "url": {
+                    "description": "The repository's base URL.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "format",
+                  "name",
+                  "url"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "absent",
                   "present"
                 ]
               }
@@ -7298,6 +7633,7 @@
                     "file",
                     "group",
                     "package",
+                    "packageRepository",
                     "service",
                     "user"
                   ]
@@ -7551,6 +7887,89 @@
           "if": {
             "properties": {
               "type": {
+                "const": "packageRepository"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A repository the system's package manager installs from: apt or yum.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "components": {
+                    "description": "With `format: apt`: the archive's components. Default `[main]`.",
+                    "type": [
+                      "array",
+                      "string"
+                    ]
+                  },
+                  "distribution": {
+                    "description": "With `format: apt`: the suite, such as `bookworm` or `stable`. Required for apt.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "format": {
+                    "description": "`apt` or `yum` (yum also serves dnf).",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "key": {
+                    "description": "The URL of the key the repository is signed with.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The repository's name: its file name and id.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "url": {
+                    "description": "The repository's base URL.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "format",
+                  "name",
+                  "url"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "absent",
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
                 "const": "service"
               }
             },
@@ -7694,6 +8113,7 @@
                     "file",
                     "group",
                     "package",
+                    "packageRepository",
                     "service",
                     "user"
                   ]
@@ -7950,6 +8370,89 @@
                 "enum": [
                   "absent",
                   "latest",
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "packageRepository"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A repository the system's package manager installs from: apt or yum.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "components": {
+                    "description": "With `format: apt`: the archive's components. Default `[main]`.",
+                    "type": [
+                      "array",
+                      "string"
+                    ]
+                  },
+                  "distribution": {
+                    "description": "With `format: apt`: the suite, such as `bookworm` or `stable`. Required for apt.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "format": {
+                    "description": "`apt` or `yum` (yum also serves dnf).",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "key": {
+                    "description": "The URL of the key the repository is signed with.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The repository's name: its file name and id.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "url": {
+                    "description": "The repository's base URL.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "format",
+                  "name",
+                  "url"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "absent",
                   "present"
                 ]
               }

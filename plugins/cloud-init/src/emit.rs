@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use meridian_sdk::Value;
 use meridian_yaml::Yaml;
 
-use crate::{CloudConfig, Group, Module, Package, User, WriteFile};
+use crate::{CloudConfig, Group, Module, Package, Repository, User, WriteFile};
 
 /// The artifact's file names, shared with the runner. They are the names
 /// cloud-init's NoCloud data source looks for, so the artifact is a seed
@@ -41,6 +41,45 @@ pub(crate) fn serialise(config: &CloudConfig) -> BTreeMap<String, String> {
         let mut users = vec![Yaml::str("default")];
         users.extend(config.users.iter().map(|u| user_node(&u.item)));
         document.push(("users".to_owned(), Yaml::Seq(users)));
+    }
+    let (apt, yum): (Vec<&Repository>, Vec<&Repository>) = config
+        .repositories
+        .iter()
+        .map(|r| &r.item)
+        .partition(|r| r.apt_line.is_some());
+    if !apt.is_empty() {
+        let sources = apt
+            .iter()
+            .map(|r| {
+                let line = r.apt_line.clone().unwrap_or_default();
+                (
+                    format!("{}.list", r.name),
+                    Yaml::Map(vec![("source".to_owned(), Yaml::str(line))]),
+                )
+            })
+            .collect();
+        document.push((
+            "apt".to_owned(),
+            Yaml::Map(vec![("sources".to_owned(), Yaml::Map(sources))]),
+        ));
+    }
+    if !yum.is_empty() {
+        let repos = yum
+            .iter()
+            .map(|r| {
+                let mut entry = vec![
+                    ("name".to_owned(), Yaml::str(&r.name)),
+                    ("baseurl".to_owned(), Yaml::str(&r.url)),
+                    ("enabled".to_owned(), Yaml::Bool(true)),
+                    ("gpgcheck".to_owned(), Yaml::Bool(r.key.is_some())),
+                ];
+                if let Some(key) = &r.key {
+                    entry.push(("gpgkey".to_owned(), Yaml::str(key)));
+                }
+                (r.name.clone(), Yaml::Map(entry))
+            })
+            .collect();
+        document.push(("yum_repos".to_owned(), Yaml::Map(repos)));
     }
     if !config.packages.is_empty() {
         let packages = config

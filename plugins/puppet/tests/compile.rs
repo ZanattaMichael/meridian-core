@@ -507,8 +507,25 @@ fn the_schemas_offer_any_puppet_type_as_an_open_pattern() {
             "file",
             "group",
             "package",
+            "packageRepository",
             "service",
             "user"
         ]
     );
+}
+
+#[test]
+fn a_yum_repository_is_a_yumrepo_and_apt_is_refused() {
+    let site = manifest("    - id: repo\n      type: packageRepository\n      params:\n        name: nginx\n        format: yum\n        url: https://nginx.org/packages/rhel/9/x86_64/\n        key: https://nginx.org/keys/nginx_signing.key\n");
+    assert!(site.contains("yumrepo { 'repo':"), "{site}");
+    for line in [
+        "baseurl  => 'https://nginx.org/packages/rhel/9/x86_64/'",
+        "gpgcheck => true",
+        "gpgkey   => 'https://nginx.org/keys/nginx_signing.key'",
+    ] {
+        assert!(site.contains(line), "{line} in {site}");
+    }
+    let err = refusal("    - id: repo\n      type: packageRepository\n      params:\n        name: nginx\n        format: apt\n        url: https://nginx.org/packages/debian\n        distribution: bookworm\n");
+    assert_eq!(err.rule, "unsupported-param");
+    assert!(err.msg.contains("apt::source"), "{}", err.msg);
 }
