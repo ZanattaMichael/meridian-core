@@ -102,10 +102,10 @@ impl LocalBackend {
         } else {
             options.create(true).truncate(true);
         }
-        Self::private(options, path)
+        Self::private(&mut options, path)
     }
 
-    fn private(mut options: std::fs::OpenOptions, path: &Path) -> std::io::Result<std::fs::File> {
+    fn private(options: &mut std::fs::OpenOptions, path: &Path) -> std::io::Result<std::fs::File> {
         // Nothing in the record is secret. Keeping it private anyway costs
         // nothing, and means a mistake elsewhere is not also a leak.
         #[cfg(unix)]
@@ -221,7 +221,7 @@ impl Backend for LocalBackend {
             }
             let mut options = std::fs::OpenOptions::new();
             options.append(true).create(true);
-            let mut file = Self::private(options, &path)?;
+            let mut file = Self::private(&mut options, &path)?;
             file.write_all(bytes)?;
             file.sync_data()
         })();
