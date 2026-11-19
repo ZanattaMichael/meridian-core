@@ -385,6 +385,27 @@ fn a_deployment_is_previewed_made_read_back_and_changed_in_azure() {
     apply(&dir, &second);
     let again = plan(&dir, &second);
     assert!(again.changes.is_empty(), "{:?}", again.changes);
+
+    // A destroy previews what the deployment made, deletes it, and then has
+    // nothing left to remove.
+    let log = KeptLog::default();
+    let runner = ArmRunner::from_env();
+    let preview = runner
+        .plan_destroy(&context(&dir), &second, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(
+        changes(&preview.changes),
+        [(ChangeAction::Delete, "identity")]
+    );
+    let removed = runner
+        .destroy(&context(&dir), &second, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(changes(&removed), changes(&preview.changes));
+    assert!(!identity_exists(&group), "the identity is gone");
+    let after = runner
+        .plan_destroy(&context(&dir), &second, &log)
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(after.changes.is_empty(), "{:?}", after.changes);
 }
 
 #[ignore = "needs a real az; see docs/contributing/real-tool-tests.md"]

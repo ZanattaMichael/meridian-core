@@ -24,6 +24,7 @@ and deploys it to a resource group or a subscription with the `az` command line.
 | Plan | Yes: `what-if`. Where Azure cannot analyse a resource, the plan is reported as unknown |
 | Apply | Yes: `az deployment group create` or `az deployment sub create` |
 | Outputs | Yes, always as strings |
+| Destroy | Yes: each resource the deployment's record lists is deleted, then the record. See [Destroying](../operations/destroying.md) |
 | Template `variables` and `functions` | No. Write the expression where it is used |
 | Typed outputs | No. A Meridian output has no type |
 | Checking a resource's properties against its type | Not at compile time: the plugin checks the template's structure, references and expressions; Azure checks the properties, and a plan reports what it says. An editor checks them once the type definitions are synced; see [Editor schemas](#editor-schemas) |
@@ -238,6 +239,7 @@ All refused:
 | Plan | `az deployment group what-if --name <name> --resource-group <rg> --template-file template.json --mode <mode> --no-pretty-print` |
 | Apply | the same preview, so the changes can be reported, then `az deployment group create` with the same arguments |
 | Outputs later | `az deployment group show --name <name> --resource-group <rg>` |
+| Destroy | `az deployment group|sub show` (the record's `outputResources`), then `az resource delete --ids` for each, children first and otherwise last made first, then `az deployment group|sub delete`; `plan --destroy` stops after `show`. A resource already gone is skipped. A resource the deployment did not make, or one made by a nested deployment that the record does not list, is kept. At subscription scope a resource group the deployment made is deleted last, with whatever it holds |
 
 At subscription scope: `az deployment sub ...` with `--location`. `--subscription` is added
 when named. Every call uses `--output json`.
