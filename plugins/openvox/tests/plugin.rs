@@ -103,6 +103,7 @@ fn the_binary_is_discovered_by_name_and_says_what_it_is() {
             "file",
             "group",
             "package",
+            "packageRepository",
             "service",
             "user"
         ]

@@ -187,7 +187,15 @@ fn mapping(resource_type: &str) -> Option<Mapping> {
 }
 
 /// The six shared types, sorted.
-const SHARED: &[&str] = &["exec", "file", "group", "package", "service", "user"];
+const SHARED: &[&str] = &[
+    "exec",
+    "file",
+    "group",
+    "package",
+    "packageRepository",
+    "service",
+    "user",
+];
 
 /// How an editor is told that any module's full name is a type: a
 /// namespace, a collection and a module, joined by dots.
@@ -268,6 +276,7 @@ pub fn resource_schemas() -> Vec<ResourceSchema> {
             &actions,
         ))
     }));
+    meridian_sdk::schema::insert_repository_schema(&mut schemas);
     schemas
 }
 
@@ -406,6 +415,9 @@ fn task_for(r: &Resource, state: &str) -> Result<Task, CompileError> {
     if let Some(module) = native_module(r)? {
         return native_task(r, module, state);
     }
+    if r.r#type == "packageRepository" {
+        return repository_task(r);
+    }
     let m = mapping(&r.r#type).ok_or_else(|| unsupported_type(r))?;
     let module = (m.module)(r);
     let allowed = (m.params)(module);
@@ -455,6 +467,58 @@ fn task_for(r: &Resource, state: &str) -> Result<Task, CompileError> {
 
     apply_state(r, state, &m, module, &mut args)?;
 
+    Ok(Task {
+        name: r.id.clone(),
+        module: module.to_owned(),
+        args,
+        notify: Vec::new(),
+        when: r.runtime_when.clone(),
+        native: false,
+        resource_id: r.id.clone(),
+        pos: r.pos.clone(),
+    })
+}
+
+/// A `packageRepository`: `deb822_repository` for apt, `yum_repository`
+/// for yum.
+fn repository_task(r: &Resource) -> Result<Task, CompileError> {
+    use meridian_sdk::schema::RepositoryFormat;
+    let repo = meridian_sdk::schema::package_repository(r).map_err(|e| CompileError {
+        target: NAME.to_owned(),
+        ..e
+    })?;
+    let text = |s: &str| Value::String(s.to_owned());
+    let mut args = BTreeMap::new();
+    args.insert("name".to_owned(), text(&repo.name));
+    let state = if repo.present { "present" } else { "absent" };
+    args.insert("state".to_owned(), text(state));
+    let module = match &repo.format {
+        RepositoryFormat::Apt {
+            distribution,
+            components,
+        } => {
+            args.insert("types".to_owned(), Value::List(vec![text("deb")]));
+            args.insert("uris".to_owned(), text(&repo.url));
+            args.insert("suites".to_owned(), text(distribution));
+            args.insert(
+                "components".to_owned(),
+                Value::List(components.iter().map(|c| text(c)).collect()),
+            );
+            if let Some(key) = &repo.key {
+                args.insert("signed_by".to_owned(), text(key));
+            }
+            "ansible.builtin.deb822_repository"
+        }
+        RepositoryFormat::Yum => {
+            args.insert("description".to_owned(), text(&repo.name));
+            args.insert("baseurl".to_owned(), text(&repo.url));
+            args.insert("gpgcheck".to_owned(), Value::Bool(repo.key.is_some()));
+            if let Some(key) = &repo.key {
+                args.insert("gpgkey".to_owned(), text(key));
+            }
+            "ansible.builtin.yum_repository"
+        }
+    };
     Ok(Task {
         name: r.id.clone(),
         module: module.to_owned(),

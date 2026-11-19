@@ -159,6 +159,7 @@ fn the_plugin_says_what_it_is() {
             "file",
             "group",
             "package",
+            "packageRepository",
             "service",
             "user"
         ]
@@ -382,7 +383,7 @@ fn an_unknown_type_names_the_types_that_work_and_the_line() {
     assert_eq!(
         err.msg,
         "unsupported resource type \"firewall_rule\" on this target: it is not one of the \
-         shared types (exec, file, group, package, service, user), and a Salt state is \
+         shared types (exec, file, group, package, packageRepository, service, user), and a Salt state is \
          written by its dotted name, such as pkgrepo.managed"
     );
     assert_eq!((err.pos.file.as_str(), err.pos.line), ("site.yaml", 11));
@@ -1036,4 +1037,20 @@ fn the_schemas_offer_any_state_function_as_an_open_pattern() {
         .expect("the function pattern is declared");
     assert!(pattern.open && pattern.is_pattern() && pattern.params.is_empty());
     assert_eq!(pattern.actions, ["watch"]);
+}
+
+#[test]
+fn a_repository_is_a_pkgrepo_state() {
+    let apt = sls("    - id: repo\n      type: packageRepository\n      params:\n        name: nginx\n        format: apt\n        url: https://nginx.org/packages/debian\n        distribution: bookworm\n        components: [nginx]\n        key: https://nginx.org/keys/nginx_signing.key\n");
+    assert!(apt.contains("pkgrepo.managed:"), "{apt}");
+    for line in [
+        "name: deb https://nginx.org/packages/debian bookworm nginx",
+        "file: /etc/apt/sources.list.d/nginx.list",
+        "key_url: https://nginx.org/keys/nginx_signing.key",
+    ] {
+        assert!(apt.contains(line), "{line} in {apt}");
+    }
+    let yum = sls("    - id: repo\n      type: packageRepository\n      state: absent\n      params:\n        name: nginx\n        format: yum\n        url: https://nginx.org/packages/rhel/9/x86_64/\n");
+    assert!(yum.contains("pkgrepo.absent:"), "{yum}");
+    assert!(!yum.contains("baseurl"), "{yum}");
 }

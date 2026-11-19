@@ -10,7 +10,7 @@ Compiles a ResourceSet into a Puppet class and node statement, applied with
 | | |
 |---|---|
 | Category | Configuration management |
-| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)), and any Puppet type beside them: `cron`, `mysql::db`, `native/file` ([Puppet types beside the six](#puppet-types-beside-the-six)) |
+| Resource types | `package`, `packageRepository`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)), and any Puppet type beside them: `cron`, `mysql::db`, `native/file` ([Puppet types beside the six](#puppet-types-beside-the-six)) |
 | `dependsOn` | Yes, as `require`. Puppet orders by declared relationships, so the dependency graph survives into the manifest intact |
 | `notifies` | Native: `notify`. A service can be restarted (`restart` or `refresh`); an exec can be `run`; a Puppet type of its own can be refreshed (`refresh`) |
 | `runtimeWhen` | No. A catalog is compiled before it reaches the node, so there is nothing left to evaluate at apply time. Refused |
@@ -127,6 +127,7 @@ Unlisted params (`unsupported-param`) and states (`unsupported-state`) are refus
 | Type | Puppet type | States (`ensure`) | Params | Required |
 |---|---|---|---|---|
 | `package` | `package` | `present` (default), `absent`, `latest` | `name` | `name` |
+| `packageRepository` | `yumrepo`; `format: apt` refused (use `apt::source`) | `present` (default), `absent` | `name`, `format`, `url` (`baseurl`), `key` (`gpgkey`) | `name`, `format`, `url` |
 | `service` | `service` | `running` (default), `started` (the same), `stopped` | `name`, `enabled` (`enable`) | `name` |
 | `file` | `file` | `file` (default), `present` (the same), `directory`, `absent` | `path`, `content`, `owner`, `group`, `mode` | `path` |
 | `user` | `user` | `present` (default), `absent` | `name`, `uid`, `home`, `shell`, `system`, `groups` | `name` |

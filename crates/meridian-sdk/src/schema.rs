@@ -485,6 +485,10 @@ const SHARED_TYPES: &[(&str, &str)] = &[
         "A package installed through the system's package manager.",
     ),
     (
+        "packageRepository",
+        "A repository the system's package manager installs from: apt or yum.",
+    ),
+    (
         "service",
         "A system service: whether it runs, and whether it starts at boot.",
     ),
@@ -593,6 +597,42 @@ const SHARED_PARAMS: &[(&str, &str, ParamKind, &str)] = &[
         "version",
         ParamKind::String,
         "The version to install.",
+    ),
+    (
+        "packageRepository",
+        "components",
+        ParamKind::List,
+        "With `format: apt`: the archive's components. Default `[main]`.",
+    ),
+    (
+        "packageRepository",
+        "distribution",
+        ParamKind::String,
+        "With `format: apt`: the suite, such as `bookworm` or `stable`. Required for apt.",
+    ),
+    (
+        "packageRepository",
+        "format",
+        ParamKind::String,
+        "`apt` or `yum` (yum also serves dnf).",
+    ),
+    (
+        "packageRepository",
+        "key",
+        ParamKind::String,
+        "The URL of the key the repository is signed with.",
+    ),
+    (
+        "packageRepository",
+        "name",
+        ParamKind::String,
+        "The repository's name: its file name and id.",
+    ),
+    (
+        "packageRepository",
+        "url",
+        ParamKind::String,
+        "The repository's base URL.",
     ),
     (
         "service",
@@ -808,6 +848,214 @@ pub fn check_shared(resource: &Resource) -> Result<(), CompileError> {
         ));
     }
     Ok(())
+}
+
+/// The params a `packageRepository` takes, in the order an editor lists them.
+pub const REPOSITORY_PARAMS: &[&str] =
+    &["components", "distribution", "format", "key", "name", "url"];
+
+/// The states a `packageRepository` takes, and the one assumed.
+pub const REPOSITORY_STATES: &[&str] = &["absent", "present"];
+
+/// A `packageRepository` read once, so every target refuses the same
+/// documents the same way and maps only what is left.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Repository {
+    /// The file name and id.
+    pub name: String,
+    /// The base URL.
+    pub url: String,
+    /// The signing key's URL.
+    pub key: Option<String>,
+    /// Whether the repository is wanted (`present`) or removed (`absent`).
+    pub present: bool,
+    /// What kind of repository it is.
+    pub format: RepositoryFormat,
+}
+
+/// The two repository formats.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RepositoryFormat {
+    /// A Debian archive.
+    Apt {
+        /// The suite.
+        distribution: String,
+        /// The components.
+        components: Vec<String>,
+    },
+    /// A yum or dnf repository.
+    Yum,
+}
+
+impl Repository {
+    /// The one-line apt source: `deb <url> <distribution> <components>`.
+    /// `None` for a yum repository.
+    pub fn apt_line(&self) -> Option<String> {
+        match &self.format {
+            RepositoryFormat::Apt {
+                distribution,
+                components,
+            } => Some(format!(
+                "deb {} {} {}",
+                self.url,
+                distribution,
+                components.join(" ")
+            )),
+            RepositoryFormat::Yum => None,
+        }
+    }
+}
+
+/// What a `packageRepository` takes, for a target's editor schemas.
+pub fn repository_schema() -> ResourceSchema {
+    shared(
+        "packageRepository",
+        REPOSITORY_PARAMS,
+        &["format", "name", "url"],
+        REPOSITORY_STATES,
+        "present",
+        &[],
+    )
+}
+
+/// Puts [`repository_schema`] into a target's list, after `package`.
+pub fn insert_repository_schema(schemas: &mut Vec<ResourceSchema>) {
+    let at = schemas
+        .iter()
+        .position(|s| s.r#type == "package")
+        .map_or(schemas.len(), |i| i + 1);
+    schemas.insert(at, repository_schema());
+}
+
+/// Reads a `packageRepository`: checks every param's kind, what each format
+/// takes, and the state. The caller fills in its own target name.
+pub fn package_repository(resource: &Resource) -> Result<Repository, CompileError> {
+    check_shared(resource)?;
+    let refuse =
+        |rule: &rules::Rule, msg: String| Err(CompileError::for_resource(resource, rule, msg));
+    for name in resource.params.keys() {
+        if !REPOSITORY_PARAMS.contains(&name.as_str()) {
+            return refuse(
+                &rules::UNSUPPORTED_PARAM,
+                format!(
+                    "resource type \"packageRepository\" does not accept param {name:?} (accepted: {})",
+                    REPOSITORY_PARAMS.join(", ")
+                ),
+            );
+        }
+    }
+    let text = |name: &str| -> Result<Option<String>, CompileError> {
+        match resource.params.get(name) {
+            None => Ok(None),
+            Some(Value::String(s)) if !s.is_empty() => Ok(Some(s.clone())),
+            Some(Value::Secret(_)) => Err(CompileError::for_resource(
+                resource,
+                &rules::INVALID_PARAM,
+                format!("param {name:?} of a packageRepository is not secret; write it as text"),
+            )),
+            Some(_) => Err(CompileError::for_resource(
+                resource,
+                &rules::EMPTY_PARAM,
+                format!("param {name:?} on resource type \"packageRepository\" has no value"),
+            )),
+        }
+    };
+    let required = |name: &str| -> Result<String, CompileError> {
+        text(name)?.ok_or_else(|| {
+            CompileError::for_resource(
+                resource,
+                &rules::MISSING_PARAM,
+                format!("resource type \"packageRepository\" requires param {name:?}"),
+            )
+        })
+    };
+    let name = required("name")?;
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return refuse(
+            &rules::INVALID_PARAM,
+            format!("the name {name:?} becomes a file name: use letters, digits, `-`, `_` and `.`"),
+        );
+    }
+    let format = required("format")?;
+    let url = required("url")?;
+    let key = text("key")?;
+    let present = match resource.state.as_str() {
+        "" | "present" => true,
+        "absent" => false,
+        other => {
+            return refuse(
+                &rules::UNSUPPORTED_STATE,
+                format!("a packageRepository takes state present or absent, not {other:?}"),
+            )
+        }
+    };
+    let format = match format.as_str() {
+        "apt" => {
+            let distribution = required("distribution")?;
+            let components =
+                match resource.params.get("components") {
+                    None => vec!["main".to_owned()],
+                    Some(Value::List(items)) if !items.is_empty() => {
+                        let mut out = Vec::new();
+                        for item in items {
+                            match item {
+                                Value::String(s)
+                                    if !s.is_empty() && !s.contains(char::is_whitespace) =>
+                                {
+                                    out.push(s.clone())
+                                }
+                                other => {
+                                    return refuse(
+                                        &rules::INVALID_PARAM,
+                                        format!(
+                                            "each of \"components\" is one word, not {}",
+                                            other.describe()
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+                        out
+                    }
+                    Some(_) => return refuse(
+                        &rules::EMPTY_PARAM,
+                        "param \"components\" on resource type \"packageRepository\" has no value"
+                            .to_owned(),
+                    ),
+                };
+            RepositoryFormat::Apt {
+                distribution,
+                components,
+            }
+        }
+        "yum" => {
+            for apt_only in ["components", "distribution"] {
+                if resource.params.contains_key(apt_only) {
+                    return refuse(
+                        &rules::UNSUPPORTED_PARAM,
+                        format!("param {apt_only:?} is for an apt repository, not a yum one"),
+                    );
+                }
+            }
+            RepositoryFormat::Yum
+        }
+        other => {
+            return refuse(
+                &rules::INVALID_PARAM,
+                format!("format {other:?} is not one Meridian maps; write apt or yum"),
+            )
+        }
+    };
+    Ok(Repository {
+        name,
+        url,
+        key,
+        present,
+        format,
+    })
 }
 
 /// Whether a secret sits somewhere inside a list or a map.
@@ -1135,7 +1383,47 @@ mod tests {
         assert!(TypeName::read("native/exec").is_native());
         assert_eq!(
             shared_type_names(),
-            ["exec", "file", "group", "package", "service", "user"]
+            [
+                "exec",
+                "file",
+                "group",
+                "package",
+                "packageRepository",
+                "service",
+                "user"
+            ]
         );
+    }
+
+    #[test]
+    fn a_repository_is_read_once_for_every_target() {
+        let text = |s: &str| Value::String(s.to_owned());
+        let mut r = resource(
+            "packageRepository",
+            &[
+                ("name", text("nginx")),
+                ("format", text("apt")),
+                ("url", text("https://nginx.org/packages/debian")),
+                ("distribution", text("bookworm")),
+            ],
+        );
+        let repo = package_repository(&r).unwrap();
+        assert!(repo.present);
+        assert_eq!(
+            repo.apt_line().unwrap(),
+            "deb https://nginx.org/packages/debian bookworm main"
+        );
+        r.params.insert("name".to_owned(), text("../etc"));
+        assert_eq!(package_repository(&r).unwrap_err().rule, "invalid-param");
+        r.params.insert("name".to_owned(), text("nginx"));
+        r.state = "latest".to_owned();
+        assert_eq!(
+            package_repository(&r).unwrap_err().rule,
+            "unsupported-state"
+        );
+        r.state = String::new();
+        r.params
+            .insert("components".to_owned(), Value::List(vec![text("a b")]));
+        assert_eq!(package_repository(&r).unwrap_err().rule, "invalid-param");
     }
 }

@@ -101,6 +101,17 @@ pub(crate) struct Package {
     pub version: String,
 }
 
+/// One package repository: an entry under `apt: sources:` or `yum_repos:`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Repository {
+    /// The file name and id.
+    pub name: String,
+    /// The apt source line; `None` for a yum repository.
+    pub apt_line: Option<String>,
+    pub url: String,
+    pub key: Option<String>,
+}
+
 /// One entry under `write_files:`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct WriteFile {
@@ -140,6 +151,7 @@ pub(crate) enum Item {
     Group(Group),
     User(User),
     Package(Package),
+    Repository(Repository),
     /// cloud-init has no module for the resource, or the resource is a
     /// command: it runs at the end of the first boot.
     Commands(Vec<Command>),
@@ -156,6 +168,7 @@ pub(crate) struct CloudConfig {
     pub files: Vec<Placed<WriteFile>>,
     pub groups: Vec<Placed<Group>>,
     pub users: Vec<Placed<User>>,
+    pub repositories: Vec<Placed<Repository>>,
     pub packages: Vec<Placed<Package>>,
     pub commands: Vec<Command>,
     /// The modules of cloud-init's own, in document order.

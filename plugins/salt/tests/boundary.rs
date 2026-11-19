@@ -60,6 +60,7 @@ fn the_plugin_describes_itself() {
             "file",
             "group",
             "package",
+            "packageRepository",
             "service",
             "user"
         ]

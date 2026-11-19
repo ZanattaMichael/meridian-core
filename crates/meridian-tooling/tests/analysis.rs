@@ -225,6 +225,7 @@ fn types_states_and_params_come_from_the_target_plugin() {
             "file",
             "group",
             "package",
+            "packageRepository",
             "service",
             "user"
         ]

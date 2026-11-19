@@ -206,7 +206,7 @@ fn a_schema_matches_what_the_target_compiles() {
         }
     }
     // Six targets, six shared types each.
-    assert_eq!(checked, 36);
+    assert_eq!(checked, 42);
 }
 
 #[test]

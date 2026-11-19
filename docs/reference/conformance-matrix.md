@@ -41,6 +41,18 @@ where the tools themselves differ; the cells say how, and the
 | `name` is a number | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
 | `name` is a list | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
 
+## `packageRepository`
+
+| Document | same | ansible | chef | cloud-init | openvox | puppet | salt |
+|---|---|---|---|---|---|---|---|
+| apt, without a key | no | ok | ok | ok | `unsupported-param` | `unsupported-param` | ok |
+| apt, with a key URL | no | ok | ok | `unsupported-param` | `unsupported-param` | `unsupported-param` | ok |
+| yum, with a key URL | yes | ok | ok | ok | ok | ok | ok |
+| state `absent` | no | ok | ok | `unsupported-state` | ok | ok | ok |
+| apt without `distribution` | yes | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` |
+| `distribution` on yum | yes | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` |
+| a format outside the dialect (`zypper`) | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+
 ## `service`
 
 | Document | same | ansible | chef | cloud-init | openvox | puppet | salt |

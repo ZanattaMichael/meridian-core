@@ -429,8 +429,27 @@ fn the_schemas_offer_any_chef_resource_as_an_open_pattern() {
             "file",
             "group",
             "package",
+            "packageRepository",
             "service",
             "user"
         ]
     );
+}
+
+#[test]
+fn a_repository_is_an_apt_repository_or_a_yum_repository() {
+    let apt = recipe("    - id: repo\n      type: packageRepository\n      params:\n        name: nginx\n        format: apt\n        url: https://nginx.org/packages/debian\n        distribution: bookworm\n        key: https://nginx.org/keys/nginx_signing.key\n");
+    assert!(apt.contains("apt_repository 'repo' do"), "{apt}");
+    for line in [
+        "uri 'https://nginx.org/packages/debian'",
+        "distribution 'bookworm'",
+        "repo_name 'nginx'",
+        "action :add",
+    ] {
+        assert!(apt.contains(line), "{line} in {apt}");
+    }
+    let yum = recipe("    - id: repo\n      type: packageRepository\n      state: absent\n      params:\n        name: nginx\n        format: yum\n        url: https://nginx.org/packages/rhel/9/x86_64/\n");
+    assert!(yum.contains("yum_repository 'repo' do"), "{yum}");
+    assert!(yum.contains("gpgcheck false"), "{yum}");
+    assert!(yum.contains("action :remove"), "{yum}");
 }

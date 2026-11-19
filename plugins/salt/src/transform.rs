@@ -313,11 +313,20 @@ pub fn resource_schemas() -> Vec<ResourceSchema> {
             &actions,
         ))
     }));
+    meridian_sdk::schema::insert_repository_schema(&mut schemas);
     schemas
 }
 
-/// The six shared types, sorted.
-const SHARED: &[&str] = &["exec", "file", "group", "package", "service", "user"];
+/// The shared types, sorted.
+const SHARED: &[&str] = &[
+    "exec",
+    "file",
+    "group",
+    "package",
+    "packageRepository",
+    "service",
+    "user",
+];
 
 /// How an editor is told that any state function is a type: a state module
 /// and a function, joined by a dot.
@@ -460,6 +469,59 @@ fn quiet_secrets(
 
 /// `name` leads, as a person would write it; the rest keep their sorted
 /// order, so the same resource always renders to the same bytes.
+/// A `packageRepository`: `pkgrepo.managed`, or `pkgrepo.absent`. An apt
+/// repository is named by its source line, a yum one by its id.
+fn repository_state(r: &Resource) -> Result<State, CompileError> {
+    use meridian_sdk::schema::RepositoryFormat;
+    let repo = meridian_sdk::schema::package_repository(r).map_err(|e| CompileError {
+        target: NAME.to_owned(),
+        ..e
+    })?;
+    let text = |s: &str| Value::String(s.to_owned());
+    let mut args = BTreeMap::new();
+    match (&repo.format, repo.apt_line()) {
+        (RepositoryFormat::Apt { .. }, Some(line)) => {
+            args.insert("name".to_owned(), text(&line));
+            if repo.present {
+                args.insert(
+                    "file".to_owned(),
+                    text(&format!("/etc/apt/sources.list.d/{}.list", repo.name)),
+                );
+                if let Some(key) = &repo.key {
+                    args.insert("key_url".to_owned(), text(key));
+                }
+            }
+        }
+        _ => {
+            args.insert("name".to_owned(), text(&repo.name));
+            if repo.present {
+                args.insert("humanname".to_owned(), text(&repo.name));
+                args.insert("baseurl".to_owned(), text(&repo.url));
+                args.insert(
+                    "gpgcheck".to_owned(),
+                    Value::Int(i64::from(repo.key.is_some())),
+                );
+                if let Some(key) = &repo.key {
+                    args.insert("gpgkey".to_owned(), text(key));
+                }
+            }
+        }
+    }
+    Ok(State {
+        id: r.id.clone(),
+        module: "pkgrepo".to_owned(),
+        function: if repo.present { "managed" } else { "absent" }.to_owned(),
+        args: name_first(args),
+        require: Vec::new(),
+        watch: Vec::new(),
+        onchanges: Vec::new(),
+        when: r.runtime_when.clone(),
+        native: false,
+        resource_id: r.id.clone(),
+        pos: r.pos.clone(),
+    })
+}
+
 fn name_first(mut args: BTreeMap<String, Value>) -> Vec<(String, Value)> {
     let mut ordered = Vec::with_capacity(args.len());
     if let Some(name) = args.remove("name") {
@@ -536,6 +598,9 @@ fn state_for(
 ) -> Result<State, CompileError> {
     if let Some((module, function)) = native_function(r)? {
         return native_state(r, module, function);
+    }
+    if r.r#type == "packageRepository" {
+        return repository_state(r);
     }
     let m = mapping(&r.r#type).ok_or_else(|| unsupported_type(r))?;
     let shape = shape_for(r, state, &m)?;

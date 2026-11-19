@@ -1,10 +1,10 @@
 # The configuration management resource types
 
-`ansible`, `puppet`, `openvox`, `chef`, `salt` and `cloud-init` share six types. Puppet notes
+`ansible`, `puppet`, `openvox`, `chef`, `salt` and `cloud-init` share seven types. Puppet notes
 hold for `openvox`. Anything outside the tables is refused. For more, use the
 tool's own type ([native types](dsl/configuration-management.md#native-types-beside-the-six)).
 
-Param kinds are checked once, the same on all six: text for names (`name`, `path`, `mode`,
+Param kinds are checked once, the same on every target: text for names (`name`, `path`, `mode`,
 `shell`), booleans for flags (`enabled`, `system`, `append`), integers for `uid` and `gid`,
 lists for `groups`, `members` and `ssh_authorized_keys`. A wrong kind, including `yes`, is
 `invalid-param` ([decision 0024](../decisions/0024-shared-param-kinds-are-checked-once-strictly.md)).
@@ -28,6 +28,38 @@ generated [conformance matrix](conformance-matrix.md). Other targets use the too
   type: package
   params:
     name: nginx
+```
+
+## `packageRepository`
+
+| | |
+|---|---|
+| Params | `name`, `format` (`apt` or `yum`), `url` (all required). `key`: the signing key's URL. apt only: `distribution` (required), `components` (default `[main]`) |
+| States | `present` (default), `absent`. cloud-init: `present` only |
+| Can be notified | no |
+
+| Target | apt | yum |
+|---|---|---|
+| ansible | `ansible.builtin.deb822_repository` | `ansible.builtin.yum_repository` |
+| puppet, openvox | refused: no built-in apt source; use `apt::source` | `yumrepo` |
+| chef | `apt_repository` | `yum_repository` |
+| salt | `pkgrepo.managed` with the `deb` line, in `/etc/apt/sources.list.d/<name>.list` | `pkgrepo.managed` |
+| cloud-init | `apt: sources: <name>.list`; `key` refused (cloud-init takes a key's text or id) | `yum_repos` |
+
+`name` is the file name and repository id: letters, digits, `-`, `_`, `.`. A key turns on
+signature checks for yum. cloud-init adds repositories before it installs packages, so a
+`package` may depend on one.
+
+```yaml
+- id: nginx_repo
+  type: packageRepository
+  params:
+    name: nginx
+    format: apt
+    url: https://nginx.org/packages/debian
+    distribution: bookworm
+    components: [nginx]
+    key: https://nginx.org/keys/nginx_signing.key
 ```
 
 ## `service`

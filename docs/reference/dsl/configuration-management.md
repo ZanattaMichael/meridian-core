@@ -14,24 +14,25 @@ machine.
 
 | Target | Types | Page |
 |---|---|---|
-| `ansible` | the six shared types, and any module by its full name (`ansible.builtin.lineinfile`) | [ansible](../../targets/ansible.md) |
-| `puppet` | the six shared types, and any Puppet type (`cron`, `mysql::db`, `native/file`) | [puppet](../../targets/puppet.md) |
-| `chef` | the six shared types, and any Chef resource (`template`, `native/package`) | [chef](../../targets/chef.md) |
-| `salt` | the six shared types, and any state function (`pkgrepo.managed`) | [salt](../../targets/salt.md) |
-| `openvox` | the six shared types and any Puppet type, compiled the way `puppet` compiles them | [openvox](../../targets/openvox.md) |
-| `cloud-init` | the six shared types, limited to what a first boot can do, and any cloud-config module (`ntp`) | [cloud-init](../../targets/cloud-init.md) |
+| `ansible` | the shared types, and any module by its full name (`ansible.builtin.lineinfile`) | [ansible](../../targets/ansible.md) |
+| `puppet` | the shared types, and any Puppet type (`cron`, `mysql::db`, `native/file`) | [puppet](../../targets/puppet.md) |
+| `chef` | the shared types, and any Chef resource (`template`, `native/package`) | [chef](../../targets/chef.md) |
+| `salt` | the shared types, and any state function (`pkgrepo.managed`) | [salt](../../targets/salt.md) |
+| `openvox` | the shared types and any Puppet type, compiled the way `puppet` compiles them | [openvox](../../targets/openvox.md) |
+| `cloud-init` | the shared types, limited to what a first boot can do, and any cloud-config module (`ntp`) | [cloud-init](../../targets/cloud-init.md) |
 | `dsc` | DSC's own resources | [dsc](../../targets/dsc.md) |
 
 Two dialects. Shared-dialect targets also take [native types](#native-types-beside-the-six).
 
-## The shared dialect: six types
+## The shared dialect: seven types
 
-`ansible`, `puppet`, `openvox`, `chef`, `salt` and `cloud-init` take the same six types.
+`ansible`, `puppet`, `openvox`, `chef`, `salt` and `cloud-init` take the same seven types.
 Changing `spec.target` moves a document between them, within each tool's limits.
 
 | `type` | Manages | `state` | Required params |
 |---|---|---|---|
 | `package` | an installed package | `present` (default), `absent`, `latest` | `name` |
+| `packageRepository` | an apt or yum repository | `present` (default), `absent` | `name`, `format`, `url` |
 | `service` | a running service | `running` (default), `started`, `stopped` | `name` |
 | `file` | a file or directory | `present` (default) or `file`, `directory`, `absent` | `path` |
 | `user` | a user account | `present` (default), `absent` | `name` |

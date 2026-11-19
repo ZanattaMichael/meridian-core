@@ -10,7 +10,7 @@ the machine Meridian runs on.
 | | |
 |---|---|
 | Category | Configuration management |
-| Resource types | `package`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)), and any module by its full name, such as `ansible.builtin.lineinfile` ([modules beside the six](#modules-beside-the-six)) |
+| Resource types | `package`, `packageRepository`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)), and any module by its full name, such as `ansible.builtin.lineinfile` ([modules beside the six](#modules-beside-the-six)) |
 | `dependsOn` | Yes, as task order. A play runs top to bottom, so independent resources still run in sequence; a warning says which |
 | `notifies` | Native: handlers. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec or on a module. The action is kept: a reload stays a reload |
 | `runtimeWhen` | Yes: a task's `when:`, as an Ansible expression |
@@ -137,6 +137,7 @@ Unlisted params (`unsupported-param`) and states (`unsupported-state`) are refus
 | Type | Module | States (`state`) | Params | Required |
 |---|---|---|---|---|
 | `package` | `ansible.builtin.package` | `present` (default), `absent`, `latest` | `name` | `name` |
+| `packageRepository` | `ansible.builtin.deb822_repository` (apt), `ansible.builtin.yum_repository` (yum) | `present` (default), `absent` | `name`, `format`, `url`, `key`; apt: `distribution`, `components` | `name`, `format`, `url` |
 | `service` | `ansible.builtin.service` | `running` (`started`, default), `started`, `stopped`, `restarted`, `reloaded` | `name`, `enabled` | `name` |
 | `file` | `ansible.builtin.copy` when there is `content`, `ansible.builtin.file` otherwise | `present` (`file`, default), `file`, `directory`, `absent` | `path` (`dest` or `path`), `content`, `owner`, `group`, `mode` | `path` |
 | `user` | `ansible.builtin.user` | `present` (default), `absent` | `name`, `uid`, `home`, `shell`, `system`, `groups` | `name` |

@@ -25,8 +25,16 @@ pub(crate) struct Transformed {
     pub warnings: Vec<Warning>,
 }
 
-/// The six shared types, sorted.
-const SHARED: &[&str] = &["exec", "file", "group", "package", "service", "user"];
+/// The shared types, sorted.
+const SHARED: &[&str] = &[
+    "exec",
+    "file",
+    "group",
+    "package",
+    "packageRepository",
+    "service",
+    "user",
+];
 
 /// How an editor is told that any cloud-config module is a type: the key
 /// the module is written under.
@@ -94,6 +102,14 @@ pub fn resource_schemas() -> Vec<ResourceSchema> {
             "package",
             &["name", "version"],
             &["name"],
+            &["present"],
+            "present",
+            &[],
+        ),
+        shared(
+            "packageRepository",
+            &["components", "distribution", "format", "key", "name", "url"],
+            &["format", "name", "url"],
             &["present"],
             "present",
             &[],
@@ -328,6 +344,7 @@ fn item_for(r: &Resource) -> Result<Item, CompileError> {
     }
     match r.r#type.as_str() {
         "package" => package(r),
+        "packageRepository" => repository(r),
         "file" => file(r),
         "user" => user(r),
         "group" => group(r),
@@ -352,6 +369,39 @@ fn package(r: &Resource) -> Result<Item, CompileError> {
     Ok(Item::Package(Package {
         name: required(r, "name")?.to_owned(),
         version: text(r, "version")?.unwrap_or_default().to_owned(),
+    }))
+}
+
+/// A `packageRepository`: an entry under `apt: sources:` or `yum_repos:`.
+/// cloud-init adds a repository on a first boot and never removes one; an
+/// apt key is taken as its text or id, not a URL.
+fn repository(r: &Resource) -> Result<Item, CompileError> {
+    let repo = meridian_sdk::schema::package_repository(r).map_err(|e| CompileError {
+        target: NAME.to_owned(),
+        ..e
+    })?;
+    if !repo.present {
+        return Err(refuse(
+            r,
+            &rules::UNSUPPORTED_STATE,
+            "cloud-init adds a repository on a first boot; it cannot remove one".to_owned(),
+        ));
+    }
+    let apt_line = repo.apt_line();
+    if apt_line.is_some() && repo.key.is_some() {
+        return Err(refuse(
+            r,
+            &rules::UNSUPPORTED_PARAM,
+            "cloud-init takes an apt key as its text or its id, not a URL; write the native \
+             apt module with sources.<name>.key instead"
+                .to_owned(),
+        ));
+    }
+    Ok(Item::Repository(crate::Repository {
+        name: repo.name,
+        apt_line,
+        url: repo.url,
+        key: repo.key,
     }))
 }
 

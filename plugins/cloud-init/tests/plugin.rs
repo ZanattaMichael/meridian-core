@@ -115,7 +115,16 @@ fn the_host_learns_what_the_plugin_is_from_the_plugin() {
     assert_eq!(info.operations, Operations::ALL);
     assert_eq!(
         info.resource_types,
-        ["<module>", "exec", "file", "group", "package", "service", "user"]
+        [
+            "<module>",
+            "exec",
+            "file",
+            "group",
+            "package",
+            "packageRepository",
+            "service",
+            "user"
+        ]
     );
     assert_eq!(
         info.capabilities,

@@ -137,6 +137,49 @@ const CASES: &[Case] = &[
         Same,
         "    - id: a\n      type: package\n      params:\n        name: [nginx, curl]\n",
     ),
+    // ---- packageRepository ---------------------------------------------
+    case(
+        "packageRepository",
+        "apt, without a key",
+        Varies,
+        "    - id: a\n      type: packageRepository\n      params:\n        name: nginx\n        format: apt\n        url: https://nginx.org/packages/debian\n        distribution: bookworm\n",
+    ),
+    case(
+        "packageRepository",
+        "apt, with a key URL",
+        Varies,
+        "    - id: a\n      type: packageRepository\n      params:\n        name: nginx\n        format: apt\n        url: https://nginx.org/packages/debian\n        distribution: bookworm\n        key: https://nginx.org/keys/nginx_signing.key\n",
+    ),
+    case(
+        "packageRepository",
+        "yum, with a key URL",
+        Same,
+        "    - id: a\n      type: packageRepository\n      params:\n        name: nginx\n        format: yum\n        url: https://nginx.org/packages/rhel/9/x86_64/\n        key: https://nginx.org/keys/nginx_signing.key\n",
+    ),
+    case(
+        "packageRepository",
+        "state `absent`",
+        Varies,
+        "    - id: a\n      type: packageRepository\n      state: absent\n      params:\n        name: nginx\n        format: yum\n        url: https://nginx.org/packages/rhel/9/x86_64/\n",
+    ),
+    case(
+        "packageRepository",
+        "apt without `distribution`",
+        Same,
+        "    - id: a\n      type: packageRepository\n      params:\n        name: nginx\n        format: apt\n        url: https://nginx.org/packages/debian\n",
+    ),
+    case(
+        "packageRepository",
+        "`distribution` on yum",
+        Same,
+        "    - id: a\n      type: packageRepository\n      params:\n        name: nginx\n        format: yum\n        url: https://nginx.org/packages/rhel/9/x86_64/\n        distribution: el9\n",
+    ),
+    case(
+        "packageRepository",
+        "a format outside the dialect (`zypper`)",
+        Same,
+        "    - id: a\n      type: packageRepository\n      params:\n        name: nginx\n        format: zypper\n        url: https://nginx.org/packages/sles/\n",
+    ),
     // ---- service -------------------------------------------------------
     case(
         "service",
@@ -1133,7 +1176,15 @@ fn every_target_declares_its_segment_and_its_types() {
             .partition(|t| t.contains('<') || t.starts_with(meridian_sdk::NATIVE_PREFIX));
         assert_eq!(
             shared,
-            ["exec", "file", "group", "package", "service", "user"],
+            [
+                "exec",
+                "file",
+                "group",
+                "package",
+                "packageRepository",
+                "service",
+                "user"
+            ],
             "{name}"
         );
         for pattern in own {
