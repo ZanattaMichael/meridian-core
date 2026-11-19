@@ -1,0 +1,19 @@
+# Tier 1 scale budgets (issue 240), checked by crates/meridian-cli/tests/scale.rs.
+# A measurement more than 20% over its budget fails the test. Seconds are wall
+# time on a GitHub-hosted ubuntu-latest runner; memory is peak resident set.
+
+[project]
+resources = 10000
+endpoints = 1000
+stages = 200
+seed = 1
+
+[seconds]
+compile = 2
+plan = 10
+apply = 25
+destroy = 18
+
+[megabytes]
+meridian = 90
+plugin = 10

@@ -126,9 +126,44 @@ Sweep covers `lab/` and the `tests/` environments `meridian test --keep` left, r
 directory it destroys, and exits `1` if one could not be destroyed. Run it before and after a
 scheduled lab run.
 
+## Scale
+
+`tools/lab/generate.py` writes a project of a given size for the fake target, the same for the
+same seed:
+
+```
+tools/lab/generate.py --resources 10000 --endpoints 1000 --stages 200 --seed 1 scale/
+```
+
+`stages/` holds the Infrastructure documents and `hosts/` one ResourceSet per endpoint, each
+reached through an output of a stage.
+
+The tier 1 test compiles, plans, applies and destroys that project and holds each command's wall
+time, and the peak memory of `meridian` and of a plugin, to
+[`tests/scale/budgets.toml`](../../tests/scale/budgets.toml). It fails when a measurement is more
+than 20% over its budget. The `scale` workflow runs it on every pull request that touches
+`crates/` and is not a draft, and writes the table to the job summary. To run it yourself:
+
+```
+cargo test --release -p meridian-cli --test scale -- --ignored --nocapture
+```
+
+| Measure | Budget |
+|---|---|
+| compile | 2 s |
+| plan | 10 s |
+| apply | 25 s |
+| destroy | 18 s |
+| `meridian` peak memory | 90 MB |
+| a plugin's peak memory | 10 MB |
+
+See [decision 0058](../decisions/0058-a-run-appends-its-events-and-is-held-to-scale-budgets.md).
+
 ## What is not here yet
 
 - **A sweep that finds resources by their tags** when the state directory is gone.
+- **Scale tiers 2 and 3**: a simulated fleet on the lab runner, and real clouds
+  ([issue 240](https://github.com/ZanattaMichael/meridian-core/issues/240)).
 - **Faults** to break an environment and the diagnosis each must produce
   ([issue 237](https://github.com/ZanattaMichael/meridian-core/issues/237)).
 - **The self-hosted runner and workflow** ([issue 238](https://github.com/ZanattaMichael/meridian-core/issues/238)).
