@@ -59,9 +59,14 @@ fn the_plugin_says_what_it_is() {
         Pulumi.supported_resource_types(),
         [
             "<package>:<module>:<Type>",
+            "address",
             "config",
+            "firewall",
             "invoke.<function>",
-            "stack"
+            "network",
+            "stack",
+            "subnet",
+            "vm"
         ]
     );
 }
@@ -605,4 +610,62 @@ fn adopt_on_a_configuration_value_or_a_provider_is_refused() {
         ));
         assert_eq!(e.rule, "invalid-adopt", "{e}");
     }
+}
+
+// ---- the common infrastructure types ----
+
+#[test]
+fn the_common_types_compile_to_their_golden_program_on_aws_and_azure() {
+    for name in ["web-pulumi-aws", "web-pulumi-azure"] {
+        let graph = graph_from_file(&format!("examples/common/{name}.yaml"), "pulumi");
+        assert_golden(&golden(), &format!("common-{name}"), &emit(&graph).unwrap());
+    }
+}
+
+const NET: &str = "    - id: net\n      type: network\n      params: {cidr: 10.0.0.0/16}\n";
+
+#[test]
+fn the_cloud_is_the_one_package_the_document_uses() {
+    let text = program(&format!(
+        "  settings:\n    resourceGroup: rg\n  resources:\n    - id: loc\n      type: config\n      params: {{name: azure-native:location, value: westeurope}}\n{NET}"
+    ));
+    assert!(
+        text.contains("azure-native:network:VirtualNetwork"),
+        "{text}"
+    );
+    let text = program(&format!(
+        "  resources:\n    - id: bucket\n      type: aws:s3:BucketV2\n{NET}"
+    ));
+    assert!(text.contains("aws:ec2:Vpc"), "{text}");
+}
+
+#[test]
+fn a_document_that_does_not_say_its_cloud_is_refused_with_how_to_say_it() {
+    let err = refusal(&format!("  resources:\n{NET}"));
+    assert_eq!(err.target, "pulumi");
+    assert_eq!(err.rule, "missing-resource");
+    assert!(err.msg.contains("spec.settings.cloud"), "{}", err.msg);
+}
+
+#[test]
+fn an_azure_resource_needs_the_resource_group_and_takes_its_location_otherwise() {
+    let err = refusal(&format!(
+        "  settings:\n    cloud: azure\n  resources:\n{NET}"
+    ));
+    assert_eq!(err.rule, "missing-resource");
+    assert!(err.msg.contains("resourceGroup"), "{}", err.msg);
+    let text = program(&format!(
+        "  settings:\n    cloud: azure\n    resourceGroup: rg\n  resources:\n{NET}"
+    ));
+    assert!(!text.contains("location"), "{text}");
+}
+
+#[test]
+fn an_aws_image_by_family_is_an_ami_lookup_by_its_publisher() {
+    let text = program(&format!(
+        "  settings:\n    cloud: aws\n  resources:\n{NET}    - id: s\n      type: subnet\n      params: {{network: \"${{net}}\", cidr: 10.0.1.0/24}}\n    - id: vm\n      type: vm\n      params: {{subnet: \"${{s}}\", size: t3.micro, image: {{family: debian, version: \"12\"}}}}\n"
+    ));
+    assert!(text.contains("function: aws:ec2:getAmi"), "{text}");
+    assert!(text.contains("\"136693071363\""), "{text}");
+    assert!(text.contains("ami: ${vm_image.id}"), "{text}");
 }

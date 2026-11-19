@@ -223,6 +223,36 @@ Every recorded run, oldest first, each as `status` shows it. Schema:
 { "command": "runs", "ok": true, "backend": "the state directory .meridian", "runs": [ … ] }
 ```
 
+### `logs`
+
+The steps shown, after the filters, each with the lines kept. Schema:
+`schemas/output/logs.schema.json`.
+
+```json
+{ "command": "logs", "ok": true, "run": "2026-11-17T09-14-03Z-0cc7",
+  "steps": [ { "name": "web", "kind": "ResourceSet", "target": "ansible", "endpoint": "203.0.113.10",
+               "status": "failed", "reason": "tool-failed",
+               "file": ".meridian/runs/2026-11-17T09-14-03Z-0cc7/logs/resourceset/web@203.0.113.10.log",
+               "lines": [ { "time": "2026-11-17T09:15:11.102Z", "stream": "stderr", "text": "fatal: …" } ] } ] }
+```
+
+`file` is `null` when this machine kept no output for the step. `stream` is
+`stdout`, `stderr` or `meridian`.
+
+### `bug-report`
+
+The archive written. Schema: `schemas/output/bug-report.schema.json`.
+
+```json
+{ "command": "bug-report", "ok": true, "run": "2026-11-17T09-14-03Z-0cc7",
+  "out": "meridian-bug-report-2026-11-17T09-14-03Z-0cc7.tar.gz",
+  "files": ["run.json", "events.jsonl", "logs/resourceset/web@203.0.113.10.log", "version.txt", "plugins.json"],
+  "bytes": 2210 }
+```
+
+`files` are relative to the archive's one directory,
+`meridian-bug-report-<run>/`.
+
 ### `unlock`
 
 The lock that was removed, as `status` showed it. Schema:

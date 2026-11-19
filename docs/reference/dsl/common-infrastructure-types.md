@@ -32,15 +32,22 @@ targets do today.
 |---|---|---|
 | `terraform` | AWS (`aws` provider), Azure (`azurerm` provider) | `spec.settings.cloud`, or the one cloud whose provider the document configures |
 | `opentofu` | AWS, Azure | the same as `terraform`: the two read the same providers, and compile a common resource to the same blocks |
+| `pulumi` | AWS (`aws` package), Azure (`azure-native` package) | `spec.settings.cloud`, or the one cloud whose package the document already uses, in a resource type or a `config` name such as `aws:region` |
 | `cloudformation` | AWS | always AWS, in the stack's region |
 | `bicep` | Azure | always Azure |
 | `arm` | Azure | always Azure: the same resources as Bicep, written as an ARM template |
 
 Every other target refuses the five types under `unsupported-resource-type`,
-as it refuses any type it does not map. Pulumi and GCP are the next to take
-them (issue 151).
+as it refuses any type it does not map. GCP is the next cloud to take them
+(issue 151).
 
-The tables below give one column for CloudFormation and one for Bicep. ARM
+The tables below give one column for CloudFormation and one for Bicep.
+Pulumi makes the same resources as the Terraform column of its cloud, written
+with Pulumi's type tokens and property names (`aws:ec2:Vpc` with `cidrBlock`,
+`azure-native:network:VirtualNetwork` with `addressSpace`); the
+[Pulumi page](../../targets/pulumi.md#common-infrastructure-types) lists them.
+On Azure it places a resource at `spec.settings.location` when given, and
+otherwise at its resource group's location. ARM
 writes the same Azure resources as Bicep, with two differences of form: the
 API version is the resource's `apiVersion` instead of part of its type, and a
 subnet is named `<network>/<subnet>` instead of taking a `parent`.
@@ -298,7 +305,7 @@ A document that already uses one of these ids is refused as
 
 ## Settings
 
-The Terraform and OpenTofu targets read three keys in
+The Terraform, OpenTofu and Pulumi targets read three keys in
 [`spec.settings`](index.md#settings), all for the common types:
 
 | Key | |

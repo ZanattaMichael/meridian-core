@@ -1218,6 +1218,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "ctrlc",
+ "flate2",
  "jsonschema",
  "meridian-all-targets",
  "meridian-ast",
@@ -1242,7 +1243,9 @@ dependencies = [
  "meridian-value",
  "meridian-yaml",
  "proptest",
+ "regex",
  "serde_json",
+ "tar",
 ]
 
 [[package]]

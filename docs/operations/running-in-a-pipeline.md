@@ -626,7 +626,9 @@ A metadata service is asked last, with a one-second timeout. `MISSING` fails the
 The record (lock, run-state, runs) must reach the next job:
 
 - **As an artifact** (`.meridian/`), enough for one pipeline running one job at a time. It
-  holds no secret.
+  holds no secret. It also holds each step's [tool output](../reference/state.md#runsidlogs),
+  masked as the job's log is; exclude `.meridian/runs/*/logs/` or use `--no-logs` to leave
+  it out.
 - **A shared backend** (`--backend NAME`, a program `meridian-backend-<name>`) locks across
   pipelines and laptops.
   [`meridian-backend-dir`](https://github.com/ZanattaMichael/meridian-core/tree/main/examples/backends)

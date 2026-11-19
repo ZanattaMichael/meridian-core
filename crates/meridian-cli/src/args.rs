@@ -129,6 +129,45 @@ pub(crate) enum Command {
         #[command(flatten)]
         state: State,
     },
+    /// Print the tool output a run kept on this machine: by default the
+    /// failed steps of the last run, or every step when none failed
+    Logs {
+        /// The run; the last one when not given
+        run: Option<String>,
+        /// Only the step of this document
+        #[arg(long, value_name = "NAME")]
+        step: Option<String>,
+        /// Only the step on this machine, as `meridian status` shows it
+        #[arg(long, value_name = "ENDPOINT")]
+        endpoint: Option<String>,
+        /// Only the lines of one stream: stdout, stderr, or meridian for
+        /// what Meridian added (a failure, or how much was cut)
+        #[arg(long, value_name = "STREAM")]
+        stream: Option<StreamFilter>,
+        /// Only the lines whose text matches this regular expression
+        #[arg(long, value_name = "RE")]
+        grep: Option<String>,
+        /// Only the last N lines of each step, after the other filters
+        #[arg(long, value_name = "N")]
+        tail: Option<usize>,
+        /// Every step, also when some failed
+        #[arg(long)]
+        all: bool,
+        #[command(flatten)]
+        state: State,
+    },
+    /// Write one archive of a run for a bug report: its record, its events,
+    /// the tool output this machine kept, and the versions of meridian and
+    /// of the plugins the run used. It sends nothing anywhere
+    BugReport {
+        /// The run; the last one when not given
+        run: Option<String>,
+        /// The file to write. Defaults to meridian-bug-report-<RUN>.tar.gz
+        #[arg(short, long, value_name = "FILE")]
+        out: Option<PathBuf>,
+        #[command(flatten)]
+        state: State,
+    },
     /// Write a report of a recorded run, or of a file of events: JSON,
     /// JUnit XML, Markdown or HTML
     Report {
@@ -331,6 +370,8 @@ impl Command {
             Command::Status { .. } => "status".to_owned(),
             Command::Runs { .. } => "runs".to_owned(),
             Command::Events { .. } => "events".to_owned(),
+            Command::Logs { .. } => "logs".to_owned(),
+            Command::BugReport { .. } => "bug-report".to_owned(),
             Command::Report { .. } => "report".to_owned(),
             Command::Unlock { .. } => "unlock".to_owned(),
             Command::Import { .. } => "import".to_owned(),
@@ -677,6 +718,14 @@ pub(crate) struct Workflow {
     /// How many runs' records to keep; older ones are removed when a run ends
     #[arg(long, value_name = "N", default_value_t = meridian_orchestrator::DEFAULT_KEEP_RUNS)]
     pub(crate) keep_runs: usize,
+    /// The most of one step's tool output kept in the state directory, as
+    /// in 10MiB, 512KiB or a number of bytes. Past it the start and the end
+    /// are kept, and a line says how much was cut between them
+    #[arg(long, value_name = "SIZE", default_value = "10MiB", value_parser = parse_size)]
+    pub(crate) log_limit: u64,
+    /// Keep no tool output in the state directory; it is still printed
+    #[arg(long, env = "MERIDIAN_NO_LOGS")]
+    pub(crate) no_logs: bool,
     /// Run only the documents whose metadata.labels match, as in
     /// `tier=web,env!=prod`; may be given more than once, and every
     /// requirement must hold. Forms: key=value, key!=value, key, !key
@@ -765,6 +814,29 @@ pub(crate) fn parse_duration(text: &str) -> Result<Duration, String> {
             "{other:?} is not a unit of time; use ms, s, m or h"
         )),
     }
+}
+
+/// A size as a person writes one: `10MiB`, `512KiB`, `1GiB`, or a number
+/// of bytes. K, M and G mean the same as KiB, MiB and GiB.
+pub(crate) fn parse_size(text: &str) -> Result<u64, String> {
+    let text = text.trim();
+    let digits = text.chars().take_while(char::is_ascii_digit).count();
+    let (number, unit) = text.split_at(digits);
+    let number: u64 = number
+        .parse()
+        .map_err(|_| format!("{text:?} is not a size; write one as 10MiB or 512KiB"))?;
+    let scale: u64 = match unit.trim() {
+        "" | "B" => 1,
+        "K" | "KiB" => 1 << 10,
+        "M" | "MiB" => 1 << 20,
+        "G" | "GiB" => 1 << 30,
+        other => {
+            return Err(format!(
+                "{other:?} is not a unit of size; use KiB, MiB or GiB"
+            ))
+        }
+    };
+    Ok(number.saturating_mul(scale))
 }
 
 /// Reads one `--report FORMAT=FILE`.

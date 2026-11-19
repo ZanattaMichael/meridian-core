@@ -67,3 +67,4 @@ page it affects. The pull request template asks for it.
 | [Tool schemas travel as signed OCI bundles, chosen by the types the documents use and pinned by digest](0041-tool-schemas-travel-as-signed-oci-bundles-chosen-by-the-types-the-documents-use.md) | Tooling | proposed |
 | [`adopt` is a field of the resource, and each target says how it adopts](0042-adopt-is-a-resource-field-and-a-target-says-how-it-adopts.md) | Language | proposed |
 | [`meridian retarget` writes a new file from what the old tool reports](0043-retarget-writes-a-new-file-from-what-the-old-tool-reports.md) | Core | proposed |
+| [Tool output is kept, masked, on the machine that ran it, and never in the record](0044-tool-output-is-kept-masked-on-the-machine-that-ran.md) | Runs | proposed |
