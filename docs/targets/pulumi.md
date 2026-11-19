@@ -365,11 +365,11 @@ file.
 
 ### Reading a failure
 
-`pulumi up` and `pulumi destroy` write their engine events to `pulumi-events.jsonl` in
-the work directory, which is read and removed. Each `error` diagnostic about a resource
-is a [resource failure](../reference/state.md#resource-failures) on the URN's name, `resource-failed` or `unreachable`, `auth-failed`, `timed-out` or `reboot-required` when the message says so. The stack's own `update failed`
-is left to the step's error. A failed preview's `error` diagnostics are
-`invalid-config`, on the resource where one is named.
+When `pulumi up` or `pulumi destroy` fails, each resource with an `error:` in its
+`Diagnostics:` section is a [resource failure](../reference/state.md#resource-failures) on the URN's name, `resource-failed` or `unreachable`, `auth-failed`, `timed-out` or `reboot-required` when the message says so. The stack's own `update failed`
+is left to the step's error. A failed preview's `error` diagnostics, or what the program
+wrote to standard error when there are none, are `invalid-config`, on the resource where
+one is named.
 
 ## Secrets
 

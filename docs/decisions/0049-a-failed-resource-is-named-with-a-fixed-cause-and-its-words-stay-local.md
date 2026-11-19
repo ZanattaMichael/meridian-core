@@ -30,10 +30,9 @@
   DSC); **part 3 the other infrastructure targets** (CloudFormation, Bicep,
   ARM, Pulumi, Packer, cloud-init). Containers and orchestration follow.
 - **A target whose failing command says too little asks the tool again**:
-  CloudFormation's stack events, Azure's deployment operations. Pulumi
-  writes an event log beside the run, read and removed.
+  CloudFormation's stack events, Azure's deployment operations.
 - **Where a tool has no structured output, its fixed lines are read**:
-  Puppet's `Error:` and `Skipping because of failed dependencies` lines,
+  Pulumi's `Diagnostics:` section, Puppet's `Error:` and `Skipping because of failed dependencies` lines,
   chef-client's `Error executing action` block. `chef-run` reports none.
 - **Shared causes come from the message** (`Cause::from_message`): a refused
   login, a failed connection, a timeout, a reboot.

@@ -196,7 +196,7 @@ fn an_apply_previews_updates_and_reports_outputs() {
     assert_eq!(
         calls(&dir)[2..],
         [
-            "up --stack prod --yes --skip-preview --event-log pulumi-events.jsonl --config region=us-east-1 --config replicas=3",
+            "up --stack prod --yes --skip-preview --config region=us-east-1 --config replicas=3",
             "stack output --stack prod --json",
             "stack output --stack prod --json --show-secrets",
         ]
@@ -415,7 +415,7 @@ fn secrets_reach_pulumi_as_secret_configuration_set_from_stdin_and_nowhere_else(
             // standard input, and Pulumi encrypts it before it is written.
             "config set --secret meridian_secret_db_password --stack prod",
             "preview --stack prod --json",
-            "up --stack prod --yes --skip-preview --event-log pulumi-events.jsonl",
+            "up --stack prod --yes --skip-preview",
             // Taken out again once the stage is over.
             "config rm meridian_secret_db_password --stack prod",
             "stack output --stack prod --json",
@@ -553,7 +553,7 @@ fn a_plan_asked_to_save_hands_back_the_update_plan_and_an_apply_handed_it_update
         calls(&dir),
         [
             "stack select prod --create",
-            "up --stack prod --yes --skip-preview --event-log pulumi-events.jsonl --plan meridian.plan.json --config region=us-east-1 --config replicas=3",
+            "up --stack prod --yes --skip-preview --plan meridian.plan.json --config region=us-east-1 --config replicas=3",
             "stack output --stack prod --json",
             "stack output --stack prod --json --show-secrets",
         ]
@@ -596,7 +596,7 @@ fn a_destroy_reads_the_stack_and_destroys_it_last_created_first() {
         [
             "stack select prod --create",
             "stack export --stack prod",
-            "destroy --stack prod --yes --skip-preview --event-log pulumi-events.jsonl",
+            "destroy --stack prod --yes --skip-preview",
         ]
     );
     let said: Vec<String> = removed.iter().map(ToString::to_string).collect();

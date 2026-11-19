@@ -185,7 +185,7 @@ fn the_host_plans_applies_and_reads_outputs_through_the_binary() {
             "preview --stack dev --json --config prefix=db",
             "stack select dev --create",
             "preview --stack dev --json --config prefix=db",
-            "up --stack dev --yes --skip-preview --event-log pulumi-events.jsonl --config prefix=db",
+            "up --stack dev --yes --skip-preview --config prefix=db",
             "stack output --stack dev --json",
             "stack output --stack dev --json --show-secrets",
             "stack output --stack dev --json",
