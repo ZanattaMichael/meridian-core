@@ -173,6 +173,9 @@ fn the_common_types_are_bicep_the_real_compiler_builds() {
             "Microsoft.Network/publicIPAddresses",
             "Microsoft.Network/virtualNetworks",
             "Microsoft.Network/virtualNetworks/subnets",
+            "Microsoft.Storage/storageAccounts",
+            "Microsoft.Storage/storageAccounts/blobServices",
+            "Microsoft.Storage/storageAccounts/blobServices/containers",
         ]
     );
     assert_eq!(output_names(&template), ["address", "private_address"]);

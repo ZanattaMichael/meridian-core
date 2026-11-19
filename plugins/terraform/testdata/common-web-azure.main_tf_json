@@ -129,6 +129,24 @@
         "sku": "Standard"
       }
     },
+    "azurerm_storage_account": {
+      "files": {
+        "account_replication_type": "LRS",
+        "account_tier": "Standard",
+        "blob_properties": {
+          "versioning_enabled": true
+        },
+        "location": "westeurope",
+        "name": "files",
+        "resource_group_name": "web-prod"
+      }
+    },
+    "azurerm_storage_container": {
+      "files_objects": {
+        "name": "objects",
+        "storage_account_id": "${azurerm_storage_account.files.id}"
+      }
+    },
     "azurerm_subnet": {
       "web": {
         "address_prefixes": [

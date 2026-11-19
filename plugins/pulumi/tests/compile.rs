@@ -65,6 +65,7 @@ fn the_plugin_says_what_it_is() {
             "firewall",
             "invoke.<function>",
             "network",
+            "objectStore",
             "stack",
             "subnet",
             "vm"

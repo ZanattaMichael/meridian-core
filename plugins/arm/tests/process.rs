@@ -71,6 +71,7 @@ fn the_plugin_introduces_itself() {
             "disk",
             "firewall",
             "network",
+            "objectStore",
             "parameter",
             "subnet",
             "vm"

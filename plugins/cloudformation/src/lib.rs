@@ -226,6 +226,7 @@ impl Emitter for CloudFormation {
             "disk",
             "firewall",
             "network",
+            "objectStore",
             "stack",
             "subnet",
             "vm",

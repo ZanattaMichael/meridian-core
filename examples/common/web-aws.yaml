@@ -62,6 +62,12 @@ spec:
         vm: ${vm}
         sizeGb: 50
 
+    # A store of files, keeping older versions.
+    - id: files
+      type: objectStore
+      params:
+        versioning: true
+
     # The tool's own type, beside the common ones.
     - id: logs
       type: aws_s3_bucket

@@ -8,7 +8,10 @@
     "microsoft.network/networksecuritygroups/web_fw": "web_fw",
     "microsoft.network/publicipaddresses/web_ip": "web_ip",
     "microsoft.network/virtualnetworks/net": "net",
-    "microsoft.network/virtualnetworks/subnets/web": "web"
+    "microsoft.network/virtualnetworks/subnets/web": "web",
+    "microsoft.storage/storageaccounts/blobservices/containers/objects": "files_objects",
+    "microsoft.storage/storageaccounts/blobservices/default": "files_blobs",
+    "microsoft.storage/storageaccounts/files": "files"
   },
   "subscription": ""
 }

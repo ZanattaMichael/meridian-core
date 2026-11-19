@@ -167,7 +167,7 @@ Also:
 - dependencies come first.
 
 **Common infrastructure types.** `infra_conformance.rs` compiles about 40 documents using
-`network`, `subnet`, `firewall`, `address`, `vm` and `disk` for Terraform and OpenTofu (AWS, Azure, Google Cloud), Pulumi (AWS, Azure),
+`network`, `subnet`, `firewall`, `address`, `vm`, `disk` and `objectStore` for Terraform and OpenTofu (AWS, Azure, Google Cloud), Pulumi (AWS, Azure),
 CloudFormation, Bicep and ARM into the
 [infra conformance matrix](../reference/infra-conformance-matrix.md). It fails if a target
 declares only some of the five or has no column, and checks a secret ssh key is never

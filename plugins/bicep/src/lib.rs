@@ -200,6 +200,7 @@ impl Emitter for Bicep {
             "disk",
             "firewall",
             "network",
+            "objectStore",
             "subnet",
             "vm",
         ]

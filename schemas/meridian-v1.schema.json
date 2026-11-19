@@ -2365,6 +2365,7 @@
                     "disk",
                     "firewall",
                     "network",
+                    "objectStore",
                     "parameter",
                     "subnet",
                     "vm"
@@ -2698,6 +2699,63 @@
           "if": {
             "properties": {
               "type": {
+                "const": "objectStore"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A store of files reached over HTTPS: an S3 bucket, an Azure storage account with one blob container, a Cloud Storage bucket. Reads on every target: `${id.id}`.",
+            "properties": {
+              "params": {
+                "properties": {
+                  "location": {
+                    "description": "Refused on AWS, where the provider's or the stack's region decides. On Azure, as `location` of any type. On Google Cloud, the bucket's location; `spec.settings.location` unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The store's name in the cloud, unique across the cloud. The resource's id unless given; on Azure, the id with only its lower-case letters and digits.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "tags": {
+                    "description": "Labels on the resource, as a mapping of text to text.",
+                    "type": [
+                      "object",
+                      "string"
+                    ]
+                  },
+                  "versioning": {
+                    "description": "Whether an overwritten or deleted file is kept as an older version. Off unless given.",
+                    "type": [
+                      "boolean",
+                      "string"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
                 "const": "subnet"
               }
             },
@@ -2936,6 +2994,7 @@
                     "disk",
                     "firewall",
                     "network",
+                    "objectStore",
                     "subnet",
                     "vm"
                   ]
@@ -3255,6 +3314,63 @@
                 "required": [
                   "cidr"
                 ]
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "objectStore"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A store of files reached over HTTPS: an S3 bucket, an Azure storage account with one blob container, a Cloud Storage bucket. Reads on every target: `${id.id}`.",
+            "properties": {
+              "params": {
+                "properties": {
+                  "location": {
+                    "description": "Refused on AWS, where the provider's or the stack's region decides. On Azure, as `location` of any type. On Google Cloud, the bucket's location; `spec.settings.location` unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The store's name in the cloud, unique across the cloud. The resource's id unless given; on Azure, the id with only its lower-case letters and digits.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "tags": {
+                    "description": "Labels on the resource, as a mapping of text to text.",
+                    "type": [
+                      "object",
+                      "string"
+                    ]
+                  },
+                  "versioning": {
+                    "description": "Whether an overwritten or deleted file is kept as an older version. Off unless given.",
+                    "type": [
+                      "boolean",
+                      "string"
+                    ]
+                  }
+                },
+                "additionalProperties": false
               },
               "state": {
                 "enum": [
@@ -4346,6 +4462,7 @@
                     "disk",
                     "firewall",
                     "network",
+                    "objectStore",
                     "stack",
                     "subnet",
                     "vm"
@@ -4666,6 +4783,63 @@
                 "required": [
                   "cidr"
                 ]
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "objectStore"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A store of files reached over HTTPS: an S3 bucket, an Azure storage account with one blob container, a Cloud Storage bucket. Reads on every target: `${id.id}`.",
+            "properties": {
+              "params": {
+                "properties": {
+                  "location": {
+                    "description": "Refused on AWS, where the provider's or the stack's region decides. On Azure, as `location` of any type. On Google Cloud, the bucket's location; `spec.settings.location` unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The store's name in the cloud, unique across the cloud. The resource's id unless given; on Azure, the id with only its lower-case letters and digits.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "tags": {
+                    "description": "Labels on the resource, as a mapping of text to text.",
+                    "type": [
+                      "object",
+                      "string"
+                    ]
+                  },
+                  "versioning": {
+                    "description": "Whether an overwritten or deleted file is kept as an older version. Off unless given.",
+                    "type": [
+                      "boolean",
+                      "string"
+                    ]
+                  }
+                },
+                "additionalProperties": false
               },
               "state": {
                 "enum": [
@@ -5021,6 +5195,7 @@
                     "local",
                     "module",
                     "network",
+                    "objectStore",
                     "provider",
                     "subnet",
                     "variable",
@@ -5348,6 +5523,63 @@
                 "required": [
                   "cidr"
                 ]
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "objectStore"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A store of files reached over HTTPS: an S3 bucket, an Azure storage account with one blob container, a Cloud Storage bucket. Reads on every target: `${id.id}`.",
+            "properties": {
+              "params": {
+                "properties": {
+                  "location": {
+                    "description": "Refused on AWS, where the provider's or the stack's region decides. On Azure, as `location` of any type. On Google Cloud, the bucket's location; `spec.settings.location` unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The store's name in the cloud, unique across the cloud. The resource's id unless given; on Azure, the id with only its lower-case letters and digits.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "tags": {
+                    "description": "Labels on the resource, as a mapping of text to text.",
+                    "type": [
+                      "object",
+                      "string"
+                    ]
+                  },
+                  "versioning": {
+                    "description": "Whether an overwritten or deleted file is kept as an older version. Off unless given.",
+                    "type": [
+                      "boolean",
+                      "string"
+                    ]
+                  }
+                },
+                "additionalProperties": false
               },
               "state": {
                 "enum": [
@@ -6060,6 +6292,7 @@
                     "disk",
                     "firewall",
                     "network",
+                    "objectStore",
                     "stack",
                     "subnet",
                     "vm"
@@ -6383,6 +6616,63 @@
                 "required": [
                   "cidr"
                 ]
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "objectStore"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A store of files reached over HTTPS: an S3 bucket, an Azure storage account with one blob container, a Cloud Storage bucket. Reads on every target: `${id.id}`.",
+            "properties": {
+              "params": {
+                "properties": {
+                  "location": {
+                    "description": "Refused on AWS, where the provider's or the stack's region decides. On Azure, as `location` of any type. On Google Cloud, the bucket's location; `spec.settings.location` unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The store's name in the cloud, unique across the cloud. The resource's id unless given; on Azure, the id with only its lower-case letters and digits.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "tags": {
+                    "description": "Labels on the resource, as a mapping of text to text.",
+                    "type": [
+                      "object",
+                      "string"
+                    ]
+                  },
+                  "versioning": {
+                    "description": "Whether an overwritten or deleted file is kept as an older version. Off unless given.",
+                    "type": [
+                      "boolean",
+                      "string"
+                    ]
+                  }
+                },
+                "additionalProperties": false
               },
               "state": {
                 "enum": [
@@ -7441,6 +7731,7 @@
                     "local",
                     "module",
                     "network",
+                    "objectStore",
                     "provider",
                     "subnet",
                     "variable",
@@ -7765,6 +8056,63 @@
                 "required": [
                   "cidr"
                 ]
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "objectStore"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A store of files reached over HTTPS: an S3 bucket, an Azure storage account with one blob container, a Cloud Storage bucket. Reads on every target: `${id.id}`.",
+            "properties": {
+              "params": {
+                "properties": {
+                  "location": {
+                    "description": "Refused on AWS, where the provider's or the stack's region decides. On Azure, as `location` of any type. On Google Cloud, the bucket's location; `spec.settings.location` unless given.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "name": {
+                    "description": "The store's name in the cloud, unique across the cloud. The resource's id unless given; on Azure, the id with only its lower-case letters and digits.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "tags": {
+                    "description": "Labels on the resource, as a mapping of text to text.",
+                    "type": [
+                      "object",
+                      "string"
+                    ]
+                  },
+                  "versioning": {
+                    "description": "Whether an overwritten or deleted file is kept as an older version. Off unless given.",
+                    "type": [
+                      "boolean",
+                      "string"
+                    ]
+                  }
+                },
+                "additionalProperties": false
               },
               "state": {
                 "enum": [

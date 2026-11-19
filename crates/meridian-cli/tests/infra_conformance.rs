@@ -1,7 +1,7 @@
 //! Conformance of the common infrastructure types: the same document through
 //! every target and cloud that maps them.
 //!
-//! The common types (`network`, `subnet`, `firewall`, `address`, `vm`, `disk`) promise that a
+//! The common types (`network`, `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore`) promise that a
 //! resource written once compiles for each infrastructure as code target
 //! that takes them, on each cloud it maps them to, "within what each cloud
 //! can do". This test writes that promise down cell by cell, the way
@@ -446,6 +446,24 @@ const CASES: &[Case] = &[
         Same,
         "    - id: store\n      type: disk\n      params: {sizeGb: 10, vm: web}\n",
     ),
+    case(
+        "objectStore",
+        "a store with versioning",
+        Same,
+        "    - id: files\n      type: objectStore\n      params: {name: acme-files, versioning: true, tags: {team: web}}\n",
+    ),
+    case(
+        "objectStore",
+        "a location",
+        Varies,
+        "    - id: files\n      type: objectStore\n      params: {location: westeurope}\n",
+    ),
+    case(
+        "objectStore",
+        "versioning that is not true or false",
+        Same,
+        "    - id: files\n      type: objectStore\n      params: {versioning: \"yes\"}\n",
+    ),
 ];
 
 fn document(column: &Column, name: &str, resources: &str) -> String {
@@ -472,7 +490,7 @@ const INTRODUCTION: &str = "\
 
 What happens to the same document on each target, and each cloud, that maps
 the [common infrastructure types](dsl/common-infrastructure-types.md)
-(`network`, `subnet`, `firewall`, `address`, `vm`, `disk`). This page is generated:
+(`network`, `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore`). This page is generated:
 `crates/meridian-cli/tests/infra_conformance.rs` compiles one small document
 per row for every column and writes down how each compile came out, and it
 fails when this page is out of date. So the page cannot drift from the code,

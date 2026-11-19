@@ -200,7 +200,7 @@ A package-prefixed name is a provider setting, given with `name` and `value`:
 
 ## Common infrastructure types
 
-`network`, `subnet`, `firewall`, `address`, `vm` and `disk` are Meridian's own types,
+`network`, `subnet`, `firewall`, `address`, `vm`, `disk` and `objectStore` are Meridian's own types,
 and this target turns each into the `aws` or `azure-native` package's own
 ([the common infrastructure types](../reference/dsl/common-infrastructure-types.md)
 has every param and mapping). They make the same resources the Terraform
@@ -220,6 +220,7 @@ location goes to its resource group's.
 | `address` | `aws:ec2:Eip` | `azure-native:network:PublicIPAddress`, Standard and static |
 | `vm` | `aws:ec2:Instance`, an `aws:ec2:KeyPair`, an `invoke.aws:ec2:getAmi` lookup for an image by name, an `aws:ec2:EipAssociation` | `azure-native:compute:VirtualMachine` and an `azure-native:network:NetworkInterface` (`<id>_nic`) |
 | `disk` | `aws:ebs:Volume` and an `aws:ec2:VolumeAttachment` | `azure-native:compute:Disk`, listed in its vm's `dataDisks` |
+| `objectStore` | `aws:s3:BucketV2`, and `aws:s3:BucketVersioningV2` | `azure-native:storage:StorageAccount`, a `BlobContainer`, and `BlobServiceProperties` |
 
 Compare [`examples/common/web-pulumi-aws.yaml`](../../examples/common/web-pulumi-aws.yaml)
 and [`web-pulumi-azure.yaml`](../../examples/common/web-pulumi-azure.yaml) with

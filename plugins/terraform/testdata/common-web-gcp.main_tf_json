@@ -142,6 +142,16 @@
         "network": "${google_compute_network.net.id}",
         "region": "europe-west1"
       }
+    },
+    "google_storage_bucket": {
+      "files": {
+        "location": "europe-west1",
+        "name": "files",
+        "uniform_bucket_level_access": true,
+        "versioning": {
+          "enabled": true
+        }
+      }
     }
   },
   "terraform": {

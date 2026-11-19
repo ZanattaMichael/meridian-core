@@ -2,7 +2,7 @@
 
 What happens to the same document on each target, and each cloud, that maps
 the [common infrastructure types](dsl/common-infrastructure-types.md)
-(`network`, `subnet`, `firewall`, `address`, `vm`, `disk`). This page is generated:
+(`network`, `subnet`, `firewall`, `address`, `vm`, `disk`, `objectStore`). This page is generated:
 `crates/meridian-cli/tests/infra_conformance.rs` compiles one small document
 per row for every column and writes down how each compile came out, and it
 fails when this page is out of date. So the page cannot drift from the code,
@@ -106,4 +106,12 @@ The configuration management types have [their own matrix](conformance-matrix.md
 | no vm and no location | no | `missing-param` | ok | ok | `missing-param` | ok | ok | `missing-param` | ok | `missing-param` | ok | ok |
 | a size of zero | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
 | a vm that is not a reference | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+
+## `objectStore`
+
+| Document | same | terraform (aws) | terraform (azure) | terraform (gcp) | opentofu (aws) | opentofu (azure) | opentofu (gcp) | pulumi (aws) | pulumi (azure) | cloudformation | bicep | arm |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| a store with versioning | yes | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| a location | no | `unsupported-param` | ok | ok | `unsupported-param` | ok | ok | `unsupported-param` | ok | `unsupported-param` | ok | ok |
+| versioning that is not true or false | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
 

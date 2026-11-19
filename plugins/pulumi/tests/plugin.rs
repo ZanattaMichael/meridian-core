@@ -91,6 +91,7 @@ fn the_binary_reports_what_the_plugin_is() {
             "firewall",
             "invoke.<function>",
             "network",
+            "objectStore",
             "stack",
             "subnet",
             "vm"

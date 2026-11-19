@@ -468,6 +468,28 @@ fn aws(r: &Resource, graph: &ResourceGraph, state: &mut State) -> Result<Expansi
             )
         }
         "disk" => aws_disk(r, graph)?,
+        "objectStore" => {
+            let mut resources = vec![primary(
+                r,
+                "aws:s3:BucketV2",
+                map(vec![("bucket", cloud_name(r)), ("tags", aws_tags(r))]),
+            )];
+            if infra::versioning(r) {
+                resources.push(helper(
+                    r,
+                    "versioning",
+                    "aws:s3:BucketVersioningV2",
+                    map(vec![
+                        ("bucket", reference(id, "id")),
+                        (
+                            "versioningConfiguration",
+                            Value::Map(map(vec![("status", Value::from("Enabled"))])),
+                        ),
+                    ]),
+                ));
+            }
+            expansion(resources, &own_id())
+        }
         _ => aws_vm(r)?,
     })
 }
@@ -791,6 +813,54 @@ fn azure(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError>
                 ("id", format!("${{{id}.id}}")),
             ],
         ),
+        "objectStore" => {
+            let account = || reference(id, "name");
+            let mut resources = vec![
+                primary(
+                    r,
+                    "azure-native:storage:StorageAccount",
+                    with(
+                        azure_place(r, graph, true)?,
+                        vec![
+                            ("accountName", infra::storage_account_name(r)),
+                            ("kind", Value::from("StorageV2")),
+                            (
+                                "sku",
+                                Value::Map(map(vec![("name", Value::from("Standard_LRS"))])),
+                            ),
+                        ],
+                    ),
+                ),
+                helper(
+                    r,
+                    "objects",
+                    "azure-native:storage:BlobContainer",
+                    with(
+                        azure_place(r, graph, false)?,
+                        vec![
+                            ("accountName", account()),
+                            ("containerName", Value::from("objects")),
+                        ],
+                    ),
+                ),
+            ];
+            if infra::versioning(r) {
+                resources.push(helper(
+                    r,
+                    "versioning",
+                    "azure-native:storage:BlobServiceProperties",
+                    with(
+                        azure_place(r, graph, false)?,
+                        vec![
+                            ("accountName", account()),
+                            ("blobServicesName", Value::from("default")),
+                            ("isVersioningEnabled", Value::Bool(true)),
+                        ],
+                    ),
+                ));
+            }
+            expansion(resources, &own_id())
+        }
         "disk" => expansion(
             vec![primary(
                 r,

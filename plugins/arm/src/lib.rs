@@ -214,6 +214,7 @@ impl Emitter for Arm {
             "disk",
             "firewall",
             "network",
+            "objectStore",
             "parameter",
             "subnet",
             "vm",

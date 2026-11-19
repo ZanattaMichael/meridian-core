@@ -170,7 +170,7 @@ references ([see](../reference/dsl/interpolation.md#a-tools-own-expressions)).
 
 ## Common infrastructure types
 
-`network`, `subnet`, `firewall`, `address`, `vm` and `disk` are Meridian's own types,
+`network`, `subnet`, `firewall`, `address`, `vm`, `disk` and `objectStore` are Meridian's own types,
 and this target turns each into CloudFormation's own
 ([the common infrastructure types](../reference/dsl/common-infrastructure-types.md)
 has every param and mapping). They are created in the stack's region, and
@@ -185,6 +185,7 @@ refusals and outputs.
 | `address` | `AWS::EC2::EIP` |
 | `vm` | `AWS::EC2::Instance`, an `AWS::EC2::KeyPair` for `sshKey`, an `AWS::EC2::EIPAssociation` for `address` |
 | `disk` | `AWS::EC2::Volume` and an `AWS::EC2::VolumeAttachment` |
+| `objectStore` | `AWS::S3::Bucket` |
 
 An image given as `{family, version}` is read when the stack is deployed from
 the vendor's public Systems Manager parameter, as `{{resolve:ssm:...}}`.

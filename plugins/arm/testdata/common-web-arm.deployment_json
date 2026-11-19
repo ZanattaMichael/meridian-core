@@ -5,6 +5,18 @@
   "parameters": {},
   "resourceGroup": "web-prod",
   "resources": {
+    "files": {
+      "name": "files",
+      "type": "Microsoft.Storage/storageAccounts"
+    },
+    "files_blobs": {
+      "name": "[format('{0}/default', 'files')]",
+      "type": "Microsoft.Storage/storageAccounts/blobServices"
+    },
+    "files_objects": {
+      "name": "[format('{0}/objects', format('{0}/default', 'files'))]",
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers"
+    },
     "net": {
       "name": "net",
       "type": "Microsoft.Network/virtualNetworks"

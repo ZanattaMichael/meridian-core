@@ -93,6 +93,7 @@ fn the_plugin_describes_itself_as_infrastructure_as_code() {
             "local",
             "module",
             "network",
+            "objectStore",
             "provider",
             "subnet",
             "variable",

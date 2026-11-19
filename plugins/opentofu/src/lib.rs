@@ -282,6 +282,7 @@ impl Emitter for OpenTofu {
             "local",
             "module",
             "network",
+            "objectStore",
             "provider",
             "subnet",
             "variable",

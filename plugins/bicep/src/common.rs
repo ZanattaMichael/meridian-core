@@ -22,6 +22,8 @@ use crate::{Dialect, NAME};
 pub const NETWORK_API: &str = "2023-09-01";
 /// The API version of virtual machines.
 pub const COMPUTE_API: &str = "2024-03-01";
+/// The API version of the storage resources.
+pub const STORAGE_API: &str = "2023-05-01";
 
 /// Azure sizes, smallest first: (size, processors, memory in GB). The same
 /// table the Terraform target uses on Azure, so a document picks the same
@@ -342,6 +344,71 @@ fn expand(azure: Azure, r: &Resource, graph: &ResourceGraph) -> Result<Expansion
                 ("id", azure.id(id)),
             ]),
         },
+        "objectStore" => {
+            // A child is nested under its parent's symbol in Bicep, and
+            // named "<parent>/<child>" in ARM, reading the parent's name so
+            // ARM orders it after the parent.
+            let child = |parent: &str, name: &str, properties: BTreeMap<String, Value>| {
+                let mut body = match azure.dialect {
+                    Dialect::Bicep => map(vec![
+                        ("name", Value::from(name)),
+                        ("parent", Value::String(format!("${{{parent}}}"))),
+                    ]),
+                    Dialect::Arm => map(vec![(
+                        "name",
+                        Value::String(format!("${{{parent}.name}}/{name}")),
+                    )]),
+                };
+                body.insert("properties".to_owned(), Value::Map(properties));
+                body
+            };
+            let mut account = azure.top(
+                r,
+                map(vec![
+                    (
+                        "sku",
+                        Value::Map(map(vec![("name", Value::from("Standard_LRS"))])),
+                    ),
+                    ("kind", Value::from("StorageV2")),
+                ]),
+            );
+            account.insert("name".to_owned(), infra::storage_account_name(r));
+            let blobs = format!("{id}_blobs");
+            Expansion {
+                order: Vec::new(),
+                resources: vec![
+                    azure.resource(
+                        r,
+                        None,
+                        "Microsoft.Storage/storageAccounts",
+                        STORAGE_API,
+                        account,
+                    ),
+                    azure.resource(
+                        r,
+                        Some("blobs"),
+                        "Microsoft.Storage/storageAccounts/blobServices",
+                        STORAGE_API,
+                        child(
+                            id,
+                            "default",
+                            map(vec![(
+                                "isVersioningEnabled",
+                                Value::Bool(infra::versioning(r)),
+                            )]),
+                        ),
+                    ),
+                    azure.resource(
+                        r,
+                        Some("objects"),
+                        "Microsoft.Storage/storageAccounts/blobServices/containers",
+                        STORAGE_API,
+                        child(&blobs, "objects", BTreeMap::new()),
+                    ),
+                ],
+                outputs: own_id(),
+            }
+        }
         "disk" => Expansion {
             order: Vec::new(),
             resources: vec![azure.resource(

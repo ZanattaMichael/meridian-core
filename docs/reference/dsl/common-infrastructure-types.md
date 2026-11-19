@@ -1,6 +1,7 @@
 # The common infrastructure types
 
-Six resource types, `network`, `subnet`, `firewall`, `address`, `vm` and `disk`, compile to each
+Seven resource types, `network`, `subnet`, `firewall`, `address`, `vm`, `disk` and
+`objectStore`, compile to each
 cloud's own resources on the targets below.
 
 | Type | What it is |
@@ -11,13 +12,14 @@ cloud's own resources on the targets below.
 | [`address`](#address) | a fixed public IP address |
 | [`vm`](#vm) | a virtual machine in a subnet, from an image, of a size, reachable with a key |
 | [`disk`](#disk) | a data disk, attached to a vm |
+| [`objectStore`](#objectstore) | a store of files reached over HTTPS |
 
 The vocabulary is defined once, in the SDK. A param outside it is refused. What a cloud
 cannot express is refused at compile time with what to write instead. The
 [infra conformance matrix](../infra-conformance-matrix.md) is generated from what the
 targets do.
 
-<p align="center"><img src="../../graphics/meridian-common-types.svg" alt="One document with network, subnet, firewall, address, vm and disk on the left; four columns on the right showing what each becomes on Terraform for AWS, CloudFormation, Terraform for Azure, and Bicep and ARM" width="100%"></p>
+<p align="center"><img src="../../graphics/meridian-common-types.svg" alt="One document with network, subnet, firewall, address, vm, disk and objectStore on the left; four columns on the right showing what each becomes on Terraform for AWS, CloudFormation, Terraform for Azure, and Bicep and ARM" width="100%"></p>
 
 ## Where they compile
 
@@ -116,6 +118,7 @@ Read as `${id.output}`; each target rewrites it to the tool's expression. A
 | `network`, `subnet`, `firewall` | `id`: the cloud's own id |
 | `address` | `id`; `address`: the IP address |
 | `disk` | `id` |
+| `objectStore` | `id`: the bucket, or the Azure storage account |
 | `vm` | `id`; `privateAddress`: the address inside the network; `publicAddress`: the machine's address from the internet |
 
 `publicAddress` is the attached `address`. On AWS a vm in a public subnet has one
@@ -285,6 +288,24 @@ names at most 11 data disks per vm (`/dev/sdf` to `/dev/sdp`); a twelfth is refu
 `invalid-param`. On AWS a disk with neither `vm` nor `location` is refused as
 `missing-param`.
 
+## `objectStore`
+
+| Param | Kind | |
+|---|---|---|
+| `versioning` | true or false | keep an overwritten or deleted file as an older version; off unless given |
+| `name` | text | the store's name, unique across the cloud. The id unless given; on Azure, the id with only its lower-case letters and digits |
+| `location` | text | Azure: as on `network`. Google Cloud: the bucket's location; `spec.settings.location` unless given. Refused on AWS |
+| `tags` | | as on `network` |
+
+| Terraform, AWS | CloudFormation | Terraform, Azure | Bicep |
+|---|---|---|---|
+| `aws_s3_bucket`; an `aws_s3_bucket_versioning` (`<id>_versioning`) with `versioning` | `AWS::S3::Bucket` with `VersioningConfiguration` | `azurerm_storage_account` (Standard, LRS, `blob_properties.versioning_enabled`) and an `azurerm_storage_container` named `objects` (`<id>_objects`) | `Microsoft.Storage/storageAccounts` (StorageV2, Standard_LRS), its `blobServices` (`<id>_blobs`, `isVersioningEnabled`) and a container named `objects` (`<id>_objects`) |
+
+Pulumi writes the same with `aws:s3:BucketV2` and `aws:s3:BucketVersioningV2`, or
+`azure-native:storage:StorageAccount`, `BlobContainer` and, with `versioning`,
+`BlobServiceProperties` (`<id>_versioning`). Google Cloud: `google_storage_bucket` with
+uniform bucket-level access and `tags` as labels.
+
 ## What a common type adds
 
 Some common resources become several tool resources. The main one keeps the id; the
@@ -297,6 +318,7 @@ others are named from it:
 | `<net>_gateway`, `<net>_gateway_link` (CloudFormation), `<subnet>_routes`, `<subnet>_routes_internet`, `<subnet>_routes_link` | AWS: a public subnet's way out |
 | `<fw>_in_<n>`, `<fw>_out_<n>`, `<fw>_out_all`, `<fw>_rule_<n>`, `<fw>_out_deny` | a firewall's rules |
 | `<disk>_attachment` | AWS, Terraform on Azure, Google Cloud: a disk's attachment to its vm |
+| `<store>_versioning`, `<store>_objects`, `<store>_blobs` | an object store's versioning, its Azure container and blob service |
 
 A document that already uses one of these ids is refused as `duplicate-resource`.
 
@@ -307,7 +329,7 @@ Terraform, OpenTofu and Pulumi read these [`spec.settings`](index.md#settings) k
 | Key | |
 |---|---|
 | `cloud` | `aws`, `azure`, or `gcp` (Terraform and OpenTofu only). Needed only when the document configures more than one provider or none |
-| `location` | Azure: the location of every common resource that gives none. Google Cloud: the region of every subnet and address that gives none, and zone `b` of it for a vm |
+| `location` | Azure: the location of every common resource that gives none. Google Cloud: the region of every subnet, address and object store that gives none, and zone `b` of it for a vm |
 | `resourceGroup` | Azure: the resource group every common resource is created in. Required on Azure |
 
 `location` and `resourceGroup` are refused on a document with no common resources.
@@ -329,4 +351,4 @@ CloudFormation needs none (the stack's region; a subnet's `location` is its zone
 
 ## Why so few
 
-Each type maps one-to-one on every target. Object stores and DNS records are next. See [decision 0040](../../decisions/0040-common-infrastructure-types-are-a-small-core-mapped-per-cloud.md).
+Each type maps one-to-one on every target. DNS records are next. See [decision 0040](../../decisions/0040-common-infrastructure-types-are-a-small-core-mapped-per-cloud.md).

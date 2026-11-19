@@ -262,6 +262,7 @@ impl Emitter for Terraform {
             "local",
             "module",
             "network",
+            "objectStore",
             "provider",
             "subnet",
             "variable",

@@ -134,6 +134,18 @@ resources:
       deviceName: /dev/sdf
       instanceId: ${vm.id}
       volumeId: ${store.id}
+  files:
+    type: aws:s3:BucketV2
+    properties:
+      bucket: files
+      tags:
+        Name: files
+  files_versioning:
+    type: aws:s3:BucketVersioningV2
+    properties:
+      bucket: ${files.id}
+      versioningConfiguration:
+        status: Enabled
   logs:
     type: aws:s3:BucketV2
     properties:
