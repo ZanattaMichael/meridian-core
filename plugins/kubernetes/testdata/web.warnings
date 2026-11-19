@@ -1,2 +1,1 @@
-kubernetes: dependsOn orders the manifests in the file and nothing more; kubectl applies them in that order without waiting for one to be ready before the next
 kubernetes: web: restarts by rolling its pods whenever the content of "web_config" changes; the trigger is the annotation meridian.dev/restart-on-web-config on its pod template

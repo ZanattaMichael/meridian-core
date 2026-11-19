@@ -13,9 +13,10 @@ const ROLLING: &[&str] = &["DaemonSet", "Deployment", "StatefulSet"];
 /// The annotation a notify compiles to, on the workload's pod template.
 const ANNOTATION_PREFIX: &str = "meridian.dev/restart-on-";
 
-/// The objects stay in the tree's apply order, which is the order `kubectl`
-/// sends them in. That is all the ordering Kubernetes offers, so a document
-/// that declares dependencies is told what they will and will not do.
+/// The objects stay in the tree's apply order. `kubectl` does not wait for
+/// one object before the next, so a document that declares dependencies has
+/// its objects split into waves, which the runner applies one at a time,
+/// waiting for each wave to be ready before the next (decision 0057).
 ///
 /// A notify becomes a checksum of the notifier, written onto the notified
 /// workload's pod template: when the notifier's content changes, so does the
@@ -103,19 +104,40 @@ pub(crate) fn apply_ordering(
     }
 
     if ordered {
-        warnings.insert(
-            0,
-            Warning {
-                target: NAME.to_owned(),
-                resource: String::new(),
-                msg: "dependsOn orders the manifests in the file and nothing more; kubectl \
-                      applies them in that order without waiting for one to be ready before \
-                      the next"
-                    .to_owned(),
-            },
-        );
+        manifests.waves = waves(graph, manifests);
     }
     Ok(warnings)
+}
+
+/// The objects in waves by `dependsOn` depth: an object goes one wave after
+/// the latest of the objects it depends on. The objects are already in an
+/// order every edge agrees with, so one pass is enough. A single wave is no
+/// waves at all.
+fn waves(graph: &ResourceGraph, manifests: &Manifests) -> Vec<Vec<usize>> {
+    let mut depth: BTreeMap<&str, usize> = BTreeMap::new();
+    for object in &manifests.objects {
+        let own = graph
+            .edges
+            .iter()
+            .filter(|e| e.kind == EdgeKind::HardOrder && e.to == object.id)
+            .filter_map(|e| depth.get(e.from.as_str()).map(|d| d + 1))
+            .max()
+            .unwrap_or(0);
+        let entry = depth.entry(object.id.as_str()).or_insert(own);
+        *entry = (*entry).max(own);
+    }
+    let mut waves: Vec<Vec<usize>> = Vec::new();
+    for (index, object) in manifests.objects.iter().enumerate() {
+        let wave = depth[object.id.as_str()];
+        if waves.len() <= wave {
+            waves.resize(wave + 1, Vec::new());
+        }
+        waves[wave].push(index);
+    }
+    if waves.len() < 2 {
+        return Vec::new();
+    }
+    waves
 }
 
 /// A short, stable fingerprint of some content (64-bit FNV-1a). It only has

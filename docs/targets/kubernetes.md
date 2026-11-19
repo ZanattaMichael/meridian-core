@@ -10,7 +10,7 @@ with `kubectl`.
 | | |
 |---|---|
 | Resource types | Kubernetes' own: API version and kind, such as `apps/v1/Deployment` or `v1/Service`, plus `cluster` for where the manifests go. Custom resources work the same way |
-| `dependsOn` | Orders the manifests in the file, and nothing more. `kubectl` applies them in that order without waiting for one to be ready. A warning says so |
+| `dependsOn` | Meridian-run: the manifests are applied in waves, waiting for each wave to be ready. See [Ordering](#ordering) |
 | `notifies` | Synthetic: the action `restart`, aimed at a Deployment, StatefulSet or DaemonSet. See [Notifications](#notifications) |
 | `runtimeWhen` | No. Refused |
 | `adopt` | Accepted, and changes nothing: `kubectl apply` takes over an object of the same kind, name and namespace. The compile warns |
@@ -116,6 +116,37 @@ refused (`reserved-name`).
 Tested against a stand-in `kubectl` (`plugins/kubernetes/tests/run.rs`) and a kind cluster
 in CI (`plugins/kubernetes/tests/real.rs`).
 
+## Ordering
+
+`kubectl` applies manifests without waiting for one to be ready, so with a `dependsOn` Meridian
+applies the objects in waves by depth: an object goes one wave after the latest object it
+depends on. Before the next wave, it waits for each object of the wave
+([decision 0057](../decisions/0057-kubernetes-applies-depends-on-in-waves-and-waits-between.md)):
+
+| Object | Wait | On failure |
+|---|---|---|
+| Deployment, StatefulSet, DaemonSet | `kubectl rollout status` | `resource-failed`, or `timed-out` |
+| Job | until its `Complete` or `Failed` condition | `resource-failed` for a failed Job, or `timed-out` |
+| CustomResourceDefinition | `kubectl wait --for=condition=Established` | `timed-out` |
+| anything else | none | |
+
+- Each wait has `wait-timeout` (`MERIDIAN_KUBECTL_WAIT_TIMEOUT`, 300 s by default).
+- A failure stops the apply; later waves are not applied.
+- With no `dependsOn` the manifests go in one `kubectl apply`.
+- The compile writes `wave-<n>.yaml` beside `manifests.yaml`. Plan and destroy use
+  `manifests.yaml`, all at once.
+
+```yaml
+- id: migrate
+  type: batch/v1/Job
+  params: {spec: {template: {spec: {restartPolicy: Never, containers: [{name: m, image: app:2, command: [migrate]}]}}}}
+- id: web
+  type: apps/v1/Deployment
+  params: {spec: {template: {spec: {containers: [{name: web, image: app:2}]}}}}
+  dependsOn:
+    - resource: migrate      # applied after the Job completes
+```
+
 ## Notifications
 
 A `restart` notify writes a checksum of the notifier to the pod template annotation
@@ -211,6 +242,7 @@ Undescribed kinds are noted.
 | `MERIDIAN_KUBECTL` | the program to run, when it is not `kubectl` on `PATH` |
 | `MERIDIAN_KUBECTL_ARGS` | arguments added to every call, split like a shell command line (quotes hold a word together): `--context prod` |
 | `MERIDIAN_KUBECTL_OUTPUT_WAIT` | seconds an apply waits for an output that has no value yet |
+| `MERIDIAN_KUBECTL_WAIT_TIMEOUT` | seconds an apply waits for each object of a [wave](#ordering) (300) |
 
 Settings can also go in `meridian.yaml` under `spec.settings.kubernetes`; the environment
 wins. See the [plugin settings reference](../reference/plugin-settings.md#kubernetes).
@@ -231,8 +263,8 @@ When `kubectl` fails, each error on its standard error is a
 | `AlreadyExists`, `Conflict` | `resource-failed` | the reason |
 | `Unable to connect to the server` | `unreachable` | |
 
-An apply does not wait for rollouts, so a Pod that fails after `kubectl apply` returns is not
-a failure of the run.
+Without a `dependsOn`, an apply does not wait for rollouts, so a Pod that fails after
+`kubectl apply` returns is not a failure of the run. A wait between [waves](#ordering) is.
 
 CI tests a real `kubectl` and [kind](https://kind.sigs.k8s.io) cluster: plan, apply,
 in-sync, notify restart and a refused manifest. Managed clusters and admission webhooks are
