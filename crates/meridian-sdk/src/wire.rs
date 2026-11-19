@@ -1025,6 +1025,50 @@ pub fn identifiers_response_from_wire(
     Ok(Ok(r.identifiers.into_iter().collect()))
 }
 
+pub fn inspect_response(outcome: Result<crate::Inspection, RunError>) -> pb::InspectResponse {
+    match outcome {
+        Ok(i) => pb::InspectResponse {
+            found: i.found,
+            actual_json: canonical_map(&i.actual).into_bytes(),
+            in_desired_state: match i.in_desired_state {
+                None => pb::InDesiredState::Unknown,
+                Some(true) => pb::InDesiredState::Yes,
+                Some(false) => pb::InDesiredState::No,
+            } as i32,
+            command: i.command,
+            error: None,
+        },
+        Err(e) => pb::InspectResponse {
+            error: Some(run_error_to_wire(e)),
+            ..Default::default()
+        },
+    }
+}
+
+/// The outer error is a malformed message; the inner one is the tool failing.
+pub fn inspect_response_from_wire(
+    r: pb::InspectResponse,
+) -> Result<Result<crate::Inspection, RunError>, String> {
+    if let Some(e) = r.error {
+        return Ok(Err(run_error_from_wire(e, Vec::new())));
+    }
+    let actual = if r.actual_json.is_empty() {
+        Data::new()
+    } else {
+        decode_map(&r.actual_json).map_err(|e| format!("reading the properties: {e}"))?
+    };
+    Ok(Ok(crate::Inspection {
+        found: r.found,
+        actual,
+        in_desired_state: match pb::InDesiredState::try_from(r.in_desired_state) {
+            Ok(pb::InDesiredState::Yes) => Some(true),
+            Ok(pb::InDesiredState::No) => Some(false),
+            _ => None,
+        },
+        command: r.command,
+    }))
+}
+
 pub fn settings_to_wire(settings: Vec<Setting>) -> Vec<pb::Setting> {
     settings
         .into_iter()

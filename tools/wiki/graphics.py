@@ -887,6 +887,7 @@ def troubleshooting_flow() -> str:
         "web  ansible  203.0.113.10  resource-failed",
         "  nginx_conf  'nginx_port' is undefined",
         "  next: meridian logs <run> --step web",
+        "  next: meridian inspect nginx_conf site.yaml",
         "web  ansible  37 machines  unreachable",
         "  next: check the 37 machines can be reached",
         "",
@@ -896,13 +897,14 @@ def troubleshooting_flow() -> str:
     steps = [
         ("diagnose", "what broke and where", GREEN),
         ("logs", "the tool's own words", LINE),
+        ("inspect", "one resource, as it is now", CON),
         ("--tool-debug", "the tool, more verbose", CM),
         ("apply --resume", "carry on from the failure", IAC),
     ]
     for i, (name, body, colour) in enumerate(steps):
-        x = 40 + i * 285
-        p.append(chip(x, 356, 265, name, colour, 28, 13, True))
-        p.append(text(x + 132.5, 404, body, 12.5, 400, TEXT_SOFT))
+        x = 40 + i * 228
+        p.append(chip(x, 356, 208, name, colour, 28, 13, True))
+        p.append(text(x + 104, 404, body, 12.5, 400, TEXT_SOFT))
         if i:
             p.append(flow(f"M{x - 20} 370L{x} 370", WHITE, delay=0.4 * i, seconds=1.8))
     p.append(caption(W, H, "The failed step comes first; the steps it stopped are named under it, and each machine gets the command to run next."))

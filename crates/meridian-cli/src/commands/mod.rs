@@ -3,6 +3,7 @@
 
 pub(crate) mod diagnose;
 pub(crate) mod documents;
+pub(crate) mod inspect;
 pub(crate) mod logs;
 pub(crate) mod modules;
 pub(crate) mod plugins;
@@ -15,6 +16,7 @@ pub(crate) mod testing;
 
 pub(crate) use diagnose::*;
 pub(crate) use documents::*;
+pub(crate) use inspect::*;
 pub(crate) use logs::*;
 pub(crate) use modules::*;
 pub(crate) use plugins::*;

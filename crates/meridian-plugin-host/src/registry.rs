@@ -173,6 +173,18 @@ impl Target {
         self.client("read identifiers")?.identifiers(context)
     }
 
+    /// Reads one resource of the artifact as it is now, changing nothing.
+    pub fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunFailure> {
+        self.client("inspect")?
+            .inspect(context, artifact, resource, endpoint)
+    }
+
     /// A compiled-in emitter only compiles; running a tool is a plugin's job.
     fn client(&self, verb: &str) -> Result<&Client, RunFailure> {
         match &self.kind {
@@ -258,6 +270,7 @@ impl Registry {
             reads_identifiers: false,
             debug_levels: Vec::new(),
             destroys: false,
+            inspects: false,
             path: String::new(),
             signature: crate::Signature::NotChecked,
         };

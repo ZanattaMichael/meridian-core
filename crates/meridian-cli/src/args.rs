@@ -189,6 +189,32 @@ pub(crate) enum Command {
         #[command(flatten)]
         state: State,
     },
+    /// Read one resource as its tool sees it now, beside what the document
+    /// declares, and name the properties that differ. Compiles the step
+    /// that declares it and asks its tool; changes nothing and takes no lock
+    Inspect {
+        /// The resource's id, as the document declares it
+        resource: String,
+        /// The documents
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// The document that declares the resource, when more than one does
+        #[arg(long, value_name = "NAME")]
+        step: Option<String>,
+        /// The machine to read it on; it must be the one the step configures
+        #[arg(long, value_name = "ENDPOINT")]
+        endpoint: Option<String>,
+        /// A YAML or JSON file of values that `when` conditions read, as for
+        /// plan; may be given more than once
+        #[arg(long, value_name = "FILE")]
+        data: Vec<PathBuf>,
+        /// One value for `when` conditions, as for plan; may be given more
+        /// than once
+        #[arg(long = "set", value_name = "KEY=VALUE")]
+        set: Vec<String>,
+        #[command(flatten)]
+        state: State,
+    },
     /// Write one archive of a run for a bug report: its record, its events,
     /// the tool output this machine kept, and the versions of meridian and
     /// of the plugins the run used. It sends nothing anywhere
@@ -410,6 +436,7 @@ impl Command {
             Command::Events { .. } => "events".to_owned(),
             Command::Logs { .. } => "logs".to_owned(),
             Command::Diagnose { .. } => "diagnose".to_owned(),
+            Command::Inspect { .. } => "inspect".to_owned(),
             Command::BugReport { .. } => "bug-report".to_owned(),
             Command::Report { .. } => "report".to_owned(),
             Command::Unlock { .. } => "unlock".to_owned(),

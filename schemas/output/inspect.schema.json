@@ -1,0 +1,130 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ZanattaMichael/meridian-core/schemas/output/inspect.schema.json",
+  "title": "inspect",
+  "description": "One resource as its tool reads it now, beside what the document declares.",
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "const": "inspect",
+      "description": "The subcommand as it is typed"
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "Whether the command did what was asked: false means it exited 1"
+    },
+    "step": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "Infrastructure",
+            "ResourceSet"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "target": {
+      "type": "string"
+    },
+    "inspection": {
+      "type": "object",
+      "properties": {
+        "resource": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "The machine it was read on; empty for an Infrastructure step"
+        },
+        "found": {
+          "type": "boolean",
+          "description": "False when the tool has no such resource"
+        },
+        "inDesiredState": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "What the tool says; null when it cannot say"
+        },
+        "command": {
+          "type": "string",
+          "description": "The native command the plugin ran, masked"
+        },
+        "desired": {
+          "type": "object",
+          "description": "state and the params as the document compiled them; a secret is \"(sensitive)\""
+        },
+        "actual": {
+          "type": "object",
+          "description": "What the tool read, every known secret value masked"
+        },
+        "differs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The declared properties the tool reads differently"
+        },
+        "notCompared": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "param": {
+                "type": "string"
+              },
+              "why": {
+                "type": "string",
+                "enum": [
+                  "sensitive",
+                  "not-reported"
+                ]
+              }
+            },
+            "required": [
+              "param",
+              "why"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "resource",
+        "type",
+        "endpoint",
+        "found",
+        "inDesiredState",
+        "command",
+        "desired",
+        "actual",
+        "differs",
+        "notCompared"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "command",
+    "ok",
+    "step",
+    "target",
+    "inspection"
+  ],
+  "additionalProperties": false
+}

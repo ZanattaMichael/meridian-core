@@ -141,6 +141,7 @@ fn the_failed_step_comes_first_with_its_resource_cause_and_next_commands() {
          web  fake  10.0.0.5  resource-failed\n\
          \x20 banner  could not write files/banner: disk on fire  site.yaml:37\n\
          \x20 next: meridian logs {id} --step web --endpoint 10.0.0.5\n\
+         \x20 next: meridian inspect banner site.yaml --step web --endpoint 10.0.0.5\n\
          \x20 next: meridian apply site.yaml --tool-debug --tool-debug-step web --resume={id}\n\
          \n\
          not run: app (earlier-step-failed: web)\n"
@@ -183,7 +184,7 @@ fn the_json_names_the_run_the_entries_and_the_steps_not_run() {
     assert_eq!(entry["endpoints"], serde_json::json!(["10.0.0.5"]));
     assert_eq!(entry["failures"][0]["resource"], "banner");
     assert_eq!(entry["failures"][0]["toolCode"], "EFIRE");
-    assert_eq!(entry["next"].as_array().unwrap().len(), 2);
+    assert_eq!(entry["next"].as_array().unwrap().len(), 3);
     assert_eq!(value["skipped"][0]["name"], "app");
     assert_eq!(value["skipped"][0]["becauseOf"], "web");
     assert_eq!(value["keptHere"], true);

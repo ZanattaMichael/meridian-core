@@ -392,6 +392,11 @@ message DescribeResponse {
   // nothing, and a stage of its target is left in place by `meridian
   // destroy`.
   bool destroys = 29;
+  // inspects is true when the plugin's Runner answers Inspect: it reads one
+  // resource as it is now, without changing anything. A plugin built before
+  // this field inspects nothing, and `meridian inspect` refuses its stages
+  // with the rule unsupported-inspect.
+  bool inspects = 30;
 }
 
 // Setting is one thing an operator can configure about a runner.
@@ -548,14 +553,15 @@ message RunContext {
   bytes inputs_json = 4;
   // secrets is the value of every secret the graph's params referred to,
   // sent only to a target whose capabilities include secrets, and only for
-  // Plan and Apply: Outputs is sent none. The host sends them over the
+  // Plan, Apply, Destroy and Inspect: Outputs is sent none. The host sends them over the
   // plugin's private socket and nowhere else, and the SDK takes each one
   // into protected memory as it arrives and wipes the message. The plugin
   // holds them for the length of the call and no longer.
   repeated Secret secrets = 5;
   // credential is the identity the host is reached with, with the value of
   // each of its secret fields, sent as secrets are: only to a target whose
-  // capabilities include credentials, and only for Plan and Apply.
+  // capabilities include credentials, and only for the calls that are sent
+  // secrets.
   CredentialValues credential = 6;
   // save_plan asks Plan to hand back the tool's own saved plan in its result,
   // for `meridian plan --out`. A plugin that cannot, or whose saved plan would
@@ -790,6 +796,39 @@ message IdentifiersResponse {
   RunError error = 2;
 }
 
+message InspectRequest {
+  RunContext context = 1;
+  Artifact artifact = 2;
+  // resource is the id of the resource to read, as the document declares it.
+  string resource = 3;
+  // endpoint is the machine to read it on: the context's host unless the
+  // operator named another one the artifact configures.
+  string endpoint = 4;
+}
+
+// InDesiredState is whether the tool says a resource is as declared.
+enum InDesiredState {
+  // The tool cannot say, or was not asked.
+  IN_DESIRED_STATE_UNKNOWN = 0;
+  IN_DESIRED_STATE_YES = 1;
+  IN_DESIRED_STATE_NO = 2;
+}
+
+message InspectResponse {
+  // found is false when the tool has no such resource: it was never made, or
+  // was removed.
+  bool found = 1;
+  // actual_json is a JSON object of the resource's properties as the tool
+  // reads them now, keyed by the document's param names where the plugin
+  // can map them and by the tool's own names otherwise.
+  bytes actual_json = 2;
+  InDesiredState in_desired_state = 3;
+  // command is the native command the plugin ran, as a person would type it,
+  // with no secret in it.
+  string command = 4;
+  RunError error = 5;
+}
+
 // Runner hands an artifact to the real tool. Unlike Emitter it has side
 // effects, takes as long as the tool takes, and can fail for reasons that have
 // nothing to do with the document. Plan and Apply stream, so an operator sees
@@ -817,6 +856,10 @@ service Runner {
   // tool's own destroy does. Asked only of a plugin whose Describe says
   // destroys; Cancel stops it as it stops Apply.
   rpc Destroy(DestroyRequest) returns (stream DestroyEvent);
+  // Inspect reads one resource of the artifact as it is now, on one
+  // endpoint, and changes nothing: no apply, no write to the tool's state.
+  // Asked only of a plugin whose Describe says inspects.
+  rpc Inspect(InspectRequest) returns (InspectResponse);
 }
 
 message CancelRequest {}
