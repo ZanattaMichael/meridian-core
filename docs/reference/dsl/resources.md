@@ -133,8 +133,8 @@ On passthrough targets, names are the tool's: `instance_type` for Terraform,
 
 <p align="center"><img src="../../graphics/meridian-adopt.svg" alt="adopt: a resource names the tool's identifier of a thing that exists; a stateful target compiles it into the tool's import and the plan reports adopt, a converging target accepts it and changes nothing, and any other target is refused before its plugin is asked" width="100%"></p>
 
-`adopt` says the resource already exists, and gives the tool's own identifier
-for it. The tool takes it under management instead of creating a second one:
+`adopt` gives the tool's identifier of something that already exists, so the tool
+manages it instead of creating another:
 
 ```yaml
 - id: logs
@@ -144,25 +144,22 @@ for it. The tool takes it under management instead of creating a second one:
     bucket: example-logs
 ```
 
-What it does depends on the target, and the
-[capability matrix](../capability-matrix.md) has the column `adopt`:
+By target (the `adopt` column of the [capability matrix](../capability-matrix.md)):
 
 | Target says | What happens | Targets |
 |---|---|---|
-| `import` | The identifier is compiled into the tool's own import. The first `meridian plan` reports the resource as `adopt`, and the apply records it in the tool's state | Terraform, OpenTofu, Pulumi |
-| `converge` | Accepted, and changes nothing: the tool keeps no state and makes the thing what the document says whether it exists or not. The compile warns | Ansible, Puppet, OpenVox, Chef, Salt, DSC, Kubernetes, Bicep, ARM |
-| no | Refused before the plugin is asked, so the tool never creates a second thing beside the one that exists | the rest |
+| `import` | Compiled into the tool's import; the first plan reports `adopt` and the apply records it in state | Terraform, OpenTofu, Pulumi |
+| `converge` | Accepted with a warning and changes nothing: the tool converges either way | Ansible, Puppet, OpenVox, Chef, Salt, DSC, Kubernetes, Bicep, ARM |
+| no | Refused before the plugin is asked | the rest |
 
 - `adopt` is text, and may be placed from data: `adopt: "${{ data.vpc_id }}"`.
   It cannot hold a secret.
-- `adopt` with `state: absent` is refused: one takes the thing under
-  management, the other deletes it.
-- A target refuses `adopt` on something its tool cannot import, such as a
-  Terraform data source, with `invalid-adopt`.
-- Once the thing is adopted, `adopt` can stay: the tool's import does nothing
-  for a thing already in its state.
-- [`meridian retarget`](../../operations/retargeting.md) writes the `adopt`
-  lines for you when a document moves from one tool to another.
+- `adopt` with `state: absent` is refused.
+- `adopt` on something the tool cannot import, such as a Terraform data source, is
+  refused as `invalid-adopt`.
+- `adopt` can stay after the import; it then does nothing.
+- [`meridian retarget`](../../operations/retargeting.md) writes `adopt` lines when a
+  document moves to another tool.
 
 ## A resource in each flavour
 
