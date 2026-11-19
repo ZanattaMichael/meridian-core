@@ -117,6 +117,52 @@ impl Cause {
     pub fn read(word: &str) -> Cause {
         word.parse().unwrap_or(Cause::Unknown)
     }
+
+    /// The cause a tool's message names in words most tools share: a
+    /// connection that failed, a login refused, a timeout, a reboot. `None`
+    /// when it names none of them, for the plugin to decide.
+    ///
+    /// ```
+    /// use meridian_sdk::failure::Cause;
+    ///
+    /// assert_eq!(Cause::from_message("ssh: connect to host web01 port 22: Connection refused"), Some(Cause::Unreachable));
+    /// assert_eq!(Cause::from_message("package nginx not found"), None);
+    /// ```
+    pub fn from_message(message: &str) -> Option<Cause> {
+        let text = message.to_ascii_lowercase();
+        let has = |words: &[&str]| words.iter().any(|w| text.contains(w));
+        if has(&[
+            "permission denied (publickey",
+            "authentication failed",
+            "unauthorized",
+            "invalid credentials",
+            "logon failure",
+            "incorrect password",
+        ]) {
+            Some(Cause::AuthFailed)
+        } else if has(&[
+            "connection refused",
+            "no route to host",
+            "could not resolve hostname",
+            "name or service not known",
+            "network is unreachable",
+            "host is unreachable",
+            "failed to connect",
+        ]) {
+            Some(Cause::Unreachable)
+        } else if has(&["timed out", "timeout expired", "deadline exceeded"]) {
+            Some(Cause::TimedOut)
+        } else if has(&[
+            "reboot is required",
+            "requires a reboot",
+            "pending reboot",
+            "restart required",
+        ]) {
+            Some(Cause::RebootRequired)
+        } else {
+            None
+        }
+    }
 }
 
 /// One resource the tool failed on.
@@ -178,5 +224,27 @@ mod tests {
         let words: std::collections::BTreeSet<&str> =
             Cause::ALL.iter().map(|c| c.as_str()).collect();
         assert_eq!(words.len(), Cause::ALL.len());
+    }
+
+    #[test]
+    fn a_message_names_a_shared_cause_or_none() {
+        for (message, cause) in [
+            (
+                "deploy@web01: Permission denied (publickey).",
+                Some(Cause::AuthFailed),
+            ),
+            (
+                "Failed to connect to the host via ssh",
+                Some(Cause::Unreachable),
+            ),
+            ("operation timed out after 300s", Some(Cause::TimedOut)),
+            (
+                "A reboot is required to complete the install",
+                Some(Cause::RebootRequired),
+            ),
+            ("no such package", None),
+        ] {
+            assert_eq!(Cause::from_message(message), cause, "{message}");
+        }
     }
 }

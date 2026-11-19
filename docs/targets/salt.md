@@ -794,6 +794,23 @@ A failed plan or apply reports the command that ran, its exit status, and what S
 
 Messages name `salt-ssh` in place of `salt-call` when that is what ran.
 
+### Reading a failure
+
+Each failed state in Salt's JSON result is a [resource failure](../reference/state.md#resource-failures):
+
+| From the result | Becomes |
+|---|---|
+| `__id__` | the resource |
+| the minion (`local` is the step's host) | the endpoint |
+| `comment`, or `changes.stderr` when it is empty | the summary |
+| `changes.retcode` | the tool code, `rc=1` |
+| `One or more requisite failed` | `dependency-failed` |
+| any other failed state | `resource-failed`, or `unreachable`, `auth-failed`, `timed-out` or `reboot-required` when the message says so |
+
+A state file that did not compile is `invalid-config` on no resource; a host
+`salt-ssh` could not run on is `unreachable` (or `auth-failed`), with its
+`retcode`.
+
 A permission error from `salt-call`, such as being unable to write under `/var/cache/salt`,
 means it needs root or a configuration directory of its own; see [Settings](#settings).
 

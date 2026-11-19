@@ -8,6 +8,7 @@
 
 use std::path::PathBuf;
 
+use meridian_sdk::failure::{Cause, Failure};
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
     agent_for, credential_for_this_machine, decode_value, AgentPrograms, Applied, Artifact, Change,
@@ -226,6 +227,7 @@ impl PuppetRunner {
                     _ => "puppet apply failed",
                 };
                 let mut error = finished.into_error(what);
+                error.failures = report.failures;
                 if !noop {
                     error.changes = report.changes;
                 }
@@ -287,6 +289,7 @@ impl PuppetRunner {
             return Ok(report);
         }
         let mut error = finished.clone().into_error("bolt apply failed");
+        error.failures = report.failures;
         if error.output.is_empty() {
             error.output = finished.stdout;
         }
@@ -428,9 +431,22 @@ struct Report {
     changes: Vec<Change>,
     /// The tool's report could not be read, so "no changes" is not known.
     unreadable: bool,
+    /// The resources that failed, one each.
+    failures: Vec<Failure>,
 }
 
 impl Report {
+    /// Records a failure, the first one for a resource only.
+    fn fail(&mut self, failure: Failure) {
+        if !self
+            .failures
+            .iter()
+            .any(|f| f.resource == failure.resource && f.endpoint == failure.endpoint)
+        {
+            self.failures.push(failure);
+        }
+    }
+
     /// Records one event against a resource, folding several properties of
     /// one resource into a single change.
     fn record(&mut self, resource: &str, property: &str, message: &str) {
@@ -483,6 +499,12 @@ struct Reader<'a> {
 
 impl Log for Reader<'_> {
     fn line(&self, line: LogLine) {
+        if let Some(failure) = read_failure(&line.text) {
+            self.report
+                .lock()
+                .expect("no panic holds the report")
+                .fail(failure);
+        }
         if line.stream == LogStream::Stdout {
             if let Some((resource, property, message)) =
                 read_notice(&line.text).filter(|(_, property, message)| is_event(property, message))
@@ -497,9 +519,63 @@ impl Log for Reader<'_> {
     }
 }
 
+/// The failure one line of `puppet apply` reports, Puppet writing it to
+/// standard error:
+///
+/// ```text
+/// Error: /Stage[main]/Meridian_web/Exec[broken]/returns: change from 'notrun' to ['0'] failed: '/bin/false' returned 1 instead of one of [0]
+/// Warning: /Stage[main]/Meridian_web/File[after]: Skipping because of failed dependencies
+/// Error: Evaluation Error: Unknown variable: '$nope'. (file: /work/site.pp, line: 3, column: 9) on node web01
+/// ```
+fn read_failure(text: &str) -> Option<Failure> {
+    if let Some(event) = text.strip_prefix("Warning: ") {
+        let (title, _, message) = read_event(event)?;
+        return message
+            .starts_with("Skipping because of failed dependencies")
+            .then(|| Failure::new(Cause::DependencyFailed, title, message));
+    }
+    let said = text.strip_prefix("Error: ")?;
+    let Some((title, _, message)) = read_event(said) else {
+        // An error about no resource is the manifest's own.
+        let invalid = [
+            "Evaluation Error",
+            "Could not parse",
+            "Syntax error",
+            "Could not find",
+        ];
+        return invalid
+            .iter()
+            .any(|w| said.contains(w))
+            .then(|| Failure::new(Cause::InvalidConfig, "", said));
+    };
+    // `change from 'x' to 'y' failed: why`.
+    let why = message
+        .split_once(" failed: ")
+        .map_or(message, |(_, why)| why);
+    let mut failure = Failure::new(
+        Cause::from_message(why).unwrap_or(Cause::ResourceFailed),
+        title,
+        why,
+    );
+    if let Some(code) = why
+        .split_once(" returned ")
+        .and_then(|(_, rest)| rest.split(|c: char| !c.is_ascii_digit()).next())
+        .filter(|code| !code.is_empty())
+    {
+        failure = failure.code(format!("rc={code}"));
+    }
+    Some(failure)
+}
+
 /// The resource title, property and message of one resource event line.
 fn read_notice(text: &str) -> Option<(&str, &str, &str)> {
-    let path = text.strip_prefix("Notice: /Stage[main]/")?;
+    read_event(text.strip_prefix("Notice: ")?)
+}
+
+/// The resource title, property and message of a line about a resource,
+/// past its level: `/Stage[main]/Class/Type[title]/property: message`.
+fn read_event(text: &str) -> Option<(&str, &str, &str)> {
+    let path = text.strip_prefix("/Stage[main]/")?;
     // Past the class segment, to `Type[title]`.
     let declaration = &path[path.find('/')? + 1..];
     let title_start = declaration.find('[')? + 1;
@@ -538,6 +614,8 @@ fn is_event(property: &str, message: &str) -> bool {
 /// each carrying Puppet's own report with a status per resource.
 fn read_bolt(stdout: &str, noop: bool) -> Report {
     let mut report = Report::default();
+    let mut failed_target = None;
+    let mut bolt_target = String::new();
     let statuses = decode_value(stdout.trim().as_bytes()).ok().and_then(|v| {
         // `bolt apply` prints a list of results; `bolt task run` and older
         // releases wrap it as `{"items": [...]}`.
@@ -546,7 +624,29 @@ fn read_bolt(stdout: &str, noop: bool) -> Report {
             None => v.as_list()?.to_vec(),
         };
         let item = items.first()?.clone();
+        let target = item
+            .as_map()?
+            .get("target")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
         let value = item.as_map()?.get("value")?.clone();
+        // A target Bolt could not reach or run on has an `_error` and no report.
+        if let Some(error) = value.as_map()?.get("_error").and_then(Value::as_map) {
+            let text = |key: &str| error.get(key).and_then(Value::as_str).unwrap_or("");
+            let cause = if text("kind").contains("connect-error") {
+                Cause::from_message(text("msg")).unwrap_or(Cause::Unreachable)
+            } else {
+                Cause::from_message(text("msg")).unwrap_or(Cause::Unknown)
+            };
+            failed_target = Some(
+                Failure::new(cause, "", text("msg").lines().next().unwrap_or(""))
+                    .endpoint(target.clone())
+                    .code(text("kind")),
+            );
+            return None;
+        }
+        bolt_target = target;
         let statuses = value
             .as_map()?
             .get("report")?
@@ -557,6 +657,7 @@ fn read_bolt(stdout: &str, noop: bool) -> Report {
     });
     let Some(statuses) = statuses else {
         report.unreadable = true;
+        report.failures.extend(failed_target);
         return report;
     };
     // The report keys statuses by name; the order Puppet evaluated them in
@@ -591,6 +692,19 @@ fn read_bolt(stdout: &str, noop: bool) -> Report {
             let wanted = if noop { "noop" } else { "success" };
             if text("status") == wanted {
                 report.record(title, text("property"), text("message"));
+            } else if text("status") == "failure" {
+                let message = text("message");
+                let why = message
+                    .split_once(" failed: ")
+                    .map_or(message, |(_, why)| why);
+                report.fail(
+                    Failure::new(
+                        Cause::from_message(why).unwrap_or(Cause::ResourceFailed),
+                        title,
+                        why,
+                    )
+                    .endpoint(bolt_target.clone()),
+                );
             }
         }
     }

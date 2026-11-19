@@ -405,6 +405,10 @@ certificate name.
 Locally, exit 0 or 2 is success (2: changed); 4 or 6 is a failed resource, reported with
 what had changed. Over OpenBolt an unreadable report makes the plan unknown.
 
+A failed resource is read as on [Puppet](puppet.md#reading-a-failure): a
+[resource failure](../reference/state.md#resource-failures) per resource from OpenVox's `Error:` and `Skipping because of
+failed dependencies` lines, or from OpenBolt's JSON report.
+
 ### Settings
 
 Optional environment variables.

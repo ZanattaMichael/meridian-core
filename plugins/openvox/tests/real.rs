@@ -300,6 +300,19 @@ fn a_failed_resource_fails_the_apply_and_keeps_what_was_already_done() {
     assert!(matches!(err.exit_code, Some(4 | 6)), "{err}");
     assert!(err.command.contains("apply --detailed-exitcodes"), "{err}");
     assert!(err.output.contains("returned 3"), "{err}");
+    let failed: Vec<(&str, &str, &str)> = err
+        .failures
+        .iter()
+        .map(|f| (f.resource.as_str(), f.cause.as_str(), f.tool_code.as_str()))
+        .collect();
+    assert_eq!(
+        failed,
+        [
+            ("broken", "resource-failed", "rc=3"),
+            ("after", "dependency-failed", "")
+        ],
+        "{err}"
+    );
     // What came before the failure was done and is reported; what depended
     // on it was not attempted.
     assert_eq!(

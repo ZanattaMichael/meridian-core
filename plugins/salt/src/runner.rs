@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
+use meridian_sdk::failure::{Cause, Failure};
 use meridian_sdk::tool::{write_artifact, Finished, Tool};
 use meridian_sdk::{
     agent_for, credential_for_this_machine, decode_value, AgentPrograms, Applied, Artifact, Change,
@@ -426,6 +427,9 @@ struct Outcome {
     changed: bool,
     comment: String,
     run_num: i64,
+    /// A command's exit status and standard error, from its `changes`.
+    retcode: Option<i64>,
+    stderr: String,
 }
 
 /// Reads the JSON document a run printed, relays a line per state, and turns
@@ -459,9 +463,19 @@ fn read_result(
 
     // The result is keyed by the minion: `local` for salt-call, the host for
     // salt-ssh. There is one, because one host was asked.
-    let body = match &document {
-        Value::Map(map) if map.len() == 1 => map.values().next().expect("one entry"),
-        other => other,
+    let (minion, body) = match &document {
+        Value::Map(map) if map.len() == 1 => {
+            let (minion, body) = map.iter().next().expect("one entry");
+            (minion.as_str(), body)
+        }
+        other => ("", other),
+    };
+    // salt-call answers as `local`: the step's own host.
+    let endpoint = if minion == "local" { "" } else { minion };
+    let failed_with = |msg: String, text: String, reported: Failure| {
+        let mut error = failure(msg, text);
+        error.failures.push(reported.endpoint(endpoint));
+        error
     };
     let body = match body {
         // salt-ssh wraps a host's answer when it carries more than the result.
@@ -474,9 +488,11 @@ fn read_result(
         // the reasons.
         Value::List(reasons) => {
             let text: String = reasons.iter().map(|r| format!("{}\n", plain(r))).collect();
-            return Err(failure(
+            let first = text.lines().next().unwrap_or_default().to_owned();
+            return Err(failed_with(
                 format!("{program} could not compile the state file"),
-                text,
+                text.clone(),
+                Failure::new(Cause::InvalidConfig, "", first).detail(text),
             ));
         }
         Value::Map(map) if map.contains_key("stderr") || map.contains_key("stdout") => {
@@ -485,15 +501,21 @@ fn read_result(
                 map.get("stdout").map(plain).unwrap_or_default(),
                 map.get("stderr").map(plain).unwrap_or_default()
             );
-            return Err(failure(
+            let mut reported = unreached(&text);
+            if let Some(code) = map.get("retcode").map(plain) {
+                reported = reported.code(format!("rc={code}"));
+            }
+            return Err(failed_with(
                 format!("{program} could not run on the host"),
                 text,
+                reported,
             ));
         }
         Value::String(text) => {
-            return Err(failure(
+            return Err(failed_with(
                 format!("{program} could not run on the host"),
                 text.clone(),
+                unreached(text),
             ));
         }
         other => {
@@ -512,6 +534,7 @@ fn read_result(
 
     let mut report = Report::default();
     let mut failed = Vec::new();
+    let mut failures = Vec::new();
     for outcome in &outcomes {
         let summary = outcome.comment.lines().next().unwrap_or_default().trim();
         let status = match outcome.result {
@@ -528,7 +551,10 @@ fn read_result(
             log.out(&format!("{line}: {summary}"));
         }
         match outcome.result {
-            Some(false) => failed.push(format!("{}: {}", outcome.id, outcome.comment.trim())),
+            Some(false) => {
+                failed.push(format!("{}: {}", outcome.id, outcome.comment.trim()));
+                failures.push(failure_of(outcome).endpoint(endpoint));
+            }
             _ if status != "ok" => report.changes.push(Change {
                 resource: outcome.id.clone(),
                 action: if outcome.function.ends_with(".absent")
@@ -557,10 +583,56 @@ fn read_result(
         format!("{program} reported {} failed states", failed.len())
     };
     let mut error = failure(what, failed.join("\n") + "\n");
+    error.failures = failures;
     if !test {
         error.changes = report.changes;
     }
     Err(error)
+}
+
+/// The failure a failed state amounts to. A state skipped for a failed
+/// requisite says so in its comment.
+fn failure_of(outcome: &Outcome) -> Failure {
+    let comment = outcome.comment.trim();
+    let summary = if comment.is_empty() {
+        outcome.stderr.lines().next().unwrap_or_default()
+    } else {
+        comment.lines().next().unwrap_or_default()
+    };
+    let cause = if comment.starts_with("One or more requisite failed") {
+        Cause::DependencyFailed
+    } else {
+        Cause::from_message(comment)
+            .or_else(|| Cause::from_message(&outcome.stderr))
+            .unwrap_or(Cause::ResourceFailed)
+    };
+    let mut failure = Failure::new(cause, outcome.id.clone(), summary);
+    if let Some(code) = outcome.retcode {
+        failure = failure.code(format!("rc={code}"));
+    }
+    let detail = if outcome.stderr.is_empty() {
+        comment
+    } else {
+        outcome.stderr.trim()
+    };
+    if detail != summary {
+        failure = failure.detail(detail);
+    }
+    failure
+}
+
+/// The failure of a host Salt could not run on.
+fn unreached(text: &str) -> Failure {
+    let summary = text
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or_default();
+    Failure::new(
+        Cause::from_message(text).unwrap_or(Cause::Unreachable),
+        "",
+        summary.trim(),
+    )
+    .detail(text.trim())
 }
 
 /// Whether a value looks like one state's result and not something else a
@@ -601,6 +673,21 @@ fn outcome(key: &str, value: &Value) -> Outcome {
             Some(Value::Uint(n)) => i64::try_from(*n).unwrap_or(i64::MAX),
             _ => i64::MAX,
         },
+        retcode: match map
+            .get("changes")
+            .and_then(Value::as_map)
+            .and_then(|c| c.get("retcode"))
+        {
+            Some(Value::Int(n)) => Some(*n),
+            Some(Value::Uint(n)) => i64::try_from(*n).ok(),
+            _ => None,
+        },
+        stderr: map
+            .get("changes")
+            .and_then(Value::as_map)
+            .and_then(|c| c.get("stderr"))
+            .map(plain)
+            .unwrap_or_default(),
     }
 }
 
@@ -694,6 +781,64 @@ mod tests {
         assert_eq!(outcome.function, "cmd.run");
         assert_eq!(outcome.run_num, 3);
         assert!(!outcome.changed);
+    }
+
+    fn read(json: &str) -> RunError {
+        let mut finished = Finished::default();
+        finished.code = Some(1);
+        finished.stdout = json.to_owned();
+        read_result("salt-ssh", finished, false, &NoLog).unwrap_err()
+    }
+
+    #[test]
+    fn a_failed_state_is_a_failure_of_its_id_on_the_minion() {
+        let err = read(
+            r#"{"web01": {
+                "pkg_|-nginx_|-nginx_|-installed": {"__id__": "nginx", "result": false, "comment": "No package nginx-x found", "changes": {}, "__run_num__": 0},
+                "cmd_|-migrate_|-/bin/false_|-run": {"__id__": "migrate", "result": false, "comment": "Command /bin/false run", "changes": {"retcode": 3, "stderr": "no such upstream"}, "__run_num__": 1},
+                "service_|-nginx_svc_|-nginx_|-running": {"__id__": "nginx_svc", "result": false, "comment": "One or more requisite failed: web.nginx", "changes": {}, "__run_num__": 2}
+            }}"#,
+        );
+        assert!(!err.failures.is_empty(), "{}: {}", err.msg, err.output);
+        let got: Vec<(&str, &str, Cause, &str)> = err
+            .failures
+            .iter()
+            .map(|f| {
+                (
+                    f.resource.as_str(),
+                    f.endpoint.as_str(),
+                    f.cause,
+                    f.tool_code.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("nginx", "web01", Cause::ResourceFailed, ""),
+                ("migrate", "web01", Cause::ResourceFailed, "rc=3"),
+                ("nginx_svc", "web01", Cause::DependencyFailed, ""),
+            ]
+        );
+        assert_eq!(err.failures[1].detail, "no such upstream");
+    }
+
+    #[test]
+    fn a_state_file_that_will_not_compile_and_a_host_that_cannot_be_reached_are_failures_too() {
+        let err = read(
+            r#"{"local": ["Rendering SLS 'base:web' failed: mapping values are not allowed here"]}"#,
+        );
+        assert_eq!(err.failures[0].cause, Cause::InvalidConfig);
+        assert_eq!(err.failures[0].endpoint, "");
+
+        let err = read(
+            r#"{"web01": {"retcode": 255, "stderr": "ssh: connect to host web01 port 22: Connection refused", "stdout": ""}}"#,
+        );
+        let f = &err.failures[0];
+        assert_eq!(
+            (f.cause, f.endpoint.as_str(), f.tool_code.as_str()),
+            (Cause::Unreachable, "web01", "rc=255")
+        );
     }
 
     #[test]

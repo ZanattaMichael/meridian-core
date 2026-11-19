@@ -343,6 +343,19 @@ fn a_failed_state_stops_what_depends_on_it_and_reports_what_was_done() {
         "{}",
         err.output
     );
+    let causes: Vec<(&str, &str)> = err
+        .failures
+        .iter()
+        .map(|f| (f.resource.as_str(), f.cause.as_str()))
+        .collect();
+    assert_eq!(
+        causes,
+        [
+            ("broken", "resource-failed"),
+            ("never", "dependency-failed")
+        ]
+    );
+    assert_eq!(err.failures[0].tool_code, "rc=1");
     assert!(base.is_dir());
     assert!(!base.join("never").exists());
 }
@@ -360,6 +373,7 @@ fn a_condition_that_is_not_an_expression_is_salts_to_refuse() {
         .unwrap_err();
     assert_eq!(err.msg, "salt-call could not compile the state file");
     assert!(err.output.contains("Rendering SLS"), "{}", err.output);
+    assert_eq!(err.failures[0].cause.as_str(), "invalid-config");
 }
 
 /// The other transport, against a host that accepts SSH. It runs when

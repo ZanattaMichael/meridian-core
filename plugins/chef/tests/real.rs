@@ -242,6 +242,11 @@ fn a_command_that_fails_fails_the_apply_and_reports_what_changed_before_it() {
     assert_eq!(error.msg, "chef-client could not converge the cookbook");
     assert!(error.exit_code.is_some_and(|code| code != 0));
     assert!(error.output.contains("no such host"), "{}", error.output);
+    assert_eq!(error.failures.len(), 1, "{:?}", error.failures);
+    let failure = &error.failures[0];
+    assert_eq!(failure.resource, "broken");
+    assert_eq!(failure.cause.as_str(), "resource-failed");
+    assert_eq!(failure.tool_code, "rc=4");
     assert_eq!(
         changes(&error.changes),
         [("before", ChangeAction::Update)],
