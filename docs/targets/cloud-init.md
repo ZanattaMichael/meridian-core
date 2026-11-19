@@ -701,6 +701,14 @@ Settings can also go in `meridian.yaml` under `spec.settings.cloud-init`; the en
 wins. See the [plugin settings reference](../reference/plugin-settings.md#cloud-init). SSH
 uses `-o BatchMode=yes`. A missing cloud-init fails the check rather than skipping it.
 
+### Reading a failure
+
+A rejected user-data is `invalid-config`. When the wait finds the boot failed, each
+module `cloud-init status --long` lists under `errors:` is a [resource failure](../reference/state.md#resource-failures) on the host: the
+module (`scripts_user`) as the resource, the exception class as the tool code, its
+message as the summary. A host SSH cannot reach is `unreachable` (`auth-failed` for a
+refused key), tool code `rc=255`.
+
 ## Troubleshooting
 
 **`could not run cloud-init: it is not installed`.** Install it (Linux only), set

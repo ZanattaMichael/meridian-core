@@ -159,6 +159,7 @@ fn a_template_packer_rejects_fails_the_plan_with_packers_own_words() {
         .unwrap_err();
     assert_eq!(err.msg, "packer validate failed");
     assert!(err.output.contains("no_such_argument"), "{}", err.output);
+    assert_eq!(err.failures[0].cause.as_str(), "invalid-config");
 }
 
 #[test]
@@ -174,6 +175,12 @@ fn a_failing_provisioner_fails_the_apply_and_runs_the_error_cleanup() {
         .unwrap_err();
     assert_eq!(err.msg, "packer build failed");
     assert_ne!(err.exit_code, Some(0));
+    let f = &err.failures[0];
+    assert_eq!(
+        (f.resource.as_str(), f.cause.as_str(), f.tool_code.as_str()),
+        ("box", "resource-failed", "rc=7"),
+        "{err}"
+    );
     assert_eq!(
         fs::read_to_string(dir.join("work/cleaned.txt"))
             .unwrap()

@@ -324,6 +324,16 @@ A failure reports the step, command, exit status and Packer's output tail.
 
 [`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) sets `PACKER_LOG=1` at every level.
 
+### Reading a failure
+
+| Step | Failure |
+|---|---|
+| `packer init` | `dependency-missing`, summarised by the first `Error:` line |
+| `packer validate` | `invalid-config`, the same way |
+| `packer build` | each `--> <build>: <message>` line under `Some builds didn't complete successfully`, on the source the build is named after; `exit status: N` or `exit code N` is the tool code `rc=N` |
+
+A build's failure is `resource-failed`, or `unreachable`, `auth-failed`, `timed-out` or `reboot-required` when the message says so.
+
 ## Secrets
 
 A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) reaches Packer only as a

@@ -363,6 +363,14 @@ file.
 
 [`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `-v=3`, `-v=6` or `-v=9` with `--logtostderr` to every `pulumi` call.
 
+### Reading a failure
+
+`pulumi up` and `pulumi destroy` write their engine events to `pulumi-events.jsonl` in
+the work directory, which is read and removed. Each `error` diagnostic about a resource
+is a [resource failure](../reference/state.md#resource-failures) on the URN's name, `resource-failed` or `unreachable`, `auth-failed`, `timed-out` or `reboot-required` when the message says so. The stack's own `update failed`
+is left to the step's error. A failed preview's `error` diagnostics are
+`invalid-config`, on the resource where one is named.
+
 ## Secrets
 
 A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) becomes a secret config

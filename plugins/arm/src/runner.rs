@@ -141,9 +141,47 @@ impl ArmRunner {
 
     /// One `az deployment` call against the deployment.
     fn az(&self, context: &RunContext, deployment: &Deployment, operation: &str) -> Tool {
+        self.az_on(context, deployment, &["deployment"], operation)
+    }
+
+    /// The error with the resources whose deployment operations failed.
+    /// Operations that cannot be listed add nothing.
+    fn with_failures(
+        &self,
+        mut error: RunError,
+        context: &RunContext,
+        deployment: &Deployment,
+    ) -> RunError {
+        let listed = self
+            .az_on(context, deployment, &["deployment", "operation"], "list")
+            .run(&NoLog);
+        if let Some(listed) = listed.ok().filter(|l| l.success()) {
+            error.failures = meridian_target_bicep::operations::failed_operations(
+                &listed.stdout,
+                |kind, name, id| {
+                    let (kind, name) =
+                        type_and_name(id).unwrap_or_else(|| (kind.to_owned(), name.to_owned()));
+                    deployment
+                        .resources
+                        .get(&(kind.to_lowercase(), name.to_lowercase()))
+                        .cloned()
+                        .unwrap_or_else(|| format!("{kind}/{name}"))
+                },
+            );
+        }
+        error
+    }
+
+    fn az_on(
+        &self,
+        context: &RunContext,
+        deployment: &Deployment,
+        command: &[&str],
+        operation: &str,
+    ) -> Tool {
         let mut tool = Tool::new(&self.program)
+            .args(command.iter().copied())
             .args([
-                "deployment",
                 if deployment.subscription_scope {
                     "sub"
                 } else {
@@ -486,7 +524,7 @@ impl Runner for ArmRunner {
                 log,
             );
         drop(secrets);
-        let created = created?;
+        let created = created.map_err(|e| self.with_failures(e, context, &deployment))?;
         Ok(Applied {
             changes: plan.changes,
             outputs: read_outputs(&parse(&created, "the deployment's record")?),

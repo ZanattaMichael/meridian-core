@@ -129,13 +129,23 @@ fn an_apply_previews_then_deploys_and_reports_outputs() {
 fn a_failed_deployment_keeps_what_azure_said() {
     let dir = scratch(TMP, "failed");
     let cases = format!(
-        "{WHAT_IF}\ncreate) echo 'ERROR: {{\"code\": \"InvalidTemplateDeployment\"}}' >&2; exit 1 ;;"
+        "{WHAT_IF}\ncreate) echo 'ERROR: {{\"code\": \"InvalidTemplateDeployment\"}}' >&2; exit 1 ;;\n{}",
+        r#"group) echo '[{"properties":{"provisioningState":"Failed","statusCode":"BadRequest","statusMessage":{"error":{"code":"InvalidTemplateDeployment","message":"The SKU is not available in this region."}},"targetResource":{"resourceType":"Microsoft.Compute/virtualMachines","resourceName":"vm1"}}}]' ;;"#
     );
     let err = runner(&dir, &cases)
         .apply(&context(&dir), &compiled(), &KeptLog::default())
         .unwrap_err();
     assert_eq!(err.msg, "az could not complete the deployment");
     assert!(err.output.contains("InvalidTemplateDeployment"));
+    let f = &err.failures[0];
+    assert_eq!(
+        (f.cause.as_str(), f.tool_code.as_str()),
+        ("invalid-config", "InvalidTemplateDeployment")
+    );
+    assert!(calls(&dir)
+        .last()
+        .unwrap()
+        .starts_with("deployment operation group list"));
 }
 
 #[test]
