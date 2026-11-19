@@ -458,7 +458,7 @@ def run_safety() -> str:
     p.append(card(400, 150, 300, 70, "refused, told who holds it", ["nothing is run"], RED, 15, 12.5))
     # Policy.
     p.append(flow(f"M{cx} 220L{cx} 260", WHITE, delay=0.4))
-    p.append(card(40, 260, 260, 70, "--analyze, --policy", ["the compiled files are scanned,", "every change is asked about first"], LINE, 16, 12.5))
+    p.append(card(40, 260, 260, 70, "--analyze, --policy", ["scan the compiled files;", "ask a policy about each change"], LINE, 16, 12.5))
     p.append(flow(f"M300 295L400 295", RED, delay=0.9, seconds=2.2))
     p.append(card(400, 260, 300, 70, "the run fails", ["nothing was applied"], RED, 15, 12.5))
     # Stages.
@@ -698,32 +698,32 @@ def test_flow() -> str:
 
 def analyzers_flow() -> str:
     """A stage compiles, its files are scanned, and each finding is traced back to the document."""
-    W, H = 1200, 470
+    W, H = 1200, 520
     p: list[str] = []
-    p.append(card(40, 60, 260, 120, "site.yaml", ["kind: Infrastructure", "resources:", "  - id: logs        # line 13", "    type: aws_s3_bucket"], WHITE, 17, 12.5, True))
+    p.append(card(40, 60, 260, 120, "site.yaml", ["resource on line 13:", "id: logs", "type: aws_s3_bucket"], WHITE, 17, 12.5, True))
     p.append(flow("M300 120L360 120", WHITE, delay=0.0, seconds=1.6))
-    p.append(card(360, 60, 220, 120, "compile", ["the plugin emits", "main.tf.json", "and knows which resource", "wrote which part"], IAC, 17, 12.5))
+    p.append(card(360, 60, 220, 120, "compile", ["the target plugin", "writes main.tf.json;", "the resource id logs", "is kept in it"], IAC, 17, 12.5))
     p.append(flow("M580 120L640 120", IAC, delay=0.4, seconds=1.6))
-    p.append(card(640, 60, 240, 120, "a directory of its own", ["the compiled files on disk,", "for the analyzer only;", "removed when it is done"], LINE, 16, 12.5))
+    p.append(card(640, 60, 240, 120, "temporary directory", ["the compiled files", "are written here", "and deleted afterwards"], LINE, 16, 12.5))
     p.append(flow("M880 120L940 120", LINE, delay=0.8, seconds=1.6))
-    p.append(card(940, 60, 220, 120, "meridian-analyze-<name>", ["checkov · trivy · yours", "started in that directory,", "the stage on standard input"], CON, 15, 12.5, True))
+    p.append(card(940, 60, 220, 120, "meridian-analyze-<name>", ["checkov, trivy or your own", "runs in that directory;", "stage details on stdin"], CON, 15, 12.5, True))
     # The answer comes back below.
     ay = 240
     p.append(flow(f"M1050 180L1050 {ay}", CON, delay=1.2, seconds=1.6))
-    p.append(card(700, ay, 460, 90, "findings", ["{rule: CKV_AWS_18, severity: high, message: …,", " file: main.tf.json, line: 4, resource: logs}", "measures: [{name: monthly-cost, value: 12.5, unit: USD}]"], CON, 16, 12, True))
-    p.append(flow(f"M700 {ay + 45}L640 {ay + 45}", CON, delay=1.6, seconds=1.6))
-    p.append(card(360, ay, 280, 90, "traced to the document", ["the resource the analyzer named,", "or the last id written above the line;", "then the line that resource starts on"], IAC, 16, 12.5))
-    p.append(flow(f"M360 {ay + 45}L300 {ay + 45}", IAC, delay=2.0, seconds=1.6))
-    p.append(card(40, ay, 260, 90, "site.yaml:13", ["high CKV_AWS_18 at site.yaml:13", "(main.tf.json:4)"], WHITE, 17, 12.5, True))
+    p.append(card(700, ay, 460, 100, "findings", ["rule: CKV_AWS_18   severity: high", "file: main.tf.json   line: 4", "resource: logs"], CON, 16, 12, True))
+    p.append(flow(f"M700 {ay + 50}L640 {ay + 50}", CON, delay=1.6, seconds=1.6))
+    p.append(card(360, ay, 280, 100, "traced to the document", ["resource logs (named by the analyzer,", "or the last id above line 4)", "starts on site.yaml line 13"], IAC, 16, 12.5))
+    p.append(flow(f"M360 {ay + 50}L300 {ay + 50}", IAC, delay=2.0, seconds=1.6))
+    p.append(card(40, ay, 260, 100, "site.yaml:13", ["high CKV_AWS_18 at site.yaml:13", "(main.tf.json:4)"], WHITE, 17, 12.5, True))
     # What happens then.
-    ry = 360
-    p.append(heading(40, ry - 12, "Then"))
-    p.append(card(40, ry, 260, 70, "--fail-on high", ["at or above: the stage fails;", "could not look: it fails too"], RED, 15, 12.5))
-    p.append(card(330, ry, 260, 70, "the baseline", ["an accepted finding is shown,", "recorded, and fails nothing"], GREEN, 15, 12.5))
-    p.append(card(620, ry, 260, 70, "every finding is an event", ["record · events · reports", "SARIF · pipeline annotations"], ORC, 15, 12.5))
-    p.append(card(910, ry, 250, 70, "apply", ["every stage scanned first;", "a finding applies nothing"], CM, 15, 12.5))
-    p.append(caption(W, H, "An analyzer reads what the tool would read, and a finding lands where a person can act on it: the line of the document."))
-    return doc(W, H, "Analyzers: a stage compiles, its files are written to a directory of their own, each analyzer reads them and answers with findings, and every finding is traced back to the line of the document that resource was written on", "".join(p))
+    ry = 380
+    p.append(heading(40, ry - 12, "What happens next"))
+    p.append(card(40, ry, 260, 90, "--fail-on high", ["high or critical: stage fails;", "analyzer cannot run: fails too"], RED, 15, 12.5))
+    p.append(card(330, ry, 260, 90, "baseline", ["accepted findings are shown", "and recorded, but fail nothing"], GREEN, 15, 12.5))
+    p.append(card(620, ry, 260, 90, "finding.reported event", ["run record, reports, SARIF", "and pipeline annotations"], ORC, 15, 12.5))
+    p.append(card(910, ry, 250, 90, "apply", ["scans stages before applying;", "a failure applies nothing"], CM, 15, 12.5))
+    p.append(caption(W, H, "An analyzer scans the files the tool would read, and each finding is reported at the document line you would edit."))
+    return doc(W, H, "Analyzers: a stage compiles, its files are written to a temporary directory, each analyzer scans them and returns findings, and each finding is traced to the document line where its resource starts", "".join(p))
 
 
 def common_types() -> str:
