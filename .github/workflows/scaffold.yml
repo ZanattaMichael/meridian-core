@@ -39,7 +39,7 @@ jobs:
         # for each, and the core refuses the wrong kind.
         category: [configuration-management, container-orchestration]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup-rust
 
