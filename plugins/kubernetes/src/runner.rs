@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
+use meridian_sdk::failure::{Cause, Failure};
 use meridian_sdk::tool::{write_artifact, Finished, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, NoLog, Operations, Output, Plan,
@@ -28,6 +29,8 @@ pub const ARGS_VARIABLE: &str = "MERIDIAN_KUBECTL_ARGS";
 /// How many seconds an apply waits for an output the cluster has not filled
 /// in yet, such as a load balancer's address.
 pub const OUTPUT_WAIT_VARIABLE: &str = "MERIDIAN_KUBECTL_OUTPUT_WAIT";
+/// How many seconds an apply waits for one wave's objects to be ready.
+pub const WAIT_TIMEOUT_VARIABLE: &str = "MERIDIAN_KUBECTL_WAIT_TIMEOUT";
 
 /// What an operator can configure about this runner, in the order the
 /// settings are documented.
@@ -51,6 +54,12 @@ pub fn settings() -> Vec<Setting> {
             "120",
             "How many seconds an apply waits for an output the cluster has not filled in yet, such as a load balancer's address.",
         ),
+        Setting::new(
+            "wait-timeout",
+            WAIT_TIMEOUT_VARIABLE,
+            "300",
+            "How many seconds an apply waits for each object of a `dependsOn` wave to be ready (a rollout, a Job, a CustomResourceDefinition) before it fails with `timed-out`.",
+        ),
     ]
 }
 
@@ -67,6 +76,8 @@ pub struct KubernetesRunner {
     pub output_wait: Duration,
     /// How long it sleeps between two looks.
     pub output_poll: Duration,
+    /// How long an apply waits for one object of a wave to be ready.
+    pub wait_timeout: Duration,
 }
 
 /// One piece of an output, as `cluster.json` records it.
@@ -89,6 +100,21 @@ struct Cluster {
     /// author wrote.
     objects: BTreeMap<String, String>,
     outputs: Vec<(String, Vec<Part>)>,
+    /// The waves `dependsOn` splits the objects into; empty for one.
+    waves: Vec<Wave>,
+}
+
+/// One wave: its file, and what to wait for before the next.
+struct Wave {
+    file: String,
+    wait: Vec<Wait>,
+}
+
+/// An object to wait for: `rollout`, `complete` or `established`.
+struct Wait {
+    object: String,
+    namespace: String,
+    until: String,
 }
 
 impl Cluster {
@@ -120,6 +146,23 @@ impl Cluster {
             }
             outputs.push((string(output, "name"), parts));
         }
+        let mut waves = Vec::new();
+        for wave in map.get("waves").and_then(Value::as_list).unwrap_or(&[]) {
+            let wave = wave.as_map().ok_or_else(bad)?;
+            let mut wait = Vec::new();
+            for object in wave.get("wait").and_then(Value::as_list).unwrap_or(&[]) {
+                let object = object.as_map().ok_or_else(bad)?;
+                wait.push(Wait {
+                    object: string(object, "object"),
+                    namespace: string(object, "namespace"),
+                    until: string(object, "for"),
+                });
+            }
+            waves.push(Wave {
+                file: string(wave, "file"),
+                wait,
+            });
+        }
         Ok(Cluster {
             context: string(map, "context"),
             namespace: string(map, "namespace"),
@@ -132,6 +175,7 @@ impl Cluster {
                 .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
                 .collect(),
             outputs,
+            waves,
         })
     }
 }
@@ -198,6 +242,11 @@ impl KubernetesRunner {
                     .unwrap_or(120),
             ),
             output_poll: Duration::from_secs(2),
+            wait_timeout: Duration::from_secs(
+                settings::text(setting("wait-timeout"))
+                    .parse()
+                    .unwrap_or(300),
+            ),
         }
     }
 
@@ -245,7 +294,7 @@ impl KubernetesRunner {
         artifact: &Artifact,
         before: &[&str],
     ) -> Result<Tool, RunError> {
-        self.with_manifests(context, cluster, artifact, "apply", before)
+        self.with_file(context, cluster, artifact, MANIFESTS_PATH, "apply", before)
     }
 
     /// `kubectl <verb>`, given the manifests as [`Self::apply_manifests`]
@@ -258,18 +307,28 @@ impl KubernetesRunner {
         verb: &str,
         before: &[&str],
     ) -> Result<Tool, RunError> {
+        self.with_file(context, cluster, artifact, MANIFESTS_PATH, verb, before)
+    }
+
+    /// `kubectl <verb>` of the manifests in `file`, given as
+    /// [`Self::apply_manifests`] gives them.
+    fn with_file(
+        &self,
+        context: &RunContext,
+        cluster: &Cluster,
+        artifact: &Artifact,
+        file: &str,
+        verb: &str,
+        before: &[&str],
+    ) -> Result<Tool, RunError> {
         let mut operation = vec![verb];
         operation.extend_from_slice(before);
         if context.secrets.is_empty() {
-            operation.extend(["--filename", MANIFESTS_PATH]);
+            operation.extend(["--filename", file]);
             return Ok(self.kubectl(context, cluster, &operation, ""));
         }
         operation.extend(["--filename", "-"]);
-        let text = artifact
-            .files
-            .get(MANIFESTS_PATH)
-            .map(String::as_str)
-            .unwrap_or("");
+        let text = artifact.files.get(file).map(String::as_str).unwrap_or("");
         let filled = context
             .secrets
             .filled_text(text, secret_token, Written::JsonString)
@@ -295,6 +354,168 @@ impl KubernetesRunner {
         let cluster = Cluster::read(settings)?;
         write_artifact(&context.work_dir, artifact)?;
         Ok(cluster)
+    }
+
+    /// Applies one wave at a time, waiting for each wave's objects before
+    /// the next. A failure carries the changes made before it.
+    fn apply_waves(
+        &self,
+        context: &RunContext,
+        cluster: &Cluster,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Vec<Change>, RunError> {
+        let mut changes = Vec::new();
+        let count = cluster.waves.len();
+        for (n, wave) in cluster.waves.iter().enumerate() {
+            log.out(&format!("applying wave {} of {count}", n + 1));
+            let applied = self
+                .with_file(context, cluster, artifact, &wave.file, "apply", &[])
+                .and_then(|tool| {
+                    cluster.run_ok(tool, "kubectl could not apply the manifests", log)
+                });
+            let finished = match applied {
+                Ok(finished) => finished,
+                Err(mut err) => {
+                    err.changes = changes;
+                    return Err(err);
+                }
+            };
+            for change in read_report(&finished.stdout, cluster) {
+                log.out(&change.to_string());
+                changes.push(change);
+            }
+            for wait in &wave.wait {
+                if let Err(mut err) = self.wait(context, cluster, wait, log) {
+                    err.changes = changes;
+                    return Err(err);
+                }
+            }
+        }
+        Ok(changes)
+    }
+
+    /// Waits until `wait`'s object is ready: a rollout done, a Job complete,
+    /// a CustomResourceDefinition established.
+    fn wait(
+        &self,
+        context: &RunContext,
+        cluster: &Cluster,
+        wait: &Wait,
+        log: &dyn Log,
+    ) -> Result<(), RunError> {
+        let resource = cluster
+            .objects
+            .get(&wait.object)
+            .cloned()
+            .unwrap_or_else(|| wait.object.clone());
+        let timeout = format!("--timeout={}s", self.wait_timeout.as_secs());
+        let timed_out = |what: &str| {
+            let mut err = RunError::new(format!(
+                "{} did not {what} within {} s",
+                wait.object,
+                self.wait_timeout.as_secs()
+            ));
+            err.failures.push(Failure::new(
+                Cause::TimedOut,
+                resource.clone(),
+                format!("{} did not {what} in time", wait.object),
+            ));
+            err
+        };
+        let (operation, what): (Vec<&str>, &str) = match wait.until.as_str() {
+            "rollout" => (
+                vec!["rollout", "status", &wait.object, &timeout],
+                "finish its rollout",
+            ),
+            "established" => (
+                vec![
+                    "wait",
+                    "--for=condition=Established",
+                    &wait.object,
+                    &timeout,
+                ],
+                "become established",
+            ),
+            "complete" => return self.wait_for_job(context, cluster, wait, &resource, log),
+            _ => return Ok(()),
+        };
+        log.out(&format!("waiting for {} to {what}", wait.object));
+        let finished = self
+            .kubectl(context, cluster, &operation, &wait.namespace)
+            .run(log)?;
+        if finished.success() {
+            return Ok(());
+        }
+        if finished.stderr.contains("timed out") {
+            let mut err = timed_out(what);
+            err.output = finished.stderr;
+            return Err(err);
+        }
+        let mut err = cluster.error(finished, &format!("kubectl could not wait for {resource}"));
+        if err.failures.is_empty() {
+            err.failures.push(Failure::new(
+                Cause::ResourceFailed,
+                resource,
+                format!("{} did not {what}", wait.object),
+            ));
+        }
+        Err(err)
+    }
+
+    /// Looks at a Job until it is complete or failed. `kubectl wait` cannot
+    /// wait for either, so a failed Job would otherwise wait the whole time.
+    fn wait_for_job(
+        &self,
+        context: &RunContext,
+        cluster: &Cluster,
+        wait: &Wait,
+        resource: &str,
+        log: &dyn Log,
+    ) -> Result<(), RunError> {
+        log.out(&format!("waiting for {} to complete", wait.object));
+        let started = Instant::now();
+        let conditions = "jsonpath={.status.conditions[?(@.status==\"True\")].type}";
+        loop {
+            let finished = self
+                .kubectl(
+                    context,
+                    cluster,
+                    &["get", &wait.object, "--output", conditions],
+                    &wait.namespace,
+                )
+                .run(&NoLog)?;
+            if !finished.success() {
+                return Err(cluster.error(finished, &format!("kubectl could not read {resource}")));
+            }
+            let conditions: Vec<&str> = finished.stdout.split_whitespace().collect();
+            if conditions.contains(&"Complete") {
+                return Ok(());
+            }
+            if conditions.contains(&"Failed") {
+                let mut err = RunError::new(format!("{} failed", wait.object));
+                err.failures.push(Failure::new(
+                    Cause::ResourceFailed,
+                    resource,
+                    format!("{} failed", wait.object),
+                ));
+                return Err(err);
+            }
+            if started.elapsed() >= self.wait_timeout {
+                let mut err = RunError::new(format!(
+                    "{} did not complete within {} s",
+                    wait.object,
+                    self.wait_timeout.as_secs()
+                ));
+                err.failures.push(Failure::new(
+                    Cause::TimedOut,
+                    resource,
+                    format!("{} did not complete in time", wait.object),
+                ));
+                return Err(err);
+            }
+            std::thread::sleep(self.output_poll);
+        }
     }
 
     /// Reads every output from the live objects. An output with no value is
@@ -499,15 +720,20 @@ impl Runner for KubernetesRunner {
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
         let cluster = self.prepare(context, artifact)?;
-        let finished = cluster.run_ok(
-            self.apply_manifests(context, &cluster, artifact, &[])?,
-            "kubectl could not apply the manifests",
-            log,
-        )?;
-        let changes = read_report(&finished.stdout, &cluster);
-        for change in &changes {
-            log.out(&change.to_string());
-        }
+        let changes = if cluster.waves.is_empty() {
+            let finished = cluster.run_ok(
+                self.apply_manifests(context, &cluster, artifact, &[])?,
+                "kubectl could not apply the manifests",
+                log,
+            )?;
+            let changes = read_report(&finished.stdout, &cluster);
+            for change in &changes {
+                log.out(&change.to_string());
+            }
+            changes
+        } else {
+            self.apply_waves(context, &cluster, artifact, log)?
+        };
         Ok(Applied {
             changes,
             outputs: self.read_outputs(context, &cluster, self.output_wait, log)?,

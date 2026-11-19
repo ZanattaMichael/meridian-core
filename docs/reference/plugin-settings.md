@@ -117,6 +117,7 @@ for each target by name.
 | `program` | `MERIDIAN_KUBECTL` | `kubectl` | The `kubectl` program to run, when it is not on `PATH`. Shared with the helm target. |
 | `args` | `MERIDIAN_KUBECTL_ARGS` | none | Extra arguments for every `kubectl` call, split like a shell command line: `--context prod`. Shared with the helm target. |
 | `output-wait` | `MERIDIAN_KUBECTL_OUTPUT_WAIT` | `120` | How many seconds an apply waits for an output the cluster has not filled in yet, such as a load balancer's address. |
+| `wait-timeout` | `MERIDIAN_KUBECTL_WAIT_TIMEOUT` | `300` | How many seconds an apply waits for each object of a `dependsOn` wave to be ready (a rollout, a Job, a CustomResourceDefinition) before it fails with `timed-out`. |
 
 ## [opentofu](../targets/opentofu.md)
 

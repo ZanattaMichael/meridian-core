@@ -26,8 +26,10 @@
 //! # Ordering and notification
 //!
 //! `kubectl apply` sends manifests in file order and does not wait for one to
-//! be ready before the next. `dependsOn` therefore orders the file, and a
-//! warning says that is all it does.
+//! be ready before the next. `dependsOn` therefore orders the file and splits
+//! the objects into waves by depth; the runner applies one wave at a time
+//! and waits for its workloads, Jobs and CustomResourceDefinitions before the
+//! next.
 //!
 //! `notifies` with the action `restart`, aimed at a Deployment, StatefulSet or
 //! DaemonSet, compiles to a checksum of the notifier on the workload's pod
@@ -144,6 +146,9 @@ pub(crate) struct Manifests {
     /// The name of each secret a `stringData` value stands for, so the
     /// manifest can carry the token the runner fills in.
     pub secrets: Vec<SecretName>,
+    /// The objects, by index, in the waves `dependsOn` puts them in; empty
+    /// when the document has one wave.
+    pub waves: Vec<Vec<usize>>,
 }
 
 /// What a secret's value is written as in the manifests: a token inside a

@@ -555,3 +555,85 @@ fn inspect_reads_one_object_and_a_dry_run_says_whether_it_is_as_declared() {
         "inspect changes nothing"
     );
 }
+
+/// A namespace, a Job that runs `command`, and a ConfigMap that waits for it.
+fn migration(command: &str) -> String {
+    format!(
+        r#"apiVersion: meridian/v1
+kind: Infrastructure
+metadata:
+  name: workload
+spec:
+  target: kubernetes
+  resources:
+    - id: target
+      type: cluster
+      params:
+        namespace: {NAMESPACE}
+    - id: space
+      type: v1/Namespace
+      params:
+        metadata:
+          name: {NAMESPACE}
+    - id: migrate
+      type: batch/v1/Job
+      params:
+        spec:
+          backoffLimit: 0
+          template:
+            spec:
+              restartPolicy: Never
+              containers:
+                - name: migrate
+                  image: registry.k8s.io/e2e-test-images/busybox:1.36.1-1
+                  command: [sh, -c, "{command}"]
+      dependsOn:
+        - resource: space
+    - id: done
+      type: v1/ConfigMap
+      params:
+        data:
+          migrated: "yes"
+      dependsOn:
+        - resource: migrate
+"#
+    )
+}
+
+#[ignore = "needs a real kubectl and a cluster; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn depends_on_waits_for_a_job_and_a_failed_job_stops_the_apply() {
+    if !cluster() {
+        return;
+    }
+    delete_namespace();
+    let _tear_down = TearDown;
+    let dir = scratch(TMP, "real-waves");
+    apply(&dir, &compile(&migration("sleep 3")));
+    assert_eq!(
+        kubectl(&[
+            "get",
+            "job",
+            "migrate",
+            "--namespace",
+            NAMESPACE,
+            "--output",
+            "jsonpath={.status.succeeded}"
+        ])
+        .unwrap(),
+        "1",
+        "the ConfigMap was applied only after the Job completed"
+    );
+
+    delete_namespace();
+    let dir = scratch(TMP, "real-waves-failed");
+    let err = KubernetesRunner::from_env()
+        .apply(&context(&dir), &compile(&migration("exit 1")), &NoLog)
+        .unwrap_err();
+    assert_eq!(err.failures[0].resource, "migrate");
+    assert_eq!(err.failures[0].cause.as_str(), "resource-failed");
+    assert!(
+        kubectl(&["get", "configmap", "done", "--namespace", NAMESPACE]).is_err(),
+        "the wave after a failed Job is not applied"
+    );
+}

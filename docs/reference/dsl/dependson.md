@@ -109,7 +109,7 @@ flowchart TD
     F --> F2["nothing is written:<br/>the resources are emitted in order"]
     R --> R2["the tool's keyword:<br/>require, dependsOn, depends_on, DependsOn, Requires= and After="]
     O --> O2["depends_on between services;<br/>the rest Compose creates first anyway"]
-    N --> N2["the order of the manifests,<br/>with a warning that kubectl does not wait"]
+    N --> N2["Meridian applies the manifests in waves<br/>and waits for each wave"]
 ```
 
 | Tool orders by | Targets | What `dependsOn` becomes |
@@ -119,7 +119,7 @@ flowchart TD
 | its own rules | `docker` | `depends_on` between services |
 | the fixed shape of a build | `packer` | the order of the provisioners and the chain of post-processors; a dependency that contradicts the shape is refused |
 | the stages of a first boot | `cloud-init` | nothing written; a dependency that points backwards through the stages is refused |
-| nothing | `kubernetes` | the order of the manifests, with a warning |
+| nothing | `kubernetes` | Meridian applies the manifests in waves and waits for each wave |
 | the kind of each object | `helm` | nothing written where Helm's own install order already agrees; refused where it does not |
 
 - **File-ordered tools run independent resources in sequence**, with a warning:
