@@ -18,6 +18,7 @@ and has systemd run them, on this machine or on another over `ssh`.
 | `state: absent` | No. Remove the resource from the document; the next apply stops and removes its unit |
 | Plan | Yes: an exact comparison of unit files, plus a check by the host's own Quadlet |
 | Outputs | Yes: names known at compile time, or a path into `podman inspect` |
+| Destroy | Yes: every unit Meridian installed is stopped and removed. See [Destroying](../operations/destroying.md) |
 | Documents | Infrastructure (this machine) and ResourceSet (its `targetHost`, over `ssh`) |
 | Needs on the host | Linux with systemd, and Podman 4.4 or later (4.8 for image units, 5.0 for pods, 5.2 for builds) |
 
@@ -355,6 +356,10 @@ It changes nothing and needs no extra rights.
 
 A unit that does not start fails the apply with its journal tail. Only units Meridian
 installed are removed. When nothing differs, steps 2 to 7 are skipped.
+
+`meridian destroy` runs steps 1 to 5 as if the document had no resources: every unit in
+`installed.json` is stopped and its file removed, then systemd is reloaded. Volumes, images
+and Podman secrets are kept.
 
 ### What Meridian keeps
 

@@ -261,6 +261,31 @@ fn a_workload_is_planned_applied_read_back_and_restarted_by_a_notify() {
     let applied = apply(&dir, &second);
     assert!(applied.changes.is_empty(), "{:?}", applied.changes);
     assert_eq!(pods_once_rolled_out(), after);
+
+    // A destroy previews what goes, then deletes it and waits.
+    let log = KeptLog::default();
+    let runner = KubernetesRunner::from_env();
+    let preview = runner
+        .plan_destroy(&context(&dir), &second, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    let all = [
+        (ChangeAction::Delete, "space"),
+        (ChangeAction::Delete, "web"),
+        (ChangeAction::Delete, "web_config"),
+    ];
+    assert_eq!(changes(&preview.changes), all);
+    assert!(
+        kubectl(&["get", "namespace", NAMESPACE]).is_ok(),
+        "a preview deletes nothing"
+    );
+    let removed = runner
+        .destroy(&context(&dir), &second, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(changes(&removed), all);
+    assert!(
+        kubectl(&["get", "namespace", NAMESPACE]).is_err(),
+        "the namespace is gone"
+    );
 }
 
 #[ignore = "needs a real kubectl and a cluster; see docs/contributing/real-tool-tests.md"]

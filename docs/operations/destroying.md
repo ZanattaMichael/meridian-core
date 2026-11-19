@@ -25,6 +25,10 @@ Infrastructure output still finds that output, because the Infrastructure is not
 | `terraform`, `opentofu` | `plan -destroy -out=…`, then `apply` of that plan |
 | `pulumi` | `stack export` for the preview, then `pulumi destroy`; the stack is kept |
 | `cloudformation` | `list-stack-resources` for the preview, then `delete-stack` |
+| `kubernetes` | `kubectl delete --wait` of the manifests' objects |
+| `helm` | `helm uninstall --wait`; the namespace is kept |
+| `docker` | `docker compose down --volumes --remove-orphans`; images are kept |
+| `podman` | stops and removes the units it installed; volumes, images and secrets are kept |
 | every other target | none yet: the stage is `kept` |
 
 A configuration management target keeps no record of what it made, so it cannot destroy.

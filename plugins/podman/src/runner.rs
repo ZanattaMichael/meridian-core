@@ -329,12 +329,25 @@ impl PodmanRunner {
 
     /// Everything a plan and an apply both start with: the artifact on disk,
     /// the host looked at, the units checked by the host's own Quadlet.
+    /// A destroy surveys with `nothing` set: the document's units are left
+    /// out, so every unit installed is stale and is stopped and removed.
     fn survey(
         &self,
         context: &RunContext,
         artifact: &Artifact,
         agent: Option<&SshAgent>,
         log: &dyn Log,
+    ) -> Result<Survey, RunError> {
+        self.survey_for(context, artifact, agent, log, false)
+    }
+
+    fn survey_for(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        agent: Option<&SshAgent>,
+        log: &dyn Log,
+        nothing: bool,
     ) -> Result<Survey, RunError> {
         if let Some(problem) = &self.misconfigured {
             return Err(RunError::new(problem.clone()));
@@ -344,7 +357,10 @@ impl PodmanRunner {
                 "the artifact has no {META_PATH}; it was not compiled by this plugin"
             )));
         };
-        let meta = Meta::read(meta)?;
+        let mut meta = Meta::read(meta)?;
+        if nothing {
+            meta.units.clear();
+        }
         let mut desired = Vec::with_capacity(meta.units.len());
         for unit in &meta.units {
             let Some(content) = artifact.files.get(&unit.file) else {
@@ -564,6 +580,71 @@ impl Runner for PodmanRunner {
         // tool's own identity otherwise.
         let agent = self.session(context, &NoLog)?;
         self.read_outputs(context, &Meta::read(&meta)?, agent.as_ref(), &NoLog)
+    }
+
+    fn destroys(&self) -> bool {
+        true
+    }
+
+    fn plan_destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Plan, RunError> {
+        let agent = self.session(context, log)?;
+        Ok(Plan {
+            changes: self
+                .survey_for(context, artifact, agent.as_ref(), log, true)?
+                .changes,
+            unknown: false,
+            saved: None,
+        })
+    }
+
+    /// Stops every unit Meridian installed for the document and removes its
+    /// file, then reloads systemd. Volumes, images and Podman secrets are
+    /// kept.
+    fn destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Vec<Change>, RunError> {
+        let agent = self.session(context, log)?;
+        let agent = agent.as_ref();
+        let survey = self.survey_for(context, artifact, agent, log, true)?;
+        if survey.changes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let steps = survey.steps();
+        let finished = self.on_host(
+            context,
+            agent,
+            self.settings(context.debug_level).apply(&steps),
+            log,
+        )?;
+        if !finished.success() {
+            let done = script::read_done(&finished.stdout);
+            let mut error = finished.into_error("removing the units failed");
+            error.changes = survey
+                .changes
+                .iter()
+                .filter(|change| survey.was_done(change, &done))
+                .cloned()
+                .collect();
+            // What was removed is no longer installed.
+            let left: Vec<Installed> = survey
+                .installed
+                .iter()
+                .filter(|old| !done.removed.contains(&old.file))
+                .cloned()
+                .collect();
+            write_installed(&context.work_dir, &left)?;
+            return Err(error);
+        }
+        write_installed(&context.work_dir, &[])?;
+        Ok(survey.changes)
     }
 }
 

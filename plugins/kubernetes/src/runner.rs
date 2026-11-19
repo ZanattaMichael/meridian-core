@@ -196,7 +196,20 @@ impl KubernetesRunner {
         artifact: &Artifact,
         before: &[&str],
     ) -> Result<Tool, RunError> {
-        let mut operation = vec!["apply"];
+        self.with_manifests(context, cluster, artifact, "apply", before)
+    }
+
+    /// `kubectl <verb>`, given the manifests as [`Self::apply_manifests`]
+    /// gives them.
+    fn with_manifests(
+        &self,
+        context: &RunContext,
+        cluster: &Cluster,
+        artifact: &Artifact,
+        verb: &str,
+        before: &[&str],
+    ) -> Result<Tool, RunError> {
+        let mut operation = vec![verb];
         operation.extend_from_slice(before);
         if context.secrets.is_empty() {
             operation.extend(["--filename", MANIFESTS_PATH]);
@@ -339,6 +352,31 @@ fn read_report(stdout: &str, cluster: &Cluster) -> Vec<Change> {
     changes
 }
 
+/// Reads what `kubectl delete` printed: one line an object, such as
+/// `deployment.apps "web" deleted (server dry run)`.
+fn read_deleted(stdout: &str, cluster: &Cluster) -> Vec<Change> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let (kind, rest) = line.trim().split_once(' ')?;
+            let (name, rest) = rest.strip_prefix('"')?.split_once('"')?;
+            if !rest.trim_start().starts_with("deleted") {
+                return None;
+            }
+            let object = format!("{kind}/{name}");
+            Some(Change {
+                resource: cluster
+                    .objects
+                    .get(&object)
+                    .cloned()
+                    .unwrap_or_else(|| object.clone()),
+                action: ChangeAction::Delete,
+                summary: object,
+            })
+        })
+        .collect()
+}
+
 /// Whether a failed dry run failed only because objects sit in a namespace
 /// the same dry run would create. Nothing is stored in a dry run, so the
 /// namespace is not there for them, though it will be in the apply.
@@ -434,5 +472,58 @@ impl Runner for KubernetesRunner {
             })?;
         let cluster = Cluster::read(&settings)?;
         self.read_outputs(context, &cluster, Duration::ZERO, &NoLog)
+    }
+
+    fn destroys(&self) -> bool {
+        true
+    }
+
+    fn plan_destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Plan, RunError> {
+        let cluster = self.prepare(context, artifact)?;
+        log.out("asking the cluster what a delete would remove");
+        let finished = self
+            .with_manifests(
+                context,
+                &cluster,
+                artifact,
+                "delete",
+                &["--ignore-not-found", "--dry-run=server"],
+            )?
+            .run_ok("kubectl could not preview the delete", log)?;
+        Ok(Plan {
+            changes: read_deleted(&finished.stdout, &cluster),
+            unknown: false,
+            saved: None,
+        })
+    }
+
+    /// `kubectl delete` of every object in the manifests, waiting until
+    /// each is gone. An object that is already gone is not an error.
+    fn destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Vec<Change>, RunError> {
+        let cluster = self.prepare(context, artifact)?;
+        let finished = self
+            .with_manifests(
+                context,
+                &cluster,
+                artifact,
+                "delete",
+                &["--ignore-not-found", "--wait"],
+            )?
+            .run_ok("kubectl could not delete the objects", log)?;
+        let removed = read_deleted(&finished.stdout, &cluster);
+        for change in &removed {
+            log.out(&change.to_string());
+        }
+        Ok(removed)
     }
 }
