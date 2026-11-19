@@ -138,6 +138,15 @@ Resources:
         Ref: Vm
       VolumeId:
         Ref: Store
+  Files:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: files
+      Tags:
+        - Key: Name
+          Value: files
+      VersioningConfiguration:
+        Status: Enabled
   Logs:
     Type: AWS::S3::Bucket
 Outputs:

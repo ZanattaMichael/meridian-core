@@ -169,5 +169,28 @@ resource store 'Microsoft.Compute/disks@2024-03-01' = {
   }
 }
 
+resource files 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: 'files'
+  location: resourceGroup().location
+  kind: 'StorageV2'
+  sku: {
+    name: 'Standard_LRS'
+  }
+}
+
+resource files_blobs 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
+  name: 'default'
+  parent: files
+  properties: {
+    isVersioningEnabled: true
+  }
+}
+
+resource files_objects 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  name: 'objects'
+  parent: files_blobs
+  properties: {}
+}
+
 output address string = string(web_ip.properties.ipAddress)
 output private_address string = string(vm_nic.properties.ipConfigurations[0].properties.privateIPAddress)

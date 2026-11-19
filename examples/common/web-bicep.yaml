@@ -55,6 +55,12 @@ spec:
         vm: ${vm}
         sizeGb: 50
 
+    # A store of files, keeping older versions.
+    - id: files
+      type: objectStore
+      params:
+        versioning: true
+
   outputs:
     - name: address
       value: ${vm.publicAddress}

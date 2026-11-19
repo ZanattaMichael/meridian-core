@@ -108,8 +108,22 @@
       }
     },
     "aws_s3_bucket": {
+      "files": {
+        "bucket": "files",
+        "tags": {
+          "Name": "files"
+        }
+      },
       "logs": {
         "bucket_prefix": "web-logs-"
+      }
+    },
+    "aws_s3_bucket_versioning": {
+      "files_versioning": {
+        "bucket": "${aws_s3_bucket.files.id}",
+        "versioning_configuration": {
+          "status": "Enabled"
+        }
       }
     },
     "aws_security_group": {

@@ -1,5 +1,5 @@
 //! The common infrastructure resource types: `network`, `subnet`, `firewall`,
-//! `address`, `vm` and `disk`.
+//! `address`, `vm`, `disk` and `objectStore`.
 //!
 //! Most of what an infrastructure document describes is the same on every
 //! cloud: a network, a subnet in it, a firewall, a fixed address, a machine.
@@ -48,6 +48,11 @@ const COMMON_TYPES: &[(&str, &str)] = &[
     (
         "network",
         "A private network with its own address range: a VPC, a virtual network.",
+    ),
+    (
+        "objectStore",
+        "A store of files reached over HTTPS: an S3 bucket, an Azure storage account with one \
+         blob container, a Cloud Storage bucket.",
     ),
     (
         "subnet",
@@ -122,6 +127,31 @@ const COMMON_PARAMS: &[(&str, &str, ParamKind, bool, &str)] = &[
     ("network", "location", ParamKind::String, false, LOCATION),
     ("network", "name", ParamKind::String, false, NAME),
     ("network", "tags", ParamKind::Map, false, TAGS),
+    (
+        "objectStore",
+        "location",
+        ParamKind::String,
+        false,
+        "Refused on AWS, where the provider's or the stack's region decides. On Azure, as \
+         `location` of any type. On Google Cloud, the bucket's location; \
+         `spec.settings.location` unless given.",
+    ),
+    (
+        "objectStore",
+        "name",
+        ParamKind::String,
+        false,
+        "The store's name in the cloud, unique across the cloud. The resource's id unless \
+         given; on Azure, the id with only its lower-case letters and digits.",
+    ),
+    ("objectStore", "tags", ParamKind::Map, false, TAGS),
+    (
+        "objectStore",
+        "versioning",
+        ParamKind::Bool,
+        false,
+        "Whether an overwritten or deleted file is kept as an older version. Off unless given.",
+    ),
     (
         "subnet",
         "cidr",
@@ -229,6 +259,11 @@ const COMMON_OUTPUTS: &[(&str, &str, &str)] = &[
     ("disk", "id", "The cloud's own id for the disk."),
     ("firewall", "id", "The cloud's own id for the firewall."),
     ("network", "id", "The cloud's own id for the network."),
+    (
+        "objectStore",
+        "id",
+        "The cloud's own id for the store: the bucket, or the Azure storage account.",
+    ),
     ("subnet", "id", "The cloud's own id for the subnet."),
     ("vm", "id", "The cloud's own id for the machine."),
     (
@@ -941,6 +976,27 @@ pub fn cloud_name(resource: &Resource) -> Value {
         .get("name")
         .cloned()
         .unwrap_or_else(|| Value::String(resource.id.clone()))
+}
+
+/// The name of an Azure storage account for an `objectStore`: its `name`,
+/// or its id with only the lower-case letters and digits Azure allows.
+pub fn storage_account_name(resource: &Resource) -> Value {
+    match resource.params.get("name") {
+        Some(name) => name.clone(),
+        None => Value::String(
+            resource
+                .id
+                .to_ascii_lowercase()
+                .chars()
+                .filter(char::is_ascii_alphanumeric)
+                .collect(),
+        ),
+    }
+}
+
+/// Whether an `objectStore` keeps older versions of its files.
+pub fn versioning(resource: &Resource) -> bool {
+    matches!(resource.params.get("versioning"), Some(Value::Bool(true)))
 }
 
 /// Picks the smallest size of a cloud's table that has at least the asked

@@ -762,6 +762,7 @@ fn the_plugin_declares_what_it_is() {
             "disk",
             "firewall",
             "network",
+            "objectStore",
             "parameter",
             "subnet",
             "vm"

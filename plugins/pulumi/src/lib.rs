@@ -268,6 +268,7 @@ impl Emitter for Pulumi {
             "firewall",
             "invoke.<function>",
             "network",
+            "objectStore",
             "stack",
             "subnet",
             "vm",

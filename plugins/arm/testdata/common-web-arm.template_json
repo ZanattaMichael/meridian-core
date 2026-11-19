@@ -201,6 +201,36 @@
         "name": "StandardSSD_LRS"
       },
       "type": "Microsoft.Compute/disks"
+    },
+    {
+      "apiVersion": "2023-05-01",
+      "kind": "StorageV2",
+      "location": "[resourceGroup().location]",
+      "name": "files",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "type": "Microsoft.Storage/storageAccounts"
+    },
+    {
+      "apiVersion": "2023-05-01",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', 'files')]"
+      ],
+      "name": "[format('{0}/default', 'files')]",
+      "properties": {
+        "isVersioningEnabled": true
+      },
+      "type": "Microsoft.Storage/storageAccounts/blobServices"
+    },
+    {
+      "apiVersion": "2023-05-01",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices', split(format('{0}/default', 'files'), '/')[0], split(format('{0}/default', 'files'), '/')[1])]"
+      ],
+      "name": "[format('{0}/objects', format('{0}/default', 'files'))]",
+      "properties": {},
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers"
     }
   ]
 }

@@ -123,6 +123,28 @@ resources:
       resourceGroupName: web-prod
       sku:
         name: StandardSSD_LRS
+  files:
+    type: azure-native:storage:StorageAccount
+    properties:
+      accountName: files
+      kind: StorageV2
+      location: westeurope
+      resourceGroupName: web-prod
+      sku:
+        name: Standard_LRS
+  files_objects:
+    type: azure-native:storage:BlobContainer
+    properties:
+      accountName: ${files.name}
+      containerName: objects
+      resourceGroupName: web-prod
+  files_versioning:
+    type: azure-native:storage:BlobServiceProperties
+    properties:
+      accountName: ${files.name}
+      blobServicesName: default
+      isVersioningEnabled: true
+      resourceGroupName: web-prod
 outputs:
   address: ${web_ip.ipAddress}
   private_address: ${vm_nic.ipConfigurations[0].privateIPAddress}

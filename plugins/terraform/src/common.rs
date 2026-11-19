@@ -452,6 +452,32 @@ fn aws(r: &Resource, graph: &ResourceGraph, state: &mut State) -> Result<Expansi
             }
         }
         "disk" => aws_disk(r, graph)?,
+        "objectStore" => {
+            let mut resources = vec![primary(
+                r,
+                "aws_s3_bucket",
+                map(vec![("bucket", cloud_name(r)), ("tags", aws_tags(r))]),
+            )];
+            if infra::versioning(r) {
+                resources.push(helper(
+                    r,
+                    "versioning",
+                    "aws_s3_bucket_versioning",
+                    map(vec![
+                        ("bucket", reference(id, "id")),
+                        (
+                            "versioning_configuration",
+                            Value::Map(map(vec![("status", Value::from("Enabled"))])),
+                        ),
+                    ]),
+                ));
+            }
+            Expansion {
+                order: Vec::new(),
+                resources,
+                outputs: outputs(&[("id", format!("${{{id}.id}}"))]),
+            }
+        }
         _ => aws_vm(r)?,
     })
 }
@@ -853,6 +879,39 @@ fn azure(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError>
             }
         }
         "disk" => azure_disk(r, graph)?,
+        "objectStore" => {
+            let mut body = with(
+                map(vec![
+                    ("name", infra::storage_account_name(r)),
+                    ("account_tier", Value::from("Standard")),
+                    ("account_replication_type", Value::from("LRS")),
+                ]),
+                azure_place(r, graph, Some(azure_location(r, graph)?))?,
+            );
+            if infra::versioning(r) {
+                body.insert(
+                    "blob_properties".to_owned(),
+                    Value::Map(map(vec![("versioning_enabled", Value::Bool(true))])),
+                );
+            }
+            azure_tags(r, &mut body);
+            Expansion {
+                order: Vec::new(),
+                resources: vec![
+                    primary(r, "azurerm_storage_account", body),
+                    helper(
+                        r,
+                        "objects",
+                        "azurerm_storage_container",
+                        map(vec![
+                            ("name", Value::from("objects")),
+                            ("storage_account_id", reference(id, "id")),
+                        ]),
+                    ),
+                ],
+                outputs: outputs(&[("id", format!("${{{id}.id}}"))]),
+            }
+        }
         _ => azure_vm(r, graph)?,
     })
 }
@@ -1195,6 +1254,25 @@ fn gcp(r: &Resource, graph: &ResourceGraph) -> Result<Expansion, CompileError> {
             }
         }
         "disk" => gcp_disk(r, graph)?,
+        "objectStore" => {
+            let mut body = map(vec![
+                ("name", gcp_name(r)),
+                ("location", gcp_region(r, graph)?),
+                ("uniform_bucket_level_access", Value::Bool(true)),
+            ]);
+            if infra::versioning(r) {
+                body.insert(
+                    "versioning".to_owned(),
+                    Value::Map(map(vec![("enabled", Value::Bool(true))])),
+                );
+            }
+            gcp_labels(r, &mut body);
+            Expansion {
+                order: Vec::new(),
+                resources: vec![primary(r, "google_storage_bucket", body)],
+                outputs: own_id(),
+            }
+        }
         _ => gcp_vm(r, graph)?,
     })
 }

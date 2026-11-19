@@ -80,7 +80,7 @@ creates a machine with the user-data a cloud-init document compiles to.
 
 ## Common infrastructure types
 
-`network`, `subnet`, `firewall`, `address`, `vm` and `disk` are Meridian's own types,
+`network`, `subnet`, `firewall`, `address`, `vm`, `disk` and `objectStore` are Meridian's own types,
 and this target turns each into the resources of the AWS, Azure or Google provider
 ([the common infrastructure types](../reference/dsl/common-infrastructure-types.md)
 has every param and mapping). They are mixed freely with Terraform's own
@@ -104,6 +104,7 @@ spec:
 | `address` | `aws_eip` | `azurerm_public_ip` | `google_compute_address` |
 | `vm` | `aws_instance`, an `aws_key_pair`, a `data.aws_ami` lookup, an `aws_eip_association` | `azurerm_linux_virtual_machine`, an `azurerm_network_interface` and its firewall association | `google_compute_instance`, tagged for its firewalls |
 | `disk` | `aws_ebs_volume` and an `aws_volume_attachment` | `azurerm_managed_disk` and an `azurerm_virtual_machine_data_disk_attachment` | `google_compute_disk` and a `google_compute_attached_disk` |
+| `objectStore` | `aws_s3_bucket`, and `aws_s3_bucket_versioning` | `azurerm_storage_account` and an `azurerm_storage_container` | `google_storage_bucket` |
 
 The rules and routes are separate resources rather than the inline
 `ingress`, `route` or `security_rule` blocks. Those are "attributes as blocks"

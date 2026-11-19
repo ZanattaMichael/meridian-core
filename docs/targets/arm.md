@@ -375,7 +375,7 @@ With two API versions of one type, the first is used.
 
 ## Common infrastructure types
 
-`network`, `subnet`, `firewall`, `address`, `vm` and `disk` are Meridian's own types,
+`network`, `subnet`, `firewall`, `address`, `vm`, `disk` and `objectStore` are Meridian's own types,
 and this target turns each into the same Azure resources the Bicep target
 does ([the common infrastructure types](../reference/dsl/common-infrastructure-types.md)
 has every param and mapping). They go to the deployment's resource group, at
@@ -389,6 +389,7 @@ has every param and mapping). They go to the deployment's resource group, at
 | `address` | `Microsoft.Network/publicIPAddresses`, Standard and static |
 | `vm` | `Microsoft.Compute/virtualMachines` (API version `2024-03-01`) and a `Microsoft.Network/networkInterfaces` named `<id>_nic` |
 | `disk` | `Microsoft.Compute/disks` (API version `2024-03-01`), listed in its vm's `dataDisks` |
+| `objectStore` | `Microsoft.Storage/storageAccounts` (API version `2023-05-01`), its `blobServices` and a container |
 
 The mapping is the Bicep plugin's, so the two targets cannot drift apart;
 compare [`examples/common/web-arm.yaml`](../../examples/common/web-arm.yaml)

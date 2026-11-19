@@ -262,6 +262,20 @@ fn expand(
             }
         }
         "disk" => disk(r, graph)?,
+        "objectStore" => {
+            let mut body = map(vec![("BucketName", cloud_name(r)), ("Tags", tags(r))]);
+            if infra::versioning(r) {
+                body.insert(
+                    "VersioningConfiguration".to_owned(),
+                    Value::Map(map(vec![("Status", Value::from("Enabled"))])),
+                );
+            }
+            Expansion {
+                resources: vec![primary(r, "AWS::S3::Bucket", body)],
+                outputs: outputs(&[("id", format!("${{{id}}}"))]),
+                order: Vec::new(),
+            }
+        }
         _ => vm(r)?,
     })
 }
