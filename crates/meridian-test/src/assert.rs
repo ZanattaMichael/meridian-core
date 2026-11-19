@@ -80,7 +80,8 @@ pub(crate) fn parse_refusal(text: &str) -> Refusal {
 /// `refusal` the rule, resource and message of a refusal, or `null`;
 /// `changes` the plan's changes, each with `action`, `resource` and
 /// `summary`; `unknown` whether the tool could not preview; `condition`
-/// the `when` that left the document out, or `null`.
+/// the `when` that left the document out, or `null`; `outputs` an applied
+/// document's outputs by name, a sensitive one masked.
 pub fn stage_value(report: &StageReport) -> Value {
     let text = |s: &str| Value::String(s.to_owned());
     let mut map = BTreeMap::new();
@@ -151,6 +152,23 @@ pub fn stage_value(report: &StageReport) -> Value {
         ),
     );
     map.insert("unknown".to_owned(), Value::Bool(unknown));
+    map.insert(
+        "outputs".to_owned(),
+        Value::Map(match &report.outcome {
+            Outcome::Applied { outputs, .. } => outputs
+                .iter()
+                .map(|o| {
+                    let value = if o.sensitive {
+                        text(meridian_orchestrator::MASK)
+                    } else {
+                        o.value.clone()
+                    };
+                    (o.name.clone(), value)
+                })
+                .collect(),
+            _ => BTreeMap::new(),
+        }),
+    );
     map.insert(
         "condition".to_owned(),
         match &report.outcome {

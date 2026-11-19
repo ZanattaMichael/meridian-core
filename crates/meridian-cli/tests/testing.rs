@@ -303,7 +303,7 @@ fn case_picks_by_name_and_json_and_junit_describe_the_run() {
     // The report for people went to standard error.
     assert!(stderr(&out).contains("report: wrote junit to report.xml"));
     let junit = fs::read_to_string(dir.join("report.xml")).unwrap();
-    assert!(junit.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites name=\"meridian test\" tests=\"2\" failures=\"1\" errors=\"0\">"), "{junit}");
+    assert!(junit.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites name=\"meridian test\" tests=\"2\" failures=\"1\" errors=\"0\" skipped=\"0\">"), "{junit}");
     assert!(
         junit.contains("<testcase classname=\"site\" name=\"plan creates everything\" time=\""),
         "{junit}"
@@ -338,11 +338,11 @@ fn a_test_file_with_a_mistake_is_refused_before_anything_runs() {
         ),
         (
             &format!("{head}  cases:\n    - name: a\n      run: apply\n      assert: [\"1 == 1\"]\n"),
-            "error: tests/t.test.yaml: spec.cases[0].run: expected \"compile\" or \"plan\", found \"apply\"\n",
+            "error: tests/t.test.yaml: spec.cases[0].run: expected \"compile\", \"plan\" or \"lifecycle\", found \"apply\"\n",
         ),
         (
             &format!("{head}  cases:\n    - name: a\n      expect:\n        web: {{outcome: built}}\n"),
-            "error: tests/t.test.yaml: spec.cases[0].expect.web.outcome: expected one of compiled, refused, left-out, planned, deferred, failed, found \"built\"\n",
+            "error: tests/t.test.yaml: spec.cases[0].expect.web.outcome: expected one of compiled, refused, left-out, planned, deferred, failed, applied, found \"built\"\n",
         ),
         (
             &format!("{head}  cases:\n    - name: a\n      assert: [\"param.x == 1\"]\n"),
@@ -363,6 +363,22 @@ fn a_test_file_with_a_mistake_is_refused_before_anything_runs() {
         (
             &format!("{head}  cases:\n    - name: a\n      expect:\n        web:\n          changes: [{{}}]\n"),
             "error: tests/t.test.yaml: spec.cases[0].expect.web.changes[0]: a change must name an action, a resource or both\n",
+        ),
+        (
+            &format!("{head}  cases:\n    - name: a\n      run: plan\n      timeout: 5m\n      assert: [\"1 == 1\"]\n"),
+            "error: tests/t.test.yaml: spec.cases[0].timeout: only a lifecycle case takes this (run: lifecycle)\n",
+        ),
+        (
+            &format!("{head}  cases:\n    - name: a\n      run: lifecycle\n      phases:\n        break: {{fault: service-stopped}}\n"),
+            "error: tests/t.test.yaml: spec.cases[0].phases.break: not supported yet: it comes with the fault catalogue\n",
+        ),
+        (
+            &format!("{head}  cases:\n    - name: a\n      run: lifecycle\n      phases:\n        verify: {{drift: some}}\n"),
+            "error: tests/t.test.yaml: spec.cases[0].phases.verify.drift: expected \"none\" or \"any\", found \"some\"\n",
+        ),
+        (
+            &format!("{head}  cases:\n    - name: a\n      run: lifecycle\n      timeout: 5 minutes\n"),
+            "error: tests/t.test.yaml: spec.cases[0].timeout: \" minutes\" is not a unit of time; use s, m or h\n",
         ),
         (
             &format!("{head}  extra: 1\n  cases:\n    - name: a\n      assert: [\"1 == 1\"]\n"),

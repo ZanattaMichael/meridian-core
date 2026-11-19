@@ -478,7 +478,8 @@ secrets are refused.
 
 ### `test`
 
-Runs [`Test` documents](testing.md). Nothing is applied or recorded.
+Runs [`Test` documents](testing.md). Only a lifecycle case applies, to a scratch state
+directory, and destroys what it applied; nothing is recorded in the project's state.
 
 ```
 $ meridian test
@@ -490,8 +491,8 @@ tests/site.test.yaml (site)
 3 cases: 2 passed, 1 failed
 ```
 
-Defaults to `tests/*.test.yaml`. `--case TEXT` filters; `--junit FILE` writes JUnit. Exit `1`
-if any case fails or nothing ran.
+Defaults to `tests/*.test.yaml`. `--case TEXT` filters; `--junit FILE` writes JUnit; `--keep`
+leaves each lifecycle case's environment in place. Exit `1` if any case fails or nothing ran.
 
 ### `fmt`
 

@@ -670,31 +670,32 @@ def modules_flow() -> str:
 def test_flow() -> str:
     W, H = 1200, 470
     p: list[str] = []
-    p.append(card(40, 60, 300, 150, "tests/site.test.yaml", ["kind: Test", "documents: [../site.yaml]", "cases:", "  - name: prod", "    set: {env: prod}", "    expect: …  assert: …"], WHITE, 17, 12.5, True))
+    p.append(card(40, 60, 300, 150, "tests/site.test.yaml", ["kind: Test", "documents: [../site.yaml]", "cases:", "  - name: prod", "    run: compile | plan | lifecycle", "    expect: …  assert: …"], WHITE, 17, 12.5, True))
     p.append(heading(400, 48, "For each case, in a scratch directory of its own"))
-    steps = [("data", "the case's files and set", IAC), ("compile", "every document, by its plugin", CM), ("plan", "only when run: plan; from nothing applied", ORC)]
+    steps = [("data", "the case's files and set", IAC), ("compile", "every document", CM), ("plan", "run: plan; from nothing", ORC), ("lifecycle", "provision, verify, destroy", PIPE)]
     for i, (name, note, colour) in enumerate(steps):
-        x = 400 + i * 270
-        p.append(card(x, 60, 240, 76, name, [note], colour, 16, 12.5, i == 0))
+        x = 400 + i * 200
+        p.append(card(x, 60, 180, 76, name, [note], colour, 16, 12, i == 0))
         if i > 0:
-            p.append(flow(f"M{x - 30} 98L{x} 98", colour, delay=i * 0.4, seconds=1.6))
+            p.append(flow(f"M{x - 20} 98L{x} 98", colour, delay=i * 0.4, seconds=1.6))
     p.append(flow("M340 135C370 135 370 98 400 98", WHITE, delay=0.0, seconds=1.6))
     # What comes out.
     oy = 200
-    p.append(card(400, oy, 780, 70, "stages.<document>", ["outcome · files · warnings · refusal {rule, resource, message} · changes · condition"], LINE, 16, 12.5))
-    p.append(flow(f"M1060 136L1060 {oy}", ORC, delay=1.2, seconds=1.6))
-    p.append(flow(f"M790 136L790 {oy}", CM, delay=0.8, seconds=1.6))
+    p.append(card(400, oy, 780, 70, "stages.<document>", ["outcome · files · warnings · refusal · changes · outputs · condition"], LINE, 16, 12.5))
+    p.append(flow(f"M1090 136L1090 {oy}", PIPE, delay=1.6, seconds=1.6))
+    p.append(flow(f"M890 136L890 {oy}", ORC, delay=1.2, seconds=1.6))
+    p.append(flow(f"M690 136L690 {oy}", CM, delay=0.8, seconds=1.6))
     # The checks.
     cy = 320
     p.append(heading(40, cy - 12, "Checks, all of them reported"))
     p.append(card(40, cy, 360, 96, "expect", ["outcome: refused   rule: unsupported-action", "files: {playbook.yml: {contains: …}}", "changes: [{action: create}]  changeCount: 2"], GREEN, 16, 12.5, True))
-    p.append(card(440, cy, 360, 96, "assert", ["stages.web.outcome == 'compiled'", "contains(stages.web.files['playbook.yml'], 'x')", "the one expression language, no script"], GREEN, 16, 12.5, True))
-    p.append(card(840, cy, 320, 96, "report", ["ok / FAIL per case, with each failure;", "--output json: one object;", "--junit FILE: for the pipeline engine"], WHITE, 16, 12.5))
-    p.append(flow(f"M790 270L790 {cy}", GREEN, delay=1.6, seconds=1.6))
-    p.append(flow(f"M400 {cy + 48}L440 {cy + 48}", GREEN, delay=2.0, seconds=1.6))
-    p.append(flow(f"M800 {cy + 48}L840 {cy + 48}", WHITE, delay=2.4, seconds=1.6))
-    p.append(caption(W, H, "Nothing is applied and no record is kept: a test compiles and plans, then checks. A module carries its tests under tests/."))
-    return doc(W, H, "meridian test: a Test document names documents and cases; each case compiles or plans them with its data in a scratch directory and checks the outcome, the files, the refusal and the changes", "".join(p))
+    p.append(card(440, cy, 360, 96, "assert", ["stages.web.outcome == 'compiled'", "stages.network.outputs.address != ''", "the one expression language, no script"], GREEN, 16, 12.5, True))
+    p.append(card(840, cy, 320, 96, "report", ["ok / FAIL per case, and per phase;", "--output json: one object;", "--junit FILE: a testcase per phase"], WHITE, 16, 12.5))
+    p.append(flow(f"M790 270L790 {cy}", GREEN, delay=2.0, seconds=1.6))
+    p.append(flow(f"M400 {cy + 48}L440 {cy + 48}", GREEN, delay=2.4, seconds=1.6))
+    p.append(flow(f"M800 {cy + 48}L840 {cy + 48}", WHITE, delay=2.8, seconds=1.6))
+    p.append(caption(W, H, "Nothing is recorded in the project's state. A lifecycle case always destroys what it applied, unless --keep."))
+    return doc(W, H, "meridian test: a Test document names documents and cases; each case compiles, plans, or applies and destroys them with its data in a scratch directory and checks the outcome, the files, the refusal, the changes and the outputs", "".join(p))
 
 
 def analyzers_flow() -> str:
