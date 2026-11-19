@@ -51,6 +51,18 @@
 - Pulumi on azure-native waits for #272: its credential reaches Pulumi's environment, and
   `az` would need a login, which Meridian does not do.
 
+## AWS (part 3)
+
+| Target | Action | Types |
+|---|---|---|
+| CloudFormation, Pulumi | one `aws` call per type, in the resource's region | `AWS::EC2::Instance` and shared `vm` on CloudFormation (`restart`, `start`, `stop`); `AWS::ECS::Service` (`redeploy`); `AWS::Lambda::Function` (`run`) |
+
+- The table and calls live once, in the SDK (`notify::aws`).
+- CloudFormation reads the physical id with `describe-stack-resource`; Pulumi reads the id
+  and region from `pulumi stack export`.
+- `aws` runs with the same credential as the deployment. A Lambda that raises fails the
+  action.
+
 ## The fake target
 
 `touch` on a `file` is Meridian-run; acting appends to `acts.log`; `NOACT` in the applied

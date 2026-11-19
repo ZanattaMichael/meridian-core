@@ -55,6 +55,19 @@ pub struct CloudFormationRunner {
     pub extra_args: Vec<String>,
 }
 
+/// The types a document writes that Meridian acts on, by CloudFormation
+/// type.
+const AWS_TYPES: &[(&str, &str)] = &[
+    ("AWS::EC2::Instance", "AWS::EC2::Instance"),
+    ("AWS::ECS::Service", "AWS::ECS::Service"),
+    ("AWS::Lambda::Function", "AWS::Lambda::Function"),
+    ("vm", "AWS::EC2::Instance"),
+];
+
+/// Where `aws lambda invoke` writes the function's result, in the work
+/// directory.
+const LAMBDA_RESULT: &str = "lambda-result.json";
+
 /// What `stack.json` says about the deployment.
 struct Stack {
     name: String,
@@ -795,6 +808,85 @@ impl Runner for CloudFormationRunner {
             in_desired_state: if found { None } else { Some(false) },
             command,
         })
+    }
+
+    fn acts(&self) -> Vec<meridian_sdk::ActSchema> {
+        meridian_sdk::notify::aws::acts(AWS_TYPES)
+    }
+
+    /// The resource's physical id from `describe-stack-resource`, then the
+    /// action's own `aws` call, with the stack's region and credential.
+    fn act(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        action: &str,
+        log: &dyn Log,
+    ) -> Result<meridian_sdk::Acted, RunError> {
+        use meridian_sdk::notify::aws;
+        let Some(settings) = artifact.files.get(STACK_PATH) else {
+            return Err(RunError::new(format!(
+                "the artifact has no {STACK_PATH}; it was not compiled by this plugin"
+            )));
+        };
+        let stack = Stack::read(settings)?;
+        let Some(logical) = stack
+            .resources
+            .iter()
+            .find(|(_, id)| *id == resource)
+            .map(|(logical, _)| logical.clone())
+        else {
+            return Err(RunError::new(format!(
+                "{resource} compiles to no resource of its own in the stack, so Meridian \
+                 cannot {action} it"
+            )));
+        };
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let described = self
+            .aws(context, cloud.as_ref(), &stack, "describe-stack-resource")
+            .args(["--logical-resource-id", &logical, "--output", "json"])
+            .run_ok("aws could not read the resource", log)?;
+        let detail = parse(&described, "the stack's resource")?;
+        let field = |name: &str| {
+            detail
+                .as_map()
+                .and_then(|m| m.get("StackResourceDetail"))
+                .and_then(Value::as_map)
+                .and_then(|d| d.get(name))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let (kind, physical) = (field("ResourceType"), field("PhysicalResourceId"));
+        let args = aws::args(&kind, &physical, action, LAMBDA_RESULT).ok_or_else(|| {
+            RunError::new(format!(
+                "Meridian cannot {action} {resource} ({kind} {physical:?})"
+            ))
+        })?;
+        let mut tool = Tool::new(&self.program)
+            .args(args.iter().cloned())
+            .dir(&context.work_dir)
+            .env("AWS_PAGER", "")
+            .capture_stdout();
+        if !stack.region.is_empty() {
+            tool = tool.args(["--region", &stack.region]);
+        }
+        let command = format!("aws {}", args.join(" "));
+        let tool =
+            CloudHandover::tell_if_any(cloud.as_ref(), tool.args(self.extra_args.iter().cloned()));
+        let finished = tool
+            .run_ok(&format!("aws could not {action} {resource}"), log)
+            .map_err(|mut e| {
+                e.command = command.clone();
+                e
+            })?;
+        if let Some(why) = aws::failed(&kind, &finished.stdout) {
+            let mut e = RunError::new(format!("{action} {resource}: {why}"));
+            e.command = command;
+            return Err(e);
+        }
+        Ok(meridian_sdk::Acted { command })
     }
 
     fn destroys(&self) -> bool {

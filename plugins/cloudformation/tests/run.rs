@@ -533,3 +533,76 @@ fn inspect_of_a_stack_that_does_not_exist_finds_nothing() {
     .unwrap();
     assert!(!read.found);
 }
+
+const DESCRIBED: &str = r#"describe-stack-resource) echo '{"StackResourceDetail":{"LogicalResourceId":"WebVm","ResourceType":"AWS::EC2::Instance","PhysicalResourceId":"i-0abc"}}' ;;"#;
+
+#[test]
+fn an_action_reads_the_physical_id_and_runs_its_own_aws_call() {
+    let dir = scratch(TMP, "act");
+    fs::create_dir_all(dir.join("work")).unwrap();
+    let runner = runner(&dir, &format!("{DESCRIBED}\nreboot-instances) echo '' ;;"));
+    let acted = runner
+        .act(
+            &context(&dir),
+            &compiled(),
+            "web_vm",
+            "restart",
+            &KeptLog::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        [
+            "describe-stack-resource --logical-resource-id WebVm --output json",
+            "ec2 reboot-instances --instance-ids i-0abc --region us-east-1 --profile prod",
+        ]
+    );
+    assert_eq!(
+        acted.command,
+        "aws ec2 reboot-instances --instance-ids i-0abc"
+    );
+    assert!(meridian_sdk::notify::performs(
+        &runner.acts(),
+        "vm",
+        "restart"
+    ));
+}
+
+#[test]
+fn an_action_the_type_has_not_and_a_lambda_that_raised_fail() {
+    let dir = scratch(TMP, "act-failed");
+    fs::create_dir_all(dir.join("work")).unwrap();
+    let vm = runner(&dir, DESCRIBED);
+    let err = vm
+        .act(
+            &context(&dir),
+            &compiled(),
+            "web_vm",
+            "redeploy",
+            &KeptLog::default(),
+        )
+        .unwrap_err();
+    assert!(err.msg.contains("cannot redeploy web_vm"), "{}", err.msg);
+
+    let dir = scratch(TMP, "act-lambda");
+    fs::create_dir_all(dir.join("work")).unwrap();
+    let lambda = runner(
+        &dir,
+        r#"describe-stack-resource) echo '{"StackResourceDetail":{"ResourceType":"AWS::Lambda::Function","PhysicalResourceId":"migrate"}}' ;;
+invoke) echo '{"StatusCode":200,"FunctionError":"Unhandled"}' ;;"#,
+    );
+    let err = lambda
+        .act(
+            &context(&dir),
+            &compiled(),
+            "web_ip",
+            "run",
+            &KeptLog::default(),
+        )
+        .unwrap_err();
+    assert!(err.msg.contains("raised an error"), "{}", err.msg);
+    assert_eq!(
+        err.command,
+        "aws lambda invoke --function-name migrate lambda-result.json"
+    );
+}

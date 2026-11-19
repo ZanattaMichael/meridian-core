@@ -12,7 +12,7 @@ with `aws` through a change set, so what is applied is what was previewed.
 | Category | Infrastructure as code |
 | Resource types | CloudFormation's own: any `Vendor::Service::Type` or `Custom::Name`, plus `stack` for the deployment's settings. Also the [common infrastructure types](#common-infrastructure-types) |
 | `dependsOn` | Yes, as `DependsOn`, unless a reference already implies the order |
-| `notifies` | No. CloudFormation has no way to react to a change in another resource. Refused |
+| `notifies` | Meridian-run: an `aws` call after the stack deploys, for the types in [Notifications](#notifications) |
 | `runtimeWhen` | No. A CloudFormation condition is decided from the template's parameters, not at deploy time. Refused |
 | `adopt` | No. Refused: CloudFormation adopts only through a resource-import change set, which this target does not make yet |
 | `state: absent` | No. Remove the resource from the document; CloudFormation deletes what the template no longer declares, subject to its `DeletionPolicy` |
@@ -199,6 +199,34 @@ with [`web-aws.yaml`](../../examples/common/web-aws.yaml).
 A `dependsOn` a `Ref` or `Fn::GetAtt` implies is left out; others become `DependsOn`.
 Resources are written in Meridian's order.
 
+## Notifications
+
+CloudFormation cannot act on one resource because another changed, so a notify is
+[Meridian-run](../concepts/dependencies.md#meridian-run-notifies): after the stack deploys,
+Meridian finds the notified resource's physical id with `aws cloudformation
+describe-stack-resource` and calls `aws` on it, in the stack's region, when the change set
+added, modified or replaced the notifier. The compile warns.
+
+| Type | Action | Call |
+|---|---|---|
+| `AWS::EC2::Instance`, shared `vm` | `restart`, `start`, `stop` | `aws ec2 reboot-instances`, `start-instances`, `stop-instances` |
+| `AWS::ECS::Service` | `redeploy` | `aws ecs update-service --force-new-deployment` |
+| `AWS::Lambda::Function` | `run` | `aws lambda invoke`; a function that raises fails the action |
+
+Any other action is refused with `unsupported-action`.
+
+```yaml
+- id: config
+  type: AWS::SSM::Parameter
+  params: {Type: String, Value: v2}
+  notifies:
+    - resource: api
+      action: redeploy
+- id: api
+  type: AWS::ECS::Service
+  params: {Cluster: web, TaskDefinition: api:3, DesiredCount: 2}
+```
+
 ## What a compile writes
 
 ```
@@ -373,7 +401,7 @@ Each names the resource, line and rule:
 | `unsupported-resource-type` | a type that is not `Vendor::Service::Type`, `Custom::Name` or `stack` | use the CloudFormation type as AWS writes it |
 | `unsupported-state` | `state: absent`, or any state but `present` | remove the resource from the document instead |
 | `unsupported-runtime-condition` | `runtimeWhen` on any resource | decide with a compile-time `when` instead |
-| `unsupported-action` | `notifies` on any resource | drop it; CloudFormation has no notifications |
+| `unsupported-action` | a notify whose type and action are not in [Notifications](#notifications) | use a listed action, or drop it |
 | `unsupported-dependency` | a `dependsOn` to or from the `stack` resource | the stack is not a resource of the template |
 | `unsupported-param` | a param the `stack` resource does not take | only `name`, `region` and `capabilities` |
 | `invalid-param` | a `stack` param of the wrong kind, or a capability CloudFormation does not know | a string for `name` and `region`, a list of `CAPABILITY_*` strings for `capabilities` |

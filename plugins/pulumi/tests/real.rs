@@ -42,6 +42,7 @@ fn runner() -> PulumiRunner {
     PulumiRunner {
         program: std::env::var("MERIDIAN_PULUMI").unwrap_or_else(|_| "pulumi".to_owned()),
         extra_args: Vec::new(),
+        aws: "aws".to_owned(),
         backend_chosen: false,
         passphrase_chosen: false,
     }

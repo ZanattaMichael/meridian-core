@@ -21,7 +21,7 @@ with the `pulumi` command line.
 | The [common infrastructure types](#common-infrastructure-types) | Yes, on AWS (`aws`) and Azure (`azure-native`). |
 | Plan, apply and outputs | Yes: `pulumi preview`, `pulumi up`, `pulumi stack output`. |
 | Destroy | Yes: `pulumi destroy`; the stack and its history are kept. See [Destroying](../operations/destroying.md) |
-| `notifies` | **No.** Refused at compile time. See [Notifications](#notifications). |
+| `notifies` | Meridian-run on AWS: an `aws` call after `pulumi up`, for the types in [Notifications](#notifications). Refused elsewhere. |
 | `runtimeWhen` | **No.** Refused at compile time. |
 | `adopt` | Yes: the `import` resource option. See [Adopting what exists](#adopting-what-exists) |
 | `state: absent` | **No.** Refused: remove the resource from the document instead. |
@@ -278,8 +278,20 @@ it.
 
 ## Notifications
 
-`notifies` is refused (`unsupported-action`). Instead, pass the changing value into a
-property and name it in `replaceOnChanges`:
+Pulumi cannot act on one resource because another changed, so a notify on an AWS resource is
+[Meridian-run](../concepts/dependencies.md#meridian-run-notifies): after `pulumi up`, Meridian
+reads the notified resource's id and region from `pulumi stack export` and calls `aws` on it
+when the preview created, updated or replaced the notifier. The compile warns.
+
+| Type | Action | Call |
+|---|---|---|
+| `aws:ec2:Instance` | `restart`, `start`, `stop` | `aws ec2 reboot-instances`, `start-instances`, `stop-instances` |
+| `aws:ecs:Service` | `redeploy` | `aws ecs update-service --force-new-deployment` |
+| `aws:lambda:Function` | `run` | `aws lambda invoke`; a function that raises fails the action |
+
+The full tokens (`aws:ec2/instance:Instance`) are matched too. Azure types wait for issue 272,
+as `az` would need its own sign-in. Any other notify is refused with `unsupported-action`;
+for those, pass the changing value into a property and name it in `replaceOnChanges`:
 
 ```yaml
 - id: cert
@@ -536,7 +548,7 @@ Each names the rule, and the resource with file and line where there is one.
 |---|---|---|
 | `unsupported-resource-type` | The `type` is not a Pulumi type token, `config`, `stack` or `invoke.<function>`. Terraform's `aws_instance` is the usual cause. | Use the Pulumi token: `aws:ec2:Instance`. |
 | `invalid-reference` | `${...}` names an id the document does not declare, holds something computed, reads a provider setting, or appears in a `config` declaration. | Fix the id, or use a `fn::` function. |
-| `unsupported-action` | The resource has `notifies`. Nothing in a Pulumi YAML program makes one resource react to a change in another. | Pass the changing value into a property of the other resource and name that property in its `replaceOnChanges` option. |
+| `unsupported-action` | A notify whose type and action are not in [Notifications](#notifications). Nothing in a Pulumi YAML program makes one resource react to a change in another. | Pass the changing value into a property of the other resource and name that property in its `replaceOnChanges` option. |
 | `unsupported-runtime-condition` | The resource has `runtimeWhen`. A Pulumi YAML program has no conditional. | Decide before compiling, with `when`. |
 | `invalid-adopt` | `adopt` on something that is not a resource, or beside a `resourceOptions.import` that names another identifier. | Put `adopt` on the resource, and remove the option. |
 | `unsupported-state` | `state: absent`. | Remove the resource from the document; Pulumi deletes what its program no longer declares. |
@@ -553,6 +565,7 @@ Each names the rule, and the resource with file and line where there is one.
 |---|---|
 | `MERIDIAN_PULUMI` | The program to run, when it is not `pulumi` on `PATH`. |
 | `MERIDIAN_PULUMI_ARGS` | Arguments added to `pulumi preview`, `pulumi up` and `pulumi destroy`, split like a shell command line (quotes hold a word together): `--parallel 4`. The calls that select the stack and read its outputs get none. |
+| `MERIDIAN_PULUMI_AWS` | The `aws` program that runs a [Meridian-run notify](#notifications), when it is not on `PATH`. |
 | `PULUMI_BACKEND_URL` | Where state lives; wins over the document. |
 | `PULUMI_CONFIG_PASSPHRASE`, `PULUMI_CONFIG_PASSPHRASE_FILE` | The passphrase for a stack's secrets. Set either and the plugin sets none. |
 | `PULUMI_ACCESS_TOKEN` and provider credentials | Passed through to `pulumi` untouched. |

@@ -30,6 +30,9 @@ pub const PROGRAM_VARIABLE: &str = "MERIDIAN_PULUMI";
 /// Extra arguments for `pulumi preview`, `pulumi up` and `pulumi destroy`, split like a shell
 /// command line: `--parallel 4`, `--diff`.
 pub const ARGS_VARIABLE: &str = "MERIDIAN_PULUMI_ARGS";
+/// Names the `aws` program a Meridian-run notify on AWS calls, when it is
+/// not `aws` on `PATH`.
+pub const AWS_VARIABLE: &str = "MERIDIAN_PULUMI_AWS";
 
 /// What an operator can configure about this runner, in the order the
 /// settings are documented.
@@ -47,6 +50,12 @@ pub fn settings() -> Vec<Setting> {
             "",
             "Extra arguments for `pulumi preview`, `pulumi up` and `pulumi destroy`, split like a shell command line: `--parallel 4`. The calls that select the stack or read its outputs get none. Pulumi's own `PULUMI_BACKEND_URL` and `PULUMI_CONFIG_PASSPHRASE` are read as Pulumi reads them.",
         ),
+        Setting::new(
+            "aws",
+            AWS_VARIABLE,
+            "aws",
+            "The `aws` program a Meridian-run notify on an AWS resource calls, when it is not on `PATH`.",
+        ),
     ]
 }
 
@@ -56,6 +65,21 @@ const BACKEND_VARIABLE: &str = "PULUMI_BACKEND_URL";
 /// when no secrets service does.
 const PASSPHRASE_VARIABLES: [&str; 2] =
     ["PULUMI_CONFIG_PASSPHRASE", "PULUMI_CONFIG_PASSPHRASE_FILE"];
+
+/// The AWS types a document writes, short or as `pulumi stack export`
+/// spells them, by CloudFormation type.
+const AWS_TYPES: &[(&str, &str)] = &[
+    ("aws:ec2:Instance", "AWS::EC2::Instance"),
+    ("aws:ec2/instance:Instance", "AWS::EC2::Instance"),
+    ("aws:ecs:Service", "AWS::ECS::Service"),
+    ("aws:ecs/service:Service", "AWS::ECS::Service"),
+    ("aws:lambda:Function", "AWS::Lambda::Function"),
+    ("aws:lambda/function:Function", "AWS::Lambda::Function"),
+];
+
+/// Where `aws lambda invoke` writes the function's result, in the work
+/// directory.
+const LAMBDA_RESULT: &str = "lambda-result.json";
 
 /// What Pulumi prints in place of a secret output's value.
 const MASKED: &str = "[secret]";
@@ -70,6 +94,8 @@ pub struct PulumiRunner {
     pub program: String,
     /// Arguments added to `preview` and `up`, after Pulumi's own.
     pub extra_args: Vec<String>,
+    /// The `aws` program a Meridian-run notify on AWS calls.
+    pub aws: String,
     /// The operator chose a backend through `PULUMI_BACKEND_URL`, so the
     /// runner must not choose one.
     pub backend_chosen: bool,
@@ -125,6 +151,7 @@ impl PulumiRunner {
         PulumiRunner {
             program: settings::text(setting("program")),
             extra_args: settings::args(setting("args")),
+            aws: settings::text(setting("aws")),
             backend_chosen: set(BACKEND_VARIABLE),
             // A passphrase that is set but empty is still a choice.
             passphrase_chosen: PASSPHRASE_VARIABLES
@@ -554,6 +581,75 @@ impl Runner for PulumiRunner {
             actual: found.unwrap_or_default(),
             command,
         })
+    }
+
+    fn acts(&self) -> Vec<meridian_sdk::ActSchema> {
+        meridian_sdk::notify::aws::acts(AWS_TYPES)
+    }
+
+    /// The resource's cloud id and region from `pulumi stack export`, then
+    /// the action's own `aws` call, with the document's cloud credential.
+    fn act(
+        &self,
+        context: &RunContext,
+        _artifact: &Artifact,
+        resource: &str,
+        action: &str,
+        log: &dyn Log,
+    ) -> Result<meridian_sdk::Acted, RunError> {
+        use meridian_sdk::notify::aws;
+        let settings = std::fs::read_to_string(context.work_dir.join(STACK_PATH))
+            .map_err(|_| RunError::new("nothing has been applied for this document yet"))?;
+        let stack = Stack::read(&settings)?;
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let exported = self
+            .on_stack(context, cloud.as_ref(), &stack, &["stack", "export"])
+            .capture_stdout()
+            .run_ok("pulumi could not export the stack", log)?;
+        let found = read_export(&exported.stdout)?
+            .into_iter()
+            .find(|r| r.name == resource);
+        let (kind, id) = found
+            .as_ref()
+            .and_then(|r| Some((aws::kind_of(AWS_TYPES, &r.r#type)?, r.id.as_str())))
+            .ok_or_else(|| {
+                RunError::new(format!(
+                    "the stack has no AWS resource {resource} Meridian can {action}"
+                ))
+            })?;
+        let args = aws::args(kind, id, action, LAMBDA_RESULT).ok_or_else(|| {
+            RunError::new(format!(
+                "Meridian cannot {action} {resource} ({kind} {id:?})"
+            ))
+        })?;
+        let outputs = read_outputs_of(&exported.stdout, resource)?.unwrap_or_default();
+        let region = [outputs.get("arn"), Some(&Value::from(id))]
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .find_map(aws::region_of)
+            .map(str::to_owned);
+        let mut tool = Tool::new(&self.aws)
+            .args(args.iter().cloned())
+            .dir(&context.work_dir)
+            .env("AWS_PAGER", "")
+            .capture_stdout();
+        if let Some(region) = &region {
+            tool = tool.args(["--region", region]);
+        }
+        let command = format!("aws {}", args.join(" "));
+        let finished = CloudHandover::tell_if_any(cloud.as_ref(), tool)
+            .run_ok(&format!("aws could not {action} {resource}"), log)
+            .map_err(|mut e| {
+                e.command = command.clone();
+                e
+            })?;
+        if let Some(why) = aws::failed(kind, &finished.stdout) {
+            let mut e = RunError::new(format!("{action} {resource}: {why}"));
+            e.command = command;
+            return Err(e);
+        }
+        Ok(meridian_sdk::Acted { command })
     }
 
     fn destroys(&self) -> bool {
