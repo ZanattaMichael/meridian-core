@@ -1,4 +1,4 @@
-//! A report as a file: JSON, JUnit XML, Markdown or HTML.
+//! A report as a file: JSON, JUnit XML, Markdown, HTML or SARIF.
 //!
 //! Every renderer reads the same [`Report`], so the four always agree. Text
 //! that came from an event is escaped for the format it lands in, because a
@@ -28,10 +28,19 @@ pub enum Format {
     Markdown,
     /// One self-contained HTML page, to keep as a build artifact.
     Html,
+    /// SARIF 2.1.0, the format code scanning reads: every analyzer finding,
+    /// pointed at the line of the Meridian document.
+    Sarif,
 }
 
 impl Format {
-    pub const ALL: [Format; 4] = [Format::Json, Format::Junit, Format::Markdown, Format::Html];
+    pub const ALL: [Format; 5] = [
+        Format::Json,
+        Format::Junit,
+        Format::Markdown,
+        Format::Html,
+        Format::Sarif,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -39,6 +48,7 @@ impl Format {
             Format::Junit => "junit",
             Format::Markdown => "markdown",
             Format::Html => "html",
+            Format::Sarif => "sarif",
         }
     }
 
@@ -50,8 +60,10 @@ impl Format {
             "junit" | "xml" => Ok(Format::Junit),
             "markdown" | "md" => Ok(Format::Markdown),
             "html" => Ok(Format::Html),
+            "sarif" => Ok(Format::Sarif),
             other => Err(format!(
-                "{other:?} is not a report format; the formats are json, junit, markdown and html"
+                "{other:?} is not a report format; the formats are json, junit, markdown, html \
+                 and sarif"
             )),
         }
     }
@@ -64,6 +76,166 @@ pub fn render(report: &Report, format: Format) -> String {
         Format::Junit => junit(report),
         Format::Markdown => markdown(report),
         Format::Html => html(report),
+        Format::Sarif => sarif(report),
+    }
+}
+
+fn finding_value(finding: &crate::model::Finding) -> Value {
+    let text = |s: &str| Value::from(s);
+    map([
+        ("analyzer", text(&finding.analyzer)),
+        ("rule", text(&finding.rule)),
+        ("severity", text(&finding.severity)),
+        ("message", text(&finding.message)),
+        ("file", text(&finding.file)),
+        ("line", Value::Uint(finding.line)),
+        ("resource", text(&finding.resource)),
+        ("document", text(&finding.document)),
+        ("documentLine", Value::Uint(finding.document_line)),
+        ("url", text(&finding.url)),
+        ("accepted", Value::Bool(finding.accepted)),
+    ])
+}
+
+/// A SARIF 2.1.0 log: one run per analyzer that reported anything, each
+/// finding a result at the Meridian document's line when the finding was
+/// traced to one, and at the compiled file's otherwise. An accepted
+/// finding carries a suppression, which code scanning shows as dismissed.
+fn sarif(report: &Report) -> String {
+    let text = |s: &str| Value::from(s);
+    let mut analyzers: Vec<&str> = report
+        .steps
+        .iter()
+        .flat_map(|step| step.findings.iter().map(|f| f.analyzer.as_str()))
+        .collect();
+    analyzers.sort_unstable();
+    analyzers.dedup();
+    let runs = analyzers
+        .into_iter()
+        .map(|analyzer| {
+            let mut rules: BTreeMap<String, Value> = BTreeMap::new();
+            let mut results = Vec::new();
+            for step in &report.steps {
+                for finding in step.findings.iter().filter(|f| f.analyzer == analyzer) {
+                    rules.entry(finding.rule.clone()).or_insert_with(|| {
+                        let mut rule = vec![
+                            ("id", text(&finding.rule)),
+                            ("shortDescription", map([("text", text(&finding.message))])),
+                        ];
+                        if !finding.url.is_empty() {
+                            rule.push(("helpUri", text(&finding.url)));
+                        }
+                        Value::Map(
+                            rule.into_iter()
+                                .map(|(key, value)| (key.to_owned(), value))
+                                .collect(),
+                        )
+                    });
+                    let (uri, line) = if !finding.document.is_empty() {
+                        (finding.document.as_str(), finding.document_line)
+                    } else {
+                        (finding.file.as_str(), finding.line)
+                    };
+                    let mut location = vec![(
+                        "artifactLocation",
+                        map([("uri", text(&uri.replace('\\', "/")))]),
+                    )];
+                    if line > 0 {
+                        location.push(("region", map([("startLine", Value::Uint(line))])));
+                    }
+                    let mut result = vec![
+                        ("ruleId", text(&finding.rule)),
+                        ("level", text(sarif_level(&finding.severity))),
+                        ("message", map([("text", text(&finding.message))])),
+                        (
+                            "properties",
+                            map([
+                                ("severity", text(&finding.severity)),
+                                ("step", text(&step.name)),
+                                ("target", text(&step.target)),
+                                ("resource", text(&finding.resource)),
+                                ("compiledFile", text(&finding.file)),
+                                ("compiledLine", Value::Uint(finding.line)),
+                            ]),
+                        ),
+                    ];
+                    if !uri.is_empty() {
+                        result.push((
+                            "locations",
+                            Value::List(vec![map([(
+                                "physicalLocation",
+                                Value::Map(
+                                    location
+                                        .into_iter()
+                                        .map(|(key, value)| (key.to_owned(), value))
+                                        .collect(),
+                                ),
+                            )])]),
+                        ));
+                    }
+                    if finding.accepted {
+                        result.push((
+                            "suppressions",
+                            Value::List(vec![map([
+                                ("kind", text("external")),
+                                ("justification", text("accepted by the run's baseline")),
+                            ])]),
+                        ));
+                    }
+                    results.push(Value::Map(
+                        result
+                            .into_iter()
+                            .map(|(key, value)| (key.to_owned(), value))
+                            .collect(),
+                    ));
+                }
+            }
+            map([
+                (
+                    "tool",
+                    map([(
+                        "driver",
+                        map([
+                            ("name", text(&format!("meridian-analyze-{analyzer}"))),
+                            (
+                                "informationUri",
+                                text("https://github.com/ZanattaMichael/meridian-core"),
+                            ),
+                            ("rules", Value::List(rules.into_values().collect())),
+                        ]),
+                    )]),
+                ),
+                (
+                    "automationDetails",
+                    map([(
+                        "id",
+                        text(&format!("meridian/{}/{}", report.mode, report.run)),
+                    )]),
+                ),
+                ("results", Value::List(results)),
+            ])
+        })
+        .collect();
+    let log = map([
+        (
+            "$schema",
+            text("https://json.schemastore.org/sarif-2.1.0.json"),
+        ),
+        ("version", text("2.1.0")),
+        ("runs", Value::List(runs)),
+    ]);
+    let mut out = log.canonical();
+    out.push('\n');
+    out
+}
+
+/// The SARIF level a severity maps to: `error` for critical and high,
+/// `warning` for medium, `note` for low and info.
+fn sarif_level(severity: &str) -> &'static str {
+    match severity {
+        "critical" | "high" => "error",
+        "medium" => "warning",
+        _ => "note",
     }
 }
 
@@ -105,6 +277,14 @@ fn json(report: &Report) -> String {
                 ("policy", text(&step.policy)),
                 ("policyDenials", Value::Uint(step.policy_denials)),
                 ("policyWarnings", Value::Uint(step.policy_warnings)),
+                ("analysis", text(&step.analysis)),
+                ("findingsReported", Value::Uint(step.findings_reported)),
+                ("findingsAccepted", Value::Uint(step.findings_accepted)),
+                ("findingsFailing", Value::Uint(step.findings_failing)),
+                (
+                    "findings",
+                    Value::List(step.findings.iter().map(finding_value).collect()),
+                ),
                 (
                     "resources",
                     Value::List(
@@ -200,6 +380,12 @@ fn why(step: &Step) -> String {
             explain(&step.reason),
             rules(step.policy_denials)
         ),
+        StepState::Failed if step.reason == "analysis-failed" => format!(
+            "failed: {} ({} of {} reaching it)",
+            explain(&step.reason),
+            step.findings_failing,
+            findings(step.findings_reported)
+        ),
         StepState::Failed => format!("failed: {}", explain(&step.reason)),
         StepState::Skipped => format!("skipped: {}", explain(&step.reason)),
         StepState::NotRun => format!("not run: the earlier step {} failed", step.waiting_on),
@@ -217,6 +403,15 @@ fn why(step: &Step) -> String {
             _ if step.policy_warnings > 0 => {
                 format!("the policy warned: {}", rules(step.policy_warnings))
             }
+            _ if step.findings_reported > 0 => format!(
+                "the analyzers reported {}{}",
+                findings(step.findings_reported),
+                if step.findings_accepted > 0 {
+                    format!(", and {} accepted", step.findings_accepted)
+                } else {
+                    String::new()
+                }
+            ),
             _ => String::new(),
         },
     }
@@ -224,6 +419,28 @@ fn why(step: &Step) -> String {
 
 fn rules(n: u64) -> String {
     format!("{n} rule{}", if n == 1 { "" } else { "s" })
+}
+
+fn findings(n: u64) -> String {
+    format!("{n} finding{}", if n == 1 { "" } else { "s" })
+}
+
+/// A finding as one line of text: the severity, the rule, where, and what.
+fn finding_line(finding: &crate::model::Finding) -> String {
+    let place = finding.place();
+    format!(
+        "{}{} {} ({}){}: {}",
+        if finding.accepted { "accepted " } else { "" },
+        finding.severity,
+        finding.rule,
+        finding.analyzer,
+        if place.is_empty() {
+            String::new()
+        } else {
+            format!(" at {place}")
+        },
+        finding.message
+    )
 }
 
 fn seconds(ms: Option<u64>) -> String {
@@ -343,7 +560,11 @@ fn junit(report: &Report) -> String {
         ) {
             let _ = writeln!(body, "      <skipped message=\"{why}\"/>");
         }
-        let lines = resource_lines(step);
+        let mut lines = resource_lines(step);
+        for finding in &step.findings {
+            lines.push_str(&finding_line(finding));
+            lines.push('\n');
+        }
         if !lines.is_empty() {
             let _ = writeln!(body, "      <system-out>{}</system-out>", escape(&lines));
         }
@@ -514,6 +735,29 @@ fn markdown(report: &Report) -> String {
             let _ = writeln!(out, "- **{}** {}", md(&step.title()), md(&why));
         }
     }
+    if report.steps.iter().any(|s| !s.findings.is_empty()) {
+        out.push_str(
+            "\n### Findings\n\n| Step | Severity | Rule | Where | What |\n|---|---|---|---|---|\n",
+        );
+        for step in &report.steps {
+            for finding in &step.findings {
+                let _ = writeln!(
+                    out,
+                    "| {} | {}{} | {} | {} | {} |",
+                    md(&step.title()),
+                    md(&finding.severity),
+                    if finding.accepted { " (accepted)" } else { "" },
+                    if finding.url.is_empty() {
+                        format!("`{}`", finding.rule.replace('`', ""))
+                    } else {
+                        format!("[`{}`]({})", finding.rule.replace('`', ""), finding.url)
+                    },
+                    md(&finding.place()),
+                    md(&finding.message)
+                );
+            }
+        }
+    }
     for step in &report.steps {
         if step.resources.is_empty() && step.outputs.is_empty() {
             continue;
@@ -650,6 +894,40 @@ fn html(report: &Report) -> String {
         );
     }
     out.push_str("</tbody>\n</table></div>\n");
+    if report.steps.iter().any(|s| !s.findings.is_empty()) {
+        out.push_str("<h2>Findings</h2>\n<div class=\"scroll\"><table>\n<thead><tr><th>Step</th><th>Severity</th><th>Rule</th><th>Where</th><th>What</th></tr></thead>\n<tbody>\n");
+        for step in &report.steps {
+            for finding in &step.findings {
+                let class = if finding.accepted {
+                    "idle"
+                } else {
+                    match finding.severity.as_str() {
+                        "critical" | "high" => "bad",
+                        _ => "idle",
+                    }
+                };
+                let _ = writeln!(
+                    out,
+                    "<tr><td>{}</td><td class=\"{class}\">{}{}</td><td>{}</td><td><code>{}</code></td><td>{}</td></tr>",
+                    escape(&step.title()),
+                    escape(&finding.severity),
+                    if finding.accepted { " (accepted)" } else { "" },
+                    if finding.url.is_empty() {
+                        format!("<code>{}</code>", escape(&finding.rule))
+                    } else {
+                        format!(
+                            "<a href=\"{}\"><code>{}</code></a>",
+                            escape(&finding.url),
+                            escape(&finding.rule)
+                        )
+                    },
+                    escape(&finding.place()),
+                    escape(&finding.message)
+                );
+            }
+        }
+        out.push_str("</tbody>\n</table></div>\n");
+    }
     if report
         .steps
         .iter()

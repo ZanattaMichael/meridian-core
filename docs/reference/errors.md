@@ -42,6 +42,8 @@ for a failed stage.
 | `policy-denied` | the run's [policy](policy.md) does not allow the change, or could not be asked |
 | `interrupted` | the operator stopped the run with Ctrl-C (or a `SIGTERM`) while the step was going, or before its tool was started |
 | `timed-out` | the step's tool ran past `--stage-timeout` and was stopped |
+| `analysis-failed` | an [analyzer](analyzers.md) found something at or above the severity the run fails on (`--fail-on`) |
+| `analyzer-failed` | an analyzer could not be run, or did not answer, so the step was not analyzed |
 | `plan-differs` | an `apply --plan` compiled the stage to an artifact other than the one the saved plan recorded, or the plan previewed a stage the document now leaves out; the stages after it are not run |
 
 Also: `earlier-step-failed` for skipped steps, and rollback reasons under

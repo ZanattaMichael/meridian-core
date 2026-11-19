@@ -81,9 +81,10 @@ value.
 A [policy](run-safety.md#8-policy-checks-before-apply) result is folded in
 as what the events carry: passed or denied, and how many rules denied and
 warned. SARIF, the right format for findings that point at a rule and a
-place in a document, is not written yet, because a `policy.*` event holds
-counts and neither a rule nor a place. It needs those two names added to the
-event, which is the run-safety work's to decide.
+place in a document, is written for [analyzer](../reference/analyzers.md)
+findings, whose `finding.reported` event names the rule and the place (since
+decision 0039). A `policy.*` event still holds counts and neither a rule nor a
+place, so a policy's denials are not in SARIF; that is issue 102.
 
 ## 4. Sinks
 
@@ -159,7 +160,7 @@ P2 to P7 were made during the work and accepted by the owner on 2026-11-18.
 | 1 | crate `meridian-report`; `--report`, `meridian report`; sinks with the built-in `command` sink and two reference sinks (`file`, `webhook` over `curl`); docs | this pull request |
 | 2 | crate `meridian-report-server` and its `server` sink; [guide](../reference/report-server.md) | this pull request |
 | 3 | an OpenTelemetry sink (a trace per run, a span per step), and a built-in webhook that needs no `curl` | after 2 |
-| 4 | SARIF | when a `policy.*` event names the rule and the place |
+| 4 | SARIF | built for analyzer findings (decision 0039); policy denials wait for issue 102 |
 | 5 | for the server, if wanted: a token per project, live push in place of page reloads, an index so a list does not fold every run | on request |
 
 `notification.sent` and `notification.failed` events are not emitted by part

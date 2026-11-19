@@ -473,6 +473,7 @@ mod tests {
             done_before_failing: Vec::new(),
             previous_good: String::new(),
             policy: None,
+            analyses: Vec::new(),
         });
         assert!(keeper.close().is_empty());
         assert_eq!(list(&dir, "r2"), ["resourceset/web@_2001_db8__1__22.log"]);

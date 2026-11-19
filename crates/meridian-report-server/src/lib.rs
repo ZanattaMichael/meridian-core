@@ -12,7 +12,7 @@
 //! | `POST /v1/projects/{project}/runs/{run}/events` | adds events, one JSON object per line. Needs the write token |
 //! | `GET /v1/projects/{project}/runs` | the project's runs, as JSON |
 //! | `GET /v1/projects/{project}/runs/{run}/events` | a run's events, one per line |
-//! | `GET /v1/projects/{project}/runs/{run}/report/{format}` | a run's report: `json`, `junit`, `markdown` or `html` |
+//! | `GET /v1/projects/{project}/runs/{run}/report/{format}` | a run's report: `json`, `junit`, `markdown`, `html` or `sarif` |
 //! | `GET /`, `/projects/{project}`, `/projects/{project}/runs/{run}` | the pages for people |
 //! | `GET /healthz` | `ok` |
 //!
@@ -246,6 +246,7 @@ async fn read_report(
                 Format::Junit => "application/xml",
                 Format::Markdown => "text/markdown; charset=utf-8",
                 Format::Html => "text/html; charset=utf-8",
+                Format::Sarif => "application/sarif+json",
             },
             render(&report, format),
         ),

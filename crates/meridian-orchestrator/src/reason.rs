@@ -32,6 +32,12 @@ pub enum Reason {
     Interrupted,
     /// The stage's tool ran past the run's time limit and was stopped.
     TimedOut,
+    /// An analyzer found something at or above the severity the run fails
+    /// on.
+    AnalysisFailed,
+    /// An analyzer could not be run, or did not answer, so the stage was
+    /// not analyzed.
+    AnalyzerFailed,
     /// An apply from a saved plan found that the document no longer compiles
     /// to what was planned, or that its condition no longer keeps it, so the
     /// plan does not say what would happen.
@@ -40,7 +46,7 @@ pub enum Reason {
 
 impl Reason {
     /// Every reason, in the order the reference lists them.
-    pub const ALL: [Reason; 10] = [
+    pub const ALL: [Reason; 12] = [
         Reason::NoPlugin,
         Reason::CompileRefused,
         Reason::NotSupported,
@@ -50,6 +56,8 @@ impl Reason {
         Reason::PolicyDenied,
         Reason::Interrupted,
         Reason::TimedOut,
+        Reason::AnalysisFailed,
+        Reason::AnalyzerFailed,
         Reason::PlanDiffers,
     ];
 
@@ -65,6 +73,8 @@ impl Reason {
             Reason::PolicyDenied => "policy-denied",
             Reason::Interrupted => "interrupted",
             Reason::TimedOut => "timed-out",
+            Reason::AnalysisFailed => "analysis-failed",
+            Reason::AnalyzerFailed => "analyzer-failed",
             Reason::PlanDiffers => "plan-differs",
         }
     }

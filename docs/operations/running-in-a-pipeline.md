@@ -20,7 +20,7 @@ order, and keeps the record.
 | **Runners and their identity**: where the job runs, and the OIDC token or service connection it runs as | **Secrets delivery**: a secret reaches the tool by a [private channel](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) and is never on a command line, in a file the engine keeps, or in a log |
 | **Secret release**: which secrets a job may read, and when | **The record**: every run's [events](../reference/state.md#events) and run-state, in a backend the next job can reach |
 | **Environments, reviewers and approvals**: who may deploy to production, and the pause before it | **Resume and rollback**: `apply --resume` continues a failed apply from the step that failed; `--on-failure rollback` and `meridian rollback` put one back |
-| **Logs and artifacts**: the job's log, its summary page, and the files it keeps | **Drift and policy**: `meridian drift` says whether what was applied is still there; `--policy` asks a policy before anything is applied |
+| **Logs and artifacts**: the job's log, its summary page, and the files it keeps | **Drift, policy and analysis**: `meridian drift` says whether what was applied is still there; `--policy` asks a policy before anything is applied; `--analyze` scans the compiled files and annotates each finding on the document's line |
 
 The engine never sees a value Meridian holds, and none is printed
 ([how](../concepts/secrets-in-memory.md)).

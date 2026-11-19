@@ -213,6 +213,7 @@ Two targets can run `tofu`:
 The [OpenTofu page](../targets/opentofu.md#opentofu-or-terraform) compares them.
 
 `--policy` needs `opa` (Open Policy Agent 1.0 or later); see [policy](../reference/policy.md).
+`--analyze checkov` needs `checkov`, and `--analyze trivy` needs `trivy`; see [analyzers](../reference/analyzers.md).
 
 Each tool uses its own credentials and configuration; Meridian stores none. Each
 [target's page](../targets/ansible.md) lists the environment variables that set the
