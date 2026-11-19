@@ -8,10 +8,10 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same pull request replaces the run in progress.
+# A newer run for the same branch or pull request cancels this one.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   links:

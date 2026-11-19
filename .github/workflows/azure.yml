@@ -30,7 +30,8 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same pull request replaces the run in progress.
+# A newer push to the same pull request cancels this run. Runs on main are
+# never cancelled: the subscription job deploys real resources.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

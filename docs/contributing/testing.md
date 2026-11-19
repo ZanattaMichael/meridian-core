@@ -233,3 +233,23 @@ cargo llvm-cov --workspace --locked --html      # target/llvm-cov/html/index.htm
 ```
 
 Plugin `main.rs` files show as uncovered because they run in a separate process.
+
+## Superseded CI runs
+
+Every workflow has a `concurrency` group of workflow plus ref. A newer run for the same branch or pull request cancels the older one, on `main` too.
+
+| Workflow | Cancelled when superseded |
+|---|---|
+| `wiki` | pull requests only; a publish on `main` queues |
+| `azure` | pull requests only; the subscription job deploys real resources |
+| `release` | pull requests only; tag runs are never cancelled |
+| `cut release` | never; one at a time |
+| all others | always |
+
+A new workflow copies this block, unless it publishes or deploys:
+
+```yaml
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+```
