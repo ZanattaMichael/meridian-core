@@ -102,6 +102,7 @@ fn mapping(resource_type: &str) -> Option<Mapping> {
                 ("absent", "absent"),
                 ("directory", "directory"),
                 ("file", "file"),
+                ("link", "link"),
                 ("present", "file"),
             ],
             states_without_arg: &["file"],
@@ -121,6 +122,7 @@ fn mapping(resource_type: &str) -> Option<Mapping> {
                         ("mode", "mode"),
                         ("owner", "owner"),
                         ("path", "path"),
+                        ("target", "src"),
                     ]
                 }
             },

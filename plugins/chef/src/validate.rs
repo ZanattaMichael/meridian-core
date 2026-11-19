@@ -14,6 +14,7 @@ fn identity(block: &Block) -> Option<(&'static str, &Value)> {
         "package" => "package_name",
         "service" => "service_name",
         "file" | "directory" => "path",
+        "link" => "target_file",
         "user" => "username",
         // A membership block shares its group with the block that creates it.
         "group" if !block.name.contains(':') => "group_name",

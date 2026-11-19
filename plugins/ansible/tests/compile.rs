@@ -559,3 +559,16 @@ fn a_repository_is_refused_the_same_way_as_everywhere() {
     let err = refusal(&format!("{YUM_REPO}        distribution: el9\n"));
     assert_eq!(err.rule, "unsupported-param");
 }
+
+#[test]
+fn a_link_is_the_file_module_in_state_link() {
+    let emitted = compile("    - id: ln\n      type: file\n      state: link\n      params:\n        path: /etc/nginx/sites-enabled/app\n        target: /etc/nginx/sites-available/app\n").unwrap();
+    let playbook = &emitted.artifact.files["playbook.yml"];
+    for line in [
+        "state: link",
+        "src: /etc/nginx/sites-available/app",
+        "path: /etc/nginx/sites-enabled/app",
+    ] {
+        assert!(playbook.contains(line), "{line} in {playbook}");
+    }
+}

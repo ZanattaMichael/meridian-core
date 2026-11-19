@@ -353,6 +353,7 @@ A service can be notified with `restart`, `reload`, `start` and `stop`; see
 |---|---|---|
 | `present` (default), `file` | `file.managed` | `path` → `name` (required), `content` → `contents`, `owner` → `user`, `group`, `mode` |
 | `directory` | `file.directory`, with `makedirs: true` | `path`, `owner` → `user`, `group`, `mode` |
+| `link` | `file.symlink` | `path` → `name`, `target`, `owner` → `user`, `group` |
 | `absent` | `file.absent` | `path` |
 
 - Without `content`, `replace: false` is added: an existing file's content is kept and a

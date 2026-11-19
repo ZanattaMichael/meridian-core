@@ -87,14 +87,25 @@ with a warning.
 
 | | |
 |---|---|
-| Params | `path` (required), `content`, `owner`, `group`, `mode`. cloud-init also takes `encoding` and `append` |
-| States | `present` (default) or `file`, `directory`, `absent` |
+| Params | `path` (required), `content`, `owner`, `group`, `mode`, `target` (with `link`, required). cloud-init also takes `encoding` and `append` |
+| States | `present` (default) or `file`, `directory`, `link`, `absent`. cloud-init: no `link` |
 | Can be notified | no |
 
 Quote `mode` (`"0644"`). A directory with `content` is refused. On Salt a file without
 `content` is created if missing, directories get parents, and attributes on `absent` are
 dropped with a warning. On cloud-init `present` needs `content`; `directory` and `absent`
 become `install -d` and `rm -rf`.
+
+`link` makes `path` a symbolic link to `target`. It takes `owner` and `group`, not
+`content` or `mode` (`param-conflicts-with-state`). `target` without `link` is refused.
+
+| Target | `link` |
+|---|---|
+| ansible | `ansible.builtin.file` with `state: link`, `src` |
+| puppet, openvox | `file` with `ensure => link`, `target` |
+| chef | `link`: `target_file`, `to` |
+| salt | `file.symlink` |
+| cloud-init | refused: use an `exec` running `ln -s` |
 
 ```yaml
 - id: app_conf

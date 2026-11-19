@@ -2099,6 +2099,14 @@
                       "number",
                       "boolean"
                     ]
+                  },
+                  "target": {
+                    "description": "With state `link`: the path the link points to.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
                   }
                 },
                 "additionalProperties": false,
@@ -2111,6 +2119,7 @@
                   "absent",
                   "directory",
                   "file",
+                  "link",
                   "present"
                 ]
               }
@@ -3985,6 +3994,14 @@
                       "number",
                       "boolean"
                     ]
+                  },
+                  "target": {
+                    "description": "With state `link`: the path the link points to.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
                   }
                 },
                 "additionalProperties": false,
@@ -3997,6 +4014,7 @@
                   "absent",
                   "directory",
                   "file",
+                  "link",
                   "present"
                 ]
               }
@@ -6514,6 +6532,14 @@
                       "number",
                       "boolean"
                     ]
+                  },
+                  "target": {
+                    "description": "With state `link`: the path the link points to.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
                   }
                 },
                 "additionalProperties": false,
@@ -6526,6 +6552,7 @@
                   "absent",
                   "directory",
                   "file",
+                  "link",
                   "present"
                 ]
               }
@@ -7766,6 +7793,14 @@
                       "number",
                       "boolean"
                     ]
+                  },
+                  "target": {
+                    "description": "With state `link`: the path the link points to.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
                   }
                 },
                 "additionalProperties": false,
@@ -7778,6 +7813,7 @@
                   "absent",
                   "directory",
                   "file",
+                  "link",
                   "present"
                 ]
               }
@@ -8251,6 +8287,14 @@
                       "number",
                       "boolean"
                     ]
+                  },
+                  "target": {
+                    "description": "With state `link`: the path the link points to.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
                   }
                 },
                 "additionalProperties": false,
@@ -8263,6 +8307,7 @@
                   "absent",
                   "directory",
                   "file",
+                  "link",
                   "present"
                 ]
               }

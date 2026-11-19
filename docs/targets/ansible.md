@@ -139,7 +139,7 @@ Unlisted params (`unsupported-param`) and states (`unsupported-state`) are refus
 | `package` | `ansible.builtin.package` | `present` (default), `absent`, `latest` | `name` | `name` |
 | `packageRepository` | `ansible.builtin.deb822_repository` (apt), `ansible.builtin.yum_repository` (yum) | `present` (default), `absent` | `name`, `format`, `url`, `key`; apt: `distribution`, `components` | `name`, `format`, `url` |
 | `service` | `ansible.builtin.service` | `running` (`started`, default), `started`, `stopped`, `restarted`, `reloaded` | `name`, `enabled` | `name` |
-| `file` | `ansible.builtin.copy` when there is `content`, `ansible.builtin.file` otherwise | `present` (`file`, default), `file`, `directory`, `absent` | `path` (`dest` or `path`), `content`, `owner`, `group`, `mode` | `path` |
+| `file` | `ansible.builtin.copy` when there is `content`, `ansible.builtin.file` otherwise | `present` (`file`, default), `file`, `directory`, `link`, `absent` | `path` (`dest` or `path`), `content`, `owner`, `group`, `mode`, `target` (`src`) | `path`; `target` with `link` |
 | `user` | `ansible.builtin.user` | `present` (default), `absent` | `name`, `uid`, `home`, `shell`, `system`, `groups` | `name` |
 | `group` | `ansible.builtin.group` | `present` (default), `absent` | `name`, `gid`, `system` | `name` |
 | `exec` | `ansible.builtin.command`, or `ansible.builtin.shell` with `shell: true` | none; an exec has no state | `command` (`cmd`), `chdir`, `creates`, `removes`, `shell` | `command` |

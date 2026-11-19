@@ -332,6 +332,30 @@ const CASES: &[Case] = &[
         Same,
         "    - id: a\n      type: file\n      params:\n        path: /etc/app/app.conf\n        source: https://example.com/app.conf\n",
     ),
+    case(
+        "file",
+        "state `link` with `target`",
+        Varies,
+        "    - id: a\n      type: file\n      state: link\n      params:\n        path: /etc/nginx/sites-enabled/app\n        target: /etc/nginx/sites-available/app\n",
+    ),
+    case(
+        "file",
+        "state `link` without `target`",
+        Same,
+        "    - id: a\n      type: file\n      state: link\n      params:\n        path: /etc/nginx/sites-enabled/app\n",
+    ),
+    case(
+        "file",
+        "state `link` with `content`",
+        Same,
+        "    - id: a\n      type: file\n      state: link\n      params:\n        path: /etc/app\n        target: /opt/app\n        content: x\n",
+    ),
+    case(
+        "file",
+        "`target` without state `link`",
+        Same,
+        "    - id: a\n      type: file\n      params:\n        path: /etc/app\n        target: /opt/app\n",
+    ),
     // ---- user ----------------------------------------------------------
     case(
         "user",
