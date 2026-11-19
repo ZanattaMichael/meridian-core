@@ -636,3 +636,47 @@ fn a_failed_destroy_says_so() {
     assert_eq!(err.msg, "pulumi destroy failed");
     assert!(err.output.contains("is protected"), "{err:?}");
 }
+
+const INSPECTING: &str = r#""stack export") echo '{"version":3,"deployment":{"resources":[
+  {"urn":"urn:pulumi:prod::web-vm::aws:ec2/instance:Instance::web_vm","type":"aws:ec2/instance:Instance","id":"i-1",
+   "outputs":{"instanceType":"t3.micro","userData":{"4dabf18193072939515e22adb298388d":"1b47061264138c4ac30d75fd1eb44270","ciphertext":"v1:x"}}}]}}' ;;"#;
+
+#[test]
+fn inspect_reads_one_resource_from_the_stack_export() {
+    let dir = scratch(TMP, "inspect");
+    let context = context(&dir);
+    fs::create_dir_all(&context.work_dir).unwrap();
+    fs::write(
+        context.work_dir.join("stack.json"),
+        r#"{"project":"web-vm","stack":"prod","backend":"","secretsProvider":""}"#,
+    )
+    .unwrap();
+    let runner = runner(&dir, INSPECTING);
+    assert!(runner.inspects());
+    let read = runner.inspect(&context, &compiled(), "web_vm", "").unwrap();
+    assert_eq!(calls(&dir), ["stack export --stack prod"]);
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, None);
+    assert_eq!(read.command, "pulumi stack export");
+    assert_eq!(
+        read.actual.get("instanceType"),
+        Some(&Value::from("t3.micro"))
+    );
+    assert_eq!(
+        read.actual.get("userData"),
+        Some(&Value::from("(sensitive)"))
+    );
+
+    let missing = runner.inspect(&context, &compiled(), "db", "").unwrap();
+    assert!(!missing.found);
+}
+
+#[test]
+fn inspect_before_any_apply_runs_nothing() {
+    let dir = scratch(TMP, "inspect-never");
+    let read = runner(&dir, INSPECTING)
+        .inspect(&context(&dir), &compiled(), "web_vm", "")
+        .unwrap();
+    assert!(!dir.join("calls").exists());
+    assert!(!read.found);
+}

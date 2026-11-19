@@ -486,3 +486,50 @@ fn a_stack_that_is_not_deleted_fails_the_destroy() {
     .unwrap_err();
     assert!(err.msg.starts_with("the stack was not deleted"), "{err:?}");
 }
+
+#[test]
+fn inspect_reads_the_resource_with_drift_detection_and_changes_nothing() {
+    let dir = scratch(TMP, "inspect");
+    let runner = runner(
+        &dir,
+        r#"detect-stack-resource-drift) echo '{"StackResourceDrift":{"LogicalResourceId":"WebVm","StackResourceDriftStatus":"IN_SYNC","ActualProperties":"{\"InstanceType\":\"t3.micro\"}"}}' ;;"#,
+    );
+    assert!(runner.inspects());
+    // The host makes the work directory before any call.
+    fs::create_dir_all(dir.join("work")).unwrap();
+    let read = runner
+        .inspect(&context(&dir), &compiled(), "web_vm", "")
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        ["detect-stack-resource-drift --logical-resource-id WebVm --output json"]
+    );
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, None);
+    assert_eq!(
+        read.actual.get("InstanceType"),
+        Some(&Value::from("t3.micro"))
+    );
+    assert_eq!(
+        read.command,
+        "aws cloudformation detect-stack-resource-drift --stack-name web-vm --logical-resource-id WebVm"
+    );
+    assert_eq!(
+        fs::read_dir(dir.join("work")).unwrap().count(),
+        0,
+        "nothing was written"
+    );
+}
+
+#[test]
+fn inspect_of_a_stack_that_does_not_exist_finds_nothing() {
+    let dir = scratch(TMP, "inspect-missing");
+    fs::create_dir_all(dir.join("work")).unwrap();
+    let read = runner(
+        &dir,
+        r#"detect-stack-resource-drift) echo 'An error occurred (ValidationError): Stack with id web-vm does not exist' >&2; exit 254 ;;"#,
+    )
+    .inspect(&context(&dir), &compiled(), "web_vm", "")
+    .unwrap();
+    assert!(!read.found);
+}

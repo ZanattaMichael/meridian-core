@@ -419,6 +419,35 @@ impl Runner for TerraformRunner {
             .run_ok("terraform could not show its state", log)?;
         read_identifiers(&shown.stdout)
     }
+
+    fn inspects(&self) -> bool {
+        true
+    }
+
+    /// The resource's recorded values from `show -json`, and a plan of the
+    /// compiled configuration targeted at it for whether it is as declared.
+    /// Changes no state.
+    fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        _endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunError> {
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let tool = || self.tool(context, cloud.as_ref());
+        crate::inspect::inspect(
+            &crate::inspect::Program {
+                name: "terraform",
+                tool: &tool,
+                extra_args: &self.extra_args,
+                config_path: CONFIG_PATH,
+            },
+            context,
+            artifact,
+            resource,
+        )
+    }
 }
 
 fn unreadable(what: &str, detail: impl std::fmt::Display) -> RunError {
