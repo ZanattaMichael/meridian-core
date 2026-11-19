@@ -325,4 +325,4 @@ Run before the plan ([pipelines](../operations/running-in-a-pipeline.md)):
 
 See [decision 0037](../decisions/0037-a-test-is-a-document-of-cases-over-compile-and-plan.md)
 [decision 0050](../decisions/0050-a-lifecycle-case-provisions-verifies-and-always-destroys.md)
-and [decision 0052](../decisions/0052-the-run-id-is-carried-in-the-data-and-read-as-meridian-run-id.md).
+and [decision 0053](../decisions/0053-the-run-id-is-carried-in-the-data-and-read-as-meridian-run-id.md).
