@@ -41,8 +41,7 @@ impl Target {
             // A compiled-in emitter does not know its own registered name is
             // what the reader needs to see, so it is stamped here, exactly as
             // it is for a refusal that crossed the process boundary.
-            Kind::InProcess(t) => meridian_sdk::check_settings(t.emitter.as_ref(), graph)
-                .and_then(|()| t.emitter.emit(graph, data))
+            Kind::InProcess(t) => meridian_sdk::emit_checked(t.emitter.as_ref(), graph, data)
                 .map_err(|mut e| {
                     e.target = self.info.name.clone();
                     EmitError::Refused(e)
@@ -141,6 +140,14 @@ impl Target {
         self.client("report outputs")?.outputs(context)
     }
 
+    /// Reads the tool's identifier of each thing it manages, by resource id.
+    pub fn identifiers(
+        &self,
+        context: &RunContext,
+    ) -> Result<std::collections::BTreeMap<String, String>, RunFailure> {
+        self.client("read identifiers")?.identifiers(context)
+    }
+
     /// A compiled-in emitter only compiles; running a tool is a plugin's job.
     fn client(&self, verb: &str) -> Result<&Client, RunFailure> {
         match &self.kind {
@@ -223,6 +230,7 @@ impl Registry {
             operations: Operations::COMPILE_ONLY,
             accepts_inputs: false,
             saves_plans: false,
+            reads_identifiers: false,
             path: String::new(),
             signature: crate::Signature::NotChecked,
         };

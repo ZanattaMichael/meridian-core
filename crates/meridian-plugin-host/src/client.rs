@@ -235,6 +235,7 @@ impl Client {
             operations: wire::operations_from_wire(reply.operations),
             accepts_inputs: reply.accepts_inputs,
             saves_plans: reply.saves_plans,
+            reads_identifiers: reply.reads_identifiers,
             import_formats: wire::import_formats_from_wire(reply.import_formats),
             exports_schemas: reply.exports_schemas,
             settings: wire::settings_from_wire(reply.settings),
@@ -648,6 +649,26 @@ impl Client {
         let result = self.finished("reading outputs", result)?;
         wire::outputs_response_from_wire(result)
             .map_err(|e| self.unreadable("reading outputs", e))?
+            .map_err(RunFailure::Tool)
+    }
+
+    /// Reads the tool's identifier of each thing it manages, without
+    /// changing anything.
+    pub fn identifiers(
+        &self,
+        context: &RunContext,
+    ) -> Result<BTreeMap<String, String>, RunFailure> {
+        let mut runner = self.runner("read identifiers", self.info.reads_identifiers)?;
+        let request = pb::IdentifiersRequest {
+            context: Some(wire::context_to_wire_without_secrets(context)),
+        };
+        let result = self
+            .runtime
+            .block_on(runner.identifiers(request))
+            .map(|r| Some(r.into_inner()));
+        let result = self.finished("reading identifiers", result)?;
+        wire::identifiers_response_from_wire(result)
+            .map_err(|e| self.unreadable("reading identifiers", e))?
             .map_err(RunFailure::Tool)
     }
 

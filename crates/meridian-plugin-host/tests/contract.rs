@@ -50,6 +50,7 @@ const TARGETS: &[Target] = &[
             runtime_condition: true,
             secrets: true,
             credentials: true,
+            adopt: meridian_sdk::Adoption::Converge,
         },
     },
     Target {
@@ -71,6 +72,7 @@ const TARGETS: &[Target] = &[
             runtime_condition: false,
             secrets: true,
             credentials: true,
+            adopt: meridian_sdk::Adoption::Converge,
         },
     },
 ];

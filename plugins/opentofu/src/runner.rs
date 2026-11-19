@@ -294,6 +294,34 @@ impl Runner for OpenTofuRunner {
         }
         self.read_outputs(context, &meridian_sdk::NoLog)
     }
+
+    fn reads_identifiers(&self) -> bool {
+        true
+    }
+
+    fn identifiers(
+        &self,
+        context: &RunContext,
+    ) -> Result<std::collections::BTreeMap<String, String>, RunError> {
+        if !context.work_dir.join(CONFIG_PATH).exists() {
+            return Err(RunError::new(
+                "nothing has been applied for this document yet, so there is nothing to adopt",
+            ));
+        }
+        let log = &meridian_sdk::NoLog;
+        // The state is read through the tool, which needs the directory
+        // initialised for its backend and providers.
+        self.tool(context)
+            .args(["init", "-input=false", "-no-color"])
+            .args(self.extra_args.iter().cloned())
+            .run_ok("tofu init failed", log)?;
+        let shown = self
+            .tool(context)
+            .args(["show", "-json", "-no-color"])
+            .capture_stdout()
+            .run_ok("tofu could not show its state", log)?;
+        read_identifiers(&shown.stdout)
+    }
 }
 
 fn unreadable(what: &str, detail: impl std::fmt::Display) -> RunError {
@@ -316,6 +344,12 @@ fn read_plan(json: &str) -> Result<Vec<Change>, RunError> {
             continue;
         };
         let text = |key: &str| entry.get(key).and_then(Value::as_str).unwrap_or("");
+        // A resource's `adopt`, compiled to an import block: the plan says
+        // it is importing, and its actions say what else is done to it.
+        let importing = entry
+            .get("change")
+            .and_then(Value::as_map)
+            .is_some_and(|c| c.get("importing").is_some_and(|i| *i != Value::Null));
         let actions: Vec<&str> = entry
             .get("change")
             .and_then(Value::as_map)
@@ -326,6 +360,7 @@ fn read_plan(json: &str) -> Result<Vec<Change>, RunError> {
             .filter_map(Value::as_str)
             .collect();
         let action = match actions.as_slice() {
+            ["no-op"] if importing => ChangeAction::Adopt,
             ["create"] => ChangeAction::Create,
             ["update"] => ChangeAction::Update,
             ["delete"] => ChangeAction::Delete,
@@ -344,7 +379,13 @@ fn read_plan(json: &str) -> Result<Vec<Change>, RunError> {
                 text("address").to_owned()
             },
             action,
-            summary: text("type").to_owned(),
+            // An adoption that also changes the thing is reported as the
+            // change, and says it adopts.
+            summary: if importing && action != ChangeAction::Adopt {
+                format!("{}, adopted", text("type"))
+            } else {
+                text("type").to_owned()
+            },
         });
     }
     Ok(changes)
@@ -367,6 +408,45 @@ fn read_outputs(json: &str) -> Result<Vec<Output>, RunError> {
             })
         })
         .collect())
+}
+
+/// Reads `tofu show -json` of the state into each top-level managed
+/// resource's `id`, by the resource's name, which is its id in the document.
+/// A resource inside a module, or one of several made by `count` or
+/// `for_each`, has no one resource of the document to belong to.
+fn read_identifiers(json: &str) -> Result<std::collections::BTreeMap<String, String>, RunError> {
+    let mut found = std::collections::BTreeMap::new();
+    if json.trim().is_empty() {
+        return Ok(found);
+    }
+    let state = decode_value(json.as_bytes()).map_err(|e| unreadable("state", e))?;
+    let resources = state
+        .as_map()
+        .and_then(|s| s.get("values"))
+        .and_then(Value::as_map)
+        .and_then(|v| v.get("root_module"))
+        .and_then(Value::as_map)
+        .and_then(|m| m.get("resources"))
+        .and_then(Value::as_list)
+        .unwrap_or(&[]);
+    for entry in resources {
+        let Some(entry) = entry.as_map() else {
+            continue;
+        };
+        let text = |key: &str| entry.get(key).and_then(Value::as_str).unwrap_or("");
+        if text("mode") != "managed" || entry.contains_key("index") || text("name").is_empty() {
+            continue;
+        }
+        let id = entry
+            .get("values")
+            .and_then(Value::as_map)
+            .and_then(|v| v.get("id"))
+            .and_then(Value::as_str);
+        if let Some(id) = id.filter(|id| !id.is_empty()) {
+            found.insert(text("name").to_owned(), id.to_owned());
+        }
+    }
+    Ok(found)
 }
 
 #[cfg(test)]
@@ -400,6 +480,42 @@ mod tests {
         );
         assert!(read_plan("{}").unwrap().is_empty());
         assert!(read_plan("not json").is_err());
+    }
+
+    #[test]
+    fn the_state_is_read_into_identifiers_by_resource_id() {
+        let json = r#"{"format_version":"1.0","values":{"root_module":{"resources":[
+          {"address":"aws_instance.web","mode":"managed","type":"aws_instance","name":"web","values":{"id":"i-0abc123","ami":"ami-1"}},
+          {"address":"data.aws_ami.ubuntu","mode":"data","type":"aws_ami","name":"ubuntu","values":{"id":"ami-1"}},
+          {"address":"aws_subnet.a[0]","mode":"managed","type":"aws_subnet","name":"a","index":0,"values":{"id":"subnet-1"}}
+        ],"child_modules":[{"resources":[{"address":"module.net.aws_vpc.this","mode":"managed","type":"aws_vpc","name":"this","values":{"id":"vpc-1"}}]}]}}}"#;
+        let found = read_identifiers(json).unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found["web"], "i-0abc123");
+        assert!(read_identifiers("").unwrap().is_empty());
+        assert!(read_identifiers("{}").unwrap().is_empty());
+        assert!(read_identifiers("not json").is_err());
+    }
+
+    #[test]
+    fn an_import_is_read_as_an_adoption() {
+        let json = r#"{"format_version":"1.2","resource_changes":[
+          {"address":"aws_instance.web","mode":"managed","type":"aws_instance","name":"web","change":{"actions":["no-op"],"importing":{"id":"i-0abc123"}}},
+          {"address":"aws_s3_bucket.logs","mode":"managed","type":"aws_s3_bucket","name":"logs","change":{"actions":["update"],"importing":{"id":"logs"}}},
+          {"address":"aws_eip.addr","mode":"managed","type":"aws_eip","name":"addr","change":{"actions":["no-op"],"importing":null}}
+        ]}"#;
+        let shown: Vec<String> = read_plan(json)
+            .unwrap()
+            .iter()
+            .map(Change::to_string)
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                "adopt web: aws_instance",
+                "update logs: aws_s3_bucket, adopted",
+            ]
+        );
     }
 
     #[test]

@@ -15,6 +15,7 @@
 //! have come from [`meridian_ir::schema`], which the parser itself reads,
 //! and everything about a target comes from its plugin.
 pub mod analysis;
+pub mod bundles;
 pub mod catalog;
 pub mod check;
 pub mod fmt;

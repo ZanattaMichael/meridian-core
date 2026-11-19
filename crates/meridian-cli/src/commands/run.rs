@@ -253,7 +253,20 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
         seen: Vec::new(),
         sinks: Dispatcher::start(sinks, workflow.sink_timeout).map_err(Failure::Message)?,
     };
-    let report = run_selected(&bundle, &registry, mode, &options, &selector, &mut printer);
+    // Each step's tool output is kept, masked, on this machine; a compile
+    // runs no tool and keeps no record.
+    let (report, log_warnings) = if mode == Mode::Compile || workflow.no_logs {
+        let report = run_selected(&bundle, &registry, mode, &options, &selector, &mut printer);
+        (report, Vec::new())
+    } else {
+        let mut keeper = Keeper::new(&mut printer, &workflow.state.state_dir, workflow.log_limit);
+        let report = run_selected(&bundle, &registry, mode, &options, &selector, &mut keeper);
+        let warnings = keeper.close();
+        (report, warnings)
+    };
+    for warning in &log_warnings {
+        eprintln!("warning: {warning}");
+    }
     // The sinks are closed and the reports written whatever the run did: a
     // failed run is the one most worth hearing about.
     let mut sink_failed = false;

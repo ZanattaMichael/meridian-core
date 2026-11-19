@@ -131,6 +131,13 @@ fn every_example_is_a_template_real_tooling_reads() {
             ],
         ),
         (
+            "../common/web-arm",
+            vec![
+                "'Microsoft.Network/virtualNetworks/subnets@2023-09-01'",
+                "'Microsoft.Compute/virtualMachines@2024-03-01'",
+            ],
+        ),
+        (
             "landing-zone",
             vec![
                 "targetScope = 'subscription'",
@@ -140,7 +147,10 @@ fn every_example_is_a_template_real_tooling_reads() {
         ),
     ];
     for (name, expected) in examples {
-        let dir = scratch(TMP, &format!("real-read-{name}"));
+        let dir = scratch(
+            TMP,
+            &format!("real-read-{}", name.replace("../common/", "common-")),
+        );
         let artifact = compile(&graph_from_file(
             &format!("examples/arm/{name}.yaml"),
             "arm",

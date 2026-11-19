@@ -48,6 +48,7 @@ mod credential;
 pub mod expr;
 pub mod fetch;
 mod import;
+pub mod infra;
 mod listen;
 pub mod rules;
 mod run;
@@ -94,9 +95,9 @@ pub use secrets::{holds_secret, Written};
 pub use secrets::{SecretName, Secrets};
 pub use serve::{serve, Plugin, ServeError};
 pub use settings::Setting;
-pub use types::check_settings;
+pub use types::{check_adopt, check_settings, emit_checked};
 pub use types::{
-    Artifact, Capabilities, CompileError, Data, Edge, EdgeKind, Emitted, Emitter,
+    Adoption, Artifact, Capabilities, CompileError, Data, Edge, EdgeKind, Emitted, Emitter,
     OutputDeclaration, Position, Resource, ResourceGraph, Warning,
 };
 pub use version::PROTOCOLS_ENV;

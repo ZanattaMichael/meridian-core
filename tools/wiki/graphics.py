@@ -228,8 +228,8 @@ def architecture() -> str:
         "order by dependsOn", "stages and outputs", "lock, record, resume",
     ]))
     p.append(chip_row(L + 28, core_y + 96, [
-        "secrets in locked memory", "policy checks", "reports and sinks", "plugin signatures",
-        "rollback and drift", "import", "schema sync",
+        "locked-memory secrets", "policy checks", "reports, sinks", "plugin signatures",
+        "rollback, drift", "import", "adopt", "retarget", "schema sync",
     ], TEXT_SOFT))
     for i, cx in enumerate(centres):
         p.append(flow(f"M{cx:g} {top + card_h}L{cx:g} {core_y}", WHITE if i < 3 else TEXT_SOFT, delay=i * 0.9, seconds=3 if i < 3 else 4))
@@ -239,7 +239,7 @@ def architecture() -> str:
     p.append(rect(L, proto_y, R - L, proto_h, TILE, LINE, 29))
     mid = (L + R) / 2
     p.append(text(mid, proto_y + 25, "one plugin program per target, spoken to over a private socket", 15, 600, WHITE))
-    p.append(text(mid, proto_y + 45, "Describe · Emit · Plan · Apply · Outputs · Import · ExportSchemas", 13, 400, TEXT_SOFT, mono=True))
+    p.append(text(mid, proto_y + 45, "Describe · Emit · Plan · Apply · Outputs · Identifiers · Import · ExportSchemas", 13, 400, TEXT_SOFT, mono=True))
     p.append(flow(f"M{mid - 40:g} {core_y + core_h}L{mid - 40:g} {proto_y}", WHITE, delay=0.4))
     p.append(flow(f"M{mid + 40:g} {proto_y}L{mid + 40:g} {core_y + core_h}", LINE, delay=1.6))
     p.append(text(mid - 56, core_y + core_h + 22, "ordered resources, data, secrets", 12.5, 400, TEXT_SOFT, "end"))
@@ -468,6 +468,13 @@ def run_safety() -> str:
     p.append(flow(f"M300 405L740 405", CON, delay=0.2, seconds=2.6))
     p.append(text(520, 396, "every change of state is an event", 12.5, 400, TEXT_SOFT))
     p.append(card(740, 340, 200, 128, "the record", ["runs/<id>/run.json", "runs/<id>/events.jsonl", "names things, holds", "no value and no secret"], CON, 16, 12.5, True))
+    # Kept beside the record, on this machine only.
+    p.append(flow("M720 405L720 250L740 250", CM, delay=0.6, seconds=2.4))
+    p.append(card(740, 190, 420, 120, "on this machine only, never sent", [
+        "runs/<id>/logs/: each step's tool output, masked;",
+        "meridian logs reads it, meridian bug-report packs it",
+        "history/: what a rollback applies again",
+    ], CM, 16, 12.5, True))
     p.append(card(960, 340, 200, 128, "the run-state", ["state.json", "which stage applied", "which artifact, by hash;", "outputs are read back"], CON, 16, 12.5, True))
     p.append(flow(f"M840 468L840 520", CON, delay=1, seconds=2))
     p.append(flow(f"M1060 468L1060 520", CON, delay=1.4, seconds=2))
@@ -492,7 +499,7 @@ def run_safety() -> str:
         "Each tool owns its own state: Meridian's record says what Meridian did, never the truth about your infrastructure.",
     ], 12.5, TEXT_SOFT, "start"))
     p.append(caption(W, H, "A run can be repeated, shared, picked up where it stopped, or put back, because every step of it was recorded before the next began."))
-    return doc(W, H, "Running safely: the lock, the analyzers and the policy check, the record of every event, the run-state, and what happens when a stage fails", "".join(p))
+    return doc(W, H, "Running safely: the lock, the analyzers and the policy check, the record of every event, the run-state, the tool logs kept on the machine, and what happens when a stage fails", "".join(p))
 
 
 def plugin_categories() -> str:
@@ -719,6 +726,140 @@ def analyzers_flow() -> str:
     return doc(W, H, "Analyzers: a stage compiles, its files are written to a directory of their own, each analyzer reads them and answers with findings, and every finding is traced back to the line of the document that resource was written on", "".join(p))
 
 
+def common_types() -> str:
+    """One document of common infrastructure types, and what each target and cloud makes of it."""
+    W, H = 1200, 520
+    p: list[str] = []
+    p.append(heading(40, 40, "Written once"))
+    rows = [("network", "cidr"), ("subnet", "network, cidr, public"), ("firewall", "network, rules"), ("address", ""), ("vm", "subnet, size, image, sshKey")]
+    for i, (name, params) in enumerate(rows):
+        y = 60 + i * 80
+        p.append(card(40, y, 250, 64, f"type: {name}", [params] if params else ["a fixed public IP"], IAC, 16, 12.5, True))
+    cols = [
+        ("terraform · aws", ["aws_vpc", "aws_subnet + routes", "aws_security_group + rules", "aws_eip", "aws_instance + key, ami"]),
+        ("cloudformation", ["AWS::EC2::VPC", "AWS::EC2::Subnet + routes", "AWS::EC2::SecurityGroup", "AWS::EC2::EIP", "AWS::EC2::Instance + key"]),
+        ("terraform · azure", ["azurerm_virtual_network", "azurerm_subnet", "azurerm_network_security_group", "azurerm_public_ip", "azurerm_linux_virtual_machine"]),
+        ("bicep · arm", ["virtualNetworks", "virtualNetworks/subnets", "networkSecurityGroups", "publicIPAddresses", "virtualMachines + nic"]),
+    ]
+    for c, (title, natives) in enumerate(cols):
+        x = 340 + c * 215
+        p.append(heading(x, 40, title, IAC))
+        for i, native in enumerate(natives):
+            y = 60 + i * 80
+            p.append(rect(x, y + 10, 205, 44, TILE, TILE_EDGE))
+            p.append(text(x + 12, y + 37, native, 10, 400, TEXT_SOFT, "start", mono=True))
+    for i in range(5):
+        y = 92 + i * 80
+        p.append(flow(f"M290 {y}C315 {y} 315 {y} 340 {y}", IAC, delay=i * 0.35, seconds=2.4))
+    p.append(caption(W, H, "Pulumi makes the Terraform resources with its own type tokens. The same outputs everywhere: id, privateAddress, publicAddress."))
+    return doc(W, H, "The common infrastructure types: network, subnet, firewall, address and vm written once, and the native resources Terraform for AWS, CloudFormation, Terraform for Azure, and Bicep and ARM compile each of them to", "".join(p))
+
+
+def schema_bundles() -> str:
+    """Schema bundles: published once from the tools, then synced by every project without them."""
+    W, H = 1200, 560
+    p: list[str] = []
+    # Publishing, along the top.
+    p.append(heading(40, 40, "Published once, where the tools are"))
+    top = [
+        ("catalogue.yaml", ["each upstream at one", "exact version, moved", "by a reviewed PR"], WHITE, False),
+        ("build", ["no secrets:", "sync --all-types", "and pack each bundle"], IAC, False),
+        ("publish", ["a reviewer approves;", "sign, push, update", "the index, attest"], PIPE, False),
+    ]
+    for i, (title, body, colour, mono) in enumerate(top):
+        x = 40 + i * 250
+        p.append(card(x, 56, 220, 118, title, body, colour, 16, 12.5, mono))
+        if i > 0:
+            p.append(flow(f"M{x - 30} 115L{x} 115", colour, delay=i * 0.5, seconds=1.6))
+    # The registry, top right.
+    p.append(rect(800, 56, 360, 118, WELL, CON, 18, 1.4))
+    p.append(f'<rect x="800" y="56" width="360" height="5" rx="2.5" fill="{CON}"/>')
+    p.append(text(980, 86, "an OCI registry, or a directory", 16, 700, WHITE))
+    p.append(lines(822, 112, [
+        "terraform/hashicorp-aws:5.60.0",
+        "kubernetes/core:1.31.0",
+        "index:latest   every bundle, its types",
+    ], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(flow("M770 115L800 115", CON, delay=1.5, seconds=1.6))
+    # Using, along the bottom.
+    by = 280
+    p.append(heading(40, by - 16, "Used everywhere else, with no tool"))
+    p.append(card(40, by, 250, 130, "meridian.yaml", ["spec:", "  schemas:", "    registry: ghcr.io/…", "    signatures: require"], WHITE, 16, 12.5, True))
+    p.append(card(330, by, 300, 130, "meridian schema sync", ["the types the documents use", "→ the newest bundle that", "describes each, from the index", "→ its signature checked"], LINE, 16, 12.5))
+    p.append(flow(f"M290 {by + 65}L330 {by + 65}", WHITE, delay=0.2, seconds=1.6))
+    p.append(flow(f"M980 174L980 222L480 222L480 {by}", CON, delay=0.6, seconds=3.0))
+    p.append(card(670, by, 230, 130, "the cache", ["types used: in full", "the rest: by name", "the same bytes on", "every machine"], ORC, 16, 12.5))
+    p.append(flow(f"M630 {by + 65}L670 {by + 65}", ORC, delay=1.0, seconds=1.6))
+    p.append(card(940, by, 220, 130, "meridian.lock", ["each bundle by", "reference and digest;", "sync --locked takes", "exactly those"], GREEN, 16, 12.5))
+    p.append(flow(f"M900 {by + 65}L940 {by + 65}", GREEN, delay=1.4, seconds=1.6))
+    # The fallback, and the editor.
+    fy = 448
+    p.append(chip(330, fy, 300, "no bundle describes a type: ask the tool", CM, 30, 12.5))
+    p.append(flow(f"M480 {by + 130}L480 {fy}", CM, delay=1.8, seconds=1.6))
+    p.append(chip(670, fy, 490, "the editor, lint and the JSON Schema read the cache as before", LINE, 30, 12.5))
+    p.append(flow(f"M785 {by + 130}L785 {fy}", ORC, delay=2.2, seconds=1.6))
+    p.append(caption(W, H, "A bundle is data, signed and pinned by digest: it can make completion wrong, never a deployment."))
+    return doc(W, H, "Schema bundles: a catalogue is built into signed bundles and pushed with an index to an OCI registry; a project's schema sync picks the newest bundle for each type its documents use, checks the signature, writes the cache and pins each bundle in meridian.lock, and asks the tool only for what no bundle describes", "".join(p))
+
+
+def adopt_flow() -> str:
+    """adopt: one field on a resource, and what each kind of target makes of it."""
+    W, H = 1200, 470
+    p: list[str] = []
+    p.append(card(40, 60, 300, 150, "a resource", None, WHITE, 17))
+    p.append(lines(80, 112, ["- id: logs", "  type: aws_s3_bucket", "  adopt: example-logs", "  params:", "    bucket: example-logs"], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(heading(400, 48, "What the target says it does with adopt"))
+    kinds = [
+        ("import", ["compiled into the tool's own import:", "an import block, Pulumi's import", "option. The first plan says adopt,", "the apply puts it in the state"], IAC, "Terraform · OpenTofu · Pulumi"),
+        ("converge", ["accepted with a warning, and", "changes nothing: the tool keeps", "no state and makes the thing what", "the document says either way"], CM, "Ansible · Puppet · Chef · Salt · DSC · Kubernetes · Bicep · ARM"),
+        ("none", ["refused by the core before the", "plugin is asked, so no tool", "creates a second thing beside", "the one that exists"], RED, "every other target, and any plugin built before adopt"),
+    ]
+    for i, (name, body, colour, who) in enumerate(kinds):
+        x = 400 + i * 265
+        p.append(card(x, 60, 245, 150, name, body, colour, 16, 12.5))
+    p.append(flow("M340 135L400 135", WHITE, delay=0.2, seconds=1.6))
+    # Who is which, below.
+    y = 250
+    p.append(heading(40, y - 12, "Which targets"))
+    for i, (name, _, colour, who) in enumerate(kinds):
+        p.append(chip(40, y + i * 40, 110, name, colour, 28, 13, True))
+        p.append(text(165, y + i * 40 + 19, who, 13, 400, TEXT_SOFT, "start"))
+    p.append(card(760, 250, 400, 108, "meridian plan", None, GREEN, 16))
+    p.append(lines(790, 302, ["= adopt logs: aws_s3_bucket", "~ update app: aws_subnet, adopted"], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(text(960, 346, "an import that also changes the thing is reported as the change", 11.5, 400, TEXT_SOFT))
+    p.append(caption(W, H, "One field moves between tools: a stateful tool imports the thing, a converging tool already takes it as it finds it."))
+    return doc(W, H, "adopt: a resource names the tool's identifier of a thing that exists; a stateful target compiles it into the tool's import and the plan reports adopt, a converging target accepts it and changes nothing, and any other target is refused before its plugin is asked", "".join(p))
+
+
+def retarget_flow() -> str:
+    """meridian retarget: the old tool reports what it manages, the new file adopts it."""
+    W, H = 1200, 480
+    p: list[str] = []
+    p.append(heading(40, 48, "One document, from one tool to another"))
+    p.append(card(40, 60, 330, 170, "site.yaml", None, IAC, 17))
+    p.append(lines(70, 112, ["spec:", "  target: terraform", "  resources:", "    - id: logs", "      type: aws_s3_bucket"], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(card(435, 60, 330, 170, "the old tool's state", None, WHITE, 17))
+    p.append(lines(465, 112, ["terraform show -json", "", "logs  ->  example-logs", "web   ->  i-0abc123"], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(card(830, 60, 330, 170, "site.opentofu.yaml", None, GREEN, 17))
+    p.append(lines(860, 112, ["spec:", "  target: opentofu", "  resources:", "    - id: logs", "      adopt: \"example-logs\""], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(flow("M370 145L435 145", WHITE, delay=0.2, seconds=1.6))
+    p.append(flow("M765 145L830 145", WHITE, delay=0.9, seconds=1.6))
+    p.append(text(602, 255, "meridian retarget site.yaml --to opentofu", 13, 600, WHITE, mono=True))
+    p.append(heading(40, 300, "What the new target decides"))
+    kinds = [
+        ("import", "an adopt line per resource the old tool manages", IAC),
+        ("converge", "only the target: the tool takes what it finds", CM),
+        ("none", "only the target, and a warning: it creates again", RED),
+    ]
+    for i, (name, body, colour) in enumerate(kinds):
+        p.append(chip(40, 312 + i * 38, 110, name, colour, 28, 13, True))
+        p.append(text(165, 312 + i * 38 + 19, body, 13, 400, TEXT_SOFT, "start"))
+    p.append(card(760, 300, 400, 96, "meridian plan site.opentofu.yaml", None, GREEN, 15))
+    p.append(lines(790, 350, ["= adopt logs: aws_s3_bucket", "= adopt web: aws_instance"], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(caption(W, H, "The old file is left as it was, and no tool changes anything until you plan and apply the new one."))
+    return doc(W, H, "retarget: the old tool reports the identifier of each resource it manages, meridian retarget writes a new file with the new target and an adopt line per resource, and the new tool's first plan adopts each one instead of creating it", "".join(p))
+
+
 GRAPHIC_FILES = {
     "meridian-architecture.svg": architecture,
     "meridian-compile-pipeline.svg": compile_pipeline,
@@ -730,7 +871,11 @@ GRAPHIC_FILES = {
     "meridian-modules-flow.svg": modules_flow,
     "meridian-saved-plan.svg": saved_plan,
     "meridian-test-flow.svg": test_flow,
+    "meridian-common-types.svg": common_types,
     "meridian-analyzers-flow.svg": analyzers_flow,
+    "meridian-schema-bundles.svg": schema_bundles,
+    "meridian-adopt.svg": adopt_flow,
+    "meridian-retarget.svg": retarget_flow,
 }
 
 # ---------------------------------------------------------------------------

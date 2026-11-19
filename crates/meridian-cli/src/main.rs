@@ -31,6 +31,7 @@ mod interrupt;
 mod output;
 mod pipeline;
 mod print;
+mod schema_bundles;
 mod tools;
 
 use std::collections::BTreeMap;
@@ -46,9 +47,9 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use meridian_ir::Bundle;
 use meridian_orchestrator::{
     describe_duration, file_hash, lock, record, run_selected, selected, Analysis, Analyzer, Asked,
-    Backend, Baseline, Decisions, Drift, Event, ExecBackend, FailOn, LocalBackend, LockInfo, Mode,
-    Observer, OnFailure, Options, Outcome, PlanFile, Policy, Reason, Refusal, Resume,
-    RollbackOutcome, RollbackReport, RunRecord, RunReport, RunState, Selector, StageId,
+    Backend, Baseline, Decisions, Drift, Event, ExecBackend, FailOn, Keeper, LocalBackend,
+    LockInfo, Mode, Observer, OnFailure, Options, Outcome, PlanFile, Policy, Reason, Refusal,
+    Resume, RollbackOutcome, RollbackReport, RunRecord, RunReport, RunState, Selector, StageId,
     StageReport, Stop, MASK,
 };
 use meridian_plugin_host::{
@@ -103,7 +104,28 @@ struct Cli {
     annotations: AnnotationMode,
 }
 
+/// The stack the command runs on. Windows gives the main thread 1 MiB, which
+/// an unoptimised build of `run`, holding every command's locals in one
+/// frame, outgrew; the stack is set here rather than by each platform.
+const STACK: usize = 16 * 1024 * 1024;
+
 fn main() -> ExitCode {
+    match std::thread::Builder::new()
+        .name("meridian".to_owned())
+        .stack_size(STACK)
+        .spawn(run)
+    {
+        Ok(command) => command
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+        Err(e) => {
+            eprintln!("error: starting the command: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> ExitCode {
     // Before anything is read: no core dump of this process, and no other
     // process of the same user reading its memory, so a secret fetched later
     // cannot leave that way.
@@ -185,6 +207,30 @@ fn main() -> ExitCode {
         Command::Status { state } => status(&state),
         Command::Runs { state } => runs(&state),
         Command::Events { run, types, state } => events(&state, run.as_deref(), &types),
+        Command::Logs {
+            run,
+            step,
+            endpoint,
+            stream,
+            grep,
+            tail,
+            all,
+            state,
+        } => show_logs(
+            &state,
+            &LogQuery {
+                run: run.as_deref(),
+                step: step.as_deref(),
+                endpoint: endpoint.as_deref(),
+                stream,
+                grep: grep.as_deref(),
+                tail,
+                all,
+            },
+        ),
+        Command::BugReport { run, out, state } => {
+            bug_report(&state, run.as_deref(), out.as_deref())
+        }
         Command::Report {
             run,
             format,
@@ -246,6 +292,14 @@ fn main() -> ExitCode {
             &state_dir,
         ),
         Command::Migrate { files, to, check } => migrate(&files, to.as_deref(), check),
+        Command::Retarget {
+            file,
+            to,
+            out,
+            no_adopt,
+            state_dir,
+            plugins,
+        } => retarget(&file, &to, out.as_deref(), no_adopt, &state_dir, &plugins),
         Command::Version => {
             version();
             Ok(())

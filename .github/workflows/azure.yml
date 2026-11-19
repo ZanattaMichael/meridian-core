@@ -20,6 +20,7 @@ on:
       - 'plugins/bicep/**'
       - 'plugins/arm/**'
       - 'examples/bicep/**'
+      - 'examples/common/**'
       - 'examples/arm/**'
       - 'crates/**'
       - 'Cargo.toml'
@@ -43,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup-rust
 
@@ -79,13 +80,13 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup-rust
 
       # Signs in with a short-lived token GitHub issues for this run. No
       # password or client secret is stored anywhere.
-      - uses: azure/login@v2
+      - uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}

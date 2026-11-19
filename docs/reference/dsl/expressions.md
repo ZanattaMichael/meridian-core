@@ -1,13 +1,7 @@
 # Expressions and functions
 
-Meridian has one expression language. Today it is what a
-[`when` condition](conditions.md) is written in; as the
-[language expansion](../../plans/language-expansion.md) lands, the same
-language, with the same functions and the same errors, is what every
-interpolation, variable and parameter default is written in.
-
-An expression is decided by Meridian's core, before a plugin is handed
-anything. That is why it means the same on every target: no tool ever sees one.
+The language of [`when`](conditions.md), interpolations and variables. Meridian decides
+it before the plugin sees anything, so it means the same on every target.
 
 ```mermaid
 flowchart LR
@@ -20,17 +14,11 @@ flowchart LR
     E --> V["a value"]
 ```
 
-Three things are true of every expression:
-
-- **It always ends.** There are no loops and no recursion. The two functions
-  that take an expression, `map` and `filter`, run it once per item of a list.
-  Nesting is limited to 64 levels, and one expression to 1,000 operators,
-  field reads and indexes.
-- **It is pure.** The same expression over the same values gives the same
-  result. The only function that looks outside is `env`.
-- **It never guesses.** A name that is not set, two types that do not go
-  together and a value that is not a yes or a no are errors. Nothing is
-  converted silently, and nothing missing is taken as `false` or as empty text.
+- **It always ends.** No loops or recursion; `map` and `filter` run once per item.
+  Nesting is limited to 64 levels and 1,000 operators, field reads and indexes.
+- **It is pure.** Only `env` reads outside.
+- **It never guesses.** Unset names, mismatched types and non-boolean conditions are
+  errors. Nothing is converted silently.
 
 ## Contents
 
@@ -55,7 +43,7 @@ Three things are true of every expression:
 
 ## Names
 
-What an expression can read depends on where it is written.
+What an expression can read depends on where it is written:
 
 | Name | Holds | Available in |
 |---|---|---|
@@ -93,8 +81,6 @@ From loosest to tightest. Operators on the same line bind equally.
 | `a.key`, `a[index]`, `f(x)` | a key, an item, a call | |
 | `( ... )` | grouping | |
 
-Rules that follow from "it never guesses":
-
 - **No silent conversion.** `'3' == 3` is false. `'3' + 3` is an error naming
   both types: `cannot add a string and a number with +; convert one first, with
   toString or toNumber`.
@@ -122,10 +108,8 @@ Examples:
 
 ### Patterns
 
-`=~`, `!~` and the `regex` functions take a regular expression. A match
-anywhere in the text counts; anchor with `^` and `$` to match the whole.
-`(?i)` at the start ignores case. Patterns have no backreferences or
-lookaround, so matching always takes time in proportion to the text.
+`=~`, `!~` and the `regex` functions match anywhere; anchor with `^` and `$`. `(?i)`
+ignores case. No backreferences or lookaround; matching is linear time.
 
 ## Paths, indexes and missing values
 
@@ -138,18 +122,15 @@ lookaround, so matching always takes time in proportion to the text.
 | `data.ports[0]`, `data.ports.0` | the first item of a list |
 | `data.ports[-1]` | the last item |
 
-A hyphen is part of a key only straight after a `.`. Anywhere else `-` is a
-minus, so write `data.count - 1` with spaces, or it is read as the key
-`count-1`.
+A hyphen directly after a key is part of it: write `data.count - 1` with spaces.
 
-Reading something that is not there is an error, never an empty value:
+Reading something that is not there is an error:
 
 ```
 data.env is not set (give it with --data or --set, or test for it with defined(data.env))
 ```
 
-That includes a key a mapping does not have and an index past the end of a
-list. Three things answer it:
+That includes a missing key and an index past the end. Three things handle it:
 
 | You write | Gives |
 |---|---|
@@ -157,17 +138,14 @@ list. Three things answer it:
 | `data.x ?? 'fallback'` | the fallback when `data.x` is not set **or** is null |
 | `default(data.x, 'fallback')` | the same, as a function |
 
-They answer "not set" and nothing else. A real mistake still surfaces:
-`data.env.name ?? 'x'`, where `data.env` is text, is the error `data.env is a
-string, so it has no key "name"`.
+They handle "not set" only: `data.env.name ?? 'x'`, where `data.env` is text, is still the
+error `data.env is a string, so it has no key "name"`.
 
 ## Functions
 
-A function is called by name: `upper(data.env)`. Names are case sensitive, and
-a near miss is pointed out: `unknown function "Upper" (did you mean upper?)`.
-The number of arguments is checked when the document is validated; their types
-are checked when the expression is decided, and a wrong one names the
-argument: `argument 1 of upper(...) must be text, and is a number`.
+Names are case sensitive: `unknown function "Upper" (did you mean upper?)`. `validate`
+checks argument counts; types are checked when decided: `argument 1 of upper(...) must be
+text, and is a number`.
 
 ### Presence
 
@@ -233,8 +211,7 @@ argument: `argument 1 of upper(...) must be text, and is a number`.
 | `map(list, 'name', expression)` | a list of the expression's value for each item, which the expression reads by the name given | `map([1, 2], 'n', n * 2)` is `[2, 4]` |
 | `filter(list, 'name', condition)` | the items the condition is true for | `filter(data.ports, 'p', p > 1000)` |
 
-In `map` and `filter` the name is quoted text, and it exists only inside the
-third argument. It may hide a name outside it. They nest:
+In `map` and `filter` the quoted name exists only in the third argument. They nest:
 `map(data.rows, 'row', map(row, 'n', n * length(row)))`.
 
 ### Selection
@@ -291,13 +268,11 @@ metadata (`+build5`) is ignored.
 | `semverCompare(a, b)` | `-1`, `0` or `1` |
 | `semverSatisfies(version, range)` | whether the version meets every requirement of the range. Requirements are separated by spaces and start with `>=`, `<=`, `>`, `<`, `=` or `!=`: `'>=1.6 <2'` |
 
-A version must be text. Quote it in a data file: `os_version: "24.04"`.
-Unquoted, YAML reads `24.04` as the number 24.04 and `1.10` as 1.1.
+A version must be text; quote it in data (`os_version: "24.04"`).
 
 ### Paths
 
-These work on the text of a path with `/` separators. They read nothing from
-disk.
+Text only, `/` separators; nothing is read from disk.
 
 | Function | Gives |
 |---|---|
@@ -312,8 +287,8 @@ disk.
 | `env('NAME')` | the environment variable of the `meridian` process. Not set is an error |
 | `env('NAME', fallback)` | the same, or the fallback when it is not set |
 
-`env` is the one function whose result depends on where Meridian runs. Prefer
-`--set` or a data file where a value should be visible in a review.
+`env` depends on where Meridian runs. Prefer `--set` or a data file for reviewable
+values.
 
 ### Selectors
 
@@ -323,8 +298,7 @@ disk.
 
 ## Errors
 
-Every error names what was wrong and, where it helps, what to write instead.
-Inside a document it is reported with the file, line and field.
+Errors give the file, line and field, and what to write instead where possible.
 
 | When | Example |
 |---|---|
@@ -342,15 +316,12 @@ Inside a document it is reported with the file, line and field.
 | Too deep | `the condition is nested more than 64 levels deep` |
 | Too long | `the condition has more than 1000 operators` |
 
-The first five are found by `meridian validate`, with no data. The rest need
-the values, so `compile`, `plan` and `apply` find them. Each error has a kind
-with a fixed code, such as `expr-unknown-name`; they are listed in
-[error kinds and codes](../errors.md#expressions-meridian-expr).
+`validate` finds the first five; `compile`, `plan` and `apply` the rest. Codes such as
+`expr-unknown-name` are in [error kinds and codes](../errors.md#expressions-meridian-expr).
 
 ## Writing an expression in YAML
 
-Quote the whole expression. `!`, `'`, `[`, `{`, `>` and `:` followed by a
-space all mean something to YAML at the start of or inside a plain value.
+Quote the whole expression.
 
 ```yaml
 when: "data.env != 'prod'"
@@ -358,11 +329,7 @@ when: "data.replicas > 1 && data.env in ['staging', 'prod']"
 when: "(data.env == 'prod' ? 3 : 1) <= data.replicas"
 ```
 
-Use double quotes outside and single quotes for text inside. A backslash in a
-double-quoted YAML value is YAML's own escape, so a pattern with one is easier
-in single quotes outside: `when: 'data.host =~ "^web\d+$"'`.
+Use double quotes outside and single quotes inside. For a pattern with a backslash, use
+single quotes outside: `when: 'data.host =~ "^web\d+$"'`.
 
-Worked examples are in
-[`examples/conditions/`](../../../examples/conditions): the same language on a
-machine configured by Ansible, on infrastructure built by Terraform and on
-objects sent to Kubernetes.
+Examples for Ansible, Terraform and Kubernetes: [`examples/conditions/`](../../../examples/conditions).

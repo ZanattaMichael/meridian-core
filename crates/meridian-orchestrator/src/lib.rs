@@ -41,6 +41,7 @@ pub mod event;
 pub mod history;
 mod journal;
 pub mod lock;
+pub mod logs;
 mod options;
 pub mod plan;
 pub mod policy;
@@ -79,6 +80,7 @@ pub use analyze::{
 pub use backend::{Backend, ExecBackend, LocalBackend, MemoryBackend};
 pub use event::Event;
 pub use lock::{LockError, LockInfo};
+pub use logs::{Keeper, DEFAULT_LOG_LIMIT};
 pub use options::{mask, Observer, OnFailure, Options, Quiet, Resume, DEFAULT_KEEP_RUNS, MASK};
 pub use plan::{file_hash, Asked, PlanFile, PlannedStage, PlannedStatus, PLAN_FILE_VERSION};
 pub use policy::{Decisions, Policy};
@@ -468,6 +470,14 @@ pub fn run_selected(
                 .warnings
                 .push(format!("removing old run records: {why}"));
         }
+        // The logs on this machine go with the records they belong to.
+        let kept = record::list_runs(backend.as_ref())
+            .and_then(|ids| logs::prune(&options.state_dir, &ids));
+        if let Err(why) = kept {
+            journal
+                .warnings
+                .push(format!("removing old tool logs: {why}"));
+        }
         guard.held = false;
         if let Err(why) = lock::release(backend.as_ref(), &run_id) {
             journal.warnings.push(format!(
@@ -479,4 +489,50 @@ pub fn run_selected(
     report.warnings = run.warnings;
     report.warnings.append(&mut journal.warnings);
     report
+}
+
+/// Asks the tool a document was applied with for the identifier of each
+/// resource it manages, by resource id: what `meridian retarget` writes as
+/// `adopt:` for the next tool. Reads the tool's state; changes nothing.
+pub fn identifiers(
+    registry: &Registry,
+    state_dir: &Path,
+    id: &StageId,
+    target: &str,
+) -> Result<BTreeMap<String, String>, String> {
+    if !meridian_ir::is_document_name(&id.name) {
+        return Err(format!(
+            "{:?} is not a safe directory name; run `meridian validate`",
+            id.name
+        ));
+    }
+    let Some(plugin) = registry.target(target) else {
+        return Err(format!("no plugin is installed for the target {target:?}"));
+    };
+    if !plugin.info().reads_identifiers {
+        return Err(format!(
+            "the {target} plugin cannot report what it manages, so there is nothing to adopt; \
+             give the identifiers as `adopt:` by hand"
+        ));
+    }
+    let dir = work_dir(state_dir, id, target);
+    if !dir.is_dir() {
+        return Err(format!(
+            "{id} has not been applied with {target} in {}, so it manages nothing yet",
+            state_dir.display()
+        ));
+    }
+    let context = RunContext {
+        document: id.name.clone(),
+        host: String::new(),
+        work_dir: meridian_sdk::tool::absolute_path(&dir),
+        inputs: Data::new(),
+        secrets: meridian_sdk::Secrets::none(),
+        credential: None,
+        save_plan: false,
+        saved_plan: None,
+    };
+    plugin
+        .identifiers(&context)
+        .map_err(|e| format!("reading what {target} manages for {id}: {e}"))
 }

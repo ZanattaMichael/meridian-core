@@ -1,30 +1,13 @@
 # Error kinds and codes
 
-Most of what Meridian refuses comes with a sentence that says what was wrong
-and what to write instead. Behind each sentence is a *kind*: a fixed word that
-says which sort of thing went wrong, so that a program using Meridian's crates
-can act on the failure without reading its text, and so that this page can
-list every sort there is.
-
-A kind's code never changes and is never reused for another meaning. A new
-sort of failure gets a new code; a code that stops being produced stays
-reserved. The tests check that every code in the code is listed here.
-
-This page lists the kinds by the crate that produces them. The messages
-themselves are not listed: they are many, and each says what it needs to
-where it appears. The [lint rules](lint.md), the
-[compile-rule refusals](compile-rules.md#refusals) and the
-[refusal rules](refusal-rules.md) a target refuses a document under have their
-own pages, because each of those is a rule with a name of its own.
+Each error has a *kind*, a fixed code programs can match. Codes never change or get reused;
+tests check this page lists them all. See also [lint rules](lint.md),
+[compile-rule refusals](compile-rules.md#refusals) and [refusal rules](refusal-rules.md).
 
 ## Expressions (`meridian-expr`)
 
-An expression or interpolation that cannot be read or evaluated. The error
-carries the kind, the message and, where the text is known, the span of the
-expression it points at, as byte offsets into the expression's source. In a
-document the span is turned into a position after the field's own. The
-[expressions reference](dsl/expressions.md#errors) shows an example message
-for each.
+Errors carry the kind, message and byte span. See
+[examples](dsl/expressions.md#errors).
 
 | Code | When |
 |---|---|
@@ -41,15 +24,12 @@ for each.
 | `expr-interpolation` | an interpolation that is never closed, is empty, or whose value cannot be placed where it stands |
 | `expr-other` | anything else that stops evaluation; a message that has no kind of its own yet |
 
-The first five are found by `meridian validate`, with no data. The rest need
-the values, so `compile`, `plan` and `apply` find them.
+The first five are found by `validate`; the rest need data.
 
 ## Stages of a run (`meridian-orchestrator`)
 
-Why a stage failed, as the run's record keeps it. The text the terminal shows
-is the tool's or the plugin's; the record keeps only this word, because a tool
-can quote a value. The same words appear in a [run's record](state.md#runsidrunjson)
-and in the `failure` element of a [JUnit report](reporting.md).
+The word a [run's record](state.md#runsidrunjson) and [JUnit](reporting.md) `failure` keep
+for a failed stage.
 
 | Code | When |
 |---|---|
@@ -66,16 +46,12 @@ and in the `failure` element of a [JUnit report](reporting.md).
 | `analyzer-failed` | an analyzer could not be run, or did not answer, so the step was not analyzed |
 | `plan-differs` | an `apply --plan` compiled the stage to an artifact other than the one the saved plan recorded, or the plan previewed a stage the document now leaves out; the stages after it are not run |
 
-A step's record can also hold words that are not a stage failure: a step that
-was skipped because an earlier one failed says `earlier-step-failed`, and a
-rollback that could not put a step back has its own reasons, listed with the
-[rollback events](state.md#events).
+Also: `earlier-step-failed` for skipped steps, and rollback reasons under
+[events](state.md#events).
 
 ## Modules (`meridian-module`)
 
-Which step of handling modules failed. The message names the module, the file
-and what to do about it; the [modules reference](modules.md#when-something-goes-wrong)
-explains the common ones.
+See [when something goes wrong](modules.md#when-something-goes-wrong).
 
 | Code | When |
 |---|---|
@@ -92,10 +68,7 @@ explains the common ones.
 
 ## Compile rules (`meridian-rules`)
 
-A mistake in the rules file, the hierarchy or one of its layers. This is never
-a violation: a layer that breaks a rule is reported as a
-[refusal](compile-rules.md#refusals) that lists every violation, not as an
-error.
+Mistakes in the rules file or hierarchy. Violations are [refusals](compile-rules.md#refusals).
 
 | Code | When |
 |---|---|
@@ -105,8 +78,7 @@ error.
 
 ## Layered data (`meridian-resolve`)
 
-The resolver beneath the compile rules, which reads a hierarchy and merges its
-layers. The rules crate turns these into its own kinds.
+The hierarchy resolver; wrapped by the rules crate.
 
 | Code | When |
 |---|---|
@@ -116,9 +88,7 @@ layers. The rules crate turns these into its own kinds.
 
 ## Keys and signatures (`meridian-signing`)
 
-Signing a file or a module and checking the signature, as
-[plugin signatures](plugin-signatures.md) and
-[module signatures](modules.md#signatures) do.
+For [plugin](plugin-signatures.md) and [module](modules.md#signatures) signatures.
 
 | Code | When |
 |---|---|
@@ -129,8 +99,6 @@ Signing a file or a module and checking the signature, as
 
 ## For plugin and tool authors
 
-Each crate exports its `Kind` with a `code()` method and a `Kind::ALL` list,
-and its `Error` with a `kind()` accessor. `meridian_orchestrator::Reason`
-does the same for stages, with `as_str()`, and reads back from its word with
-`str::parse`. An `Error` still displays as its message and converts into a
-`String`, so code that only prints it needs no change.
+Each crate exports `Kind` (`code()`, `Kind::ALL`) and `Error` (`kind()`, displays as the
+message, converts to `String`). `meridian_orchestrator::Reason` has `as_str()` and
+`str::parse`.

@@ -180,6 +180,19 @@ general! {
         "a `runtimeWhen` on a target whose tool checks no condition on the node",
         "use a compile-time `when`, or remove the condition; see the capability matrix"
     );
+    /// `adopt` on a target that cannot take an existing thing under
+    /// management.
+    UNSUPPORTED_ADOPT = (
+        "unsupported-adopt",
+        "an `adopt` on a target that cannot take a thing that already exists under management",
+        "remove `adopt`, or use a target that adopts; see the capability matrix"
+    );
+    /// `adopt` on a resource of a kind its tool cannot import.
+    INVALID_ADOPT = (
+        "invalid-adopt",
+        "an `adopt` on a resource that its tool cannot import, such as a data source or a provider",
+        "put `adopt` on a resource the tool manages, as the target's page describes"
+    );
     /// A `runtimeWhen` the target cannot read.
     INVALID_RUNTIME_CONDITION = (
         "invalid-runtime-condition",

@@ -1,6 +1,7 @@
 //! What a plugin is, beyond a compiler: its category, the operations it
 //! offers, and the [`Runner`] half that hands an artifact to the real tool.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
@@ -160,6 +161,10 @@ pub enum ChangeAction {
     /// Destroyed and created again. It is kept apart from an update because it
     /// is the one that loses data.
     Replace,
+    /// Taken under management as it is, with nothing else changed: what a
+    /// resource's `adopt` does on its first plan. An adoption that also
+    /// changes the thing is reported as the change.
+    Adopt,
 }
 
 impl ChangeAction {
@@ -169,6 +174,7 @@ impl ChangeAction {
             ChangeAction::Update => "update",
             ChangeAction::Delete => "delete",
             ChangeAction::Replace => "replace",
+            ChangeAction::Adopt => "adopt",
         }
     }
 }
@@ -437,5 +443,20 @@ pub trait Runner: Send + Sync {
     fn outputs(&self, context: &RunContext) -> Result<Vec<Output>, RunError> {
         let _ = context;
         Err(RunError::new("this plugin does not report outputs"))
+    }
+
+    /// Whether [`Runner::identifiers`] is answered. Say true only when the
+    /// identifiers are what the tool's import takes back, so that `meridian
+    /// retarget` can write them as `adopt` for another target.
+    fn reads_identifiers(&self) -> bool {
+        false
+    }
+
+    /// The tool's own identifier of each thing it manages, by the id of the
+    /// resource it was declared as, read from the tool's state without
+    /// changing anything. A resource the tool has no record of is left out.
+    fn identifiers(&self, context: &RunContext) -> Result<BTreeMap<String, String>, RunError> {
+        let _ = context;
+        Err(RunError::new("this plugin does not read identifiers"))
     }
 }

@@ -908,3 +908,97 @@ fn a_module_is_pushed_with_a_declared_credential() {
         "the credential other: it is not declared (declared: registry)"
     );
 }
+
+#[test]
+fn a_schema_bundle_is_its_own_kind_of_artifact_and_only_an_index_is_replaced() {
+    use meridian_module::{
+        pull_artifact, push_artifact, Artifact, MODULE_ARTIFACT, SCHEMA_BUNDLE_ARTIFACT,
+        SCHEMA_INDEX_ARTIFACT,
+    };
+    let (registry, _) = registries();
+    let repository = format!("{}/acme/schemas/terraform/hashicorp-aws", registry.host);
+    let bundle = |layer: &'static [u8]| Artifact {
+        kind: SCHEMA_BUNDLE_ARTIFACT,
+        tag: "5.60.0",
+        annotations: &[(
+            "org.opencontainers.image.title",
+            "terraform/hashicorp-aws:5.60.0",
+        )],
+        layer,
+        replace: false,
+    };
+    let pushed = push_artifact(&repository, true, None, &bundle(b"a bundle")).unwrap();
+    assert!(!pushed.already_published);
+    assert!(
+        push_artifact(&repository, true, None, &bundle(b"a bundle"))
+            .unwrap()
+            .already_published
+    );
+    let err = push_artifact(&repository, true, None, &bundle(b"another"))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("a schema bundle version is published once"),
+        "{err}"
+    );
+
+    // Pulled by tag or by digest, as what it is and nothing else.
+    let (digest, layer) = pull_artifact(&repository, true, None, SCHEMA_BUNDLE_ARTIFACT, "5.60.0")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (digest.as_str(), layer.as_slice()),
+        (pushed.digest.as_str(), &b"a bundle"[..])
+    );
+    assert!(pull_artifact(
+        &repository,
+        true,
+        None,
+        SCHEMA_BUNDLE_ARTIFACT,
+        &pushed.digest
+    )
+    .unwrap()
+    .is_some());
+    let err = pull_artifact(&repository, true, None, MODULE_ARTIFACT, "5.60.0")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("is not a Meridian module"), "{err}");
+    assert_eq!(
+        pull_artifact(&repository, true, None, SCHEMA_BUNDLE_ARTIFACT, "9.9.9").unwrap(),
+        None
+    );
+
+    // An index is a pointer and moves; a tag must be a tag.
+    let index = format!("{}/acme/schemas/index", registry.host);
+    for text in [&b"{\"one\":1}"[..], &b"{\"two\":2}"[..]] {
+        push_artifact(
+            &index,
+            true,
+            None,
+            &Artifact {
+                kind: SCHEMA_INDEX_ARTIFACT,
+                tag: "latest",
+                annotations: &[],
+                layer: text,
+                replace: true,
+            },
+        )
+        .unwrap();
+    }
+    let (_, latest) = pull_artifact(&index, true, None, SCHEMA_INDEX_ARTIFACT, "latest")
+        .unwrap()
+        .unwrap();
+    assert_eq!(latest, b"{\"two\":2}");
+    let err = push_artifact(
+        &repository,
+        true,
+        None,
+        &Artifact {
+            tag: "-bad",
+            ..bundle(b"x")
+        },
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("cannot be a registry tag"), "{err}");
+}

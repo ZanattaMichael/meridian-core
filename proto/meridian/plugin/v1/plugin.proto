@@ -70,6 +70,12 @@ message Resource {
   // it runs, in RunContext.secrets. Only a target whose capabilities include
   // secrets is sent one.
   repeated SecretParam secret_params = 8;
+
+  // adopt is the tool's own identifier of a thing that already exists, for
+  // the tool to take under management instead of creating it. Empty for a
+  // resource created as usual. Only a target whose capabilities.adopt is not
+  // ADOPTION_NONE is sent one.
+  string adopt = 9;
 }
 
 // SecretParam is one place in a resource's params where a secret stands.
@@ -199,6 +205,23 @@ message Capabilities {
   // host refuses a document that names a credential for a target that does
   // not say so. A plugin built before this field existed reports false.
   bool credentials = 5;
+  // adopt says what the target does with a resource's adopt. A host refuses
+  // a document that adopts anything for a target that says ADOPTION_NONE,
+  // which is what a plugin built before this field existed reports.
+  Adoption adopt = 6;
+}
+
+// Adoption is how a target takes a thing that already exists under
+// management.
+enum Adoption {
+  // It cannot.
+  ADOPTION_NONE = 0;
+  // The tool keeps its own record of what it manages, and the identifier is
+  // compiled into the tool's own import (a Terraform import block, say).
+  ADOPTION_IMPORT = 1;
+  // The tool keeps no record and makes each thing what the document says
+  // whether it existed or not: the identifier is accepted and not used.
+  ADOPTION_CONVERGE = 2;
 }
 
 // Artifact is the complete output of a compile: relative path to file content.
@@ -345,6 +368,11 @@ message DescribeResponse {
   // saves none: an apply from a saved plan then checks the artifact's hash
   // and plans again, which the plan file says.
   bool saves_plans = 26;
+  // reads_identifiers is true when the plugin's Runner answers Identifiers:
+  // the tool's own identifier of each thing it manages, read from its state.
+  // `meridian retarget` writes them as the resources' adopt for the new
+  // target. A plugin built before this field reads none.
+  bool reads_identifiers = 27;
 }
 
 // Setting is one thing an operator can configure about a runner.
@@ -567,6 +595,9 @@ enum ChangeAction {
   // Destroyed and created again, which is worth telling apart from an update
   // because it is the one that loses data.
   CHANGE_ACTION_REPLACE = 4;
+  // Taken under management as it is, with nothing else changed: what a
+  // resource's adopt does on its first plan.
+  CHANGE_ACTION_ADOPT = 5;
 }
 
 // Change is one difference between desired and actual state.
@@ -679,6 +710,17 @@ message OutputsResponse {
   RunError error = 2;
 }
 
+message IdentifiersRequest {
+  RunContext context = 1;
+}
+
+message IdentifiersResponse {
+  // identifiers maps a resource's id to the identifier the tool's import
+  // takes for it. A resource the tool has no record of is left out.
+  map<string, string> identifiers = 1;
+  RunError error = 2;
+}
+
 // Runner hands an artifact to the real tool. Unlike Emitter it has side
 // effects, takes as long as the tool takes, and can fail for reasons that have
 // nothing to do with the document. Plan and Apply stream, so an operator sees
@@ -691,6 +733,11 @@ service Runner {
   // Outputs reports the values the last apply produced, read from the tool's
   // own state, without applying anything.
   rpc Outputs(OutputsRequest) returns (OutputsResponse);
+  // Identifiers reports the tool's own identifier of each thing it manages,
+  // by the id of the resource it was declared as, read from the tool's state
+  // without changing anything. Asked only of a plugin whose Describe says
+  // reads_identifiers.
+  rpc Identifiers(IdentifiersRequest) returns (IdentifiersResponse);
   // Cancel asks the plugin to stop the Plan or Apply it is running: the SDK
   // stops the tool's process and the run's stream ends with a RunError that
   // carries what the tool had done so far. The stream is not closed by the

@@ -14,6 +14,8 @@ meridian-module = { path = "../meridian-module" }
 meridian-orchestrator = { path = "../meridian-orchestrator" }
 meridian-plugin-host = { path = "../meridian-plugin-host" }
 meridian-sdk = { path = "../meridian-sdk" }
+meridian-signing = { path = "../meridian-signing" }
+semver = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

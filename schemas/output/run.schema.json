@@ -212,7 +212,8 @@
             "create",
             "update",
             "delete",
-            "replace"
+            "replace",
+            "adopt"
           ]
         },
         "summary": {

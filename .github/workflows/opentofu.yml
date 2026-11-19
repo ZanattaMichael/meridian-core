@@ -30,13 +30,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup-rust
 
       # The wrapper script the action can install rewrites tofu's output, which
       # would break reading its JSON.
-      - uses: opentofu/setup-opentofu@v1
+      - uses: opentofu/setup-opentofu@v2
         with:
           tofu_version: 1.11.5
           tofu_wrapper: false
@@ -49,3 +49,15 @@ jobs:
           MERIDIAN_TEST_REAL_TOFU: tofu
           MERIDIAN_TEST_REAL_TOFU_NETWORK: '1'
         run: cargo test -p meridian-target-opentofu --locked --test real --test imports -- --ignored --nocapture
+
+      # `meridian retarget` from Terraform to OpenTofu: what Terraform made is
+      # adopted by OpenTofu's first plan, and nothing is made again.
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.13.x
+          terraform_wrapper: false
+
+      - name: Retarget from terraform to tofu
+        env:
+          MERIDIAN_TEST_REAL_RETARGET: '1'
+        run: cargo test -p meridian-cli --locked --test retarget_real -- --ignored --nocapture

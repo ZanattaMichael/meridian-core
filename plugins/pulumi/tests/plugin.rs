@@ -76,6 +76,7 @@ fn the_binary_reports_what_the_plugin_is() {
         info.capabilities,
         Capabilities {
             secrets: true,
+            adopt: meridian_sdk::Adoption::Import,
             ..Capabilities::default()
         }
     );
@@ -83,9 +84,14 @@ fn the_binary_reports_what_the_plugin_is() {
         info.resource_types,
         [
             "<package>:<module>:<Type>",
+            "address",
             "config",
+            "firewall",
             "invoke.<function>",
-            "stack"
+            "network",
+            "stack",
+            "subnet",
+            "vm"
         ]
     );
     client.close().expect("the plugin shuts down cleanly");

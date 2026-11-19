@@ -136,6 +136,7 @@ fn a_rust_plugin_describes_its_category_and_operations() {
             runtime_condition: false,
             secrets: true,
             credentials: true,
+            adopt: meridian_sdk::Adoption::Import,
         }
     );
     assert_eq!(info.category, Category::Containerization);
