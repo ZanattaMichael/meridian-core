@@ -171,6 +171,7 @@ impl Emitter for Dsc {
             runtime_condition: true,
             secrets: false,
             credentials: false,
+            cloud_credentials: false,
             adopt: Adoption::Converge,
         }
     }

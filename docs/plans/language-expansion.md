@@ -1798,6 +1798,36 @@ credential on these targets. Verified against the real `salt-ssh` in CI;
 credentials, credentials on `dsc`, and the recording tool suite are still to
 come.
 
+**As built (phase 7, seventh part).** Provider credentials by rank 4.
+`spec.endpoint` (`type: cloud` or `cluster`, and `credential`) names the
+place an infrastructure document is applied to and the identity it is
+reached as, on both kinds of document; an inline endpoint, as `targetHost`
+is an inline host, which [10.4](#104-pointing-a-document-at-endpoints)'s
+named endpoints can stand beside. Validation checks the credential's type
+against the endpoint's kind (`aws`, `azure` or `gcp` for a cloud,
+`kubeconfig` for a cluster) and that a ResourceSet names one identity, host
+or endpoint. A target declares `Capabilities::cloud_credentials` (protocol
+field 7) and the core refuses a cloud credential for one that does not,
+naming the ones that do. Built for `terraform`, `opentofu`, `pulumi`,
+`cloudformation` and `packer` with one SDK module (`meridian_sdk::cloud`):
+`check_cloud_credential` refuses at compile what the tool cannot take (an
+`aws` `roleArn`, since the SDKs assume a role through a profile; `azure` on
+`packer`, whose plugin reads its login from the template; a `gcp`
+`impersonate` on `packer`; a credential for another cloud on
+`cloudformation`), and `cloud_for` prepares the handover once per stage:
+the plain fields and the secret fields as the providers' own variables
+(`AWS_*`, `ARM_*`, `GOOGLE_*`), through `Tool::env_secret`, which writes a
+secret from protected memory into the child's environment block at spawn,
+and a `gcp` `serviceAccountKey` or an `azure` `certificate` as a
+`SecretFile` the environment names, removed with the stage. The plan line
+says the credential goes in the tool's environment, and the artifact holds
+nothing of it. `bicep` and `arm` take none yet: `az login
+--service-principal` takes a secret on the command line only. A cloud
+credential is verified against stand-ins only, since no CI has a cloud
+login. `cluster` credentials on `kubernetes` and `helm`, registry logins on
+`docker` and `podman`, credentials on `dsc`, and the recording tool suite
+are still to come.
+
 ### 11.7 The operating system's own stores
 
 The best place for a long-lived credential on a workstation is the store the
@@ -2447,7 +2477,7 @@ green before the next starts.
 | 5b | `Composite`, `include`, `extends`, the configuration type (`segment`, `targets`) | 5 |
 | 6 | `Inventory`, endpoint types, `spec.endpoints`, one instance per endpoint, `--endpoint`, sources from outputs | 4, 5 |
 | 6a (built in part) | `meridian-secret`: the locked, wiped-on-drop value, process hardening, the secret handle in `Value` and how the mark spreads, the output filter, the delivery helpers (standard input, user-only files), `spec.secrets` with the `env`, `file`, `exec` and operating-system store providers, `meridian secret set` and `check`, `resolve_credential`, and the tests of [11.9](#119-what-is-tested). **Built so far:** the crate, the handle and the mark, `spec.secrets` with `env`, `file` and `exec`, fetched per stage and wiped after it, `--strict-secrets` and the warning when memory cannot be locked, `meridian secret check`, and `resolve_credential` for the `registry`, `usernamePassword` and `token` types ([reference](../reference/dsl/secrets.md), [how it is held](../concepts/secrets-in-memory.md)). Then the `keyring`, `systemd-creds`, `secret-service` and `keychain` stores, `fallback` places for one secret, and `meridian secret set` into the keyring and the Secret Service. **Still to come:** `credential-manager` on Windows, writing the keychain, the `tpm` plugin | 2 |
-| 7 (built in part) | secrets and credentials on targets: credential types, sealed references and the secret stream in the protocol, delivery on every target by its channel of [11.6](#116-handing-a-secret-to-a-tool), the plugin contract suite with the recording tool. **Built so far:** the `secrets` capability, secrets by name in the graph and by value in the run context, delivery on `ansible`, `puppet`, `openvox`, `salt`, `chef`, `terraform`, `opentofu`, `packer`, `cloudformation`, `bicep`, `arm`, `pulumi`, `docker`, `podman`, `kubernetes`, `helm` and the test target, the SDK's `Secrets`, `json_file`, `SecretFile::beside` and `stdin_secret`, and the stand-in and real-tool tests of the handover; credential types in documents (`spec.credentials`, every type checked, `targetHost.credential`, the `credentials` capability, delivery on `ansible` and the test target), credentials on `podman`, `salt`, `puppet`, `openvox` and `chef` with the SDK's SSH agent for keys. **Still to come:** provider credentials by rank 4, credentials on `dsc`, the recording tool as one suite | 6, 6a |
+| 7 (built in part) | secrets and credentials on targets: credential types, sealed references and the secret stream in the protocol, delivery on every target by its channel of [11.6](#116-handing-a-secret-to-a-tool), the plugin contract suite with the recording tool. **Built so far:** the `secrets` capability, secrets by name in the graph and by value in the run context, delivery on `ansible`, `puppet`, `openvox`, `salt`, `chef`, `terraform`, `opentofu`, `packer`, `cloudformation`, `bicep`, `arm`, `pulumi`, `docker`, `podman`, `kubernetes`, `helm` and the test target, the SDK's `Secrets`, `json_file`, `SecretFile::beside` and `stdin_secret`, and the stand-in and real-tool tests of the handover; credential types in documents (`spec.credentials`, every type checked, `targetHost.credential`, the `credentials` capability, delivery on `ansible` and the test target), credentials on `podman`, `salt`, `puppet`, `openvox` and `chef` with the SDK's SSH agent for keys; `spec.endpoint` and cloud credentials by rank 4 on `terraform`, `opentofu`, `pulumi`, `cloudformation` and `packer`. **Still to come:** cluster and registry credentials on the containers targets, cloud credentials on `bicep` and `arm`, credentials on `dsc`, the recording tool as one suite | 6, 6a |
 | 7a | events and the run record: the event stream, `status`, `runs`, `events`, locking, `--events json` | 4 |
 | 8 | `Workflow`: steps, order from needs, `with`, `assign` from data, fan-out strategies, gates, failure handling, resume | 5a, 6, 7a |
 | 8a | notification sinks: the sink protocol, `webhook` and `command` built in, then `slack`, `teams`, `email`, `opentelemetry` | 7, 7a |

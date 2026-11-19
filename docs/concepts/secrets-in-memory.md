@@ -173,6 +173,22 @@ An SSH private key for a host is delivered through an agent (the plan's rank 1,
 - Dropping the agent kills it and removes the directory, so the key lives for one
   stage.
 
+A cloud credential (`spec.endpoint`, an `aws`, `azure` or `gcp` type) takes
+the plan's rank 4 (`meridian-sdk/src/cloud.rs`): the providers of
+`terraform`, `opentofu`, `pulumi`, `packer` and the AWS command line read a
+login from the environment, from files under the user's home directory, or
+from the machine's metadata service, and Meridian writes nothing under a
+home directory. `CloudHandover` keeps one copy of each secret field in
+protected memory for the stage and tells every call of the tool through
+`Tool::env_secret`, which hands the bytes to the child's environment block
+inside the spawn and makes no `String` of them; what Meridian copies is the
+kernel's copy for the new process. A `gcp` service account key and an
+`azure` certificate go to a `SecretFile` the environment names instead. The
+exposure this adds is the one the table names: the same user can read the
+process's environment, and what the tool starts inherits it. That is what
+exporting the variables in a shell exposes too, and no more; the plan line
+says which stage goes this way.
+
 ## Handing a secret to a tool
 
 In order of preference: stdin or a file descriptor; a file only the user can read; the
@@ -271,6 +287,9 @@ Across the other crates:
 | `meridian-sdk/src/wire.rs`, `src/secrets.rs`, `src/tool.rs` | a secret in a param crosses the wire as a place and a slot and never a value, and a place that does not hold the mask is refused; a run context carries its values into protected memory and `outputs` carries none; `Secrets` prints only names; a JSON variables file holds every value escaped under its key and refuses a secret that is not text; a secret on standard input reaches the tool and is not on its command line |
 | `plugins/podman/tests/run.rs`, `plugins/salt/tests/run.rs`, `plugins/puppet/tests/run.rs`, `plugins/chef/tests/run.rs` | against stand-ins for the tool, `ssh-agent` and `ssh-add`: a credential's key reaches `ssh-add` on standard input and its passphrase through the askpass program, the tool is told the socket and the user and nothing else, a password is in a `0600` roster or inventory and in nothing else, the agent's directory is gone when the stage ends, and a credential for this machine is refused before the tool starts |
 | `plugins/salt/tests/real_salt.rs` | against the real `salt-ssh` in CI: a machine is configured over SSH as a credential whose key is read into a secret and reaches `salt-ssh` only through the agent Meridian starts |
+| `meridian-sdk/src/cloud.rs`, `src/tool.rs` | a cloud credential becomes the providers' variables and nothing else, a key or certificate a private file that is gone when the handover is dropped, a credential of another kind or with a role is refused with the reason, and no debug form holds a value; a secret in the environment reaches `sh` and is not on its command line, and one that is not text is refused before the tool starts |
+| `plugins/terraform/tests/run.rs`, `plugins/opentofu/tests/run.rs`, `plugins/pulumi/tests/run.rs`, `plugins/cloudformation/tests/run.rs`, `plugins/packer/tests/run.rs` | against a stand-in for the tool: every call of the stage sees the credential in its environment under the providers' names and nowhere else, not in an argument, the log or the work directory; a Google key is read from the file the environment names and the file is gone after the run; a credential the tool cannot take stops the run before the tool starts |
+| `meridian-cli/tests/credentials.rs`, `meridian-cli/tests/secret_conformance.rs` | through the real command: an Infrastructure document names its cloud's credential, the plan line names it and says it goes in the tool's environment, the value is in nothing printed or kept; on every target, a cloud credential is taken only where the target declares it and the artifact holds nothing of it |
 | `meridian-plugin-host/tests/runner.rs` | through the real plugin process: a secret in a param reaches the plugin by name at compile and by value when it runs, and the tool is handed it in a private file; a plugin that takes no secrets says so |
 | `plugins/ansible/tests/run.rs`, `plugins/terraform/tests/run.rs`, `plugins/opentofu/tests/run.rs` | against a stand-in for the tool: the value reaches it in a file of mode `0600`, under the variable's name; the command line names the file and nothing more; the environment holds nothing; the file is gone when the run is over; Terraform's saved plan, which holds every variable, is scrubbed |
 | `plugins/ansible/tests/real.rs`, `plugins/terraform/tests/real.rs`, `plugins/opentofu/tests/real.rs` | against the real tools in CI: the value reaches the play and the configuration and is in nothing the tool prints, in check mode with diff included, and in no file the plugin wrote |

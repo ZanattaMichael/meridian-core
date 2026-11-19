@@ -50,6 +50,7 @@ fn the_plugin_says_what_it_is() {
         Pulumi.capabilities(),
         Capabilities {
             secrets: true,
+            cloud_credentials: true,
             adopt: meridian_sdk::Adoption::Import,
             ..Capabilities::default()
         }
@@ -542,6 +543,37 @@ fn a_secret_in_the_stacks_settings_or_a_configuration_declaration_is_refused() {
             err.msg
         );
     }
+}
+
+#[test]
+fn a_cloud_credential_leaves_nothing_in_the_program_and_a_role_is_refused() {
+    let spec = |kind: &str, fields: &str| {
+        format!(
+            "  secrets:\n    - name: cloud_secret\n      from: env\n      key: CLOUD_SECRET\n  \
+             credentials:\n    - {{name: prod, type: {kind}, {fields}}}\n  \
+             endpoint: {{type: cloud, credential: prod}}\n  \
+             resources:\n    - id: logs\n      type: aws:s3/bucket:Bucket\n      params: {{bucket: logs}}\n"
+        )
+    };
+    let compiled = compile(&spec(
+        "gcp",
+        "project: shop, serviceAccountKey: \"${{ secret.cloud_secret }}\"",
+    ))
+    .unwrap();
+    let text: String = compiled.artifact.files.values().cloned().collect();
+    for part in ["shop", "cloud_secret", "prod"] {
+        assert!(!text.contains(part), "{part} is in the program:\n{text}");
+    }
+    // A credential of another kind is the core's refusal; what the providers
+    // cannot take of a cloud credential is the plugin's.
+    let err = refusal(&spec("aws", "roleArn: \"arn:aws:iam::1:role/x\""));
+    assert_eq!(err.rule, "unsupported-credential");
+    assert!(
+        err.msg
+            .starts_with("the credential \"prod\": pulumi takes no roleArn from Meridian"),
+        "{}",
+        err.msg
+    );
 }
 
 #[test]

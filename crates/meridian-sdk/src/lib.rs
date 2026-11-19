@@ -44,6 +44,7 @@
 #![allow(clippy::result_large_err)]
 
 pub mod agent;
+pub mod cloud;
 mod credential;
 pub mod debug;
 pub mod expr;
@@ -72,6 +73,7 @@ pub mod pb {
 }
 
 pub use agent::{agent_for, AgentPrograms, SshAgent};
+pub use cloud::{check_cloud_credential, cloud_for, CloudHandover, CloudTakes};
 pub use credential::{
     check_ssh_credential, credential_for_this_machine, Credential, HeldCredential, SshTakes,
 };

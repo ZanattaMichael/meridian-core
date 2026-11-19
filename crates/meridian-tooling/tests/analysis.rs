@@ -105,6 +105,7 @@ fn fields_come_from_the_language_and_leave_out_what_is_already_there() {
             "secrets",
             "credentials",
             "targetHost",
+            "endpoint",
             "settings",
             "imports",
             "resources"
@@ -120,6 +121,7 @@ fn fields_come_from_the_language_and_leave_out_what_is_already_there() {
             "conditions",
             "secrets",
             "credentials",
+            "endpoint",
             "settings",
             "imports",
             "resources",
@@ -137,6 +139,7 @@ fn fields_come_from_the_language_and_leave_out_what_is_already_there() {
             "secrets",
             "credentials",
             "targetHost",
+            "endpoint",
             "settings",
             "imports",
             "resources"

@@ -49,8 +49,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use meridian_sdk::rules::Rule;
 use meridian_sdk::{
-    Adoption, Artifact, Capabilities, Category, CompileError, Data, Emitted, Emitter, Position,
-    Resource, ResourceGraph, Value,
+    Adoption, Artifact, Capabilities, Category, CloudTakes, CompileError, Data, Emitted, Emitter,
+    Position, Resource, ResourceGraph, Value,
 };
 
 pub use common::{CLOUDS, SETTINGS_KEYS as COMMON_SETTINGS_KEYS};
@@ -197,6 +197,33 @@ impl Config {
 }
 
 /// A refusal of one resource, stamped with this target.
+/// How `terraform` takes a cloud credential: the AWS, Azure and Google
+/// providers read their login from the environment, a certificate and a
+/// service account key from a file the environment names, and an account to
+/// impersonate from the environment too. The artifact holds nothing of it.
+pub(crate) const CLOUD_TAKES: CloudTakes = CloudTakes {
+    tool: "terraform",
+    providers: &["aws", "azure", "gcp"],
+    azure_certificate: Ok(()),
+    gcp_impersonation: Ok(()),
+};
+
+/// Refuses a credential the providers cannot take, at compile, so that
+/// nothing is fetched for it.
+fn check_credential(graph: &ResourceGraph) -> Result<(), CompileError> {
+    let Some(credential) = &graph.credential else {
+        return Ok(());
+    };
+    meridian_sdk::check_cloud_credential(credential, &CLOUD_TAKES).map_err(|msg| CompileError {
+        target: NAME.to_owned(),
+        resource: String::new(),
+        rule: meridian_sdk::rules::UNSUPPORTED_CREDENTIAL.name.to_owned(),
+        hint: meridian_sdk::rules::UNSUPPORTED_CREDENTIAL.hint.to_owned(),
+        msg: format!("the credential {:?}: {msg}", credential.name),
+        pos: Position::default(),
+    })
+}
+
 pub(crate) fn refuse(r: &Resource, rule: &Rule, msg: String) -> CompileError {
     CompileError {
         target: NAME.to_owned(),
@@ -257,6 +284,7 @@ impl Emitter for Terraform {
             runtime_condition: false,
             secrets: true,
             credentials: false,
+            cloud_credentials: true,
             adopt: Adoption::Import,
         }
     }
@@ -278,6 +306,7 @@ impl Emitter for Terraform {
     }
 
     fn emit(&self, graph: &ResourceGraph, _data: &Data) -> Result<Emitted, CompileError> {
+        check_credential(graph)?;
         // The common types become the cloud's own resources first, so every
         // later stage sees a document of Terraform types only.
         let graph = &common::lower(graph)?;

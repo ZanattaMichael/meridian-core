@@ -286,6 +286,11 @@ Settings can also go in `meridian.yaml` under `spec.settings.bicep`; the environ
 See the [plugin settings reference](../reference/plugin-settings.md#bicep). Credentials are
 `az login`'s.
 
+Meridian takes no [cloud credential](../reference/dsl/credentials.md#reaching-a-cloud-as-a-credential)
+for `bicep` yet: `az login --service-principal` takes the secret on its command line, so a
+document that names one is refused before anything runs. Declare it `from: ambient` to name
+the signed-in `az`.
+
 ## What is refused
 
 Each names the resource, line and rule:

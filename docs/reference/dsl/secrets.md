@@ -251,7 +251,9 @@ A value built from a secret and other text, such as
 Everywhere:
 
 - **The value is in no file Meridian keeps**, only the tool's private file, for the run.
-- **Never on the command line or in the environment.**
+- **Never on the command line or in the environment**, except a
+  [cloud credential](credentials.md#reaching-a-cloud-as-a-credential), which the
+  providers take from the environment only; the plan line says so.
 - **The tool's own state keeps what it is given:**
   - Terraform writes resource arguments into its state file, whatever variable
     they came from. Declare a `backend` that protects the state.
