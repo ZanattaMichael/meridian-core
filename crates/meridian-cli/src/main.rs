@@ -171,12 +171,22 @@ fn run() -> ExitCode {
             workflow,
             detailed_exitcode,
             out,
+            destroy,
         } => orchestrate(
             &workflow,
             Mode::Plan,
             &How {
                 detailed_exitcode,
                 plan_out: out.as_deref(),
+                destroy,
+                ..How::default()
+            },
+        ),
+        Command::Destroy { workflow, yes } => orchestrate(
+            &workflow,
+            Mode::Destroy,
+            &How {
+                confirmed: yes,
                 ..How::default()
             },
         ),

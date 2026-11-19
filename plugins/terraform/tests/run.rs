@@ -470,3 +470,47 @@ apply) echo '{"@level":"error","@message":"Error: creating EC2 Instance: Invalid
             .to_owned()
     ));
 }
+
+const DESTROYING: &str = r#"init) echo 'initialized' ;;
+plan) echo '{"@message":"Plan: 0 to add, 0 to change, 1 to destroy.","type":"change_summary"}' ;;
+show) echo '{"resource_changes":[{"address":"aws_instance.web_vm","mode":"managed","type":"aws_instance","name":"web_vm","change":{"actions":["delete"]}}]}' ;;
+apply) echo '{"@message":"Destroy complete! Resources: 1 destroyed.","type":"apply_complete"}' ;;"#;
+
+#[test]
+fn a_destroy_plans_with_destroy_and_applies_that_plan() {
+    let dir = scratch(TMP, "destroy");
+    let runner = runner(&dir, DESTROYING);
+    assert!(runner.destroys());
+    let removed = runner
+        .destroy(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        [
+            "init -input=false -no-color",
+            "plan -input=false -no-color -json -out=meridian.tfplan -destroy",
+            "show -json meridian.tfplan",
+            "apply -input=false -no-color -json meridian.tfplan",
+        ]
+    );
+    assert_eq!(removed.len(), 1);
+    assert_eq!(removed[0].to_string(), "delete web_vm: aws_instance");
+}
+
+#[test]
+fn a_destroy_preview_plans_with_destroy_and_applies_nothing() {
+    let dir = scratch(TMP, "destroy-preview");
+    let plan = runner(&dir, DESTROYING)
+        .plan_destroy(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        [
+            "init -input=false -no-color",
+            "plan -input=false -no-color -json -out=meridian.tfplan -destroy",
+            "show -json meridian.tfplan",
+        ]
+    );
+    assert_eq!(plan.changes[0].to_string(), "delete web_vm: aws_instance");
+    assert!(plan.saved.is_none());
+}

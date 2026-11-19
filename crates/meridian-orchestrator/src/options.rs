@@ -82,6 +82,9 @@ pub struct Options {
     pub tool_debug: u32,
     /// The documents whose tools get [`Options::tool_debug`]; empty is all.
     pub tool_debug_steps: Vec<String>,
+    /// Make a plan preview a [`Mode::Destroy`]: stages last first, each
+    /// tool asked what its destroy would remove.
+    pub destroy: bool,
 }
 
 /// What an apply does when a stage fails.
@@ -122,6 +125,7 @@ impl Options {
             from_plan: None,
             tool_debug: 0,
             tool_debug_steps: Vec::new(),
+            destroy: false,
         }
     }
 

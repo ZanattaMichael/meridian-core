@@ -148,6 +148,7 @@ async fn serve_async(plugin: Plugin) -> Result<(), ServeError> {
             .as_ref()
             .map(|r| crate::debug::describe_all(r.debug_levels(), r.more_debug_levels()))
             .unwrap_or_default(),
+        destroys: plugin.runner.as_ref().is_some_and(|r| r.destroys()),
         settings: plugin
             .runner
             .as_ref()
@@ -227,6 +228,8 @@ struct EmitterHandler {
     reads_identifiers: bool,
     /// What each debug level does to the tool.
     debug_levels: Vec<String>,
+    /// Whether the runner destroys what its tool created.
+    destroys: bool,
     /// What the runner can be configured with, for the host to list.
     settings: Vec<crate::Setting>,
     /// Kept only to describe it: importing is served by its own handler.
@@ -265,6 +268,7 @@ impl EmitterService for EmitterHandler {
             saves_plans: self.saves_plans,
             reads_identifiers: self.reads_identifiers,
             debug_levels: self.debug_levels.clone(),
+            destroys: self.destroys,
             import_formats: wire::import_formats_to_wire(
                 self.importer
                     .as_ref()
@@ -464,10 +468,23 @@ fn apply_done(result: pb::ApplyResult) -> pb::ApplyEvent {
     }
 }
 
+fn destroy_log(line: pb::LogLine) -> pb::DestroyEvent {
+    pb::DestroyEvent {
+        event: Some(pb::destroy_event::Event::Log(line)),
+    }
+}
+
+fn destroy_done(result: pb::DestroyResult) -> pb::DestroyEvent {
+    pb::DestroyEvent {
+        event: Some(pb::destroy_event::Event::Result(result)),
+    }
+}
+
 #[tonic::async_trait]
 impl RunnerService for RunnerHandler {
     type PlanStream = EventStream<pb::PlanEvent>;
     type ApplyStream = EventStream<pb::ApplyEvent>;
+    type DestroyStream = EventStream<pb::DestroyEvent>;
 
     async fn plan(
         &self,
@@ -477,6 +494,12 @@ impl RunnerService for RunnerHandler {
             return Err(Status::unimplemented("this plugin does not plan"));
         }
         let request = request.into_inner();
+        // A host must never get an apply's preview when it asked what a
+        // destroy would remove.
+        if request.destroy && !self.runner.destroys() {
+            return Err(Status::unimplemented("this plugin does not destroy"));
+        }
+        let destroy = request.destroy;
         let context = wire::context_from_wire(request.context).map_err(Status::invalid_argument)?;
         let artifact = wire::artifact_from_wire(request.artifact);
         let runner = Arc::clone(&self.runner);
@@ -484,7 +507,13 @@ impl RunnerService for RunnerHandler {
             &self.active,
             plan_log,
             plan_done,
-            move |log| wire::plan_result(runner.plan(&context, &artifact, log)),
+            move |log| {
+                wire::plan_result(if destroy {
+                    runner.plan_destroy(&context, &artifact, log)
+                } else {
+                    runner.plan(&context, &artifact, log)
+                })
+            },
         )))
     }
 
@@ -504,6 +533,25 @@ impl RunnerService for RunnerHandler {
             apply_log,
             apply_done,
             move |log| wire::apply_result(runner.apply(&context, &artifact, log)),
+        )))
+    }
+
+    async fn destroy(
+        &self,
+        request: Request<pb::DestroyRequest>,
+    ) -> Result<Response<Self::DestroyStream>, Status> {
+        if !self.runner.destroys() {
+            return Err(Status::unimplemented("this plugin does not destroy"));
+        }
+        let request = request.into_inner();
+        let context = wire::context_from_wire(request.context).map_err(Status::invalid_argument)?;
+        let artifact = wire::artifact_from_wire(request.artifact);
+        let runner = Arc::clone(&self.runner);
+        Ok(Response::new(run_streaming(
+            &self.active,
+            destroy_log,
+            destroy_done,
+            move |log| wire::destroy_result(runner.destroy(&context, &artifact, log)),
         )))
     }
 

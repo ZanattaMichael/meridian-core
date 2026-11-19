@@ -20,6 +20,10 @@ pub(crate) struct How<'a> {
     pub(crate) plan_out: Option<&'a Path>,
     /// `apply --plan`
     pub(crate) from_plan: Option<&'a Path>,
+    /// `plan --destroy`
+    pub(crate) destroy: bool,
+    /// `destroy --yes`
+    pub(crate) confirmed: bool,
 }
 
 /// What `apply --plan` is given, against what the plan was taken with: a
@@ -184,6 +188,9 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
             command.push(format!("--tool-debug-step {step}"));
         }
     }
+    if how.destroy {
+        command.push("--destroy".to_owned());
+    }
     if let Some(limit) = workflow.stage_timeout {
         command.push(format!("--stage-timeout {}", describe_duration(limit)));
     }
@@ -192,11 +199,15 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
     }
     let policy = if workflow.policy.is_empty() {
         None
-    } else if !matches!(mode, Mode::Plan | Mode::Apply) {
+    } else if !matches!(mode, Mode::Plan | Mode::Apply) || how.destroy {
         // Saying nothing would read as "checked".
         return Err(Failure::Message(format!(
             "--policy is checked by plan and apply, and {} asks no policy; remove it",
-            mode.as_str()
+            if how.destroy {
+                "plan --destroy"
+            } else {
+                mode.as_str()
+            }
         )));
     } else {
         Some(
@@ -217,7 +228,7 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
         // Compiling keeps no record, so it needs no backend to be there.
         backend: match mode {
             Mode::Compile => None,
-            Mode::Plan | Mode::Apply | Mode::Drift | Mode::Rollback => {
+            Mode::Plan | Mode::Apply | Mode::Drift | Mode::Rollback | Mode::Destroy => {
                 Some(backend(&workflow.state)?)
             }
         },
@@ -240,6 +251,7 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
         policy,
         save_plan: how.plan_out.is_some(),
         from_plan: plan_file.as_ref().map(|plan| Arc::new(plan.clone())),
+        destroy: how.destroy,
         strict_secrets: workflow.strict_secrets,
         tool_debug: workflow.tool_debug,
         tool_debug_steps: workflow.tool_debug_step.clone(),
@@ -252,6 +264,9 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
         },
         ..Options::new(&workflow.state.state_dir)
     };
+    if mode == Mode::Destroy && !how.confirmed {
+        confirm_destroy(&bundle, &selector, &options.data, &files)?;
+    }
     let registry = registry(&workflow.state.plugins)?;
     let mut printer = Printer {
         mode,
@@ -483,6 +498,54 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
         return Err(Failure::Changes);
     }
     Ok(())
+}
+
+/// Asks the person at the terminal before anything is destroyed. Without a
+/// terminal to ask, `--yes` is the only answer.
+fn confirm_destroy(
+    bundle: &meridian_ir::Bundle,
+    selector: &Selector,
+    data: &meridian_sdk::Data,
+    files: &[PathBuf],
+) -> Result<(), Failure> {
+    use std::io::{BufRead, IsTerminal, Write};
+    let again = || {
+        let files: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
+        files.join(" ")
+    };
+    if json_output() || !std::io::stdin().is_terminal() {
+        return Err(Failure::Message(format!(
+            "destroy asks before it removes anything, and there is no terminal to ask; \
+             `meridian plan --destroy {0}` shows what would go, and `meridian destroy --yes \
+             {0}` destroys it",
+            again()
+        )));
+    }
+    let count = selected(bundle, selector, data);
+    eprint!(
+        "This removes what the tools of {} made, last first. `meridian plan --destroy {}` \
+         shows what would go.\nType yes to destroy: ",
+        count_of(count, "document"),
+        again()
+    );
+    let _ = std::io::stderr().flush();
+    let mut answer = String::new();
+    std::io::stdin()
+        .lock()
+        .read_line(&mut answer)
+        .map_err(|e| Failure::Message(format!("reading the answer: {e}")))?;
+    if answer.trim() != "yes" {
+        return Err(Failure::Message("nothing was destroyed".to_owned()));
+    }
+    Ok(())
+}
+
+fn count_of(n: usize, what: &str) -> String {
+    if n == 1 {
+        format!("1 {what}")
+    } else {
+        format!("{n} {what}s")
+    }
 }
 
 /// The analyzers a run puts every stage through, with their settings, and

@@ -62,6 +62,10 @@ pub(crate) enum Command {
         /// stage planned
         #[arg(short, long, value_name = "FILE")]
         out: Option<PathBuf>,
+        /// Show what `meridian destroy` would remove instead, last stage
+        /// first
+        #[arg(long, conflicts_with = "out")]
+        destroy: bool,
     },
     /// Make the documents' desired state real
     Apply {
@@ -98,6 +102,16 @@ pub(crate) enum Command {
     Drift {
         #[command(flatten)]
         workflow: Workflow,
+    },
+    /// Remove what the documents' tools created, last stage first; a stage
+    /// whose target cannot destroy is left in place
+    Destroy {
+        #[command(flatten)]
+        workflow: Workflow,
+        /// Destroy without asking. Needed when standard input is not a
+        /// terminal, or with --output json
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
     /// Put back what the last apply changed: each stage it applied is
     /// applied again from what was applied before it, last stage first
@@ -367,6 +381,7 @@ impl Command {
             Command::Apply { .. } => "apply".to_owned(),
             Command::Drift { .. } => "drift".to_owned(),
             Command::Rollback { .. } => "rollback".to_owned(),
+            Command::Destroy { .. } => "destroy".to_owned(),
             Command::Status { .. } => "status".to_owned(),
             Command::Runs { .. } => "runs".to_owned(),
             Command::Events { .. } => "events".to_owned(),

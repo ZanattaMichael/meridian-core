@@ -77,6 +77,9 @@ pub struct Info {
     /// What each debug level does to the tool, first level first; empty when
     /// the target has no debug output to give.
     pub debug_levels: Vec<String>,
+    /// Whether the target removes what its tool created, for `meridian
+    /// destroy`. A plugin built before the field says no.
+    pub destroys: bool,
     /// The versions of its tool the target compiles for; empty when it does
     /// not say.
     pub target_versions: Vec<String>,

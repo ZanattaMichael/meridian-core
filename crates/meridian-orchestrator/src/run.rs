@@ -240,6 +240,21 @@ impl Run<'_> {
         };
         let stage = Stage::of(&document);
 
+        // A destroy leaves alone what it cannot remove, and what was never
+        // made here.
+        if self.destroying() {
+            if let Some(target) = self.registry.target(stage.target()) {
+                if !target.info().destroys {
+                    report.outcome = Outcome::Kept(Kept::CannotDestroy);
+                    return report;
+                }
+            }
+            if self.state.get(&id).is_none() {
+                report.outcome = Outcome::Kept(Kept::NeverApplied);
+                return report;
+            }
+        }
+
         let Compiled {
             graph,
             emitted,
@@ -317,7 +332,7 @@ impl Run<'_> {
         let asked = options
             .policy
             .as_ref()
-            .filter(|_| matches!(self.mode, Mode::Plan | Mode::Apply));
+            .filter(|_| matches!(self.mode, Mode::Plan | Mode::Apply) && !self.destroying());
         if self.mode == Mode::Plan && !operations.plan {
             // Compiling is still a result worth having; the target just
             // cannot say what applying it would change. A policy is still
@@ -512,6 +527,12 @@ impl Run<'_> {
             _ => None,
         };
         match self.mode {
+            Mode::Plan if self.options.destroy => {
+                match target.plan_destroy_with(&context, &emitted.artifact, &mut log, stop) {
+                    Ok(plan) => report.outcome = Outcome::Planned(plan),
+                    Err(e) => return fail(report, reason_of(&e), self.describe(e)),
+                }
+            }
             Mode::Plan => match plan_now
                 .unwrap_or_else(|| target.plan_with(&context, &emitted.artifact, &mut log, stop))
             {
@@ -521,6 +542,27 @@ impl Run<'_> {
                     return fail(report, reason_of(&e), self.describe(e));
                 }
             },
+            Mode::Destroy => {
+                match target.destroy_with(&context, &emitted.artifact, &mut log, stop) {
+                    Ok(changes) => {
+                        self.forget(&id);
+                        report.outcome = Outcome::Destroyed { changes };
+                    }
+                    Err(e) => {
+                        match &e {
+                            RunFailure::Tool(tool) => {
+                                report.done_before_failing = tool.changes.clone();
+                            }
+                            RunFailure::Stopped(stopped) => {
+                                report.done_before_failing = stopped.changes.clone();
+                            }
+                            RunFailure::Plugin(_) => {}
+                        }
+                        report.failures = self.failures(&e, &document);
+                        return fail(report, reason_of(&e), self.describe(e));
+                    }
+                }
+            }
             Mode::Drift => match target.plan_with(&context, &emitted.artifact, &mut log, stop) {
                 Ok(plan) => {
                     let last = last.unwrap_or_default();
@@ -1458,6 +1500,21 @@ impl Run<'_> {
 
     pub(crate) fn describe(&self, failure: RunFailure) -> String {
         self.masker.mask(&mask(&failure.to_string(), &self.secrets))
+    }
+
+    /// Whether this run takes things down: a destroy, or its preview.
+    pub(crate) fn destroying(&self) -> bool {
+        self.mode == Mode::Destroy || (self.mode == Mode::Plan && self.options.destroy)
+    }
+
+    /// Forgets a destroyed stage, so that it reads as never applied.
+    fn forget(&mut self, id: &StageId) {
+        self.state.remove(id);
+        self.outputs.remove(&id.name);
+        if let Err(why) = self.state.write(self.backend.as_ref()) {
+            self.warnings
+                .push(format!("the run-state could not be written: {why}"));
+        }
     }
 
     /// Whether the operator has asked for the run to stop.

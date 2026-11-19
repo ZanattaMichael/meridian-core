@@ -20,12 +20,13 @@
         "plan",
         "apply",
         "drift",
-        "rollback"
+        "rollback",
+        "destroy"
       ]
     },
     "run": {
       "type": "string",
-      "description": "The run's id, under which plan, apply, drift and rollback keep their record; compile has one too but records nothing"
+      "description": "The run's id, under which plan, apply, drift, rollback and destroy keep their record; compile has one too but records nothing"
     },
     "refused": {
       "oneOf": [
@@ -326,6 +327,8 @@
             "deferred",
             "skipped",
             "drift",
+            "destroyed",
+            "kept",
             "left-out",
             "failed",
             "not-run"
@@ -487,6 +490,14 @@
         },
         "lastApplyFailed": {
           "type": "boolean"
+        },
+        "kept": {
+          "type": "string",
+          "enum": [
+            "cannot-destroy",
+            "never-applied"
+          ],
+          "description": "Why a destroy left the stage in place"
         },
         "condition": {
           "type": "string"

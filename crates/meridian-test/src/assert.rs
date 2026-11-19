@@ -23,6 +23,8 @@ pub(crate) fn outcome_word(report: &StageReport) -> &'static str {
         Outcome::Skipped { .. } => "skipped",
         Outcome::Applied { .. } => "applied",
         Outcome::Drift(_) => "drift",
+        Outcome::Destroyed { .. } => "destroyed",
+        Outcome::Kept(_) => "kept",
     }
 }
 

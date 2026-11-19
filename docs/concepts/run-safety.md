@@ -12,7 +12,7 @@ Locks, run records, resuming, stopping, sharing, rollback, drift and policy chec
 
 ## One run at a time
 
-`plan`, `apply`, `drift` and `rollback` take the state's lock first.
+`plan`, `apply`, `drift`, `rollback` and `destroy` take the state's lock first.
 
 ```
 $ meridian apply site.yaml
@@ -234,7 +234,7 @@ What it cannot do is reported per stage:
 
 | The stage | What happens | Why |
 |---|---|---|
-| was applied for the first time by that run | `NOT ROLLED BACK`; what was created is left as it is | there is nothing to go back to. Removing what was created would need a `destroy` operation that plugins do not have; use the tool itself |
+| was applied for the first time by that run | `NOT ROLLED BACK`; what was created is left as it is | there is nothing to go back to. To remove what was created, use [`meridian destroy`](../operations/destroying.md) |
 | was applied from the same artifact as before | nothing to put back | the run did not change what the stage is |
 | has no snapshot on this machine | `NOT ROLLED BACK`, with what to do by hand | snapshots are kept on the machine that applied, and not in a shared backend. Check out the previous revision of the document and apply it |
 | has been applied again by a later run | `NOT ROLLED BACK` | that later run's work is what is there now, and undoing an older run over it would undo the wrong thing |

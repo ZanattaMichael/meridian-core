@@ -135,6 +135,31 @@ impl Target {
             .apply_with(context, artifact, log, stop)
     }
 
+    /// Previews what destroying an artifact would remove.
+    pub fn plan_destroy_with(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &mut dyn FnMut(LogLine),
+        stop: &Stop,
+    ) -> Result<Plan, RunFailure> {
+        self.client("destroy")?
+            .plan_destroy_with(context, artifact, log, stop)
+    }
+
+    /// Removes everything the tool created for an artifact, stopped early
+    /// as `stop` says.
+    pub fn destroy_with(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &mut dyn FnMut(LogLine),
+        stop: &Stop,
+    ) -> Result<Vec<meridian_sdk::Change>, RunFailure> {
+        self.client("destroy")?
+            .destroy_with(context, artifact, log, stop)
+    }
+
     /// Reads the values the last apply produced.
     pub fn outputs(&self, context: &RunContext) -> Result<Vec<Output>, RunFailure> {
         self.client("report outputs")?.outputs(context)
@@ -232,6 +257,7 @@ impl Registry {
             saves_plans: false,
             reads_identifiers: false,
             debug_levels: Vec::new(),
+            destroys: false,
             path: String::new(),
             signature: crate::Signature::NotChecked,
         };
