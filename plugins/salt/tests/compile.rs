@@ -1054,3 +1054,15 @@ fn a_repository_is_a_pkgrepo_state() {
     assert!(yum.contains("pkgrepo.absent:"), "{yum}");
     assert!(!yum.contains("baseurl"), "{yum}");
 }
+
+#[test]
+fn a_link_is_file_symlink() {
+    let text = sls("    - id: ln\n      type: file\n      state: link\n      params:\n        path: /etc/nginx/sites-enabled/app\n        target: /etc/nginx/sites-available/app\n");
+    for line in [
+        "file.symlink:",
+        "name: /etc/nginx/sites-enabled/app",
+        "target: /etc/nginx/sites-available/app",
+    ] {
+        assert!(text.contains(line), "{line} in {text}");
+    }
+}

@@ -573,6 +573,12 @@ const SHARED_PARAMS: &[(&str, &str, ParamKind, &str)] = &[
         "Where the file or directory is.",
     ),
     (
+        "file",
+        "target",
+        ParamKind::String,
+        "With state `link`: the path the link points to.",
+    ),
+    (
         "group",
         "gid",
         ParamKind::Integer,
@@ -780,6 +786,9 @@ pub fn check_shared(resource: &Resource) -> Result<(), CompileError> {
     let r#type = resource.r#type.as_str();
     if !SHARED_TYPES.iter().any(|(t, _)| *t == r#type) {
         return Ok(());
+    }
+    if r#type == "file" {
+        check_link(resource)?;
     }
     for (name, value) in &resource.params {
         let Some((_, _, kind, _)) = SHARED_PARAMS
@@ -1056,6 +1065,42 @@ pub fn package_repository(resource: &Resource) -> Result<Repository, CompileErro
         present,
         format,
     })
+}
+
+/// A `file` in state `link` needs a `target` and takes no `content` or
+/// `mode`; `target` means nothing in any other state.
+fn check_link(resource: &Resource) -> Result<(), CompileError> {
+    let conflict = |msg: &str| {
+        Err(CompileError::for_resource(
+            resource,
+            &rules::PARAM_CONFLICTS_WITH_STATE,
+            msg.to_owned(),
+        ))
+    };
+    let has = |p: &str| resource.params.contains_key(p);
+    if resource.state == "link" {
+        if !has("target") {
+            return Err(CompileError::for_resource(
+                resource,
+                &rules::MISSING_PARAM,
+                "a file in state \"link\" requires param \"target\": the path it points to"
+                    .to_owned(),
+            ));
+        }
+        for param in ["append", "content", "encoding", "mode"] {
+            if has(param) {
+                return conflict(&format!(
+                    "param {param:?} cannot be used with state \"link\": a link has no \
+                     content or mode of its own; remove the param or the state"
+                ));
+            }
+        }
+    } else if has("target") {
+        return conflict(
+            "param \"target\" is for state \"link\"; add state: link or remove the param",
+        );
+    }
+    Ok(())
 }
 
 /// Whether a secret sits somewhere inside a list or a map.

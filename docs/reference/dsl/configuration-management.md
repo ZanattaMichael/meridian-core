@@ -34,7 +34,7 @@ Changing `spec.target` moves a document between them, within each tool's limits.
 | `package` | an installed package | `present` (default), `absent`, `latest` | `name` |
 | `packageRepository` | an apt or yum repository | `present` (default), `absent` | `name`, `format`, `url` |
 | `service` | a running service | `running` (default), `started`, `stopped` | `name` |
-| `file` | a file or directory | `present` (default) or `file`, `directory`, `absent` | `path` |
+| `file` | a file, directory or link | `present` (default) or `file`, `directory`, `link`, `absent` | `path`; `target` with `link` |
 | `user` | a user account | `present` (default), `absent` | `name` |
 | `group` | a group | `present` (default), `absent` | `name` |
 | `exec` | a command to run | none | `command` |

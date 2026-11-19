@@ -453,3 +453,16 @@ fn a_repository_is_an_apt_repository_or_a_yum_repository() {
     assert!(yum.contains("gpgcheck false"), "{yum}");
     assert!(yum.contains("action :remove"), "{yum}");
 }
+
+#[test]
+fn a_link_is_a_link_resource() {
+    let text = recipe("    - id: ln\n      type: file\n      state: link\n      params:\n        path: /etc/nginx/sites-enabled/app\n        target: /etc/nginx/sites-available/app\n");
+    for line in [
+        "link 'ln' do",
+        "target_file '/etc/nginx/sites-enabled/app'",
+        "to '/etc/nginx/sites-available/app'",
+        "action :create",
+    ] {
+        assert!(text.contains(line), "{line} in {text}");
+    }
+}

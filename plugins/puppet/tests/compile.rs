@@ -529,3 +529,14 @@ fn a_yum_repository_is_a_yumrepo_and_apt_is_refused() {
     assert_eq!(err.rule, "unsupported-param");
     assert!(err.msg.contains("apt::source"), "{}", err.msg);
 }
+
+#[test]
+fn a_link_is_a_file_with_ensure_link() {
+    let site = manifest("    - id: ln\n      type: file\n      state: link\n      params:\n        path: /etc/nginx/sites-enabled/app\n        target: /etc/nginx/sites-available/app\n");
+    for line in [
+        "ensure => link",
+        "target => '/etc/nginx/sites-available/app'",
+    ] {
+        assert!(site.contains(line), "{line} in {site}");
+    }
+}
