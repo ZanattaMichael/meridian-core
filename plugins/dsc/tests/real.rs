@@ -397,3 +397,29 @@ fn the_resources_properties_are_exported_for_an_editor() {
             .any(|s| s.r#type.starts_with("Microsoft.DSC/") && s.open));
     }
 }
+
+#[ignore = "needs a real PowerShell and DscPipelineRunner; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn inspect_tests_one_resource_and_sets_nothing() {
+    let Some(version) = any_engine() else { return };
+    let dir = scratch(TMP, "real-inspect");
+    let state = dir.join("state");
+    fs::create_dir_all(&state).unwrap();
+    let artifact = site(version, &state, "v1");
+    apply(&dir, &artifact);
+
+    let runner = DscRunner::from_env();
+    let read = runner
+        .inspect(&context(&dir), &artifact, "config", "localhost")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(true));
+
+    fs::remove_file(state.join("page.marker")).unwrap();
+    let read = runner
+        .inspect(&context(&dir), &artifact, "page", "localhost")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(read.in_desired_state, Some(false));
+    assert!(!state.join("page.marker").exists(), "inspect sets nothing");
+    assert_eq!(sets(&state, "page"), 1);
+}

@@ -14,6 +14,7 @@
 #![allow(clippy::result_large_err)]
 
 mod emit;
+mod inspect;
 mod runner;
 mod schemas;
 mod sort;

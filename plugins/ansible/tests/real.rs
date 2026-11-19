@@ -24,7 +24,7 @@ use std::process::{Command, Stdio};
 use meridian_plugin_testkit::{graph_from_text, scratch, secret_in_param, secrets, KeptLog};
 use meridian_sdk::{
     Applied, Artifact, Change, ChangeAction, Data, Emitter, Plan, RunContext, RunError, Runner,
-    SchemaRequest, SchemaSource,
+    SchemaRequest, SchemaSource, Value,
 };
 use meridian_target_ansible::{Ansible, AnsibleRunner, AnsibleSchemas};
 
@@ -564,4 +564,37 @@ fn a_debug_level_brings_ansibles_own_verbose_output_and_changes_no_result() {
     assert!(text.contains("ESTABLISH LOCAL CONNECTION"), "{text}");
     assert_eq!(changes(&loud.changes), changes(&quiet.changes));
     assert_eq!(loud.unknown, quiet.unknown);
+}
+
+#[ignore = "needs a real ansible-playbook; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn inspect_reads_one_task_in_check_mode_and_changes_nothing() {
+    let Some(runner) = ansible() else { return };
+    let dir = scratch(TMP, "real-inspect");
+    let conf = dir.join("app/app.conf");
+    let artifact = site(&dir, "port = 80\\n", "0640");
+    apply(&runner, &dir, &artifact);
+
+    let read = runner
+        .inspect(&context(&dir), &artifact, "app_conf", "localhost")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(true));
+    assert_eq!(read.actual.get("mode"), Some(&Value::from("0640")));
+    assert!(
+        read.command.ends_with("task app_conf only"),
+        "{}",
+        read.command
+    );
+
+    fs::write(&conf, "port = 1\n").unwrap();
+    let read = runner
+        .inspect(&context(&dir), &artifact, "app_conf", "localhost")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(read.in_desired_state, Some(false));
+    assert_eq!(
+        fs::read_to_string(&conf).unwrap(),
+        "port = 1\n",
+        "inspect changes nothing"
+    );
 }

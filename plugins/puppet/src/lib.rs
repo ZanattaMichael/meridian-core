@@ -31,6 +31,7 @@
 #![allow(clippy::result_large_err)]
 
 mod emit;
+pub mod inspect;
 mod runner;
 mod schemas;
 mod sort;

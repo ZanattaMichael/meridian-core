@@ -226,3 +226,39 @@ fn a_debug_level_sets_powershells_preferences_before_the_module_loads() {
         assert!(script.starts_with(expected), "level {level}: {script}");
     }
 }
+
+#[test]
+fn inspect_is_a_test_run_and_the_one_resources_result() {
+    let dir = scratch(TMP, "inspect");
+    let cases = format!("*'-Mode Test'*) {} ;;", result(&format!("{OK},{DRIFT}")));
+    let runner = runner(&dir, &cases);
+    let read = runner
+        .inspect(&context(&dir), &compiled(), "site_config", "")
+        .unwrap();
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(false));
+    assert_eq!(
+        read.actual.get("message"),
+        Some(&meridian_sdk::Value::from("not in the desired state"))
+    );
+    assert_eq!(
+        read.command,
+        "Invoke-DscRunner -Mode Test, resource PSDscResources/File/site_config"
+    );
+    let read = runner
+        .inspect(&context(&dir), &compiled(), "w3svc", "")
+        .unwrap();
+    assert_eq!(read.in_desired_state, Some(true));
+    assert!(read.actual.is_empty());
+    // Only Test ran.
+    let calls = fs::read_to_string(dir.join("calls")).unwrap();
+    assert!(!calls.contains("-Mode Set"), "{calls}");
+
+    let error = runner
+        .inspect(&context(&dir), &compiled(), "nothing", "")
+        .unwrap_err();
+    assert_eq!(
+        error.msg,
+        "DscPipelineRunner's Test result has no resource \"nothing\""
+    );
+}

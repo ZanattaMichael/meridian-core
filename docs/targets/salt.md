@@ -835,3 +835,16 @@ means it needs root or a configuration directory of its own; see [Settings](#set
   pip install salt
   MERIDIAN_TEST_REAL_SALT_CALL="$(command -v salt-call)" cargo test -p meridian-target-salt
   ```
+
+## Inspecting one resource
+
+[`meridian inspect`](../reference/cli.md#inspect) runs the one state by its id:
+`state.sls_id ID SLS test=True`, with `salt-call` or `salt-ssh` as an apply would.
+
+| Answer | From |
+|---|---|
+| actual | the state's `comment`, and its `changes` as `wouldChange`. Salt reports no properties in test mode |
+| as declared | `result: true` yes, `null` no. `false` fails the command |
+
+A state whose function removes (`absent`, `removed`, `purged`, `dead`) and has nothing to do is
+not found.

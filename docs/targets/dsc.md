@@ -271,3 +271,13 @@ its DSC resources. Check with:
 If empty, remove one of the three keys. DSC v3 is not affected.
 
 [`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) sets `$VerbosePreference` at level 1, and `$DebugPreference` too from level 2, before the module loads.
+
+## Inspecting one resource
+
+[`meridian inspect`](../reference/cli.md#inspect) runs `Invoke-DscRunner -Mode Test`, which
+sets nothing, and takes the resource's result.
+
+| Answer | From |
+|---|---|
+| actual | the result's `ErrorMessage`, as `message`. DscPipelineRunner's result carries no properties |
+| as declared | `Status` `OK` yes, `FAIL` no, anything else not given |

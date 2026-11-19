@@ -83,22 +83,15 @@ impl AnsibleRunner {
         }
     }
 
-    fn run(
+    /// `ansible-playbook` set up for the context, before the playbook is
+    /// named: the inventory, check mode when asked, the secrets' and the
+    /// key's files, and the operator's arguments. The files live as long as
+    /// the values returned for them.
+    pub(crate) fn tool(
         &self,
         context: &RunContext,
-        artifact: &Artifact,
         check: bool,
-        log: &dyn Log,
-    ) -> Result<Report, RunError> {
-        for needed in [PLAYBOOK_PATH, INVENTORY_PATH] {
-            if !artifact.files.contains_key(needed) {
-                return Err(RunError::new(format!(
-                    "the artifact has no {needed}; it was not compiled by this plugin"
-                )));
-            }
-        }
-        write_artifact(&context.work_dir, artifact)?;
-
+    ) -> Result<(Tool, Option<SecretFile>, Option<SecretFile>), RunError> {
         let mut tool = Tool::new(&self.program)
             .args(["--inventory", INVENTORY_PATH])
             .dir(&context.work_dir)
@@ -118,7 +111,6 @@ impl AnsibleRunner {
         // only the user can read, named on the command line by its path and
         // nothing more. A credential's password goes in the same file, and
         // its private key in a file of its own, named by `--private-key`.
-        // The files live until the run is over.
         let secrets = extra_vars_file(context)?;
         if let Some(file) = &secrets {
             tool = tool
@@ -131,9 +123,26 @@ impl AnsibleRunner {
                 .arg("--private-key")
                 .arg(file.path().to_string_lossy().into_owned());
         }
-        tool = tool
-            .args(self.extra_args.iter().cloned())
-            .arg(PLAYBOOK_PATH);
+        Ok((tool.args(self.extra_args.iter().cloned()), secrets, key))
+    }
+
+    fn run(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        check: bool,
+        log: &dyn Log,
+    ) -> Result<Report, RunError> {
+        for needed in [PLAYBOOK_PATH, INVENTORY_PATH] {
+            if !artifact.files.contains_key(needed) {
+                return Err(RunError::new(format!(
+                    "the artifact has no {needed}; it was not compiled by this plugin"
+                )));
+            }
+        }
+        write_artifact(&context.work_dir, artifact)?;
+        let (tool, secrets, key) = self.tool(context, check)?;
+        let tool = tool.arg(PLAYBOOK_PATH);
 
         let reader = Reader {
             inner: log,
@@ -268,6 +277,20 @@ impl Runner for AnsibleRunner {
             changes: report.changes,
             outputs: Vec::new(),
         })
+    }
+
+    fn inspects(&self) -> bool {
+        true
+    }
+
+    fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        _endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunError> {
+        crate::inspect::inspect(self, context, artifact, resource)
     }
 }
 

@@ -444,3 +444,17 @@ Each names the resource, line and rule:
   drift and failure, run with
   `MERIDIAN_TEST_REAL_PUPPET=1 cargo test -p meridian-target-puppet --test real -- --ignored`.
   Bolt has only met a stand-in. See [Real-tool tests](../contributing/real-tool-tests.md).
+
+## Inspecting one resource
+
+[`meridian inspect`](../reference/cli.md#inspect) reads the resource by its type and namevar
+(`path` for `file`, `command` for `exec`, otherwise `name`; the title when the declaration
+sets none).
+
+| Answer | From |
+|---|---|
+| actual | `puppet resource TYPE NAME --to_yaml`. A `content` checksum is left out. `ensure: absent` or `purged` is not found |
+| as declared | a `--noop` run of the manifest: yes when it reports no event for the resource |
+
+Over Bolt, the read is `bolt command run '/opt/puppetlabs/bin/puppet resource ...'` on the
+node.

@@ -4,7 +4,7 @@
 |---|---|
 | Area | Runs |
 | Status | **proposed**: made during the work, not yet accepted or changed by the owner |
-| Made in | the pull requests for issue 222: part 1 (core), part 2 (infrastructure targets) |
+| Made in | the pull requests for issue 222: part 1 (core), part 2 (infrastructure targets), part 3 (configuration management) |
 | Where it shows | [the `meridian` command](../reference/cli.md#inspect), [`--output json`](../reference/cli-json.md#inspect), [Troubleshooting a failed run](../operations/troubleshooting.md#meridian-inspect), [the MCP server](../tooling/mcp-server.md), [Writing a plugin](../contributing/writing-a-plugin.md), [the capability matrix](../reference/capability-matrix.md) |
 
 ## The choice
@@ -40,6 +40,17 @@
 
 A name that is an expression, and an ARM deployment to a subscription, are refused with
 `unsupported-inspect`.
+
+## Configuration management (part 3)
+
+| Target | Actual | As declared |
+|---|---|---|
+| Ansible | the module's result: the playbook cut to the task, `--check --diff -v` | `ok` yes, `changed` no |
+| Puppet, OpenVox | `puppet resource TYPE NAME --to_yaml`; over Bolt, `bolt command run` | a `--noop` run of the manifest |
+| Salt | `state.sls_id ID SLS test=True`: comment and would-be changes | `result` true yes, null no |
+| DSC | not given: DscPipelineRunner's result has no properties | `Invoke-DscRunner -Mode Test`, the resource's status |
+| Chef | why-run's lines for the resource | why-run; on another machine refused |
+| cloud-init | refused: nothing to read per resource | |
 
 ## Status
 

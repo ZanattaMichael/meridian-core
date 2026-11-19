@@ -332,6 +332,21 @@ impl Runner for OpenVoxRunner {
         self.check(context, log)?;
         self.tool.apply(context, artifact, log)
     }
+
+    fn inspects(&self) -> bool {
+        true
+    }
+
+    fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunError> {
+        self.check(context, &NoLog)?;
+        self.tool.inspect(context, artifact, resource, endpoint)
+    }
 }
 
 #[cfg(test)]
