@@ -465,7 +465,7 @@ upgraded again; a plan shows it as "may change".
 
 When `helm upgrade` or `helm uninstall` fails, each object Helm names is a
 [resource failure](../reference/state.md#resource-failures) on its id. With `wait: true`,
-`resource not ready, name: web, kind: Deployment, status: InProgress` is `timed-out`, and
+`resource Deployment/shop/web not ready. status: InProgress` is `timed-out`, and
 `status: Failed` is `resource-failed`, with the status as the tool code; a wait that names
 nothing is `timed-out` on the release. Refusals by the API server are read as the
 [Kubernetes target](kubernetes.md#reading-a-failure) reads them.

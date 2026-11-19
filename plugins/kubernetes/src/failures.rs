@@ -81,7 +81,7 @@ fn starts_an_error(line: &str) -> bool {
         || line.starts_with("Error:")
         || line.starts_with("Unable to connect to the server")
         || line.starts_with("The connection to the server")
-        || line.starts_with("resource not ready")
+        || (line.starts_with("resource ") && line.contains(" not ready"))
         || line == "context deadline exceeded"
 }
 
@@ -128,24 +128,38 @@ fn read_block(block: &[&str]) -> Option<ObjectFailure> {
     })
 }
 
-/// Helm's wait: `resource not ready, name: web, kind: Deployment, status:
-/// InProgress`. An object still in progress when the wait ran out timed
-/// out; one whose status is `Failed` failed.
+/// Helm's wait: `resource Deployment/shop/web not ready. status:
+/// InProgress, message: Available: 0/1` (Helm 4), or `resource not ready,
+/// name: web, kind: Deployment, status: InProgress`. An object still in
+/// progress when the wait ran out timed out; one whose status is `Failed`
+/// failed.
 fn not_ready(line: &str) -> Option<ObjectFailure> {
-    let rest = &line[line.find("resource not ready, name: ")?..];
-    let rest = rest.strip_prefix("resource not ready, name: ")?;
-    let (name, rest) = rest.split_once(", kind: ")?;
-    let (kind, status) = rest.split_once(", status: ")?;
-    let status = status.trim();
+    let (kind, name, status, message) =
+        if let Some(rest) = after(line, "resource not ready, name: ") {
+            let (name, rest) = rest.split_once(", kind: ")?;
+            let (kind, status) = rest.split_once(", status: ")?;
+            (kind, name, status.trim(), "")
+        } else {
+            let rest = after(line, "resource ")?;
+            let (object, rest) = rest.split_once(" not ready. status: ")?;
+            let (kind, rest_of_object) = object.split_once('/')?;
+            let name = rest_of_object.rsplit('/').next()?;
+            let (status, message) = rest.split_once(", message: ").unwrap_or((rest, ""));
+            (kind, name, status.trim(), message.trim())
+        };
     let cause = if status == "Failed" {
         Cause::ResourceFailed
     } else {
         Cause::TimedOut
     };
+    let mut summary = format!("{kind} {name} not ready: {status}");
+    if !message.is_empty() {
+        summary.push_str(&format!(" ({message})"));
+    }
     Some(ObjectFailure {
         kind: kind.to_owned(),
         name: name.to_owned(),
-        failure: Failure::new(cause, "", format!("{kind} {name} not ready: {status}")).code(status),
+        failure: Failure::new(cause, "", summary).code(status),
     })
 }
 
@@ -371,6 +385,16 @@ mod tests {
                 one("Deployment", "shop-web", Cause::TimedOut, "InProgress"),
                 one("Job", "shop-job", Cause::ResourceFailed, "Failed"),
             ]
+        );
+        let helm4 = "Error: resource Deployment/shop/shop-web not ready. status: InProgress, message: Available: 0/1\n\
+            context deadline exceeded\n";
+        assert_eq!(
+            read(helm4),
+            [one("Deployment", "shop-web", Cause::TimedOut, "InProgress")]
+        );
+        assert_eq!(
+            read_errors(helm4)[0].failure.summary,
+            "Deployment shop-web not ready: InProgress (Available: 0/1)"
         );
         assert_eq!(
             read("Error: UPGRADE FAILED: context deadline exceeded\n"),

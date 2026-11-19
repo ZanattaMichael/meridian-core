@@ -445,7 +445,7 @@ fn a_failed_install_names_what_was_not_ready_or_refused() {
     let helm = runner(&dir, "", "");
     fs::write(
         dir.join("fail-upgrade"),
-        "Error: INSTALLATION FAILED: resource not ready, name: web, kind: Deployment, status: InProgress\n\
+        "Error: resource Deployment/web/web not ready. status: InProgress, message: Available: 0/1\n\
          context deadline exceeded\n",
     )
     .unwrap();
