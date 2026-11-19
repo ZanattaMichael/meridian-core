@@ -383,10 +383,12 @@ error.failures.push(
 
 - `resource` is the document's id where the tool's address maps to one.
 - Pick the [cause word](../reference/failure-causes.md) from the tool's own fields or codes;
-  `unknown` when it does not say.
-- Read JSON where the tool offers it. `Tool::show_stdout_as` keeps one-record-a-line output
-  whole for reading and shows a person each line's message.
-- Leave masking to the host. Never parse the text you show a person.
+  `Cause::from_message` finds the shared ones (unreachable, auth-failed, timed-out,
+  reboot-required) in a message. `unknown` when nothing says.
+- Read JSON where the tool offers it, and the tool's own fixed lines where it does not
+  (Puppet's `Error:` lines, chef-client's formatter). `Tool::show_stdout_as` keeps
+  one-record-a-line output whole for reading and shows a person each line's message.
+- Leave masking to the host.
 
 Test each cause the parser picks with a stand-in and, where a real tool can fail on purpose,
 assert the failure in its real test.

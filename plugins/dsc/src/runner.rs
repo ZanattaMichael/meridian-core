@@ -2,6 +2,7 @@
 //! sits outside the compile chain: nothing here is reached by a compile.
 
 use meridian_sdk::debug::DebugLevel;
+use meridian_sdk::failure::{Cause, Failure};
 use meridian_sdk::tool::{write_artifact, Tool};
 use meridian_sdk::{
     decode_value, Applied, Artifact, Change, ChangeAction, Log, Operations, Plan, RunContext,
@@ -249,10 +250,18 @@ fn read_result(json: &str) -> Result<Vec<Outcome>, RunError> {
         };
         // The run itself broke, as opposed to a resource failing in it.
         if text(configuration, "Status") == "AbortedByException" {
-            return Err(RunError::new(format!(
-                "DscPipelineRunner stopped: {}",
-                text(configuration, "ErrorMessage")
-            )));
+            let message = text(configuration, "ErrorMessage");
+            let mut error = RunError::new(format!("DscPipelineRunner stopped: {message}"));
+            error.failures.push(
+                Failure::new(
+                    Cause::from_message(&message).unwrap_or(Cause::ToolCrashed),
+                    "",
+                    message.lines().next().unwrap_or_default(),
+                )
+                .code("AbortedByException")
+                .detail(message.clone()),
+            );
+            return Err(error);
         }
         for result in each(configuration.get("Results")) {
             let Some(result) = result.as_map() else {
@@ -372,6 +381,18 @@ impl Runner for DscRunner {
                 .map(|o| format!("{}/{}: {}", o.r#type, o.resource, o.message))
                 .collect::<Vec<_>>()
                 .join("\n");
+            error.failures = failed
+                .iter()
+                .map(|o| {
+                    Failure::new(
+                        Cause::from_message(&o.message).unwrap_or(Cause::ResourceFailed),
+                        o.resource.clone(),
+                        o.message.lines().next().unwrap_or_default(),
+                    )
+                    .code(o.status.clone())
+                    .detail(format!("{}: {}", o.r#type, o.message))
+                })
+                .collect();
             error.changes = changes;
             return Err(error);
         }
@@ -408,6 +429,8 @@ mod tests {
         let aborted = r#"{"Configurations":[{"Status":"AbortedByException","ErrorMessage":"dsc is not installed","Results":[]}]}"#;
         let err = read_result(aborted).err().unwrap();
         assert_eq!(err.msg, "DscPipelineRunner stopped: dsc is not installed");
+        assert_eq!(err.failures[0].cause, Cause::ToolCrashed);
+        assert_eq!(err.failures[0].tool_code, "AbortedByException");
     }
 
     #[test]

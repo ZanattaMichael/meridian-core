@@ -260,6 +260,22 @@ The host decides how:
 Exit `2` is success with changes; `4` and `6` fail the stage, with what had changed. An
 unreadable Bolt report makes the plan **unknown**.
 
+### Reading a failure
+
+Each resource that failed is a [resource failure](../reference/state.md#resource-failures), read from what Puppet writes to
+standard error:
+
+| Line | Becomes |
+|---|---|
+| `Error: /Stage[main]/.../Exec[migrate]/returns: change from ... failed: '/bin/false' returned 3 ...` | `migrate`, `resource-failed`, summary after `failed: `, tool code `rc=3` |
+| `Warning: /Stage[main]/.../Service[app_svc]: Skipping because of failed dependencies` | `app_svc`, `dependency-failed` |
+| `Error: Evaluation Error: ...` (or `Could not parse`, `Syntax error`, `Could not find`) | no resource, `invalid-config` |
+
+Over Bolt, a `failure` event in the JSON report is the same on the target
+named; a target Bolt could not reach is `unreachable`, with the error's
+`kind` as the tool code. A message that names a refused login or a timeout
+gives that cause instead.
+
 ## Settings
 
 | Variable | Meaning |
