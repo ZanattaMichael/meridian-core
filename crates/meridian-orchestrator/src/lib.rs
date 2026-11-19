@@ -35,6 +35,7 @@
 //!
 //! None of it holds a secret value: see `docs/reference/state.md`.
 
+pub mod analyze;
 pub mod backend;
 pub mod event;
 pub mod history;
@@ -73,6 +74,9 @@ use meridian_sdk::{
 };
 use meridian_secret::Masker;
 
+pub use analyze::{
+    Accepted, Analysis, Analyzer, Baseline, Counts, FailOn, Finding, Measure, Severity,
+};
 pub use backend::{Backend, ExecBackend, LocalBackend, MemoryBackend};
 pub use event::Event;
 pub use lock::{LockError, LockInfo};
@@ -221,6 +225,7 @@ pub fn run_selected(
     let mut journal = Journal {
         backend: backend.clone(),
         persist,
+        fail_on: options.fail_on,
         record: RunRecord {
             id: run_id.clone(),
             mode: mode.as_str().to_owned(),
@@ -285,6 +290,7 @@ pub fn run_selected(
         warnings: Vec::new(),
         touched: Vec::new(),
         checked: BTreeMap::new(),
+        analyzed: BTreeMap::new(),
         artifacts: BTreeMap::new(),
         preflight: false,
         masker: Masker::new(),
@@ -311,7 +317,7 @@ pub fn run_selected(
     // applies the first: a change that is not allowed stops the run while
     // there is still nothing to undo.
     let mut to_run = to_run;
-    if mode == Mode::Apply && options.policy.is_some() {
+    if mode == Mode::Apply && (options.policy.is_some() || !options.analyzers.is_empty()) {
         run.preflight = true;
         let checks: Vec<StageReport> = to_run
             .iter()
@@ -338,6 +344,7 @@ pub fn run_selected(
                             because_of: first.clone(),
                         },
                         policy: None,
+                        analyses: Vec::new(),
                         ..check
                     }
                 };
@@ -374,6 +381,7 @@ pub fn run_selected(
                 done_before_failing: Vec::new(),
                 previous_good: String::new(),
                 policy: None,
+                analyses: Vec::new(),
             };
             journal.finished(observer, &skipped);
             observer.stage_finished(&skipped);
@@ -384,9 +392,15 @@ pub fn run_selected(
         journal.started(observer, &id, &target);
         let stage_report = run.stage(stage, observer);
         // A plan goes on past a stage its policy denied, so that one plan
-        // shows every denial there is.
+        // shows every denial there is; a compile or a plan goes on past a
+        // stage an analyzer failed, for the same reason.
         let denied_plan = mode == Mode::Plan && stage_report.reason == Some(Reason::PolicyDenied);
-        if matches!(stage_report.outcome, Outcome::Failed(_)) && !denied_plan {
+        let found_wanting = matches!(mode, Mode::Compile | Mode::Plan)
+            && matches!(
+                stage_report.reason,
+                Some(Reason::AnalysisFailed | Reason::AnalyzerFailed)
+            );
+        if matches!(stage_report.outcome, Outcome::Failed(_)) && !denied_plan && !found_wanting {
             failed = Some(stage_report.id.clone());
         }
         journal.finished(observer, &stage_report);

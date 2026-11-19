@@ -89,6 +89,48 @@ pub struct StepOutput {
     pub sensitive: bool,
 }
 
+/// One thing an analyzer found in a step's compiled files. What the event
+/// carried: the rule and the place, and the analyzer's description of its
+/// rule.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Finding {
+    pub analyzer: String,
+    pub rule: String,
+    /// `critical`, `high`, `medium`, `low` or `info`.
+    pub severity: String,
+    pub message: String,
+    /// The compiled file and line, when known.
+    pub file: String,
+    pub line: u64,
+    pub resource: String,
+    /// The Meridian document and the line the resource starts on, when the
+    /// finding could be traced to one.
+    pub document: String,
+    pub document_line: u64,
+    pub url: String,
+    /// Whether the run's baseline accepts it.
+    pub accepted: bool,
+}
+
+impl Finding {
+    /// Where the finding is, in a few words.
+    pub fn place(&self) -> String {
+        let at = |file: &str, line: u64| match (file.is_empty(), line) {
+            (true, _) => String::new(),
+            (false, 0) => file.to_owned(),
+            (false, line) => format!("{file}:{line}"),
+        };
+        let document = at(&self.document, self.document_line);
+        let compiled = at(&self.file, self.line);
+        match (document.is_empty(), compiled.is_empty()) {
+            (true, true) => String::new(),
+            (true, false) => compiled,
+            (false, true) => document,
+            (false, false) => format!("{document} ({compiled})"),
+        }
+    }
+}
+
 /// One step of the run.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Step {
@@ -120,6 +162,14 @@ pub struct Step {
     pub policy: String,
     pub policy_denials: u64,
     pub policy_warnings: u64,
+    /// What the run's analyzers said of the step: `passed` or `failed`;
+    /// empty when none looked. With it, how many findings were not
+    /// accepted, how many were, and how many reached the run's threshold.
+    pub analysis: String,
+    pub findings_reported: u64,
+    pub findings_accepted: u64,
+    pub findings_failing: u64,
+    pub findings: Vec<Finding>,
     pub resources: Vec<Resource>,
     pub outputs: Vec<StepOutput>,
 }
@@ -323,6 +373,34 @@ impl Report {
                 step.drift = "unknown".to_owned();
                 step.reason = text(event, "reason");
             }
+            event::FINDING_REPORTED => step.findings.push(Finding {
+                analyzer: text(event, "analyzer"),
+                rule: text(event, "rule"),
+                severity: text(event, "severity"),
+                message: text(event, "message"),
+                file: text(event, "file"),
+                line: count(event, "line"),
+                resource: text(event, "resource"),
+                document: text(event, "document"),
+                document_line: count(event, "documentLine"),
+                url: text(event, "url"),
+                accepted: matches!(event.detail.get("accepted"), Some(Value::Bool(true))),
+            }),
+            event::ANALYSIS_PASSED | event::ANALYSIS_FAILED => {
+                // One analyzer at a time; a step fails on the first that
+                // does, and passes only when all have.
+                if step.analysis != "failed" {
+                    step.analysis = if kind == event::ANALYSIS_PASSED {
+                        "passed"
+                    } else {
+                        "failed"
+                    }
+                    .to_owned();
+                }
+                step.findings_reported += count(event, "findings");
+                step.findings_accepted += count(event, "accepted");
+                step.findings_failing += count(event, "failing");
+            }
             event::POLICY_PASSED | event::POLICY_DENIED => {
                 step.policy = if kind == event::POLICY_PASSED {
                     "passed"
@@ -398,6 +476,10 @@ pub fn explain(reason: &str) -> &str {
         "plugin-failed" => "the plugin failed: its process died, or a call to it did",
         "tool-failed" => "the tool reported a failure",
         "policy-denied" => "the run's policy does not allow the change, or could not be asked",
+        "analysis-failed" => {
+            "an analyzer found something at or above the severity the run fails on"
+        }
+        "analyzer-failed" => "an analyzer could not be run, so the step was not analyzed",
         "state-failed" => "the step's working directory could not be prepared",
         "already-applied" => "already applied from the same compiled content",
         "when-false" => "left out: its `when` condition is false",

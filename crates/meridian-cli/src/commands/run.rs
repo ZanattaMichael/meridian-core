@@ -219,8 +219,12 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
             .map_err(Failure::Message)?,
         )
     };
+    let (analyzers, baseline) = analyzers(workflow, mode, &mut command)?;
     let options = Options {
         data,
+        analyzers,
+        fail_on: workflow.fail_on,
+        baseline,
         // Compiling keeps no record, so it needs no backend to be there.
         backend: match mode {
             Mode::Compile => None,
@@ -542,6 +546,84 @@ fn count_of(n: usize, what: &str) -> String {
     } else {
         format!("{n} {what}s")
     }
+}
+
+/// The analyzers a run puts every stage through, with their settings, and
+/// the findings the project accepts. Settled before anything runs, as the
+/// policy is, so that a misspelt name cannot cost a finished apply its
+/// check.
+fn analyzers(
+    workflow: &Workflow,
+    mode: Mode,
+    command: &mut Vec<String>,
+) -> Result<(Vec<Analyzer>, Baseline), Failure> {
+    let names: Vec<&str> = workflow
+        .analyze
+        .iter()
+        .map(|name| name.trim())
+        .filter(|name| !name.is_empty())
+        .collect();
+    if names.is_empty() {
+        if !workflow.analyze_config.is_empty() || workflow.analyze_baseline.is_some() {
+            return Err(Failure::Message(
+                "--analyze-config and --analyze-baseline go with --analyze, and no analyzer was \
+                 named"
+                    .to_owned(),
+            ));
+        }
+        return Ok((Vec::new(), Baseline::default()));
+    }
+    if !matches!(mode, Mode::Compile | Mode::Plan | Mode::Apply) {
+        // Saying nothing would read as "analyzed".
+        return Err(Failure::Message(format!(
+            "--analyze is run by compile, plan and apply, and {} analyzes nothing; remove it",
+            mode.as_str()
+        )));
+    }
+    let dirs = plugin_dirs(&workflow.state.plugins);
+    let mut analyzers = Vec::new();
+    for name in names {
+        if analyzers.iter().any(|a: &Analyzer| a.name == name) {
+            continue;
+        }
+        analyzers.push(Analyzer::find(name, &dirs).map_err(Failure::Message)?);
+    }
+    for text in &workflow.analyze_config {
+        let (name, key, value) = Analyzer::parse_setting(text).map_err(Failure::Message)?;
+        let Some(analyzer) = analyzers.iter_mut().find(|a| a.name == name) else {
+            return Err(Failure::Message(format!(
+                "--analyze-config {text}: no analyzer {name:?} was named with --analyze"
+            )));
+        };
+        analyzer.settings.insert(key, value);
+    }
+    let baseline = match &workflow.analyze_baseline {
+        None => Baseline::default(),
+        Some(path) => {
+            let name = path.display().to_string();
+            let raw = std::fs::read(path)
+                .map_err(|e| Failure::Message(format!("reading the baseline {name}: {e}")))?;
+            let value = meridian_ir::parse_value(&name, &raw)
+                .map_err(|e| Failure::Message(e.to_string()))?;
+            Baseline::from_value(&value)
+                .map_err(|why| Failure::Message(format!("the baseline {name}: {why}")))?
+        }
+    };
+    command.push(format!(
+        "--analyze {}",
+        analyzers
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect::<Vec<_>>()
+            .join(",")
+    ));
+    if workflow.fail_on != FailOn::default() {
+        command.push(format!("--fail-on {}", workflow.fail_on.as_str()));
+    }
+    if let Some(path) = &workflow.analyze_baseline {
+        command.push(format!("--analyze-baseline {}", path.display()));
+    }
+    Ok((analyzers, baseline))
 }
 
 /// Writes a report to a file, making the directory it goes in.

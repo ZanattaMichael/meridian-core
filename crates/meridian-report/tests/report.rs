@@ -495,3 +495,139 @@ fn a_secret_reference_in_an_event_prints_only_the_placeholder() {
         );
     }
 }
+
+#[test]
+fn findings_are_folded_into_every_format_and_sarif_points_at_the_document() {
+    let finding = |rule: &str, severity: &str, accepted: bool| -> Vec<(&'static str, Value)> {
+        vec![
+            ("analyzer", text("checkov")),
+            ("rule", text(rule)),
+            ("severity", text(severity)),
+            ("message", text("Ensure the bucket logs")),
+            ("file", text("main.tf.json")),
+            ("line", Value::Uint(3)),
+            ("resource", text("logs")),
+            ("document", text("site.yaml")),
+            ("documentLine", Value::Uint(12)),
+            ("url", text("https://example.test/rule")),
+            ("accepted", Value::Bool(accepted)),
+        ]
+    };
+    let events = Stream::new()
+        .run("run.started", &[("mode", text("plan"))])
+        .step("step.started", "base", &[])
+        .step(
+            "finding.reported",
+            "base",
+            &finding("CKV_AWS_18", "high", false),
+        )
+        .step(
+            "finding.reported",
+            "base",
+            &finding("CKV_AWS_21", "low", true),
+        )
+        .step(
+            "analysis.failed",
+            "base",
+            &[
+                ("analyzer", text("checkov")),
+                ("asked", Value::Bool(true)),
+                ("findings", Value::Uint(1)),
+                ("high", Value::Uint(1)),
+                ("accepted", Value::Uint(1)),
+                ("failing", Value::Uint(1)),
+            ],
+        )
+        .step(
+            "step.failed",
+            "base",
+            &[("reason", text("analysis-failed"))],
+        )
+        .run("run.failed", &[])
+        .0;
+    let report = Report::from_events(&events);
+    let step = &report.steps[0];
+    assert_eq!(step.analysis, "failed");
+    assert_eq!(step.findings.len(), 2);
+    assert_eq!(step.findings_failing, 1);
+    assert_eq!(step.findings_accepted, 1);
+    assert_eq!(step.findings[0].place(), "site.yaml:12 (main.tf.json:3)");
+
+    let markdown = render(&report, Format::Markdown);
+    assert!(
+        markdown.contains("failed: an analyzer found something at or above the severity the run fails on (1 of 1 finding reaching it)"),
+        "{markdown}"
+    );
+    assert!(markdown.contains("### Findings"), "{markdown}");
+    assert!(
+        markdown.contains("| ResourceSet base | high | [`CKV_AWS_18`](https://example.test/rule) | site.yaml:12 (main.tf.json:3) | Ensure the bucket logs |"),
+        "{markdown}"
+    );
+    assert!(markdown.contains("| low (accepted) |"), "{markdown}");
+    let html = render(&report, Format::Html);
+    assert!(
+        html.contains("<h2>Findings</h2>") && html.contains("CKV_AWS_18"),
+        "{html}"
+    );
+    let junit = render(&report, Format::Junit);
+    assert!(
+        junit.contains("<failure type=\"analysis-failed\""),
+        "{junit}"
+    );
+    assert!(
+        junit.contains(
+            "high CKV_AWS_18 (checkov) at site.yaml:12 (main.tf.json:3): Ensure the bucket logs"
+        ),
+        "{junit}"
+    );
+    let json = render(&report, Format::Json);
+    assert!(
+        json.contains("\"analysis\": \"failed\"") && json.contains("\"documentLine\": 12"),
+        "{json}"
+    );
+
+    let sarif = render(&report, Format::Sarif);
+    let log = meridian_sdk::decode_value(sarif.as_bytes()).unwrap();
+    let log = log.as_map().unwrap();
+    assert_eq!(log["version"], text("2.1.0"));
+    let runs = log["runs"].as_list().unwrap();
+    assert_eq!(runs.len(), 1, "one run per analyzer");
+    let run = runs[0].as_map().unwrap();
+    let driver = run["tool"].as_map().unwrap()["driver"].as_map().unwrap();
+    assert_eq!(driver["name"], text("meridian-analyze-checkov"));
+    assert_eq!(driver["rules"].as_list().unwrap().len(), 2);
+    let results = run["results"].as_list().unwrap();
+    assert_eq!(results.len(), 2);
+    let first = results[0].as_map().unwrap();
+    assert_eq!(first["ruleId"], text("CKV_AWS_18"));
+    assert_eq!(first["level"], text("error"));
+    let location = first["locations"].as_list().unwrap()[0].as_map().unwrap()["physicalLocation"]
+        .as_map()
+        .unwrap()
+        .clone();
+    assert_eq!(
+        location["artifactLocation"].as_map().unwrap()["uri"],
+        text("site.yaml")
+    );
+    assert_eq!(
+        location["region"].as_map().unwrap()["startLine"],
+        Value::Int(12)
+    );
+    assert!(!first.contains_key("suppressions"));
+    let second = results[1].as_map().unwrap();
+    assert_eq!(second["level"], text("note"));
+    assert!(
+        second.contains_key("suppressions"),
+        "an accepted finding is suppressed"
+    );
+    assert_eq!(Format::parse("sarif").unwrap(), Format::Sarif);
+
+    // Every finding the baseline did not accept is a problem for a pipeline
+    // engine to annotate, at the document's line.
+    let problems = meridian_report::engine::problems(&report, &|_| None);
+    assert_eq!(problems.len(), 2, "{problems:?}");
+    assert_eq!(problems[0].title, "ResourceSet base high CKV_AWS_18");
+    assert_eq!(problems[0].file, "site.yaml");
+    assert_eq!(problems[0].line, 12);
+    assert_eq!(problems[1].title, "ResourceSet base failed");
+}

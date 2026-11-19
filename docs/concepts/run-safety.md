@@ -338,6 +338,19 @@ deny contains msg if {
 
 See the [policy reference](../reference/policy.md).
 
+## Scanning the compiled files first
+
+`--analyze` runs [analyzers](../reference/analyzers.md) such as Checkov or Trivy over each
+stage's compiled files on `compile`, `plan` and `apply`:
+
+```sh
+meridian compile site.yaml --analyze checkov,trivy
+```
+
+It follows the same rules as a policy. An analyzer that cannot run fails the stage. It reads
+the files the tool would read. Each finding points at the document line its resource starts
+on. An apply analyzes every stage it can before applying the first.
+
 ## Values between stages
 
 With [`spec.imports`](../reference/dsl/outputs-and-hand-offs.md#imports):

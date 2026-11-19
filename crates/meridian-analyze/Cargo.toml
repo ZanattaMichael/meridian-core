@@ -1,0 +1,13 @@
+[package]
+name = "meridian-analyze"
+description = "What a Meridian analyzer program shares: reading the input, running the scanner, writing the findings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+meridian-value = { path = "../meridian-value" }
+
+[lints]
+workspace = true

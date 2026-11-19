@@ -68,6 +68,10 @@ Before the plugin, Meridian checks the [kind pairing](dsl/index.md#the-document)
 [`targetVersion`](dsl/index.md#targetversion), and decides every
 [`when`](dsl/index.md#when-and-runtimewhen) from `--data`. `plan` and `apply` compile first.
 
+With `--analyze`, each document's compiled files go through the named
+[analyzers](analyzers.md). A finding at or above `--fail-on` fails that document and the
+command exits `1`, but the rest still compile.
+
 ### `plan`
 
 Compiles and asks each tool what an apply would change, listed by document ids:
@@ -590,6 +594,10 @@ meridian signing verify --trusted-key acme.pub meridian-target-acme
 | `-y`, `--yes` | | | `destroy` only: destroy without asking |
 | `--policy PATH` | | no policy | `plan`, `apply`: a [policy](policy.md) file or directory every stage is checked against before anything is applied; may be repeated |
 | `--policy-engine NAME` | `MERIDIAN_POLICY_ENGINE` | `opa` | `plan`, `apply`: the program `meridian-policy-<NAME>` that reads the policies |
+| `--analyze NAME` | `MERIDIAN_ANALYZERS` | none | `compile`, `plan`, `apply`: an [analyzer](analyzers.md), the program `meridian-analyze-<NAME>`, every stage's compiled files are put through; may be repeated, or `checkov,trivy` |
+| `--analyze-config NAME.KEY=VALUE` | | | a setting for one analyzer; may be repeated |
+| `--fail-on SEVERITY` | `MERIDIAN_FAIL_ON` | `high` | the severity at which an analyzer's finding fails its stage: `critical`, `high`, `medium`, `low`, `info` or `none` |
+| `--analyze-baseline FILE` | | none | a file of [accepted findings](analyzers.md#the-baseline) that fail nothing |
 | `--events json` | | | `compile`, `plan`, `apply`, `drift`, `rollback`: write every [event](state.md#events) to standard output as it happens, one JSON object per line. The report for people moves to standard error |
 | `--report FORMAT=FILE` | | | `compile`, `plan`, `apply`, `drift`, `rollback`: write a [report](reporting.md#--report) of the run when it ends, as `json`, `junit`, `markdown` or `html`; may be repeated |
 | `--sink NAME` | `MERIDIAN_SINKS` (separated by `,`) | | the same commands: send every event, as it happens, to a [sink](reporting.md#sinks); may be repeated |

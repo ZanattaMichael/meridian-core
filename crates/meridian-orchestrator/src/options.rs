@@ -57,6 +57,13 @@ pub struct Options {
     /// The policy every stage of a plan or an apply is checked against
     /// before it is applied. `None` checks nothing.
     pub policy: Option<Policy>,
+    /// The analyzers every stage of a compile, a plan or an apply is put
+    /// through once it has compiled. Empty analyzes nothing.
+    pub analyzers: Vec<Analyzer>,
+    /// At what severity a finding fails its stage.
+    pub fail_on: FailOn,
+    /// Findings that are accepted and do not fail a stage.
+    pub baseline: Baseline,
     /// When a stage's tool is stopped before it finishes: a flag an
     /// interrupt handler sets, a time limit, or neither. A stopped stage is
     /// recorded as [`Reason::Interrupted`] or [`Reason::TimedOut`], the
@@ -109,6 +116,9 @@ impl Options {
             on_failure: OnFailure::Stop,
             rollback_of: Resume::Last,
             policy: None,
+            analyzers: Vec::new(),
+            fail_on: FailOn::default(),
+            baseline: Baseline::default(),
             strict_secrets: false,
             stop: Stop::default(),
             save_plan: false,

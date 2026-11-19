@@ -27,6 +27,9 @@ pub(crate) struct Run<'a> {
     /// What the policy said about each stage the preflight asked about, and
     /// the artifact it was asked about.
     pub(crate) checked: BTreeMap<StageId, (String, Decisions)>,
+    /// What the analyzers said about each stage the preflight put through
+    /// them, and the artifact they looked at.
+    pub(crate) analyzed: BTreeMap<StageId, (String, Vec<Analysis>)>,
     /// What each document compiled to in this run, for the stages that
     /// import a file from it.
     pub(crate) artifacts: BTreeMap<StageId, Artifact>,
@@ -183,6 +186,7 @@ impl Run<'_> {
             done_before_failing: Vec::new(),
             previous_good: String::new(),
             policy: None,
+            analyses: Vec::new(),
         };
         let fail = |mut report: StageReport, reason: Reason, why: String| {
             report.outcome = Outcome::Failed(why);
@@ -280,6 +284,31 @@ impl Run<'_> {
         report.warnings = emitted.warnings;
         self.artifacts.insert(id.clone(), emitted.artifact.clone());
         report.artifact = Some(emitted.artifact.clone());
+
+        // The analyzers look at what the document compiled to, before any
+        // tool does. The first pass of an apply has looked already when the
+        // artifact is the same.
+        if !self.options.analyzers.is_empty() {
+            let hash = artifact_hash(&emitted.artifact);
+            let known = self
+                .analyzed
+                .get(&id)
+                .filter(|(looked_at, _)| *looked_at == hash)
+                .map(|(_, analyses)| analyses.clone());
+            report.analyses = match known {
+                Some(analyses) => analyses,
+                None => {
+                    let analyses = self.analyze(&stage, &report, info.category, &graph);
+                    if self.preflight {
+                        self.analyzed.insert(id.clone(), (hash, analyses.clone()));
+                    }
+                    analyses
+                }
+            };
+            if let Some((reason, why)) = self.found_wanting(&report.analyses) {
+                return fail(report, reason, why);
+            }
+        }
         if self.mode == Mode::Compile {
             return report;
         }
@@ -1054,6 +1083,84 @@ impl Run<'_> {
             values.insert(import.name.clone(), value);
         }
         Ok(values)
+    }
+
+    /// Puts a stage that has compiled through every analyzer of the run.
+    fn analyze(
+        &self,
+        stage: &Stage<'_>,
+        report: &StageReport,
+        category: Category,
+        graph: &meridian_sdk::ResourceGraph,
+    ) -> Vec<Analysis> {
+        let empty = Artifact::default();
+        let subject = analyze::Subject {
+            mode: self.mode.as_str(),
+            run: &self.run_id,
+            kind: report.id.kind.as_str(),
+            name: &report.id.name,
+            target: &report.target,
+            category: category.as_str(),
+            host: &report.host,
+            labels: stage.labels(),
+            graph,
+            artifact: report.artifact.as_ref().unwrap_or(&empty),
+        };
+        let scratch = std::env::temp_dir();
+        let mut analyses: Vec<Analysis> = self
+            .options
+            .analyzers
+            .iter()
+            .map(|analyzer| analyzer.analyze(&scratch, &subject))
+            .collect();
+        for analysis in &mut analyses {
+            analysis.error = mask(&analysis.error, &self.secrets);
+            for finding in &mut analysis.findings {
+                finding.message = mask(&finding.message, &self.secrets);
+            }
+        }
+        self.options
+            .baseline
+            .apply(&mut analyses, &report.id.name, &report.target);
+        analyses
+    }
+
+    /// Why the analyses fail the stage, if they do: an analyzer that could
+    /// not look comes first, then a finding at the run's threshold.
+    fn found_wanting(&self, analyses: &[Analysis]) -> Option<(Reason, String)> {
+        if let Some(failed) = analyses.iter().find(|a| !a.asked) {
+            return Some((Reason::AnalyzerFailed, failed.error.clone()));
+        }
+        let threshold = self.options.fail_on.threshold()?;
+        let failing: Vec<String> = analyses
+            .iter()
+            .flat_map(|analysis| analysis.failing(Some(threshold)))
+            .map(|finding| {
+                let place = finding.place();
+                let at = if place.is_empty() {
+                    String::new()
+                } else {
+                    format!(" at {place}")
+                };
+                format!(
+                    "{} {} ({}){at}: {}",
+                    finding.severity, finding.rule, finding.analyzer, finding.message
+                )
+            })
+            .collect();
+        if failing.is_empty() {
+            return None;
+        }
+        Some((
+            Reason::AnalysisFailed,
+            format!(
+                "an analyzer found something at severity {} or above, which this run fails on \
+                 (--fail-on {}):\n  - {}",
+                threshold,
+                self.options.fail_on.as_str(),
+                failing.join("\n  - ")
+            ),
+        ))
     }
 
     /// Asks the run's policy about a stage that has compiled.

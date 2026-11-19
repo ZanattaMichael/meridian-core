@@ -27,6 +27,7 @@ flowchart LR
 | test results in CI | `--report junit=meridian.xml` |
 | a summary on a pull request or a job page | `--report markdown=FILE` |
 | a page to keep with the build | `--report html=meridian.html` |
+| an [analyzer](analyzers.md)'s findings on the pull request, line by line | `--report sarif=findings.sarif`, uploaded to code scanning |
 | numbers for a script | `--report json=meridian.json` |
 | a report of a run that already happened | [`meridian report`](#meridian-report) |
 | runs in a chat channel, a pager, a dashboard | a [sink](#sinks) |
@@ -102,7 +103,7 @@ A run is a suite; a step is a case named by kind and name, class `meridian.<targ
 | The step | Is reported as |
 |---|---|
 | succeeded, or was put back | a passed test case |
-| failed | `<failure type="REASON">`, the reason being the fixed word, such as `tool-failed` or `policy-denied` |
+| failed | `<failure type="REASON">`, the reason being the fixed word, such as `tool-failed`, `policy-denied` or `analysis-failed` |
 | drifted, in a `drift` run | `<failure type="drift">` |
 | could not be put back | `<failure type="rollback-failed">` |
 | skipped, deferred, or not run because an earlier step failed | `<skipped>` |
@@ -114,6 +115,21 @@ are `<properties>`.
 ### `html`
 
 One self-contained page, no scripts, light or dark.
+
+### `sarif`
+
+[SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html), which code
+scanning reads. It holds the run's [analyzer](analyzers.md) findings: one `run` per analyzer,
+each result at the document line. `critical` and `high` are `error`, `medium` is `warning`,
+lower is `note`. Accepted findings carry a `suppression`.
+
+```yaml
+- run: meridian plan site.yaml --analyze checkov --report sarif=findings.sarif
+- uses: github/codeql-action/upload-sarif@v3
+  if: always()
+  with:
+    sarif_file: findings.sarif
+```
 
 ### `json`
 
@@ -130,10 +146,12 @@ changes meaning.
 | `user`, `host`, `selector` | from the run's record; empty when the report was made with `--from` |
 | `events` | how many events the report was folded from |
 | `summary` | counts: `steps`, `succeeded`, `failed`, `skipped`, `notRun`, `deferred`, `rolledBack`, `running`, `planned`, `changed`, `drifted` |
-| `steps[]` | `name`, `kind`, `target`, `endpoint`, `status`, `reason`, `artifact`, `started`, `finished`, `durationMs`, `waitingOn`, `waitingFor`, `drift`, `rollback`, `resources[]`, `outputs[]` |
+| `steps[]` | `name`, `kind`, `target`, `endpoint`, `status`, `reason`, `artifact`, `started`, `finished`, `durationMs`, `waitingOn`, `waitingFor`, `drift`, `rollback`, `resources[]`, `outputs[]`, `findings[]` |
 | `steps[].status` | `running`, `succeeded`, `failed`, `skipped`, `deferred`, `not-run`, `rolled-back` |
 | `steps[].drift` | `none`, `detected`, `unknown`; empty when the run was not a drift check |
 | `steps[].policy`, `policyDenials`, `policyWarnings` | `passed` or `denied`, empty when no [policy](policy.md) was asked, and how many rules denied and warned. Counts only: a rule's message is not in an event |
+| `steps[].analysis`, `findingsReported`, `findingsAccepted`, `findingsFailing` | `passed` or `failed`, empty when no [analyzer](analyzers.md) looked; how many findings were not accepted, were accepted, and reached `--fail-on` |
+| `steps[].findings[]` | `analyzer`, `rule`, `severity`, `message`, `file`, `line`, `resource`, `document`, `documentLine`, `url`, `accepted` |
 | `steps[].rollback` | `succeeded`, `failed`, `unavailable`; empty when the step was not put back |
 | `steps[].resources[]` | `id`, `action`, and `phase`: `planned` or `changed` |
 | `steps[].outputs[]` | `name` and `sensitive`. Never a value |

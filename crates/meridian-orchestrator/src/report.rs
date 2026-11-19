@@ -200,6 +200,9 @@ pub struct StageReport {
     /// What the run's policy said about the stage; `None` when no policy
     /// was asked about it.
     pub policy: Option<Decisions>,
+    /// What each analyzer said about the stage, in the order the analyzers
+    /// were named; empty when none was asked.
+    pub analyses: Vec<Analysis>,
 }
 
 /// Why a run did not start.

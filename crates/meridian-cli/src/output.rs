@@ -136,6 +136,40 @@ fn warning(warning: &meridian_sdk::Warning) -> Json {
     })
 }
 
+fn analysis(analysis: &Analysis) -> Json {
+    let counts = analysis.counts();
+    json!({
+        "analyzer": analysis.analyzer,
+        "asked": analysis.asked,
+        "error": text_or_null(&analysis.error),
+        "counts": {
+            "critical": counts.critical,
+            "high": counts.high,
+            "medium": counts.medium,
+            "low": counts.low,
+            "info": counts.info,
+            "accepted": counts.accepted,
+        },
+        "findings": analysis.findings.iter().map(|finding| json!({
+            "rule": finding.rule,
+            "severity": finding.severity.as_str(),
+            "message": finding.message,
+            "file": text_or_null(&finding.file),
+            "line": if finding.line == 0 { Json::Null } else { Json::from(finding.line) },
+            "resource": text_or_null(&finding.resource),
+            "document": text_or_null(&finding.document),
+            "documentLine": if finding.document_line == 0 { Json::Null } else { Json::from(finding.document_line) },
+            "url": text_or_null(&finding.url),
+            "accepted": finding.accepted,
+        })).collect::<Vec<_>>(),
+        "measures": analysis.measures.iter().map(|measure| json!({
+            "name": measure.name,
+            "value": measure.value,
+            "unit": text_or_null(&measure.unit),
+        })).collect::<Vec<_>>(),
+    })
+}
+
 fn policy(decisions: &Decisions) -> Json {
     json!({
         "allowed": decisions.allowed(),
@@ -216,6 +250,10 @@ pub(crate) fn stage(stage: &StageReport, mode: Mode, out: Option<&Path>) -> Json
     object.insert(
         "policy".to_owned(),
         stage.policy.as_ref().map_or(Json::Null, policy),
+    );
+    object.insert(
+        "analyses".to_owned(),
+        Json::Array(stage.analyses.iter().map(analysis).collect()),
     );
     match &stage.outcome {
         Outcome::Compiled => {}

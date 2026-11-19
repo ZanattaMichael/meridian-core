@@ -59,6 +59,7 @@ page it affects. The pull request template asks for it.
 | [A refusal's rule is one of a registry, and the same mistake has the same name on every target](0034-a-refusal-rule-is-one-of-a-registry.md) | Core | proposed |
 | [An apply from a saved plan applies that plan or nothing, and the file never holds a value](0038-an-apply-from-a-saved-plan-applies-that-or-nothing.md) | Orchestrator | proposed |
 | [A test is a document of cases over compile and plan, and never a script](0037-a-test-is-a-document-of-cases-over-compile-and-plan.md) | Testing | proposed |
+| [An analyzer reads the compiled files on disk, and every finding points at the document](0039-an-analyzer-reads-the-compiled-files-and-a-finding-points-at-the-document.md) | Runs | proposed |
 | [The common infrastructure types are a small core, checked once and mapped by each target per cloud](0040-common-infrastructure-types-are-a-small-core-mapped-per-cloud.md) | Targets | proposed |
 | [A key reaches a host through an agent Meridian starts](0028-a-key-reaches-a-host-through-an-agent-meridian-starts.md) | Targets | proposed |
 | [A cloud credential reaches a tool in its environment](0029-a-cloud-credential-reaches-a-tool-in-its-environment.md) | Targets | proposed |

@@ -66,7 +66,9 @@ meridian lsp / meridian mcp                 # language server, MCP server
   `meridian retarget` moves a document to another tool ([retargeting](docs/operations/retargeting.md));
   `meridian destroy` removes what was applied, last stage first ([destroying](docs/operations/destroying.md)).
   See [running safely](docs/concepts/run-safety.md) and [policy checks](docs/reference/policy.md).
-- `--report` writes JUnit, JSON, Markdown or HTML; `--sink` streams events. See
+- `--analyze checkov,trivy` scans the compiled files and shows each finding at its document
+  line ([analyzers](docs/reference/analyzers.md)).
+- `--report` writes JUnit, JSON, Markdown, HTML or SARIF; `--sink` streams events. See
   [reports](docs/reference/reporting.md).
 - In CI, a job runs `meridian apply`; `plan --out` and `apply --plan` apply exactly what was
   reviewed. See [running in a pipeline](docs/operations/running-in-a-pipeline.md) and

@@ -33,7 +33,7 @@ The core knows the language; each plugin knows one tool.
 | [Dependencies and notifications](concepts/dependencies.md) | `dependsOn` and `notifies` per tool |
 | [The capability model](concepts/capability-model.md) | why a document compiles exactly or not at all |
 | [The two-stage architecture](concepts/two-stage-architecture.md) | Infrastructure, ResourceSet and the hand-off |
-| [Running safely](concepts/run-safety.md) | locks, run records, resume, rollback, drift, policy |
+| [Running safely](concepts/run-safety.md) | locks, run records, resume, rollback, drift, policy, analyzers |
 | [Compile rules](concepts/compile-rules.md) | what a data layer may override |
 | [Secrets in memory](concepts/secrets-in-memory.md) | how a secret is held and handed to a tool |
 
@@ -71,6 +71,7 @@ The core knows the language; each plugin knows one tool.
 | [Error codes](reference/errors.md) | |
 | [Plugin signatures](reference/plugin-signatures.md) | which plugins may start |
 | [Policy checks](reference/policy.md) | Rego with Open Policy Agent |
+| [Analyzers](reference/analyzers.md) | Checkov, Trivy or any scanner on the compiled files |
 | [State, runs and backends](reference/state.md) | |
 | [Reports and sinks](reference/reporting.md) | |
 | [Report server](reference/report-server.md) | |
