@@ -67,12 +67,9 @@ Before the plugin, Meridian checks the [kind pairing](dsl/index.md#the-document)
 [`targetVersion`](dsl/index.md#targetversion), and decides every
 [`when`](dsl/index.md#when-and-runtimewhen) from `--data`. `plan` and `apply` compile first.
 
-With `--analyze`, every document's compiled files are put through each
-[analyzer](analyzers.md) named, and its findings are shown against the line
-of the document each is about. A finding at or above `--fail-on` fails the
-document and the command exits `1`; the documents after it are still
-compiled, so one compile shows everything there is to find. Nothing is
-contacted, which makes this the cheapest check to run on a pull request.
+With `--analyze`, each document's compiled files go through the named
+[analyzers](analyzers.md). A finding at or above `--fail-on` fails that document and the
+command exits `1`, but the rest still compile.
 
 ### `plan`
 

@@ -118,16 +118,10 @@ One self-contained page, no scripts, light or dark.
 
 ### `sarif`
 
-[SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html),
-the format code scanning reads, holding every [analyzer](analyzers.md)
-finding of the run and nothing else: one `run` per analyzer, its rules under
-the tool's `driver`, each finding a `result` whose location is the Meridian
-document and the line the resource starts on (the compiled file's when the
-finding could not be traced), with the severity, step, target, resource and
-compiled place under `properties`. The level is `error` for `critical` and
-`high`, `warning` for `medium` and `note` below. An accepted finding carries
-a `suppression`, which code scanning shows as dismissed. A run with no
-analyzer writes a log with no runs.
+[SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html), which code
+scanning reads. It holds the run's [analyzer](analyzers.md) findings: one `run` per analyzer,
+each result at the document line. `critical` and `high` are `error`, `medium` is `warning`,
+lower is `note`. Accepted findings carry a `suppression`.
 
 ```yaml
 - run: meridian plan site.yaml --analyze checkov --report sarif=findings.sarif

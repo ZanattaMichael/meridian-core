@@ -340,39 +340,16 @@ See the [policy reference](../reference/policy.md).
 
 ## Scanning the compiled files first
 
-A policy reasons over Meridian's own view of a stage. The scanners and cost
-tools written against each tool's native format, Checkov, Trivy, Infracost
-and the rest, reason over the files, and Meridian's output is those files.
-`--analyze` puts every stage's compiled files through one or more
-[analyzers](../reference/analyzers.md) as soon as the stage compiles, on
-`compile`, `plan` and `apply` alike:
+`--analyze` runs [analyzers](../reference/analyzers.md) such as Checkov or Trivy over each
+stage's compiled files on `compile`, `plan` and `apply`:
 
 ```sh
 meridian compile site.yaml --analyze checkov,trivy
-meridian apply   site.yaml --analyze checkov --fail-on critical
 ```
 
-```mermaid
-flowchart LR
-    DOC["a stage's document"] --> COMPILE["compile"]
-    COMPILE --> FILES["the compiled files,<br/>in a directory of their own"]
-    FILES --> AN["analyzer<br/>meridian-analyze-checkov"]
-    AN --> FOUND["findings: rule, severity,<br/>compiled file and line"]
-    FOUND --> TRACE["traced to the resource,<br/>and the document's line"]
-    TRACE --> Q{"at --fail-on?"}
-    Q -->|"no"| GO["shown, recorded,<br/>reported"]
-    Q -->|"yes, or the analyzer<br/>could not look"| NO["the stage fails"]
-```
-
-The same three things hold. It fails closed: an analyzer that cannot be run
-has not passed anything. It looks at what will run: the files the tool would
-read, not the document's text. And a finding is shown where a person can act
-on it, against the line of the document the resource was written on, because
-the compiler knows which resource produced which part of each file. Every
-finding is an event, so it reaches the record, every report (SARIF among
-them) and the pipeline's annotations; a baseline file names the findings a
-project has looked at and accepts. An apply analyzes every stage it can
-before applying the first, as it asks the policy.
+It follows the same rules as a policy. An analyzer that cannot run fails the stage. It reads
+the files the tool would read. Each finding points at the document line its resource starts
+on. An apply analyzes every stage it can before applying the first.
 
 ## Values between stages
 
