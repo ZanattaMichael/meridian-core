@@ -250,6 +250,27 @@ fn a_stack_is_previewed_created_read_back_changed_and_trimmed() {
         "{:?}",
         applied.outputs
     );
+
+    // A destroy previews the stack's resources, then deletes the stack.
+    let log = KeptLog::default();
+    let runner = CloudFormationRunner::from_env();
+    let preview = runner
+        .plan_destroy(&context(&dir), &third, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(
+        changes(&preview.changes),
+        [
+            (ChangeAction::Delete, "jobs"),
+            (ChangeAction::Delete, "jobs_queue_name"),
+        ]
+    );
+    assert!(stack_exists(STACK), "a preview deletes nothing");
+    let removed = runner
+        .destroy(&context(&dir), &third, &log)
+        .unwrap_or_else(|e| panic!("{e}\n{}", log.text().join("\n")));
+    assert_eq!(changes(&removed), changes(&preview.changes));
+    assert!(!stack_exists(STACK), "the stack is gone");
+    assert!(recorded().is_err(), "its resources are gone");
 }
 
 /// The document with its topic, and the output that reads it, removed.

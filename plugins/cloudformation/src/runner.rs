@@ -349,6 +349,64 @@ impl CloudFormationRunner {
         }
     }
 
+    /// The stack an artifact deploys, with the artifact written out.
+    fn stack_of(context: &RunContext, artifact: &Artifact) -> Result<Stack, RunError> {
+        let Some(settings) = artifact.files.get(STACK_PATH) else {
+            return Err(RunError::new(format!(
+                "the artifact has no {STACK_PATH}; it was not compiled by this plugin"
+            )));
+        };
+        let stack = Stack::read(settings)?;
+        write_artifact(&context.work_dir, artifact)?;
+        Ok(stack)
+    }
+
+    /// What deleting the stack would remove: each of its resources, by the
+    /// id the author wrote. Nothing when there is no such stack.
+    fn removals(
+        &self,
+        context: &RunContext,
+        cloud: Option<&CloudHandover>,
+        stack: &Stack,
+        log: &dyn Log,
+    ) -> Result<Option<Vec<Change>>, RunError> {
+        if self.status(context, cloud, stack)?.is_none() {
+            return Ok(None);
+        }
+        let listed = self
+            .aws(context, cloud, stack, "list-stack-resources")
+            .args(["--output", "json"])
+            .run_ok("aws could not list the stack's resources", log)?;
+        let listed = parse(&listed, "the stack's resources")?;
+        let summaries = listed
+            .as_map()
+            .and_then(|m| m.get("StackResourceSummaries"))
+            .and_then(Value::as_list)
+            .unwrap_or(&[]);
+        Ok(Some(
+            summaries
+                .iter()
+                .filter_map(|summary| {
+                    let summary = summary.as_map()?;
+                    let text = |key: &str| summary.get(key).and_then(Value::as_str).unwrap_or("");
+                    if text("ResourceStatus") == "DELETE_COMPLETE" {
+                        return None;
+                    }
+                    let logical = text("LogicalResourceId");
+                    Some(Change {
+                        resource: stack
+                            .resources
+                            .get(logical)
+                            .cloned()
+                            .unwrap_or(logical.to_owned()),
+                        action: ChangeAction::Delete,
+                        summary: text("ResourceType").to_owned(),
+                    })
+                })
+                .collect(),
+        ))
+    }
+
     fn read_outputs(
         &self,
         context: &RunContext,
@@ -568,5 +626,52 @@ impl Runner for CloudFormationRunner {
                 )
             })?;
         self.read_outputs(context, cloud, &Stack::read(&settings)?)
+    }
+
+    fn destroys(&self) -> bool {
+        true
+    }
+
+    fn plan_destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Plan, RunError> {
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let stack = Self::stack_of(context, artifact)?;
+        Ok(Plan {
+            changes: self
+                .removals(context, cloud.as_ref(), &stack, log)?
+                .unwrap_or_default(),
+            unknown: false,
+            saved: None,
+        })
+    }
+
+    /// Deletes the stack and waits until CloudFormation has removed it.
+    fn destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Vec<Change>, RunError> {
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let cloud = cloud.as_ref();
+        let stack = Self::stack_of(context, artifact)?;
+        let Some(removals) = self.removals(context, cloud, &stack, log)? else {
+            log.out(&format!("stack {}: there is no such stack", stack.name));
+            return Ok(Vec::new());
+        };
+        log.out(&format!("stack {}: deleting the stack", stack.name));
+        self.aws(context, cloud, &stack, "delete-stack")
+            .run_ok("aws could not delete the stack", log)?;
+        self.aws(context, cloud, &stack, "wait stack-delete-complete")
+            .run_ok(
+                "the stack was not deleted; its events say which resource CloudFormation \
+                 could not remove",
+                log,
+            )?;
+        Ok(removals)
     }
 }

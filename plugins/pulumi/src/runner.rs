@@ -26,7 +26,7 @@ const PLAN_FILE: &str = "meridian.plan.json";
 
 /// Names the program to run, when it is not `pulumi` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_PULUMI";
-/// Extra arguments for `pulumi preview` and `pulumi up`, split like a shell
+/// Extra arguments for `pulumi preview`, `pulumi up` and `pulumi destroy`, split like a shell
 /// command line: `--parallel 4`, `--diff`.
 pub const ARGS_VARIABLE: &str = "MERIDIAN_PULUMI_ARGS";
 
@@ -44,7 +44,7 @@ pub fn settings() -> Vec<Setting> {
             "args",
             ARGS_VARIABLE,
             "",
-            "Extra arguments for `pulumi preview` and `pulumi up`, split like a shell command line: `--parallel 4`. The calls that select the stack or read its outputs get none. Pulumi's own `PULUMI_BACKEND_URL` and `PULUMI_CONFIG_PASSPHRASE` are read as Pulumi reads them.",
+            "Extra arguments for `pulumi preview`, `pulumi up` and `pulumi destroy`, split like a shell command line: `--parallel 4`. The calls that select the stack or read its outputs get none. Pulumi's own `PULUMI_BACKEND_URL` and `PULUMI_CONFIG_PASSPHRASE` are read as Pulumi reads them.",
         ),
     ]
 }
@@ -330,6 +330,22 @@ impl PulumiRunner {
         }
     }
 
+    /// What a destroy of the stack would remove, from `pulumi stack export`.
+    /// The export holds secrets encrypted, never in the clear.
+    fn removals(
+        &self,
+        context: &RunContext,
+        cloud: Option<&CloudHandover>,
+        stack: &Stack,
+        log: &dyn Log,
+    ) -> Result<Vec<Change>, RunError> {
+        let exported = self
+            .on_stack(context, cloud, stack, &["stack", "export"])
+            .capture_stdout()
+            .run_ok("pulumi could not export the stack", log)?;
+        read_removals(&exported.stdout)
+    }
+
     fn read_outputs(
         &self,
         context: &RunContext,
@@ -498,12 +514,72 @@ impl Runner for PulumiRunner {
             .run_ok("pulumi could not export the stack", &meridian_sdk::NoLog)?;
         read_identifiers(&exported.stdout)
     }
+
+    fn destroys(&self) -> bool {
+        true
+    }
+
+    fn plan_destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Plan, RunError> {
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let cloud = cloud.as_ref();
+        let stack = self.select(context, cloud, artifact, log)?;
+        let removals = self.removals(context, cloud, &stack, log);
+        self.forget_secrets(context, cloud, &stack, log);
+        Ok(Plan {
+            changes: removals?,
+            unknown: false,
+            saved: None,
+        })
+    }
+
+    /// `pulumi destroy` on the stack. The stack and its history are kept;
+    /// only its resources go.
+    fn destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Vec<Change>, RunError> {
+        let cloud = cloud_for(context.credential.as_ref(), &crate::CLOUD_TAKES)?;
+        let cloud = cloud.as_ref();
+        let stack = self.select(context, cloud, artifact, log)?;
+        let removals = match self.removals(context, cloud, &stack, log) {
+            Ok(removals) => removals,
+            Err(e) => {
+                self.forget_secrets(context, cloud, &stack, log);
+                return Err(e);
+            }
+        };
+        log.out(&format!("stack {}: destroying its resources", stack.name));
+        let destroyed = self
+            .on_stack(context, cloud, &stack, &["destroy"])
+            .args(self.extra_args.iter().cloned())
+            .args(["--yes", "--skip-preview"])
+            .run_ok("pulumi destroy failed", log);
+        self.forget_secrets(context, cloud, &stack, log);
+        destroyed?;
+        Ok(removals)
+    }
 }
 
-/// Reads `pulumi stack export` into the cloud id of each resource of the
-/// document, by the resource's id. The stack itself and providers are left
-/// out: they are not resources of the document.
-fn read_identifiers(json: &str) -> Result<BTreeMap<String, String>, RunError> {
+/// One resource of the document in `pulumi stack export`.
+struct Exported {
+    /// The resource's id in the document.
+    name: String,
+    r#type: String,
+    /// The cloud's id for it; empty until the cloud gave one.
+    id: String,
+}
+
+/// Reads `pulumi stack export` into the resources of the document. The
+/// stack itself and providers are left out: they are not resources of the
+/// document.
+fn read_export(json: &str) -> Result<Vec<Exported>, RunError> {
     let export = decode_value(json.as_bytes()).map_err(|e| unreadable("stack export", e))?;
     let resources = export
         .as_map()
@@ -512,7 +588,7 @@ fn read_identifiers(json: &str) -> Result<BTreeMap<String, String>, RunError> {
         .and_then(|m| m.get("resources"))
         .and_then(Value::as_list)
         .unwrap_or(&[]);
-    let mut found = BTreeMap::new();
+    let mut found = Vec::new();
     for resource in resources {
         let Some(resource) = resource.as_map() else {
             continue;
@@ -523,12 +599,41 @@ fn read_identifiers(json: &str) -> Result<BTreeMap<String, String>, RunError> {
         if kind == "pulumi:pulumi:Stack" || kind.starts_with("pulumi:providers:") {
             continue;
         }
-        let id = text("id");
-        if !id.is_empty() {
-            found.insert(urn_name(urn).to_owned(), id.to_owned());
-        }
+        let r#type = match text("type") {
+            "" => kind,
+            given => given,
+        };
+        found.push(Exported {
+            name: urn_name(urn).to_owned(),
+            r#type: r#type.to_owned(),
+            id: text("id").to_owned(),
+        });
     }
     Ok(found)
+}
+
+/// Reads `pulumi stack export` into the cloud id of each resource of the
+/// document, by the resource's id.
+fn read_identifiers(json: &str) -> Result<BTreeMap<String, String>, RunError> {
+    Ok(read_export(json)?
+        .into_iter()
+        .filter(|r| !r.id.is_empty())
+        .map(|r| (r.name, r.id))
+        .collect())
+}
+
+/// What a destroy of the stack removes: every resource of the document in
+/// `pulumi stack export`, last created first, as Pulumi deletes them.
+fn read_removals(json: &str) -> Result<Vec<Change>, RunError> {
+    Ok(read_export(json)?
+        .into_iter()
+        .rev()
+        .map(|r| Change {
+            resource: r.name,
+            action: ChangeAction::Delete,
+            summary: r.r#type,
+        })
+        .collect())
 }
 
 /// The URL of a backend that keeps state in the project directory itself.

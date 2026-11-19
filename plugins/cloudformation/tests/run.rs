@@ -417,3 +417,72 @@ fn a_plan_asked_to_save_keeps_its_change_set_and_an_apply_handed_it_executes_tha
     assert_eq!(applied.changes, plan.changes);
     assert_eq!(applied.outputs[0].name, "web_vm_ip");
 }
+
+const RESOURCES: &str = r#"list-stack-resources) echo '{"StackResourceSummaries":[
+  {"LogicalResourceId":"WebVm","ResourceType":"AWS::EC2::Instance","ResourceStatus":"CREATE_COMPLETE"},
+  {"LogicalResourceId":"WebIp","ResourceType":"AWS::EC2::EIP","ResourceStatus":"UPDATE_COMPLETE"},
+  {"LogicalResourceId":"Old","ResourceType":"AWS::S3::Bucket","ResourceStatus":"DELETE_COMPLETE"}]}' ;;"#;
+
+#[test]
+fn a_destroy_lists_the_stacks_resources_deletes_it_and_waits() {
+    let dir = scratch(TMP, "destroy");
+    let runner = runner(&dir, &format!("{EXISTING}\n{RESOURCES}"));
+    assert!(runner.destroys());
+    let removed = runner
+        .destroy(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        [
+            "describe-stacks --output json",
+            "list-stack-resources --output json",
+            "delete-stack",
+            "wait stack-delete-complete",
+        ]
+    );
+    let shown: Vec<String> = removed.iter().map(ToString::to_string).collect();
+    assert_eq!(
+        shown,
+        [
+            "delete web_vm: AWS::EC2::Instance",
+            "delete web_ip: AWS::EC2::EIP",
+        ]
+    );
+}
+
+#[test]
+fn a_destroy_preview_deletes_nothing_and_a_missing_stack_has_nothing_to_remove() {
+    let dir = scratch(TMP, "destroy-preview");
+    let plan = runner(&dir, &format!("{EXISTING}\n{RESOURCES}"))
+        .plan_destroy(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        [
+            "describe-stacks --output json",
+            "list-stack-resources --output json",
+        ]
+    );
+    assert_eq!(plan.changes.len(), 2);
+
+    let dir = scratch(TMP, "destroy-missing");
+    let removed = runner(&dir, NEW_STACK)
+        .destroy(&context(&dir), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert!(removed.is_empty());
+    assert_eq!(calls(&dir), ["describe-stacks --output json"]);
+}
+
+#[test]
+fn a_stack_that_is_not_deleted_fails_the_destroy() {
+    let dir = scratch(TMP, "destroy-fails");
+    let err = runner(
+        &dir,
+        &format!(
+            "{EXISTING}\n{RESOURCES}\nwait) echo 'Waiter StackDeleteComplete failed' >&2; exit 255 ;;"
+        ),
+    )
+    .destroy(&context(&dir), &compiled(), &KeptLog::default())
+    .unwrap_err();
+    assert!(err.msg.starts_with("the stack was not deleted"), "{err:?}");
+}
