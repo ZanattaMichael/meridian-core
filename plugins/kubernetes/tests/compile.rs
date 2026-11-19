@@ -128,21 +128,33 @@ fn a_notify_kubernetes_cannot_act_on_is_refused() {
 }
 
 #[test]
-fn depends_on_orders_the_file_and_says_that_is_all() {
+fn depends_on_splits_the_objects_into_waves_the_runner_waits_between() {
+    let job = "    - id: migrate\n      type: batch/v1/Job\n      params: {spec: {}}\n      dependsOn:\n        - resource: app_config\n";
     let emitted = compile(&format!(
-        "{DEPLOYMENT}      dependsOn:\n        - resource: app_config\n{CONFIG}"
+        "{DEPLOYMENT}      dependsOn:\n        - resource: migrate\n{CONFIG}{job}"
     ))
     .unwrap();
-    let text = &emitted.artifact.files["manifests.yaml"];
+    let files = &emitted.artifact.files;
+    let text = &files["manifests.yaml"];
     assert!(
         text.find("kind: ConfigMap").unwrap() < text.find("kind: Deployment").unwrap(),
         "{text}"
     );
+    assert!(files["wave-1.yaml"].contains("kind: ConfigMap"));
+    assert!(files["wave-2.yaml"].contains("kind: Job"));
+    assert!(files["wave-3.yaml"].contains("kind: Deployment"));
+    let cluster = &files["cluster.json"];
     assert!(
-        emitted.warnings[0].msg.contains("without waiting"),
-        "{}",
-        emitted.warnings[0].msg
+        cluster.contains("\"object\": \"job.batch/migrate\""),
+        "{cluster}"
     );
+    assert!(cluster.contains("\"for\": \"complete\""), "{cluster}");
+    assert!(emitted.warnings.is_empty(), "{:?}", emitted.warnings);
+
+    // Without a dependsOn there is one apply and no waves.
+    let files = compile(CONFIG).unwrap().artifact.files;
+    assert!(!files.contains_key("wave-1.yaml"));
+    assert!(!files["cluster.json"].contains("waves"));
 }
 
 #[test]

@@ -21,7 +21,7 @@ hands each plugin the sorted list. What the plugin writes depends on the tool:
 | declared relationships | `puppet`, `openvox`, `salt`, `dsc`, `terraform`, `opentofu`, `cloudformation`, `bicep`, `arm`, `pulumi`, `podman` | the tool's own keyword (`require`, `dependsOn`, `depends_on`, `DependsOn`, systemd's `Requires=` and `After=`). Salt also runs states in file order, so its states are written in order as well |
 | its own rules | `docker` | `depends_on` between services, waiting for the other to be healthy when it declares a healthcheck; everything else Compose already creates first |
 | the stages of a build | `packer` | the order of the provisioners, and post-processors chained into a sequence; a dependency against the fixed shape of a build is refused |
-| nothing | `kubernetes` | the order of the manifests, with a warning that `kubectl` does not wait |
+| nothing | `kubernetes` | Meridian-run: the order of the manifests, applied in waves with a wait for each wave's workloads, Jobs and CRDs ([kubernetes](../targets/kubernetes.md#ordering)) |
 | the kind of each object | `helm` | nothing written where Helm's own install order already agrees; refused where it does not ([helm](../targets/helm.md#ordering)) |
 | the stages of a first boot | `cloud-init` | nothing written; each resource is placed at the step cloud-init handles it, a file that has to wait is deferred, and a dependency that points backwards through those steps is refused |
 
@@ -78,8 +78,10 @@ refused, never substituted:
 - Podman: only `restart`.
 - ARM and Bicep: Meridian-run, for the actions their pages list
   ([arm](../targets/arm.md#notifications), [bicep](../targets/bicep.md#notifications)).
-- CloudFormation, Pulumi and Packer: every notify is refused
-  ([pulumi](../targets/pulumi.md#notifications) says what to write instead).
+- CloudFormation and Pulumi: Meridian-run on AWS, for the actions their pages list
+  ([cloudformation](../targets/cloudformation.md#notifications),
+  [pulumi](../targets/pulumi.md#notifications)).
+- Packer: every notify is refused.
 
 ## Meridian-run notifies
 

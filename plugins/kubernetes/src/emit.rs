@@ -7,7 +7,7 @@ use meridian_yaml::Yaml;
 
 use meridian_sdk::SecretName;
 
-use crate::{secret_token, Manifests, OutputPart};
+use crate::{secret_token, Manifests, Object, OutputPart};
 
 /// Every object, one YAML document each, in apply order.
 pub const MANIFESTS_PATH: &str = "manifests.yaml";
@@ -63,8 +63,60 @@ fn string(text: &str) -> Value {
 /// Each object is laid out the way Kubernetes' own documentation does:
 /// `apiVersion`, `kind`, `metadata`, then the rest.
 pub(crate) fn serialise(manifests: &Manifests) -> BTreeMap<String, String> {
+    let text = render(manifests, &manifests.objects.iter().collect::<Vec<_>>());
+    let mut files = BTreeMap::new();
+    let mut waves = Vec::new();
+    for (n, wave) in manifests.waves.iter().enumerate() {
+        let objects: Vec<&Object> = wave.iter().map(|i| &manifests.objects[*i]).collect();
+        let file = wave_path(n + 1);
+        files.insert(file.clone(), render(manifests, &objects));
+        // The last wave has nothing after it to wait for.
+        let waits = if n + 1 == manifests.waves.len() {
+            Vec::new()
+        } else {
+            objects
+                .iter()
+                .filter_map(|o| {
+                    let wait = wait_for(&o.kind)?;
+                    Some(Value::Map(BTreeMap::from([
+                        ("object".to_owned(), string(&o.applied_as())),
+                        ("namespace".to_owned(), string(&o.namespace)),
+                        ("for".to_owned(), string(wait)),
+                    ])))
+                })
+                .collect()
+        };
+        waves.push(Value::Map(BTreeMap::from([
+            ("file".to_owned(), string(&file)),
+            ("wait".to_owned(), Value::List(waits)),
+        ])));
+    }
+    files.insert(MANIFESTS_PATH.to_owned(), text);
+    files.insert(CLUSTER_PATH.to_owned(), cluster(manifests, waves).pretty());
+    files
+}
+
+/// The file of wave `n`, counted from 1.
+pub fn wave_path(n: usize) -> String {
+    format!("wave-{n}.yaml")
+}
+
+/// What the runner waits for on an object of `kind` before the next wave:
+/// `rollout` for a workload, `complete` for a Job, `established` for a
+/// CustomResourceDefinition, nothing for any other kind.
+pub fn wait_for(kind: &str) -> Option<&'static str> {
+    match kind {
+        "Deployment" | "StatefulSet" | "DaemonSet" => Some("rollout"),
+        "Job" => Some("complete"),
+        "CustomResourceDefinition" => Some("established"),
+        _ => None,
+    }
+}
+
+/// The objects as YAML documents, in the order given.
+fn render(manifests: &Manifests, objects: &[&Object]) -> String {
     let mut text = String::new();
-    for object in &manifests.objects {
+    for object in objects {
         let mut pairs = vec![
             ("apiVersion".to_owned(), Yaml::str(&object.api_version)),
             ("kind".to_owned(), Yaml::str(&object.kind)),
@@ -83,7 +135,12 @@ pub(crate) fn serialise(manifests: &Manifests) -> BTreeMap<String, String> {
         text.push_str("---\n");
         text.push_str(&meridian_yaml::write(&Yaml::Map(pairs)));
     }
+    text
+}
 
+/// `cluster.json`: where the manifests go, what kubectl calls each object,
+/// how to read each output, and the waves.
+fn cluster(manifests: &Manifests, waves: Vec<Value>) -> Value {
     let outputs = manifests
         .outputs
         .iter()
@@ -111,7 +168,7 @@ pub(crate) fn serialise(manifests: &Manifests) -> BTreeMap<String, String> {
             ]))
         })
         .collect();
-    let cluster = Value::Map(BTreeMap::from([
+    let mut map = BTreeMap::from([
         ("context".to_owned(), string(&manifests.cluster.context)),
         ("namespace".to_owned(), string(&manifests.cluster.namespace)),
         (
@@ -129,10 +186,9 @@ pub(crate) fn serialise(manifests: &Manifests) -> BTreeMap<String, String> {
             ),
         ),
         ("outputs".to_owned(), Value::List(outputs)),
-    ]));
-
-    BTreeMap::from([
-        (MANIFESTS_PATH.to_owned(), text),
-        (CLUSTER_PATH.to_owned(), cluster.pretty()),
-    ])
+    ]);
+    if !waves.is_empty() {
+        map.insert("waves".to_owned(), Value::List(waves));
+    }
+    Value::Map(map)
 }

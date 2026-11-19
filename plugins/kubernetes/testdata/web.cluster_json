@@ -22,5 +22,15 @@
         }
       ]
     }
+  ],
+  "waves": [
+    {
+      "file": "wave-1.yaml",
+      "wait": []
+    },
+    {
+      "file": "wave-2.yaml",
+      "wait": []
+    }
   ]
 }

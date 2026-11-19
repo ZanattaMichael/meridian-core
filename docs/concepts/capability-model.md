@@ -68,7 +68,7 @@ The rule name is in brackets and a hint follows in parentheses. Rules are listed
 A warning means the output does what the document says, but how is worth knowing:
 
 - The tool is less expressive without changing the result. Ansible runs independent
-  resources in sequence; `kubectl` does not wait between manifests.
+  resources in sequence.
 - A notify is synthetic: a checksum label, an annotation, a replacement, or a command at
   the end of first boot.
 - The output relies on something the document cannot check. cloud-init has no services

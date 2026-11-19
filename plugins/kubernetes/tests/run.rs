@@ -50,6 +50,7 @@ fn runner(dir: &Path, cases: &str) -> KubernetesRunner {
         extra_args: Vec::new(),
         output_wait: Duration::from_secs(5),
         output_poll: Duration::from_millis(20),
+        wait_timeout: Duration::from_secs(5),
     }
 }
 
@@ -427,4 +428,88 @@ fn inspect_of_an_object_not_in_the_cluster_is_not_found() {
         1,
         "no dry run for an object that is not there"
     );
+}
+
+/// Two waves: the migration Job and its ConfigMap, then the Deployment.
+fn waved() -> Artifact {
+    artifact(&[
+        ("manifests.yaml", "---\nkind: Job\n---\nkind: Deployment\n"),
+        ("wave-1.yaml", "---\nkind: Job\n"),
+        ("wave-2.yaml", "---\nkind: Deployment\n"),
+        (
+            "cluster.json",
+            r#"{"context":"","namespace":"web","kubeconfig":"",
+                "objects":{"job.batch/migrate":"migrate","deployment.apps/web":"web","deployment.apps/db":"db"},
+                "outputs":[],
+                "waves":[
+                  {"file":"wave-1.yaml","wait":[
+                    {"object":"deployment.apps/db","namespace":"","for":"rollout"},
+                    {"object":"job.batch/migrate","namespace":"jobs","for":"complete"}]},
+                  {"file":"wave-2.yaml","wait":[]}]}"#,
+        ),
+    ])
+}
+
+#[test]
+fn depends_on_applies_wave_by_wave_and_waits_between() {
+    let dir = scratch(TMP, "waves");
+    let cases = r#"'apply --filename') echo "job.batch/migrate created" ;;
+'rollout status') ;;
+'get job.batch/migrate') echo Complete ;;"#;
+    let applied = runner(&dir, cases)
+        .apply(&context(&dir), &waved(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        [
+            "apply --filename wave-1.yaml --namespace web",
+            "rollout status deployment.apps/db --timeout=5s --namespace web",
+            r#"get job.batch/migrate --output jsonpath={.status.conditions[?(@.status=="True")].type} --namespace jobs"#,
+            "apply --filename wave-2.yaml --namespace web",
+        ]
+    );
+    assert_eq!(applied.changes.len(), 2);
+}
+
+#[test]
+fn a_failed_job_stops_the_waves_and_names_the_resource() {
+    let dir = scratch(TMP, "job-failed");
+    let cases = r#"'apply --filename') echo "job.batch/migrate created" ;;
+'rollout status') ;;
+'get job.batch/migrate') echo Failed ;;"#;
+    let err = runner(&dir, cases)
+        .apply(&context(&dir), &waved(), &KeptLog::default())
+        .unwrap_err();
+    assert_eq!(err.failures[0].resource, "migrate");
+    assert_eq!(err.failures[0].cause.as_str(), "resource-failed");
+    // What wave 1 did is reported, and wave 2 was never applied.
+    assert_eq!(err.changes.len(), 1);
+    assert!(!calls(&dir).iter().any(|c| c.contains("wave-2")));
+}
+
+#[test]
+fn a_rollout_that_does_not_finish_in_time_is_timed_out() {
+    let dir = scratch(TMP, "rollout-timeout");
+    let cases = r#"'apply --filename') ;;
+'rollout status') echo 'error: timed out waiting for the condition' >&2; exit 1 ;;"#;
+    let err = runner(&dir, cases)
+        .apply(&context(&dir), &waved(), &KeptLog::default())
+        .unwrap_err();
+    assert_eq!(err.failures[0].resource, "db");
+    assert_eq!(err.failures[0].cause.as_str(), "timed-out");
+}
+
+#[test]
+fn a_job_still_running_when_the_time_is_up_is_timed_out() {
+    let dir = scratch(TMP, "job-timeout");
+    let cases = r#"'apply --filename') ;;
+'rollout status') ;;
+'get job.batch/migrate') ;;"#;
+    let mut runner = runner(&dir, cases);
+    runner.wait_timeout = Duration::from_millis(100);
+    let err = runner
+        .apply(&context(&dir), &waved(), &KeptLog::default())
+        .unwrap_err();
+    assert_eq!(err.failures[0].cause.as_str(), "timed-out");
+    assert_eq!(err.failures[0].resource, "migrate");
 }
