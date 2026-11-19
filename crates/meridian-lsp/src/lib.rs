@@ -13,7 +13,7 @@ use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestI
 use lsp_types as lsp;
 use lsp_types::notification::Notification as _;
 use lsp_types::request::Request as _;
-use lsp_types::Url;
+use lsp_types::Uri;
 use meridian_plugin_host::{Registry, Signature, StartOptions};
 use meridian_tooling::analysis::{self, CompletionKind, SymbolKind};
 use meridian_tooling::catalog::Catalog;
@@ -157,11 +157,11 @@ pub fn serve(connection: &Connection, plugins: Plugins) -> Result<(), Error> {
         .workspace_folders
         .unwrap_or_default()
         .iter()
-        .filter_map(|f| f.uri.to_file_path().ok())
+        .filter_map(|f| path_of(&f.uri))
         .collect();
     #[allow(deprecated)]
     if roots.is_empty() {
-        roots.extend(params.root_uri.and_then(|u| u.to_file_path().ok()));
+        roots.extend(params.root_uri.and_then(|u| path_of(&u)));
     }
 
     let (sources, registry, problems) = match plugins {
@@ -296,19 +296,92 @@ struct Server<'a> {
 
 /// The name a file goes by inside the server: its path when it has one, so
 /// messages that mention a file read naturally, and its URI otherwise.
-fn name_of(uri: &Url) -> String {
-    match uri.to_file_path() {
-        Ok(path) if uri.scheme() == "file" => path.to_string_lossy().into_owned(),
-        _ => uri.to_string(),
+fn name_of(uri: &Uri) -> String {
+    match path_of(uri) {
+        Some(path) => path.to_string_lossy().into_owned(),
+        None => uri.as_str().to_owned(),
     }
 }
 
-fn uri_of(name: &str) -> Option<Url> {
+fn uri_of(name: &str) -> Option<Uri> {
     if name.contains("://") || name.starts_with("untitled:") {
-        Url::parse(name).ok()
+        name.parse().ok()
     } else {
-        Url::from_file_path(name).ok()
+        uri_of_path(name)?.parse().ok()
     }
+}
+
+/// The local path a `file:` URI names: no host (or `localhost`), the path
+/// percent-decoded, and on Windows a drive letter with backslashes.
+fn path_of(uri: &Uri) -> Option<PathBuf> {
+    let text = uri.as_str();
+    let rest = text
+        .get(..7)
+        .filter(|scheme| scheme.eq_ignore_ascii_case("file://"))
+        .map(|_| &text[7..])?;
+    let rest = &rest[..rest.find(['?', '#']).unwrap_or(rest.len())];
+    let slash = rest.find('/')?;
+    let host = &rest[..slash];
+    if !host.is_empty() && !host.eq_ignore_ascii_case("localhost") {
+        return None;
+    }
+    let path = percent_decode(&rest[slash..])?;
+    if cfg!(windows) {
+        let bytes = path.as_bytes();
+        let drive = bytes.len() >= 3 && bytes[1].is_ascii_alphabetic() && bytes[2] == b':';
+        if !drive {
+            return None;
+        }
+        Some(PathBuf::from(path[1..].replace('/', "\\")))
+    } else {
+        Some(PathBuf::from(path))
+    }
+}
+
+/// The `file:` URI for an absolute path, percent-encoding what a URI path
+/// cannot hold. A relative path has no URI.
+fn uri_of_path(name: &str) -> Option<String> {
+    let path = if cfg!(windows) {
+        let bytes = name.as_bytes();
+        let drive = bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'\\' | b'/');
+        if !drive {
+            return None;
+        }
+        format!("/{}", name.replace('\\', "/"))
+    } else if name.starts_with('/') {
+        name.to_owned()
+    } else {
+        return None;
+    };
+    let mut out = String::from("file://");
+    for &b in path.as_bytes() {
+        if b.is_ascii_alphanumeric() || b"-._~/:!$&'()*+,;=@".contains(&b) {
+            out.push(char::from(b));
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    Some(out)
+}
+
+fn percent_decode(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = text.get(i + 1..i + 3)?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
 }
 
 /// Converts a column in bytes to one in UTF-16 code units, which is what
@@ -1006,10 +1079,10 @@ mod tests {
         } else {
             ("file:///work/web.yaml", "/work/web.yaml")
         };
-        let uri = Url::parse(text).unwrap();
+        let uri: Uri = text.parse().unwrap();
         assert_eq!(name_of(&uri), path);
         assert_eq!(uri_of(path), Some(uri));
-        let untitled = Url::parse("untitled:Untitled-1").unwrap();
+        let untitled: Uri = "untitled:Untitled-1".parse().unwrap();
         assert_eq!(uri_of(&name_of(&untitled)), Some(untitled));
     }
 }
