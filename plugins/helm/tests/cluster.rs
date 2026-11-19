@@ -490,3 +490,44 @@ fn inspect_reads_an_object_of_the_release_and_the_release_itself() {
     assert_eq!(read.in_desired_state, Some(false));
     uninstall(INSPECTED, INSPECTED);
 }
+
+#[test]
+#[ignore = "needs helm, kubectl and a cluster"]
+fn ordering_releases_installs_one_release_per_wave_and_destroys_them_all() {
+    let dir = scratch(TMP, "cluster-ordered");
+    let namespace = "meridian-helm-ordered";
+    for release in ["ordered-2", "ordered-1"] {
+        uninstall(release, namespace);
+    }
+    let pause = |id: &str| {
+        format!(
+            "    - id: {id}\n      type: apps/v1/Deployment\n      params:\n        spec:\n          replicas: 1\n          selector: {{matchLabels: {{app: {id}}}}}\n          template:\n            metadata: {{labels: {{app: {id}}}}}\n            spec:\n              containers:\n                - name: pause\n                  image: registry.k8s.io/pause:3.9\n"
+        )
+    };
+    let text = format!(
+        "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: ordered\nspec:\n  target: helm\n  resources:\n    - id: release\n      type: release\n      params:\n        name: ordered\n        namespace: {namespace}\n        createNamespace: true\n        timeout: 4m\n        ordering: releases\n{}{}      dependsOn:\n        - resource: db\n",
+        pause("db"),
+        pause("api")
+    );
+    let artifact = compile(&text);
+    let applied = apply(&dir, &artifact);
+    assert_eq!(
+        shown(&applied.changes),
+        ["create api: Deployment api", "create db: Deployment db"]
+    );
+    let listed = Tool::new("helm")
+        .args(["list", "--namespace", namespace, "--short"])
+        .capture_stdout()
+        .run(&NoLog)
+        .unwrap()
+        .stdout;
+    let mut releases: Vec<&str> = listed.lines().collect();
+    releases.sort();
+    assert_eq!(releases, ["ordered-1", "ordered-2"]);
+    assert!(plan(&dir, &artifact).changes.is_empty());
+
+    let removed = HelmRunner::from_env()
+        .destroy(&context(&dir), &artifact, &KeptLog::default())
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(removed.len(), 2);
+}

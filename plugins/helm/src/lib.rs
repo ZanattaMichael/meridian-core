@@ -200,6 +200,9 @@ pub(crate) struct ReleaseSettings {
     pub wait: bool,
     pub atomic: bool,
     pub timeout: String,
+    /// `ordering: releases`: a `dependsOn` Helm's order contradicts splits
+    /// the chart into one release per wave.
+    pub ordered_releases: bool,
 }
 
 /// The overlay Kustomize applies to what Helm renders.
@@ -246,6 +249,9 @@ pub(crate) struct Chart {
     pub outputs: Vec<OutputSpec>,
     /// The name of each secret a value stands for.
     pub secrets: Vec<SecretName>,
+    /// The ids of the objects in each ordered release, first installed
+    /// first; empty for one release.
+    pub parts: Vec<Vec<String>>,
 }
 
 impl Chart {

@@ -1,5 +1,7 @@
 //! Stage two: what Helm can and cannot do with the document's edges.
 
+use std::collections::BTreeMap;
+
 use meridian_sdk::rules;
 use meridian_sdk::{CompileError, EdgeKind, ResourceGraph, Warning};
 
@@ -69,6 +71,7 @@ pub(crate) fn apply_edges(
     chart: &mut Chart,
 ) -> Result<Vec<Warning>, CompileError> {
     let mut warnings = Vec::new();
+    let mut contradicted = false;
     // A checksum is taken by rendering the watched object's template, so two
     // workloads that restart each other would render each other without end.
     let notifies: Vec<(&str, &str)> = graph
@@ -110,7 +113,9 @@ pub(crate) fn apply_edges(
 
         match edge.kind {
             EdgeKind::HardOrder => {
-                if rank(&from_kind) >= rank(&to_kind) {
+                if rank(&from_kind) >= rank(&to_kind) && chart.release.ordered_releases {
+                    contradicted = true;
+                } else if rank(&from_kind) >= rank(&to_kind) {
                     return Err(refuse_at(
                         &to_id,
                         &edge.pos,
@@ -120,7 +125,8 @@ pub(crate) fn apply_edges(
                              creates everything in a release in one pass, sorted by kind, and \
                              it does not create a {from_kind} before a {to_kind}. Kubernetes \
                              retries until what an object needs exists, so the dependency can \
-                             usually be removed"
+                             usually be removed, or set ordering: releases on the release to \
+                             install one release per dependsOn wave"
                         ),
                     ));
                 }
@@ -189,7 +195,79 @@ pub(crate) fn apply_edges(
             }
         }
     }
+    if contradicted {
+        split(graph, chart, &mut warnings)?;
+    }
     Ok(warnings)
+}
+
+/// Splits the chart into one release per `dependsOn` wave: an object goes
+/// one wave after the latest object it depends on. Each release is
+/// installed with `--wait` before the next.
+fn split(
+    graph: &ResourceGraph,
+    chart: &mut Chart,
+    warnings: &mut Vec<Warning>,
+) -> Result<(), CompileError> {
+    if let Some(edge) = graph.edges_of_kind(EdgeKind::HardOrder).next() {
+        if chart.kustomization.is_some() {
+            return Err(refuse_at(
+                &edge.to,
+                &edge.pos,
+                &rules::UNSUPPORTED_DEPENDENCY,
+                "ordering: releases splits the chart into one release per dependsOn wave, and a \
+                 Kustomize overlay patches one release; a document with ordering: releases has \
+                 no kustomization"
+                    .to_owned(),
+            ));
+        }
+    }
+    let mut depth: BTreeMap<&str, usize> = BTreeMap::new();
+    for manifest in &chart.manifests {
+        let own = graph
+            .edges_of_kind(EdgeKind::HardOrder)
+            .filter(|e| e.to == manifest.id)
+            .filter_map(|e| depth.get(e.from.as_str()).map(|d| d + 1))
+            .max()
+            .unwrap_or(0);
+        depth.insert(manifest.id.as_str(), own);
+    }
+    // A notify is a checksum of a template of the same chart.
+    for edge in graph.edges_of_kind(EdgeKind::Notify) {
+        if depth.get(edge.from.as_str()) != depth.get(edge.to.as_str()) {
+            return Err(refuse_at(
+                &edge.from,
+                &edge.pos,
+                &rules::UNSUPPORTED_ACTION,
+                format!(
+                    "notifies resource {:?}, which ordering: releases puts in another release; \
+                     a restart is a checksum of a template of the same chart",
+                    edge.to
+                ),
+            ));
+        }
+    }
+    let mut parts: Vec<Vec<String>> = Vec::new();
+    for manifest in &chart.manifests {
+        let wave = depth[manifest.id.as_str()];
+        if parts.len() <= wave {
+            parts.resize(wave + 1, Vec::new());
+        }
+        parts[wave].push(manifest.id.clone());
+    }
+    warnings.push(Warning {
+        target: NAME.to_owned(),
+        resource: String::new(),
+        msg: format!(
+            "ordering: releases installs {} releases, {name}-1 to {name}-{}, each with --wait \
+             before the next; helm rollback of one does not roll back the others",
+            parts.len(),
+            parts.len(),
+            name = chart.release.name
+        ),
+    });
+    chart.parts = parts;
+    Ok(())
 }
 
 /// Whether following notifications from `start` arrives at `goal`.

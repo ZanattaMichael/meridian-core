@@ -693,3 +693,75 @@ fn inspect_reads_an_object_of_the_chart_and_compares_the_release() {
     assert_eq!(read.actual.get("status"), Some(&Value::from("deployed")));
     assert_eq!(read.in_desired_state, Some(false));
 }
+
+/// Two ordered releases, `web-app-1` and `web-app-2`.
+fn ordered() -> Artifact {
+    let release = release_json(false).replacen(
+        r#""kustomize":false,"#,
+        r#""kustomize":false,"parts":[{"release":"web-app-1","chart":"chart-1"},{"release":"web-app-2","chart":"chart-2"}],"#,
+        1,
+    );
+    artifact(&[
+        ("chart/Chart.yaml", "apiVersion: v2\nname: web-app\n"),
+        ("chart-1/Chart.yaml", "apiVersion: v2\nname: web-app\n"),
+        ("chart-1/templates/web_config.yaml", "kind: ConfigMap\n"),
+        ("chart-2/Chart.yaml", "apiVersion: v2\nname: web-app\n"),
+        ("chart-2/templates/web.yaml", "kind: Deployment\n"),
+        ("release.json", release.as_str()),
+    ])
+}
+
+#[test]
+fn ordered_releases_are_installed_in_order_with_wait_and_uninstalled_in_reverse() {
+    let dir = scratch(TMP, "ordered");
+    // No release by the document's own name, and none of the parts yet.
+    let runner = runner(&dir, "", "");
+    runner
+        .apply(&context(&dir), &ordered(), &KeptLog::default())
+        .unwrap();
+    let upgrades: Vec<String> = calls(&dir)
+        .into_iter()
+        .filter(|c| c.starts_with("helm upgrade"))
+        .collect();
+    assert_eq!(upgrades.len(), 2, "{upgrades:?}");
+    assert!(
+        upgrades[0].starts_with("helm upgrade --install web-app-1 chart-1"),
+        "{upgrades:?}"
+    );
+    assert!(
+        upgrades[1].starts_with("helm upgrade --install web-app-2 chart-2"),
+        "{upgrades:?}"
+    );
+    assert!(upgrades.iter().all(|c| c.contains("--wait")));
+
+    let dir = scratch(TMP, "ordered-destroy");
+    let runner = installed_runner(&dir);
+    runner
+        .destroy(&context(&dir), &ordered(), &KeptLog::default())
+        .unwrap();
+    let uninstalls: Vec<String> = calls(&dir)
+        .into_iter()
+        .filter(|c| c.starts_with("helm uninstall"))
+        .collect();
+    assert_eq!(
+        uninstalls,
+        [
+            "helm uninstall web-app-2 --wait --timeout 5m",
+            "helm uninstall web-app-1 --wait --timeout 5m"
+        ]
+    );
+}
+
+/// A runner whose every release is installed.
+fn installed_runner(dir: &Path) -> HelmRunner {
+    runner(dir, "deployed", INSTALLED)
+}
+
+#[test]
+fn ordered_releases_are_refused_while_the_document_is_one_release() {
+    let dir = scratch(TMP, "ordered-switch");
+    let err = installed_runner(&dir)
+        .plan(&context(&dir), &ordered(), &KeptLog::default())
+        .unwrap_err();
+    assert!(err.msg.contains("installed as one release"), "{}", err.msg);
+}

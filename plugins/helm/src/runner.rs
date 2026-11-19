@@ -128,6 +128,7 @@ pub struct HelmRunner {
 }
 
 /// The object a resource of the document became.
+#[derive(Clone)]
 struct Target {
     api_version: String,
     kind: String,
@@ -135,11 +136,13 @@ struct Target {
     namespace: String,
 }
 
+#[derive(Clone)]
 enum Part {
     Text(String),
     Lookup { resource: String, path: Vec<Step> },
 }
 
+#[derive(Clone)]
 struct OutputSpec {
     name: String,
     sensitive: bool,
@@ -147,6 +150,7 @@ struct OutputSpec {
 }
 
 /// What `release.json` says about the installation.
+#[derive(Clone)]
 struct Release {
     name: String,
     namespace: String,
@@ -160,9 +164,31 @@ struct Release {
     /// By the id the author wrote.
     resources: BTreeMap<String, Target>,
     outputs: Vec<OutputSpec>,
+    /// The chart this release installs, relative to the work directory.
+    chart_dir: String,
+    /// With `ordering: releases`, each release's name and chart, in the
+    /// order they are installed.
+    parts: Vec<(String, String)>,
 }
 
 impl Release {
+    /// The releases an apply installs, in order: this one, or with
+    /// `ordering: releases` one per wave, each waiting before the next.
+    fn installs(&self) -> Vec<Release> {
+        if self.parts.is_empty() {
+            return vec![self.clone()];
+        }
+        self.parts
+            .iter()
+            .map(|(name, chart)| Release {
+                name: name.clone(),
+                chart_dir: chart.clone(),
+                wait: true,
+                ..self.clone()
+            })
+            .collect()
+    }
+
     fn read(text: &str) -> Result<Release, RunError> {
         Release::parse(text)
             .ok_or_else(|| RunError::new(format!("{RELEASE_PATH} is not one this plugin compiled")))
@@ -213,6 +239,11 @@ impl Release {
                 parts,
             });
         }
+        let mut ordered = Vec::new();
+        for part in map.get("parts").and_then(Value::as_list).unwrap_or(&[]) {
+            let part = part.as_map()?;
+            ordered.push((string(part, "release"), string(part, "chart")));
+        }
 
         let release = Release {
             name: string(map, "release"),
@@ -226,6 +257,8 @@ impl Release {
             kustomize: flag("kustomize"),
             resources,
             outputs,
+            chart_dir: CHART_DIR.to_owned(),
+            parts: ordered,
         };
         (!release.name.is_empty() && !release.namespace.is_empty()).then_some(release)
     }
@@ -296,7 +329,7 @@ struct Rendered {
     manifests: String,
     /// The chart to install, relative to the work directory: the compiled
     /// one, or the patched objects when there is an overlay.
-    chart: &'static str,
+    chart: String,
 }
 
 /// A rendered chart compared with the release in the cluster.
@@ -357,6 +390,13 @@ impl HelmRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Rendered, RunError> {
+        let release = Self::release_checked(context, artifact)?;
+        self.render_release(context, artifact, release, log)
+    }
+
+    /// The release an artifact installs, checked to have its chart, with the
+    /// artifact written out.
+    fn release_checked(context: &RunContext, artifact: &Artifact) -> Result<Release, RunError> {
         let chart_file = format!("{CHART_DIR}/Chart.yaml");
         let (Some(_), Some(settings)) = (
             artifact.files.get(&chart_file),
@@ -368,18 +408,33 @@ impl HelmRunner {
         };
         let release = Release::read(settings)?;
         write_artifact(&context.work_dir, artifact)?;
+        Ok(release)
+    }
 
+    /// Renders one release's chart, as [`Self::render`] does.
+    fn render_release(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        release: Release,
+        log: &dyn Log,
+    ) -> Result<Rendered, RunError> {
         log.out(&format!("release {}: rendering the chart", release.name));
-        let template = self.helm(context, &release, &["template", &release.name, CHART_DIR]);
-        let templated = with_values(template, context, artifact, CHART_DIR)?
+        let template = self.helm(
+            context,
+            &release,
+            &["template", &release.name, &release.chart_dir],
+        );
+        let templated = with_values(template, context, artifact, &release.chart_dir)?
             .capture_stdout()
             .run_ok("helm could not render the chart", log)?
             .stdout;
         if !release.kustomize {
+            let chart = release.chart_dir.clone();
             return Ok(Rendered {
                 release,
                 manifests: templated,
-                chart: CHART_DIR,
+                chart,
             });
         }
 
@@ -435,7 +490,7 @@ impl HelmRunner {
         Ok(Rendered {
             release,
             manifests: patched,
-            chart: PATCHED_DIR,
+            chart: PATCHED_DIR.to_owned(),
         })
     }
 
@@ -468,13 +523,70 @@ impl HelmRunner {
         Ok(Some(status.to_owned()))
     }
 
-    fn preview(
+    /// Each release an apply installs, rendered and compared with the
+    /// cluster, in order. With `ordering: releases`, refused while the
+    /// document is still installed as one release.
+    fn previews(
         &self,
         context: &RunContext,
         artifact: &Artifact,
         log: &dyn Log,
+    ) -> Result<Vec<Preview>, RunError> {
+        let release = Self::release_checked(context, artifact)?;
+        if !release.parts.is_empty() && self.status(context, &release)?.is_some() {
+            return Err(RunError::new(format!(
+                "release {} is installed as one release, and ordering: releases installs it as \
+                 {}; moving its objects between releases needs adopt (issue 269), so uninstall \
+                 {} first or remove ordering: releases",
+                release.name,
+                release
+                    .parts
+                    .iter()
+                    .map(|(name, _)| name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                release.name
+            )));
+        }
+        release
+            .installs()
+            .into_iter()
+            .map(|one| {
+                let rendered = self.render_release(context, artifact, one, log)?;
+                self.compare(context, rendered)
+            })
+            .collect()
+    }
+
+    /// The preview of the release that holds `resource`: the one release,
+    /// or with `ordering: releases` the one whose chart has its template
+    /// (the first, for the release's own settings).
+    fn preview_holding(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
     ) -> Result<Preview, RunError> {
-        let rendered = self.rendered(context, artifact, log)?;
+        let release = Self::release_checked(context, artifact)?;
+        let installs = release.installs();
+        let holding = installs
+            .iter()
+            .position(|r| {
+                artifact
+                    .files
+                    .contains_key(&format!("{}/templates/{resource}.yaml", r.chart_dir))
+            })
+            .unwrap_or(0);
+        let one = installs
+            .into_iter()
+            .nth(holding)
+            .expect("one release at least");
+        let rendered = self.render_release(context, artifact, one, &NoLog)?;
+        self.compare(context, rendered)
+    }
+
+    /// A rendered chart compared with what its release holds.
+    fn compare(&self, context: &RunContext, rendered: Rendered) -> Result<Preview, RunError> {
         let release = &rendered.release;
         let status = self.status(context, release)?;
         let installed = match status {
@@ -560,6 +672,60 @@ impl HelmRunner {
         })
     }
 
+    /// Installs or upgrades one release, unless it is already as rendered.
+    fn install(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        preview: &Preview,
+        log: &dyn Log,
+    ) -> Result<(), RunError> {
+        let release = &preview.rendered.release;
+        if preview.in_sync() {
+            log.out(&format!("release {}: nothing to change", release.name));
+        } else {
+            log.out(&format!(
+                "release {}: {}",
+                release.name,
+                if preview.status.is_none() {
+                    "installing"
+                } else {
+                    "upgrading"
+                }
+            ));
+            let mut upgrade = self.helm(
+                context,
+                release,
+                &[
+                    "upgrade",
+                    "--install",
+                    &release.name,
+                    &preview.rendered.chart,
+                ],
+            );
+            if release.create_namespace {
+                upgrade = upgrade.arg("--create-namespace");
+            }
+            if release.wait {
+                upgrade = upgrade.arg("--wait");
+            }
+            if release.atomic {
+                upgrade = upgrade.arg("--atomic");
+            }
+            if !release.timeout.is_empty() {
+                upgrade = upgrade.args(["--timeout", &release.timeout]);
+            }
+            let upgrade = with_values(upgrade, context, artifact, &release.chart_dir)?;
+            release.run_ok(
+                upgrade,
+                "helm could not install the release; `helm status` and `helm history` say what \
+                 state it was left in",
+                log,
+            )?;
+        }
+        Ok(())
+    }
+
     fn read_outputs(
         &self,
         context: &RunContext,
@@ -635,23 +801,27 @@ impl Runner for HelmRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
-        let preview = self.preview(context, artifact, log)?;
-        // A release that is there but not healthy is upgraded again by an
-        // apply even when its objects are the ones the chart describes, and
-        // what that will change in the cluster is not something the manifests
-        // show.
-        let unknown = preview.changes.is_empty() && !preview.in_sync();
-        if let (true, Some(status)) = (unknown, &preview.status) {
-            log.out(&format!(
-                "release {}: its status is {status}, so an apply will upgrade it again",
-                preview.rendered.release.name
-            ));
-        }
-        Ok(Plan {
-            changes: preview.changes,
-            unknown,
+        let mut plan = Plan {
+            changes: Vec::new(),
+            unknown: false,
             saved: None,
-        })
+        };
+        for preview in self.previews(context, artifact, log)? {
+            // A release that is there but not healthy is upgraded again by
+            // an apply even when its objects are the ones the chart
+            // describes, and what that will change in the cluster is not
+            // something the manifests show.
+            let unknown = preview.changes.is_empty() && !preview.in_sync();
+            if let (true, Some(status)) = (unknown, &preview.status) {
+                log.out(&format!(
+                    "release {}: its status is {status}, so an apply will upgrade it again",
+                    preview.rendered.release.name
+                ));
+            }
+            plan.unknown |= unknown;
+            plan.changes.extend(preview.changes);
+        }
+        Ok(plan)
     }
 
     fn apply(
@@ -660,53 +830,18 @@ impl Runner for HelmRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
-        let preview = self.preview(context, artifact, log)?;
-        let release = &preview.rendered.release;
-        if preview.in_sync() {
-            log.out(&format!("release {}: nothing to change", release.name));
-        } else {
-            log.out(&format!(
-                "release {}: {}",
-                release.name,
-                if preview.status.is_none() {
-                    "installing"
-                } else {
-                    "upgrading"
-                }
-            ));
-            let mut upgrade = self.helm(
-                context,
-                release,
-                &[
-                    "upgrade",
-                    "--install",
-                    &release.name,
-                    preview.rendered.chart,
-                ],
-            );
-            if release.create_namespace {
-                upgrade = upgrade.arg("--create-namespace");
+        let mut changes = Vec::new();
+        let base = Self::release_checked(context, artifact)?;
+        for preview in self.previews(context, artifact, log)? {
+            if let Err(mut err) = self.install(context, artifact, &preview, log) {
+                err.changes = changes;
+                return Err(err);
             }
-            if release.wait {
-                upgrade = upgrade.arg("--wait");
-            }
-            if release.atomic {
-                upgrade = upgrade.arg("--atomic");
-            }
-            if !release.timeout.is_empty() {
-                upgrade = upgrade.args(["--timeout", &release.timeout]);
-            }
-            let upgrade = with_values(upgrade, context, artifact, CHART_DIR)?;
-            release.run_ok(
-                upgrade,
-                "helm could not install the release; `helm status` and `helm history` say what \
-                 state it was left in",
-                log,
-            )?;
+            changes.extend(preview.changes);
         }
         Ok(Applied {
-            outputs: self.read_outputs(context, release)?,
-            changes: preview.changes,
+            outputs: self.read_outputs(context, &base)?,
+            changes,
         })
     }
 
@@ -732,7 +867,7 @@ impl Runner for HelmRunner {
         resource: &str,
         _endpoint: &str,
     ) -> Result<meridian_sdk::Inspection, RunError> {
-        let preview = self.preview(context, artifact, &NoLog)?;
+        let preview = self.preview_holding(context, artifact, resource)?;
         let release = &preview.rendered.release;
         let Some(target) = release.resources.get(resource) else {
             // The release, its chart or its values: what Helm says of the
@@ -816,8 +951,12 @@ impl Runner for HelmRunner {
         _log: &dyn Log,
     ) -> Result<Plan, RunError> {
         let release = Self::release_of(context, artifact)?;
+        let mut changes = Vec::new();
+        for one in release.installs().iter().rev() {
+            changes.extend(self.removals(context, one)?.unwrap_or_default());
+        }
         Ok(Plan {
-            changes: self.removals(context, &release)?.unwrap_or_default(),
+            changes,
             unknown: false,
             saved: None,
         })
@@ -832,17 +971,26 @@ impl Runner for HelmRunner {
         log: &dyn Log,
     ) -> Result<Vec<Change>, RunError> {
         let release = Self::release_of(context, artifact)?;
-        let Some(removals) = self.removals(context, &release)? else {
-            log.out(&format!("release {}: not installed", release.name));
-            return Ok(Vec::new());
-        };
-        log.out(&format!("release {}: uninstalling", release.name));
-        let mut uninstall = self.helm(context, &release, &["uninstall", &release.name, "--wait"]);
-        if !release.timeout.is_empty() {
-            uninstall = uninstall.args(["--timeout", &release.timeout]);
+        let mut removed = Vec::new();
+        // With ordering: releases, the last installed goes first.
+        for one in release.installs().iter().rev() {
+            let Some(removals) = self.removals(context, one)? else {
+                log.out(&format!("release {}: not installed", one.name));
+                continue;
+            };
+            log.out(&format!("release {}: uninstalling", one.name));
+            let mut uninstall = self.helm(context, one, &["uninstall", &one.name, "--wait"]);
+            if !one.timeout.is_empty() {
+                uninstall = uninstall.args(["--timeout", &one.timeout]);
+            }
+            if let Err(mut err) = one.run_ok(uninstall, "helm could not uninstall the release", log)
+            {
+                err.changes = removed;
+                return Err(err);
+            }
+            removed.extend(removals);
         }
-        release.run_ok(uninstall, "helm could not uninstall the release", log)?;
-        Ok(removals)
+        Ok(removed)
     }
 }
 

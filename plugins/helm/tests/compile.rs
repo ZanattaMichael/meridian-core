@@ -292,7 +292,8 @@ fn a_dependency_helm_cannot_honour_is_refused() {
     assert_eq!(err.resource, "api");
     assert!(
         err.msg
-            .contains("it does not create a Deployment before a Deployment"),
+            .contains("it does not create a Deployment before a Deployment")
+            && err.msg.contains("ordering: releases"),
         "{}",
         err.msg
     );
@@ -303,6 +304,75 @@ fn a_dependency_helm_cannot_honour_is_refused() {
     ));
     assert_eq!(err.rule, "unsupported-dependency");
     assert_eq!(err.resource, "settings");
+}
+
+#[test]
+fn ordering_releases_splits_the_chart_into_one_release_per_wave() {
+    let release = "    - id: release\n      type: release\n      params: {name: shop, namespace: web, ordering: releases}\n";
+    let spec = format!(
+        "  resources:\n{release}{}{}      dependsOn:\n        - resource: db\n",
+        workload("db", ""),
+        workload("api", "")
+    );
+    let emitted = compile(&spec);
+    let files = &emitted.artifact.files;
+    assert!(files.contains_key("chart-1/templates/db.yaml"));
+    assert!(!files.contains_key("chart-1/templates/api.yaml"));
+    assert!(files.contains_key("chart-2/templates/api.yaml"));
+    assert!(files.contains_key("chart-2/Chart.yaml"));
+    // The whole chart stays, for a render.
+    assert!(files.contains_key("chart/templates/api.yaml"));
+    let release_json = &files["release.json"];
+    assert!(
+        release_json.contains("\"release\": \"shop-2\""),
+        "{release_json}"
+    );
+    assert!(
+        release_json.contains("\"chart\": \"chart-2\""),
+        "{release_json}"
+    );
+    assert!(
+        emitted.warnings[0]
+            .msg
+            .contains("installs 2 releases, shop-1 to shop-2"),
+        "{:?}",
+        emitted.warnings
+    );
+
+    // A dependsOn Helm already honours keeps one release.
+    let spec = format!(
+        "  resources:\n{release}{CONFIG}{}      dependsOn:\n        - resource: settings\n",
+        workload("web", "")
+    );
+    let files = compile(&spec).artifact.files;
+    assert!(!files.contains_key("chart-1/Chart.yaml"));
+    assert!(!files["release.json"].contains("parts"));
+}
+
+#[test]
+fn ordering_releases_refuses_what_one_release_per_wave_cannot_keep() {
+    let release = "    - id: release\n      type: release\n      params: {ordering: releases}\n";
+    // A restart is a checksum of a template of the same chart.
+    let err = refusal(&format!(
+        "  resources:\n{release}{}{}      dependsOn:\n        - resource: db\n{CONFIG}      notifies:\n        - resource: api\n          action: restart\n",
+        workload("db", ""),
+        workload("api", ""),
+    ));
+    assert_eq!(err.rule, "unsupported-action", "{err}");
+    assert!(err.msg.contains("another release"), "{}", err.msg);
+
+    let err = refusal(&format!(
+        "  resources:\n{release}    - id: overlay\n      type: kustomization\n      params: {{namePrefix: p-}}\n{}{}      dependsOn:\n        - resource: db\n",
+        workload("db", ""),
+        workload("api", ""),
+    ));
+    assert_eq!(err.rule, "unsupported-dependency");
+    assert!(err.msg.contains("no kustomization"), "{}", err.msg);
+
+    let err = refusal(
+        "  resources:\n    - id: release\n      type: release\n      params: {ordering: waves}\n",
+    );
+    assert_eq!(err.rule, "invalid-param");
 }
 
 #[test]
