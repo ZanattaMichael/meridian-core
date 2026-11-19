@@ -443,12 +443,20 @@ fn a_release_that_never_becomes_ready_names_what_was_not_ready() {
     assert_eq!(named, [("web", "timed-out")], "{err}");
 }
 
+/// The release and namespace the inspect test installs, apart from the
+/// other tests', which run at the same time.
+const INSPECTED: &str = "meridian-helm-inspect";
+
+fn own(document: &str) -> String {
+    document.replace("meridian-helm-test", INSPECTED)
+}
+
 #[test]
 #[ignore = "needs helm, kubectl and a cluster"]
 fn inspect_reads_an_object_of_the_release_and_the_release_itself() {
     let dir = scratch(TMP, "cluster-inspect");
-    uninstall("meridian-helm-test", "meridian-helm-test");
-    let artifact = compile(&document(1, "fast", false));
+    uninstall(INSPECTED, INSPECTED);
+    let artifact = compile(&own(&document(1, "fast", false)));
     let runner = HelmRunner::from_env();
 
     let read = runner
@@ -475,10 +483,10 @@ fn inspect_reads_an_object_of_the_release_and_the_release_itself() {
     assert_eq!(read.actual.get("status"), Some(&text("deployed")));
     assert_eq!(read.in_desired_state, Some(true));
 
-    let changed = compile(&document(1, "slow", false));
+    let changed = compile(&own(&document(1, "slow", false)));
     let read = runner
         .inspect(&context(&dir), &changed, "settings", "")
         .unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(read.in_desired_state, Some(false));
-    uninstall("meridian-helm-test", "meridian-helm-test");
+    uninstall(INSPECTED, INSPECTED);
 }
