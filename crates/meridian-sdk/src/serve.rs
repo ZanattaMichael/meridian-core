@@ -146,7 +146,7 @@ async fn serve_async(plugin: Plugin) -> Result<(), ServeError> {
         debug_levels: plugin
             .runner
             .as_ref()
-            .map(|r| r.debug_levels().iter().map(|l| l.describe()).collect())
+            .map(|r| crate::debug::describe_all(r.debug_levels(), r.more_debug_levels()))
             .unwrap_or_default(),
         settings: plugin
             .runner

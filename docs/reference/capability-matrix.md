@@ -78,7 +78,7 @@ about.
 | [ansible](../targets/ansible.md) | `-v` | `-vvv` | `-vvvv` |
 | [arm](../targets/arm.md) | `--verbose` | `--debug` | as 2 |
 | [bicep](../targets/bicep.md) | `--verbose` | `--debug` | as 2 |
-| [chef](../targets/chef.md) | `-l info` | `-l debug` | `-l trace` |
+| [chef](../targets/chef.md) | `-l info; chef-run: [log] level info` | `-l debug; chef-run: [log] level debug` | `-l trace; chef-run: [log] level debug` |
 | [cloud-init](../targets/cloud-init.md) | `--debug` | as 1 | as 1 |
 | [cloudformation](../targets/cloudformation.md) | `--debug` | as 1 | as 1 |
 | [docker](../targets/docker.md) | `--log-level debug` | as 1 | as 1 |
@@ -86,10 +86,10 @@ about.
 | [helm](../targets/helm.md) | `--debug` | as 1 | as 1 |
 | [kubernetes](../targets/kubernetes.md) | `-v=4` | `-v=6` | `-v=8` |
 | [opentofu](../targets/opentofu.md) | `TF_LOG=INFO` | `TF_LOG=DEBUG` | `TF_LOG=TRACE` |
-| [openvox](../targets/openvox.md) | `--evaltrace` | `--debug` | `--debug --trace` |
+| [openvox](../targets/openvox.md) | `--evaltrace; bolt: --log-level info` | `--debug; bolt: --log-level debug` | `--debug --trace; bolt: --log-level trace` |
 | [packer](../targets/packer.md) | `PACKER_LOG=1` | as 1 | as 1 |
-| [podman](../targets/podman.md) | none | none | none |
+| [podman](../targets/podman.md) | `100 journal lines of a unit that fails` | `100 journal lines and systemctl status of a unit that fails` | `100 journal lines and systemctl status of a unit that fails, and every unit Quadlet generates` |
 | [pulumi](../targets/pulumi.md) | `-v=3 --logtostderr` | `-v=6 --logtostderr` | `-v=9 --logtostderr` |
-| [puppet](../targets/puppet.md) | `--evaltrace` | `--debug` | `--debug --trace` |
+| [puppet](../targets/puppet.md) | `--evaltrace; bolt: --log-level info` | `--debug; bolt: --log-level debug` | `--debug --trace; bolt: --log-level trace` |
 | [salt](../targets/salt.md) | `-l info` | `-l debug` | `-l trace` |
 | [terraform](../targets/terraform.md) | `TF_LOG=INFO` | `TF_LOG=DEBUG` | `TF_LOG=TRACE` |

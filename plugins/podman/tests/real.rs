@@ -450,8 +450,13 @@ fn a_container_that_cannot_start_fails_the_apply_and_says_why() {
     let artifact = compiled(
         "apiVersion: meridian/v1\nkind: Infrastructure\nmetadata:\n  name: real\nspec:\n  target: podman\n  resources:\n    - id: meridian-ci-broken\n      type: container\n      params:\n        Image: localhost/meridian-ci/no-such-image:1\n        Pull: never\n",
     );
+    // At debug level 2 the failure also carries systemd's own status.
     let log = KeptLog::default();
-    let err = runner.apply(&context(&dir), &artifact, &log).unwrap_err();
+    let debug = RunContext {
+        debug_level: 2,
+        ..context(&dir)
+    };
+    let err = runner.apply(&debug, &artifact, &log).unwrap_err();
     assert_eq!(err.msg, "a unit did not start", "{err}");
     assert_eq!(err.exit_code, Some(75));
     assert_eq!(
@@ -465,6 +470,7 @@ fn a_container_that_cannot_start_fails_the_apply_and_says_why() {
         "{}",
         err.output
     );
+    assert!(err.output.contains("Loaded: "), "{}", err.output);
 }
 
 /// Unlike anything Podman or the plugin prints, with the characters a shell

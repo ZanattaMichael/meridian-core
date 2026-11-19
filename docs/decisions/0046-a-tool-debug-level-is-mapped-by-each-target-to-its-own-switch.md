@@ -29,8 +29,14 @@ hand. Issue 221 asks for one flag.
   `run.started` and the recorded command.
 - **`--tool-debug-step NAME`** limits it to named documents, since debug
   output of every step can bury the one that matters.
-- **Only where the output stays off a stream Meridian parses.** Podman
-  (Quadlet and `systemctl`), Bolt and `chef-run` get none.
+- **Every target has levels.** A runner with a second tool declares its
+  table too (`Runner::more_debug_levels`): Bolt beside `puppet apply`,
+  `chef-run` beside `chef-client`. Where the tool has no switch, the runner
+  does the work and says so in words (`DebugLevel::does`): `chef-run` gets
+  a config file with a `[log]` level and its log is copied to the step;
+  Podman shows more of the journal, `systemctl status` and Quadlet's units.
+- **Debug output stays off any stream Meridian parses.** Bolt and the
+  others that print JSON log to standard error.
 
 ## Alternatives
 
@@ -38,6 +44,8 @@ hand. Issue 221 asks for one flag.
   existed, and it gives no level that means the same across targets.
 - Meridian maps levels itself, from a table in the core. Rejected: the
   plugin knows which call takes the switch and where the output goes.
+- No levels for Podman, Bolt and `chef-run`. Rejected by the owner: every
+  engine needs its own way to show more.
 
 ## Status
 

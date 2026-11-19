@@ -355,9 +355,12 @@ fn debug_levels(&self) -> &'static [DebugLevel] {
 Tool::new(&self.program).debug(debug::pick(DEBUG, context.debug_level))
 ```
 
-`pick` gives `None` at level 0 and the last entry for a level above it. The table is what
-`meridian plugins` and the capability matrix show. Leave it empty when the switch would write
-to a stream the runner parses; the host then warns. Test the command at each level and that
+`pick` gives `None` at level 0 and the last entry for a level above it. A runner that runs a
+second tool on another path declares that table in `Runner::more_debug_levels`, named (Puppet:
+`("bolt", BOLT_DEBUG)`). Where the tool has no switch, `DebugLevel::does("...")` says in words
+what the runner does itself at that level, and the runner reads `context.debug_level`. The table is what
+`meridian plugins` and the capability matrix show. Keep debug output off any stream the
+runner parses. Test the command at each level and that
 level 0 adds nothing.
 
 ### Settings

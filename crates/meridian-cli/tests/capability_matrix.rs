@@ -148,11 +148,11 @@ about.
 ";
 
 fn debug_row(name: &str, runner: &dyn Runner) -> String {
-    let levels: Vec<String> = runner
-        .debug_levels()
-        .iter()
-        .map(|level| format!("`{}`", level.describe().replace('|', "\\|")))
-        .collect();
+    let levels: Vec<String> =
+        meridian_sdk::debug::describe_all(runner.debug_levels(), runner.more_debug_levels())
+            .iter()
+            .map(|level| format!("`{}`", level.replace('|', "\\|")))
+            .collect();
     let cell = |n: usize| match (levels.get(n), levels.last()) {
         (Some(level), _) => level.clone(),
         (None, Some(_)) => format!("as {}", levels.len()),

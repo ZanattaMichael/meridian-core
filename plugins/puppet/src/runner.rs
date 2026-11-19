@@ -18,11 +18,19 @@ use meridian_sdk::{settings, Setting};
 
 use crate::{MANIFEST_PATH, SITE_PATH};
 
-/// What `--tool-debug` adds to the tool, level 1 first. Given to `puppet apply` on this machine; a Bolt run is unchanged.
+/// What `--tool-debug` adds to `puppet apply` on this machine, level 1 first.
 pub const DEBUG: &[meridian_sdk::debug::DebugLevel] = &[
     meridian_sdk::debug::DebugLevel::args(&["--evaltrace"]),
     meridian_sdk::debug::DebugLevel::args(&["--debug"]),
     meridian_sdk::debug::DebugLevel::args(&["--debug", "--trace"]),
+];
+
+/// What `--tool-debug` adds to `bolt apply`, level 1 first. Bolt logs to
+/// standard error, so the JSON report on standard output is unchanged.
+pub const BOLT_DEBUG: &[meridian_sdk::debug::DebugLevel] = &[
+    meridian_sdk::debug::DebugLevel::args(&["--log-level", "info"]),
+    meridian_sdk::debug::DebugLevel::args(&["--log-level", "debug"]),
+    meridian_sdk::debug::DebugLevel::args(&["--log-level", "trace"]),
 ];
 
 /// Names the `puppet` program, when it is not on `PATH`.
@@ -264,7 +272,9 @@ impl PuppetRunner {
         if let Some(agent) = &agent {
             tool = agent.tell(tool);
         }
-        tool = tool.args(self.extra_args.iter().cloned());
+        tool = tool
+            .debug(meridian_sdk::debug::pick(BOLT_DEBUG, context.debug_level))
+            .args(self.extra_args.iter().cloned());
 
         let finished = tool.run(log)?;
         drop(inventory);
@@ -365,6 +375,12 @@ fn hiera_files(context: &RunContext) -> Result<Option<HieraFiles>, RunError> {
 impl Runner for PuppetRunner {
     fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
         DEBUG
+    }
+
+    fn more_debug_levels(
+        &self,
+    ) -> &'static [(&'static str, &'static [meridian_sdk::debug::DebugLevel])] {
+        &[("bolt", BOLT_DEBUG)]
     }
 
     fn settings(&self) -> Vec<Setting> {

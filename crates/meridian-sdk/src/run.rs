@@ -428,6 +428,13 @@ pub trait Runner: Send + Sync {
         &[]
     }
 
+    /// The debug levels of the other tools this runner may run instead of
+    /// its main one, each named: Bolt beside `puppet apply`. Listed after
+    /// the main table by `meridian plugins`.
+    fn more_debug_levels(&self) -> &'static [(&'static str, &'static [crate::debug::DebugLevel])] {
+        &[]
+    }
+
     /// Previews what `apply` would change. It must change nothing.
     fn plan(
         &self,

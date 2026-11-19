@@ -530,7 +530,7 @@ Usually the node is unreachable or has no agent. OpenBolt's output follows.
 **A plan always shows an `exec` as a change**
 Add `creates` to run it once.
 
-[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `--evaltrace`, `--debug`, or `--debug --trace` to `puppet apply`, as the Puppet target does.
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `--evaltrace`, `--debug`, or `--debug --trace` to `puppet apply`, and `--log-level info`, `debug` or `trace` to `bolt apply`, as the Puppet target does.
 
 ## How this target is tested
 

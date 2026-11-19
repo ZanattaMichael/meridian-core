@@ -50,10 +50,19 @@ jobs:
           gem install puppet --no-document
           puppet --version
 
+      # Bolt applies to this machine over its local transport, with its own
+      # Ruby, so it needs no agent and no SSH.
+      - name: Install Bolt
+        run: |
+          gem install bolt --no-document
+          bolt --version
+
       # MERIDIAN_TEST_REAL_REQUIRED makes a missing switch a failure, so this
       # job cannot pass by checking nothing.
       - name: Test against puppet
         env:
           MERIDIAN_TEST_REAL_PUPPET: '1'
+          MERIDIAN_TEST_REAL_BOLT: '1'
           MERIDIAN_TEST_REAL_REQUIRED: '1'
+          BOLT_DISABLE_ANALYTICS: 'true'
         run: cargo test -p meridian-target-puppet --locked --test real -- --ignored --nocapture

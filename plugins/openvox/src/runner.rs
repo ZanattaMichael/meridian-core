@@ -299,6 +299,12 @@ impl Runner for OpenVoxRunner {
         self.tool.debug_levels()
     }
 
+    fn more_debug_levels(
+        &self,
+    ) -> &'static [(&'static str, &'static [meridian_sdk::debug::DebugLevel])] {
+        self.tool.more_debug_levels()
+    }
+
     fn settings(&self) -> Vec<Setting> {
         settings()
     }
