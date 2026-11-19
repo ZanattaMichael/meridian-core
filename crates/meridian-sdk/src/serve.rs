@@ -143,6 +143,11 @@ async fn serve_async(plugin: Plugin) -> Result<(), ServeError> {
             .runner
             .as_ref()
             .is_some_and(|r| r.reads_identifiers()),
+        debug_levels: plugin
+            .runner
+            .as_ref()
+            .map(|r| crate::debug::describe_all(r.debug_levels(), r.more_debug_levels()))
+            .unwrap_or_default(),
         destroys: plugin.runner.as_ref().is_some_and(|r| r.destroys()),
         settings: plugin
             .runner
@@ -221,6 +226,8 @@ struct EmitterHandler {
     saves_plans: bool,
     /// Whether the runner reads its tool's identifiers.
     reads_identifiers: bool,
+    /// What each debug level does to the tool.
+    debug_levels: Vec<String>,
     /// Whether the runner destroys what its tool created.
     destroys: bool,
     /// What the runner can be configured with, for the host to list.
@@ -260,6 +267,7 @@ impl EmitterService for EmitterHandler {
             accepts_inputs: self.accepts_inputs,
             saves_plans: self.saves_plans,
             reads_identifiers: self.reads_identifiers,
+            debug_levels: self.debug_levels.clone(),
             destroys: self.destroys,
             import_formats: wire::import_formats_to_wire(
                 self.importer

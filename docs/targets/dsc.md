@@ -262,3 +262,5 @@ its DSC resources. Check with:
 ```
 
 If empty, remove one of the three keys. DSC v3 is not affected.
+
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) sets `$VerbosePreference` at level 1, and `$DebugPreference` too from level 2, before the module loads.

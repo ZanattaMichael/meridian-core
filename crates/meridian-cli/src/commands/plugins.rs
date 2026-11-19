@@ -105,6 +105,16 @@ pub(crate) fn abilities(info: &meridian_plugin_host::Info) -> Vec<&'static str> 
     can
 }
 
+/// What each `--tool-debug` level does, as `1: -v, 2: -vvv, 3: -vvvv`.
+pub(crate) fn debug_levels(levels: &[String]) -> String {
+    levels
+        .iter()
+        .enumerate()
+        .map(|(n, level)| format!("{}: {level}", n + 1))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 pub(crate) fn list_plugins(
     plugins: &PluginDirs,
     with_settings: bool,
@@ -136,6 +146,9 @@ pub(crate) fn list_plugins(
         }
         if !info.settings_keys.is_empty() {
             outln!("  settings:  {}", info.settings_keys.join(", "));
+        }
+        if !info.debug_levels.is_empty() {
+            outln!("  debug:     {}", debug_levels(&info.debug_levels));
         }
         if !info.rules.is_empty() {
             let names: Vec<&str> = info.rules.iter().map(|r| r.name.as_str()).collect();

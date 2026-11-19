@@ -16,6 +16,21 @@ use meridian_sdk::{
 };
 use meridian_sdk::{settings, Setting};
 
+/// What `--tool-debug` adds to `chef-client` on this machine, level 1 first.
+pub const DEBUG: &[meridian_sdk::debug::DebugLevel] = &[
+    meridian_sdk::debug::DebugLevel::args(&["-l", "info"]),
+    meridian_sdk::debug::DebugLevel::args(&["-l", "debug"]),
+    meridian_sdk::debug::DebugLevel::args(&["-l", "trace"]),
+];
+
+/// What `--tool-debug` does to `chef-run`, which has no log flag: a run
+/// gets a config file with this `[log] level`, and its log is copied into
+/// the step's output when it ends. Chef Workstation has no `trace`.
+pub const CHEF_RUN_DEBUG: &[meridian_sdk::debug::DebugLevel] = &[
+    meridian_sdk::debug::DebugLevel::does("[log] level info"),
+    meridian_sdk::debug::DebugLevel::does("[log] level debug"),
+];
+
 /// Names the `chef-client` program, when it is not on `PATH`. Cinc's
 /// `cinc-client` takes the same arguments.
 pub const CLIENT_VARIABLE: &str = "MERIDIAN_CHEF_CLIENT";
@@ -158,6 +173,7 @@ impl ChefRunner {
             // directory does.
             .args(["--local-mode", "--no-color", "--force-formatter"])
             .args(["--override-runlist", &format!("recipe[{cookbook}]")])
+            .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level))
             .dir(&context.work_dir);
         if let Some(attributes) = &attributes {
             // The attributes file is read as the node's JSON attributes, and
@@ -278,6 +294,16 @@ fn read_report(stdout: &str) -> Vec<Change> {
 }
 
 impl Runner for ChefRunner {
+    fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
+        DEBUG
+    }
+
+    fn more_debug_levels(
+        &self,
+    ) -> &'static [(&'static str, &'static [meridian_sdk::debug::DebugLevel])] {
+        &[("chef-run", CHEF_RUN_DEBUG)]
+    }
+
     fn settings(&self) -> Vec<Setting> {
         settings()
     }
@@ -349,11 +375,25 @@ impl Runner for ChefRunner {
                 if let Some(agent) = &agent {
                     tool = agent.tell(tool);
                 }
-                tool.arg(&context.host)
+                let debug = match meridian_sdk::debug::pick(CHEF_RUN_DEBUG, context.debug_level) {
+                    Some(level) => Some(chef_run_debug(context, level)?),
+                    None => None,
+                };
+                if let Some((config, _)) = &debug {
+                    tool = tool
+                        .arg("--config")
+                        .arg(config.to_string_lossy().into_owned());
+                }
+                let ran = tool
+                    .arg(&context.host)
                     .arg(format!("cookbooks/{cookbook}"))
                     .args(self.extra_args.iter().cloned())
                     .dir(&context.work_dir)
-                    .run_ok("chef-run could not converge the cookbook", log)?;
+                    .run_ok("chef-run could not converge the cookbook", log);
+                if let Some((_, logs)) = &debug {
+                    relay_chef_run_log(logs, log);
+                }
+                ran?;
                 drop(agent);
                 log.out("chef-run does not report which resources it changed");
                 Vec::new()
@@ -363,6 +403,75 @@ impl Runner for ChefRunner {
             changes,
             outputs: Vec::new(),
         })
+    }
+}
+
+/// The config file a debug `chef-run` is given, and where its log goes: the
+/// user's own `~/.chef-workstation/config.toml` with its `[log]` table
+/// replaced by one at the level asked for, logging under the work
+/// directory.
+fn chef_run_debug(
+    context: &RunContext,
+    level: &meridian_sdk::debug::DebugLevel,
+) -> Result<(PathBuf, PathBuf), RunError> {
+    let word = level.does.rsplit(' ').next().unwrap_or("debug");
+    let logs = context.work_dir.join("chef-run-logs");
+    let _ = std::fs::remove_dir_all(&logs);
+    let _ = std::fs::remove_file(&logs);
+    std::fs::create_dir_all(&logs)
+        .map_err(|e| RunError::new(format!("creating {}: {e}", logs.display())))?;
+    let own = std::env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join(".chef-workstation/config.toml"))
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .unwrap_or_default();
+    let config = context.work_dir.join("chef-run-debug.toml");
+    let text = format!(
+        "{}\n[log]\nlevel = \"{word}\"\nlocation = {}\n",
+        without_table(&own, "log"),
+        meridian_sdk::Value::String(logs.to_string_lossy().into_owned()).canonical()
+    );
+    std::fs::write(&config, text)
+        .map_err(|e| RunError::new(format!("writing {}: {e}", config.display())))?;
+    Ok((config, logs))
+}
+
+/// A TOML text without one top-level table: from its `[name]` line to the
+/// next table's.
+fn without_table(text: &str, name: &str) -> String {
+    let header = format!("[{name}]");
+    let mut skipping = false;
+    let mut kept = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            skipping = trimmed == header || trimmed.starts_with(&format!("[{name}."));
+        }
+        if !skipping {
+            kept.push(line);
+        }
+    }
+    kept.join("\n")
+}
+
+/// Copies what `chef-run` logged into the step's output, as standard
+/// error: the location may be read as a directory or as the file itself.
+fn relay_chef_run_log(logs: &std::path::Path, log: &dyn Log) {
+    let mut files: Vec<PathBuf> = match std::fs::read_dir(logs) {
+        Ok(entries) => entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file())
+            .collect(),
+        Err(_) if logs.is_file() => vec![logs.to_path_buf()],
+        Err(_) => Vec::new(),
+    };
+    files.sort();
+    for file in files {
+        if let Ok(text) = std::fs::read_to_string(&file) {
+            for line in text.lines() {
+                log.err(line);
+            }
+        }
     }
 }
 
@@ -424,6 +533,15 @@ Recipe: meridian_web::default
                 "update deploy_user: modify",
                 "delete stale_conf: delete",
             ]
+        );
+    }
+
+    #[test]
+    fn the_log_table_is_taken_out_and_the_rest_kept() {
+        let own = "[telemetry]\nenable = false\n[log]\nlevel = \"warn\"\n[log.extra]\nx = 1\n[connection]\ndefault_protocol = \"ssh\"";
+        assert_eq!(
+            without_table(own, "log"),
+            "[telemetry]\nenable = false\n[connection]\ndefault_protocol = \"ssh\""
         );
     }
 }

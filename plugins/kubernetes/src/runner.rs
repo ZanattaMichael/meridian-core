@@ -13,6 +13,13 @@ use meridian_sdk::{settings, Setting};
 
 use crate::{secret_token, CLUSTER_PATH, MANIFESTS_PATH};
 
+/// What `--tool-debug` adds to the tool, level 1 first. kubectl logs to standard error.
+pub const DEBUG: &[meridian_sdk::debug::DebugLevel] = &[
+    meridian_sdk::debug::DebugLevel::args(&["-v=4"]),
+    meridian_sdk::debug::DebugLevel::args(&["-v=6"]),
+    meridian_sdk::debug::DebugLevel::args(&["-v=8"]),
+];
+
 /// Names the program to run, when it is not `kubectl` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_KUBECTL";
 /// Extra arguments for every call, split like a shell command line.
@@ -156,6 +163,7 @@ impl KubernetesRunner {
     ) -> Tool {
         let mut tool = Tool::new(&self.program)
             .args(operation.iter().copied())
+            .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level))
             .dir(&context.work_dir)
             .capture_stdout();
         let namespace = if namespace.is_empty() {
@@ -353,6 +361,10 @@ fn only_missing_new_namespaces(stdout: &str, stderr: &str) -> bool {
 }
 
 impl Runner for KubernetesRunner {
+    fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
+        DEBUG
+    }
+
     fn settings(&self) -> Vec<Setting> {
         settings()
     }

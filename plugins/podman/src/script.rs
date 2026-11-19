@@ -38,6 +38,8 @@ pub(crate) struct Settings<'a> {
     pub systemctl: &'a str,
     pub journalctl: &'a str,
     pub sudo: &'a str,
+    /// The `--tool-debug` level: see [`crate::runner::DEBUG`].
+    pub debug: u32,
 }
 
 /// A unit file the document wants on the host.
@@ -59,6 +61,10 @@ impl Settings<'_> {
             quote(self.journalctl),
             quote(self.sudo),
         );
+        out.push_str(&format!(
+            "lines={}\n",
+            if self.debug >= 1 { 100 } else { 30 }
+        ));
         match self.scope {
             Scope::System => out.push_str(
                 "mode=''\n\
@@ -165,10 +171,12 @@ impl Settings<'_> {
              \x20 QUADLET_UNIT_DIRS=\"$tmp\" \"$gen\" -dryrun{flag} > \"$tmp/.generated\" 2> \"$tmp/.said\"\n\
              \x20 echo \"{MARK}generator $?\"\n\
              \x20 sed -n 's/^---\\(.*\\)---$/{MARK}generated \\1/p' \"$tmp/.generated\"\n\
+             \x20 if [ {show} = 1 ]; then cat \"$tmp/.generated\" >&2; fi\n\
              \x20 grep -v 'Loading source unit file' \"$tmp/.said\" \\\n\
              \x20   | sed -e 's/^quadlet-generator\\[[0-9]*\\]: //' -e \"s|$tmp/||g\" -e 's/^/{MARK}said /'\n\
              fi\n\
-             exit 0\n"
+             exit 0\n",
+            show = u8::from(self.debug >= 3)
         ));
         out
     }
@@ -178,14 +186,16 @@ impl Settings<'_> {
     /// changed and starts everything.
     pub fn apply(&self, steps: &Steps) -> String {
         let mut out = self.preamble();
+        out.push_str(&format!("status={}\n", u8::from(self.debug >= 2)));
         out.push_str(
             "fail() {\n\
              \x20 code=$1; shift\n\
              \x20 for s in \"$@\"; do\n\
              \x20   if ! look is-active --quiet \"$s\" 2>/dev/null; then\n\
              \x20     echo \"--- the journal of $s ---\" >&2\n\
-             \x20     if [ -n \"$mode\" ]; then run \"$journalctl\" \"$mode\" -u \"$s\" -n 30 --no-pager >&2\n\
-             \x20     else run \"$journalctl\" -u \"$s\" -n 30 --no-pager >&2; fi\n\
+             \x20     if [ -n \"$mode\" ]; then run \"$journalctl\" \"$mode\" -u \"$s\" -n \"$lines\" --no-pager >&2\n\
+             \x20     else run \"$journalctl\" -u \"$s\" -n \"$lines\" --no-pager >&2; fi\n\
+             \x20     if [ \"$status\" = 1 ]; then look status \"$s\" --no-pager >&2 || true; fi\n\
              \x20   fi\n\
              \x20 done\n\
              \x20 exit \"$code\"\n\

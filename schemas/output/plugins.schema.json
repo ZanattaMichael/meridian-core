@@ -151,6 +151,13 @@
                 "hint"
               ]
             }
+          },
+          "debugLevels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What --tool-debug 1, 2 and 3 do to the tool, in order; fewer when the target has fewer, none when it has no debug output"
           }
         },
         "additionalProperties": false,
@@ -166,7 +173,8 @@
           "binary",
           "signature",
           "settings",
-          "rules"
+          "rules",
+          "debugLevels"
         ]
       }
     }

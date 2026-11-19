@@ -17,6 +17,12 @@ use meridian_sdk::{settings, Setting};
 use crate::validate::is_secure;
 use crate::{DEPLOYMENT_PATH, TEMPLATE_PATH};
 
+/// What `--tool-debug` adds to the tool, level 1 first. Flags of Meridian's own `az` calls; Azure Resource Manager has no log to raise.
+pub const DEBUG: &[meridian_sdk::debug::DebugLevel] = &[
+    meridian_sdk::debug::DebugLevel::args(&["--verbose"]),
+    meridian_sdk::debug::DebugLevel::args(&["--debug"]),
+];
+
 /// Names the program to run, when it is not `az` on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_AZ";
 /// Extra arguments for every call, split like a shell command line:
@@ -146,6 +152,7 @@ impl ArmRunner {
                 operation,
             ])
             .args(["--name", &deployment.name])
+            .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level))
             .dir(&context.work_dir)
             .capture_stdout();
         if !deployment.subscription_scope {
@@ -425,6 +432,10 @@ fn read_outputs(record: &Value) -> Vec<Output> {
 }
 
 impl Runner for ArmRunner {
+    fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
+        DEBUG
+    }
+
     fn settings(&self) -> Vec<Setting> {
         settings()
     }

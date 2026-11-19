@@ -130,9 +130,45 @@ fn matrix() -> String {
         })
         .collect();
     rows.sort();
+    let mut debug: Vec<String> = meridian_all_targets::ALL
+        .iter()
+        .map(|target| debug_row(target.emitter().name(), target.runner().as_ref()))
+        .collect();
+    debug.sort();
     format!(
         "{INTRODUCTION}| Target | Category | Resource types | notifies | runtimeWhen | plan | saved plan | apply | outputs | inputs | secrets | credentials | cloud | adopt | import | schemas |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n{}",
-        rows.concat()
+        rows.concat(),
+    ) + DEBUG_INTRODUCTION
+        + "| Target | 1 | 2 | 3 |\n|---|---|---|---|\n"
+        + &debug.concat()
+}
+
+const DEBUG_INTRODUCTION: &str = "
+## `--tool-debug`
+
+What each level of [`--tool-debug`](cli.md#asking-a-tool-for-more-output)
+adds to the target's tool. A level above the last one a target has uses its
+last; *none* means the target has no debug output and the flag is warned
+about.
+
+";
+
+fn debug_row(name: &str, runner: &dyn Runner) -> String {
+    let levels: Vec<String> =
+        meridian_sdk::debug::describe_all(runner.debug_levels(), runner.more_debug_levels())
+            .iter()
+            .map(|level| format!("`{}`", level.replace('|', "\\|")))
+            .collect();
+    let cell = |n: usize| match (levels.get(n), levels.last()) {
+        (Some(level), _) => level.clone(),
+        (None, Some(_)) => format!("as {}", levels.len()),
+        (None, None) => "none".to_owned(),
+    };
+    format!(
+        "| [{name}](../targets/{name}.md) | {} | {} | {} |\n",
+        cell(0),
+        cell(1),
+        cell(2)
     )
 }
 

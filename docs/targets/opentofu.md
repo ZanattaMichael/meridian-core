@@ -399,6 +399,8 @@ plans again. [Encrypt the state](#state-and-plan-encryption), which holds the ar
 Settings can also go in `meridian.yaml` under `spec.settings.opentofu`; the environment
 wins. See the [plugin settings reference](../reference/plugin-settings.md#opentofu).
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) sets `TF_LOG` to `INFO`, `DEBUG` or `TRACE` on every `tofu` call; the log goes to standard error, beside the JSON.
+
 ## Credentials
 
 `spec.endpoint` names the [credential](../reference/dsl/credentials.md#reaching-a-cloud-as-a-credential)
@@ -463,6 +465,7 @@ The compiled files hold nothing of the credential, and the plan and the run reco
 name it (`prod (aws, region eu-west-1)`) and nothing more. Outputs read on their own
 (`meridian outputs`) are read with no credential; a backend that needs the cloud's
 login to read the state is read right after the apply, inside it.
+
 ## Adopting what exists
 
 A resource's `adopt` is the provider's own import identifier of a thing that

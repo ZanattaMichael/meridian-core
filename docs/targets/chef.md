@@ -398,6 +398,8 @@ Each names the resource, line and rule:
 | a package, user or service is "up to date" when it is not | chef-client was run without root, so it could not look | run Meridian as root, or set `MERIDIAN_CHEF_CLIENT` to a wrapper that uses `sudo` |
 | `chef-run cannot be given this host` | the host is not a plain host name | fix `targetHost`; the core refuses one first ([`targetHost`](../reference/dsl/outputs-and-hand-offs.md#rules)) |
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `-l info`, `-l debug` or `-l trace` to a local `chef-client`. `chef-run` has no log flag: it is given `--config` with your `~/.chef-workstation/config.toml` and a `[log]` level of `info` (level 1) or `debug` (2 and 3), and its log is copied into the step's output when it ends.
+
 ## How it is tested
 
 - **Golden files** in `plugins/chef/testdata/`, refusals included.

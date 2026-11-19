@@ -394,6 +394,23 @@ impl Run<'_> {
                 Err(why) => return fail(report, Reason::StateFailed, why),
             };
         context.saved_plan = saved_plan;
+        // More of the tool's own output, when asked for this stage. Its lines
+        // are masked as every tool line is.
+        if options.tool_debug > 0 && options.debugs(&id) {
+            if info.debug_levels.is_empty() {
+                report.warnings.push(Warning {
+                    target: stage.target().to_owned(),
+                    resource: String::new(),
+                    msg: format!(
+                        "target {:?} has no debug output, so --tool-debug changes nothing for {}",
+                        stage.target(),
+                        id.name
+                    ),
+                });
+            } else {
+                context.debug_level = options.tool_debug;
+            }
+        }
         // A plan that will be written asks each tool that can for the plan
         // it saved, so the apply can carry out exactly that.
         context.save_plan = self.mode == Mode::Plan && options.save_plan && info.saves_plans;
@@ -1243,6 +1260,7 @@ impl Run<'_> {
             credential,
             save_plan: false,
             saved_plan: None,
+            debug_level: 0,
         })
     }
 

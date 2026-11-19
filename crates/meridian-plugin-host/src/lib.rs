@@ -74,6 +74,9 @@ pub struct Info {
     /// manages, which `meridian retarget` writes as `adopt`. A plugin built
     /// before the field says no.
     pub reads_identifiers: bool,
+    /// What each debug level does to the tool, first level first; empty when
+    /// the target has no debug output to give.
+    pub debug_levels: Vec<String>,
     /// Whether the target removes what its tool created, for `meridian
     /// destroy`. A plugin built before the field says no.
     pub destroys: bool,

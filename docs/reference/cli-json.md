@@ -331,8 +331,9 @@ resource again. Schema: `schemas/output/retarget.schema.json`.
 The catalogue: one object per plugin with `name`, `category`, `can` (the
 operations, as the text lists them), `resources`, `versions`, `imports` (each
 format's `name`, `description` and `patterns`), `sdk`, `protocol`, `binary`,
-`signature` and `settings`. Settings are always included; the text needs
-`--settings`. Schema: `schemas/output/plugins.schema.json`.
+`signature`, `settings` and `debugLevels` (what each
+[`--tool-debug`](cli.md#asking-a-tool-for-more-output) level adds, level 1
+first). Settings are always included; the text needs `--settings`. Schema: `schemas/output/plugins.schema.json`.
 
 A `signature`, here and wherever one is shown, is `state` (`not-checked`,
 `verified`, `unsigned` or `invalid`), with `keyId` when verified and `reason`
@@ -351,7 +352,8 @@ when invalid.
       "sdk": "0.1.0", "protocol": 2,
       "binary": "/usr/local/bin/meridian-target-dsc",
       "signature": { "state": "verified", "keyId": "780001b5de1d7691" },
-      "settings": [ { "name": "program", "variable": "MERIDIAN_DSC_PROGRAM", "default": "dsc", "description": "…" } ]
+      "settings": [ { "name": "program", "variable": "MERIDIAN_DSC_PROGRAM", "default": "dsc", "description": "…" } ],
+      "debugLevels": ["$VerbosePreference = 'Continue'", "$VerbosePreference = 'Continue' $DebugPreference = 'Continue'"]
     }
   ]
 }

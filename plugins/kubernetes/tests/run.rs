@@ -272,3 +272,32 @@ fn without_secrets_kubectl_reads_the_file_as_before() {
         "apply --filename manifests.yaml --context prod --namespace web"
     );
 }
+
+#[test]
+fn a_debug_level_raises_kubectls_verbosity_and_level_0_adds_nothing() {
+    let cases = "apply*) echo 'service/web created (server dry run)' ;;";
+    for (level, expected) in [
+        (
+            0,
+            "apply --dry-run=server --filename manifests.yaml --context prod --namespace web",
+        ),
+        (
+            2,
+            "apply --dry-run=server --filename manifests.yaml -v=6 --context prod --namespace web",
+        ),
+        (
+            9,
+            "apply --dry-run=server --filename manifests.yaml -v=8 --context prod --namespace web",
+        ),
+    ] {
+        let dir = scratch(TMP, &format!("debug-{level}"));
+        let context = RunContext {
+            debug_level: level,
+            ..context(&dir)
+        };
+        runner(&dir, cases)
+            .plan(&context, &compiled(), &KeptLog::default())
+            .unwrap();
+        assert_eq!(calls(&dir), [expected], "level {level}");
+    }
+}

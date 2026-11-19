@@ -504,6 +504,7 @@ pub(crate) fn plugin(name: &str, info: &meridian_plugin_host::Info, can: &[&str]
             "meaning": rule.meaning,
             "hint": text_or_null(&rule.hint),
         })).collect::<Vec<_>>(),
+        "debugLevels": info.debug_levels,
     })
 }
 
