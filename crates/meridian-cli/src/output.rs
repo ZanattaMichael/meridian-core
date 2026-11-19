@@ -184,7 +184,9 @@ fn policy(decisions: &Decisions) -> Json {
 /// does not exist yet is waiting on an apply, so both count.
 pub(crate) fn stage_has_changes(stage: &StageReport) -> bool {
     match &stage.outcome {
-        Outcome::Planned(plan) => plan.unknown || !plan.changes.is_empty(),
+        Outcome::Planned(plan) => {
+            plan.unknown || !plan.changes.is_empty() || !stage.actions.is_empty()
+        }
         Outcome::Deferred { .. } => true,
         _ => false,
     }
@@ -255,6 +257,24 @@ pub(crate) fn stage(stage: &StageReport, mode: Mode, out: Option<&Path>) -> Json
     object.insert(
         "analyses".to_owned(),
         Json::Array(stage.analyses.iter().map(analysis).collect()),
+    );
+    object.insert(
+        "actions".to_owned(),
+        Json::Array(
+            stage
+                .actions
+                .iter()
+                .map(|a| {
+                    json!({
+                        "notifier": text_or_null(&a.notifier),
+                        "resource": a.resource,
+                        "action": a.action,
+                        "status": a.status.as_str(),
+                        "command": text_or_null(&a.command),
+                    })
+                })
+                .collect(),
+        ),
     );
     match &stage.outcome {
         Outcome::Compiled => {}

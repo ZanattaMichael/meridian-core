@@ -150,6 +150,7 @@ async fn serve_async(plugin: Plugin) -> Result<(), ServeError> {
             .unwrap_or_default(),
         destroys: plugin.runner.as_ref().is_some_and(|r| r.destroys()),
         inspects: plugin.runner.as_ref().is_some_and(|r| r.inspects()),
+        acts: plugin.runner.as_ref().map(|r| r.acts()).unwrap_or_default(),
         settings: plugin
             .runner
             .as_ref()
@@ -233,6 +234,8 @@ struct EmitterHandler {
     destroys: bool,
     /// Whether the runner reads one resource as it is now.
     inspects: bool,
+    /// The notify actions the runner performs itself.
+    acts: Vec<crate::ActSchema>,
     /// What the runner can be configured with, for the host to list.
     settings: Vec<crate::Setting>,
     /// Kept only to describe it: importing is served by its own handler.
@@ -273,6 +276,7 @@ impl EmitterService for EmitterHandler {
             debug_levels: self.debug_levels.clone(),
             destroys: self.destroys,
             inspects: self.inspects,
+            acts: self.acts.iter().map(wire::act_schema_to_wire).collect(),
             import_formats: wire::import_formats_to_wire(
                 self.importer
                     .as_ref()
@@ -484,11 +488,24 @@ fn destroy_done(result: pb::DestroyResult) -> pb::DestroyEvent {
     }
 }
 
+fn act_log(line: pb::LogLine) -> pb::ActEvent {
+    pb::ActEvent {
+        event: Some(pb::act_event::Event::Log(line)),
+    }
+}
+
+fn act_done(result: pb::ActResult) -> pb::ActEvent {
+    pb::ActEvent {
+        event: Some(pb::act_event::Event::Result(result)),
+    }
+}
+
 #[tonic::async_trait]
 impl RunnerService for RunnerHandler {
     type PlanStream = EventStream<pb::PlanEvent>;
     type ApplyStream = EventStream<pb::ApplyEvent>;
     type DestroyStream = EventStream<pb::DestroyEvent>;
+    type ActStream = EventStream<pb::ActEvent>;
 
     async fn plan(
         &self,
@@ -556,6 +573,26 @@ impl RunnerService for RunnerHandler {
             destroy_log,
             destroy_done,
             move |log| wire::destroy_result(runner.destroy(&context, &artifact, log)),
+        )))
+    }
+
+    async fn act(
+        &self,
+        request: Request<pb::ActRequest>,
+    ) -> Result<Response<Self::ActStream>, Status> {
+        if self.runner.acts().is_empty() {
+            return Err(Status::unimplemented("this plugin does not act"));
+        }
+        let request = request.into_inner();
+        let context = wire::context_from_wire(request.context).map_err(Status::invalid_argument)?;
+        let artifact = wire::artifact_from_wire(request.artifact);
+        let runner = Arc::clone(&self.runner);
+        let (resource, action) = (request.resource, request.action);
+        Ok(Response::new(run_streaming(
+            &self.active,
+            act_log,
+            act_done,
+            move |log| wire::act_result(runner.act(&context, &artifact, &resource, &action, log)),
         )))
     }
 

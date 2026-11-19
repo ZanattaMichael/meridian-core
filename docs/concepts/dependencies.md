@@ -66,6 +66,9 @@ compile warning:
 - cloud-init: the action as a command that runs once, after every other first-boot
   command, unconditionally. ([cloud-init](../targets/cloud-init.md#notifications))
 
+**Meridian-run** notifies are performed by the plugin after the stage applies, when the
+tool can do neither; see [below](#meridian-run-notifies).
+
 **Accepted actions.** A target accepts only actions its tool can perform; anything else is
 refused, never substituted:
 
@@ -75,5 +78,34 @@ refused, never substituted:
 - Podman: only `restart`.
 - CloudFormation, Bicep, ARM, Pulumi and Packer: every notify is refused
   ([pulumi](../targets/pulumi.md#notifications) says what to write instead).
+
+## Meridian-run notifies
+
+A plugin lists the actions it performs itself, by resource type (`acts`). Meridian takes
+each notify it covers out of the document before compiling, with a compile warning, and
+after the stage applies asks the plugin to perform the action
+([decision 0055](../decisions/0055-meridian-runs-a-notify-the-tool-cannot-after-the-stage-applies.md)).
+Native and synthetic come first: a plugin lists only what its tool cannot express.
+
+| | |
+|---|---|
+| Trigger | the notifier was created, updated or replaced; not adopted or deleted |
+| Timing | after the stage's apply, in apply order, each action once per stage |
+| Plan | `would restart web (app_settings changes)`; `may` for every action when the tool cannot preview |
+| Saved plan | the plan lists its actions; `apply --plan` runs those only, and fails the stage with `plan-differs` for any other it triggers |
+| Pending | triggered actions are recorded in the run-state before any runs; one not run (failed apply, failed action, interrupt, not in the saved plan) stays pending and the next apply of the stage runs it |
+| Failure | a failed action fails the stage, with the resource and `resource-failed`; later actions still run |
+| Not covered | the tool's own plan and state never show the action; a rollback runs none, and a restart is not undone |
+
+```text
+web (ResourceSet, target fake on web1)
+  warning: fake: page: Meridian runs touch on page after the stage applies, when config changes; the tool's own plan and state do not show it
+  ~ update config: 2 bytes
+  applied 1 change
+  ran touch page: fake-tool touch files/page
+```
+
+`--output json` lists each stage's `actions` with `status` `would`, `may`, `done`,
+`failed` or `pending`.
 
 See the [capability matrix](../reference/capability-matrix.md).

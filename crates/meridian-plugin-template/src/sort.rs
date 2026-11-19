@@ -21,8 +21,11 @@ pub(crate) fn apply_ordering(
     // tool reacts to a change by itself, compile the edge to that and declare
     // `native_notify`. If you can build the reaction from something else the
     // tool has, do that, declare `synthetic_notify`, and return a warning that
-    // says what the operator will see. If neither is possible, refuse, as
-    // here. What you must not do is accept the edge and ignore it.
+    // says what the operator will see. If neither is possible and your runner
+    // can perform the action itself after the apply, list it in
+    // `Runner::acts`: the host then takes the edge out before `emit` and
+    // calls `Runner::act` (a Meridian-run notify). Otherwise refuse, as here.
+    // What you must not do is accept the edge and ignore it.
     if let Some(edge) = graph.edges_of_kind(EdgeKind::Notify).next() {
         return Err(refuse_at(
             &edge.from,

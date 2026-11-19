@@ -148,8 +148,11 @@ The fields every stage has: `name`, `kind` (`Infrastructure` or
 [conditions](dsl/conditions.md) left out: `subject` and `condition`),
 `policy` (`null` when no [policy](policy.md) was asked; otherwise `allowed`,
 `asked`, `deny` and `warn`), `analyses` (one per [analyzer](analyzers.md)
-named with `--analyze`, in order; empty otherwise) and `previousGood` (the
-artifact hash a rollback goes back to, or `null`).
+named with `--analyze`, in order; empty otherwise), `actions` (the
+stage's [Meridian-run notifies](../concepts/dependencies.md#meridian-run-notifies):
+`notifier`, `resource`, `action`, `status` (`would`, `may`, `done`, `failed`
+or `pending`) and `command`, or `null` for one not run; empty otherwise) and
+`previousGood` (the artifact hash a rollback goes back to, or `null`).
 
 Each of `analyses` has `analyzer`, `asked` (false when it could not look,
 with `error` saying why), `counts` (`critical`, `high`, `medium`, `low`,

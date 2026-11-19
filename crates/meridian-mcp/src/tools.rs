@@ -368,7 +368,10 @@ fn list_targets(server: &Server) -> Value {
                 })
                 .unwrap_or_default();
             let mut capabilities = Vec::new();
-            if t.capabilities.native_notify || t.capabilities.synthetic_notify {
+            if t.capabilities.native_notify
+                || t.capabilities.synthetic_notify
+                || info.is_some_and(|i| !i.acts.is_empty())
+            {
                 capabilities.push("notify");
             }
             if t.capabilities.runtime_condition {

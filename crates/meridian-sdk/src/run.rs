@@ -280,6 +280,14 @@ pub struct Inspection {
     pub command: String,
 }
 
+/// What [`Runner::act`] did.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Acted {
+    /// The native command run, as a person would type it, with no secret in
+    /// it.
+    pub command: String,
+}
+
 /// The tool failing: a non-zero exit, a rejected configuration, an unreachable
 /// node.
 ///
@@ -549,5 +557,28 @@ pub trait Runner: Send + Sync {
     ) -> Result<Inspection, RunError> {
         let _ = (context, artifact, resource, endpoint);
         Err(RunError::new("this plugin does not inspect"))
+    }
+
+    /// The notify actions this runner performs itself, by resource type,
+    /// for a notify its tool cannot express. List only what the emitter
+    /// cannot compile natively or synthetically: the host takes a covered
+    /// notify out of the tree before `emit`. The default is none.
+    fn acts(&self) -> Vec<crate::ActSchema> {
+        Vec::new()
+    }
+
+    /// Performs `action` on the resource `resource` of the artifact, after
+    /// the stage applied. Asked only for a type and action [`Runner::acts`]
+    /// lists.
+    fn act(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        action: &str,
+        log: &dyn Log,
+    ) -> Result<Acted, RunError> {
+        let _ = (context, artifact, resource, action, log);
+        Err(RunError::new("this plugin does not act"))
     }
 }
