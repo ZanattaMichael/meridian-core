@@ -734,3 +734,9 @@ the document.
 - Stand-ins for `cloud-init` and `ssh`; the binary is driven through the orchestrator.
 - CI checks every recorded user-data with real `cloud-init schema`.
 - A test compares this page's example with the files.
+
+## Inspecting one resource
+
+Not supported: cloud-init applies the user-data once, at first boot, and keeps nothing to read
+per resource. [`meridian inspect`](../reference/cli.md#inspect) is refused with
+`unsupported-inspect`.

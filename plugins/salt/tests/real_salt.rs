@@ -642,3 +642,39 @@ fn the_state_functions_schemas_are_exported_for_an_editor() {
         export.notes
     );
 }
+
+#[ignore = "needs a real salt-call or salt-ssh; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn inspect_runs_one_state_in_test_mode_and_changes_nothing() {
+    let dir = scratch(TMP, "real-inspect");
+    let Some(runner) = real(&dir) else { return };
+    let base = dir.join("node");
+    let conf = base.join("srv/app/conf/app.conf");
+    let ctx = context(&dir);
+    let artifact = compile(&site(&base, "v1"));
+    runner
+        .apply(&ctx, &artifact, &KeptLog::default())
+        .unwrap_or_else(|e| panic!("applying: {e}"));
+
+    let read = runner
+        .inspect(&ctx, &artifact, "app_conf", "localhost")
+        .unwrap_or_else(|e| panic!("inspecting: {e}"));
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(true));
+    assert!(
+        read.command.contains("state.sls_id app_conf web test=True"),
+        "{}",
+        read.command
+    );
+
+    fs::write(&conf, "drifted\n").unwrap();
+    let read = runner
+        .inspect(&ctx, &artifact, "app_conf", "localhost")
+        .unwrap_or_else(|e| panic!("inspecting: {e}"));
+    assert_eq!(read.in_desired_state, Some(false));
+    assert_eq!(
+        fs::read_to_string(&conf).unwrap(),
+        "drifted\n",
+        "inspect changes nothing"
+    );
+}

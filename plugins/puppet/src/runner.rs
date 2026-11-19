@@ -236,36 +236,34 @@ impl PuppetRunner {
         }
     }
 
-    fn run_bolt(
+    /// `bolt` with `args`, against the document's host, printing JSON. The
+    /// credential reaches Bolt as an inventory: the user and password in a
+    /// file only the user can read, and the key through an agent Meridian
+    /// starts, which Bolt is told of. Both last as long as the values
+    /// returned for them.
+    pub(crate) fn bolt_tool(
         &self,
         context: &RunContext,
-        noop: bool,
-        hiera_config: Option<&str>,
+        args: &[&str],
         log: &dyn Log,
-    ) -> Result<Report, RunError> {
+    ) -> Result<(Tool, Option<SecretFile>, Option<meridian_sdk::SshAgent>), RunError> {
         // The core checked the host already; this runner is the last thing
         // between it and Bolt's command line.
         meridian_sdk::check_host(&context.host)
             .map_err(|why| RunError::new(format!("bolt cannot be given this target: {why}")))?;
-        // The credential reaches Bolt as an inventory: the user and password
-        // in a file only the user can read, removed when the run ends, and
-        // the key through an agent Meridian starts, which Bolt is told of.
         let agent = agent_for(&self.agent, context.credential.as_ref(), log)?;
         let inventory = match &context.credential {
             Some(credential) => Some(inventory_file(&context.host, credential)?),
             None => None,
         };
+        let (verb, rest) = args.split_at(args.len().min(2));
         let mut tool = Tool::new(&self.bolt)
-            .args(["apply", APPLY_PATH, "--targets", &context.host])
+            .args(verb.iter().copied())
+            .args(["--targets", &context.host])
             .args(["--format", "json"])
+            .args(rest.iter().copied())
             .dir(&context.work_dir)
             .capture_stdout();
-        if noop {
-            tool = tool.arg("--noop");
-        }
-        if let Some(config) = hiera_config {
-            tool = tool.arg("--hiera-config").arg(config);
-        }
         if let Some(inventory) = &inventory {
             tool = tool
                 .arg("--inventoryfile")
@@ -274,10 +272,27 @@ impl PuppetRunner {
         if let Some(agent) = &agent {
             tool = agent.tell(tool);
         }
-        tool = tool
+        let tool = tool
             .debug(meridian_sdk::debug::pick(BOLT_DEBUG, context.debug_level))
             .args(self.extra_args.iter().cloned());
+        Ok((tool, inventory, agent))
+    }
 
+    fn run_bolt(
+        &self,
+        context: &RunContext,
+        noop: bool,
+        hiera_config: Option<&str>,
+        log: &dyn Log,
+    ) -> Result<Report, RunError> {
+        let mut args = vec!["apply", APPLY_PATH];
+        if noop {
+            args.push("--noop");
+        }
+        if let Some(config) = hiera_config {
+            args.extend(["--hiera-config", config]);
+        }
+        let (tool, inventory, agent) = self.bolt_tool(context, &args, log)?;
         let finished = tool.run(log)?;
         drop(inventory);
         drop(agent);
@@ -423,6 +438,93 @@ impl Runner for PuppetRunner {
             changes: report.changes,
             outputs: Vec::new(),
         })
+    }
+
+    fn inspects(&self) -> bool {
+        true
+    }
+
+    /// `puppet resource` reads the resource; a `--noop` run of the manifest
+    /// says whether Puppet would change it.
+    fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        _endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunError> {
+        let manifest = artifact.files.get(MANIFEST_PATH).ok_or_else(|| {
+            RunError::new(format!(
+                "the artifact has no {MANIFEST_PATH}; it was not compiled by this plugin"
+            ))
+        })?;
+        let Some((r#type, name)) = crate::inspect::declared(manifest, resource) else {
+            return Err(RunError::new(format!(
+                "{MANIFEST_PATH} declares no resource titled {resource:?}"
+            )));
+        };
+        let log = &meridian_sdk::NoLog;
+        let noop = self.run(context, artifact, true, log)?;
+        let in_desired_state = if noop.unreadable {
+            None
+        } else {
+            Some(!noop.changes.iter().any(|c| c.resource == resource))
+        };
+        let read = ["resource", r#type.as_str(), name.as_str(), "--to_yaml"];
+        let (stdout, shown) = match self.transport_for(&context.host) {
+            Transport::Local => {
+                let finished = Tool::new(&self.puppet)
+                    .args(read)
+                    .arg("--color=false")
+                    .args(self.extra_args.iter().cloned())
+                    .dir(&context.work_dir)
+                    .capture_stdout()
+                    .run_ok("puppet resource failed", log)?;
+                (finished.stdout, "puppet")
+            }
+            Transport::Bolt => {
+                // The node has the agent Bolt applies with; its `puppet` is
+                // not always on the PATH of a command Bolt runs.
+                let line = format!(
+                    "/opt/puppetlabs/bin/puppet resource {} {} --to_yaml",
+                    shell_word(&r#type),
+                    shell_word(&name)
+                );
+                let (tool, inventory, agent) =
+                    self.bolt_tool(context, &["command", "run", &line], log)?;
+                let finished = tool.run_ok("bolt command run failed", log)?;
+                drop(inventory);
+                drop(agent);
+                let stdout = crate::inspect::bolt_stdout(&finished.stdout)
+                    .map_err(|e| RunError::new(format!("bolt could not read {resource}: {e}")))?;
+                (stdout, "bolt command run: puppet")
+            }
+        };
+        let (found, actual) = crate::inspect::read_resource(&stdout)
+            .map_err(|e| RunError::new(format!("puppet resource printed what is not YAML: {e}")))?;
+        Ok(meridian_sdk::Inspection {
+            found,
+            actual,
+            in_desired_state,
+            command: format!(
+                "{shown} resource {} {} --to_yaml; puppet apply --noop",
+                r#type,
+                shell_word(&name)
+            ),
+        })
+    }
+}
+
+/// A word for a POSIX shell, quoted unless it is plainly safe.
+fn shell_word(word: &str) -> String {
+    if !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "/._-:=@".contains(c))
+    {
+        word.to_owned()
+    } else {
+        format!("'{}'", word.replace('\'', "'\\''"))
     }
 }
 

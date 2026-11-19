@@ -621,3 +621,99 @@ exit 2"#;
         ("web01", "unreachable", "puppetlabs.tasks/connect-error")
     );
 }
+
+fn declaring() -> Artifact {
+    artifact(&[
+        (
+            "manifests/init.pp",
+            "class meridian_web {\n  file { 'app_conf':\n    ensure  => file,\n    mode    => '0644',\n    path    => '/etc/app.conf',\n  }\n\n  package { 'app_pkg':\n    ensure => installed,\n  }\n}\n",
+        ),
+        ("site.pp", "node 'web01' {\n  include meridian_web\n}\n"),
+    ])
+}
+
+const READ: &str = "if [ \"$1\" = resource ]; then
+cat <<'OUT'
+---
+file:
+  \"/etc/app.conf\":
+    ensure: file
+    content: \"{sha256}aa\"
+    mode: '0600'
+OUT
+else
+cat <<'OUT'
+Notice: /Stage[main]/Meridian_web/File[app_conf]/mode: current_value '0600', should be '0644' (noop)
+OUT
+fi";
+
+#[test]
+fn inspect_on_the_node_reads_the_resource_and_asks_a_noop_run() {
+    let dir = scratch(TMP, "inspect-local");
+    let read = runner(&dir, READ, "exit 9")
+        .inspect(
+            &context(&dir, "localhost"),
+            &declaring(),
+            "app_conf",
+            "localhost",
+        )
+        .unwrap();
+    // The last call is the read; the noop run came before it.
+    assert_eq!(
+        fs::read_to_string(dir.join("puppet.args")).unwrap().trim(),
+        "resource file /etc/app.conf --to_yaml --color=false"
+    );
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(false));
+    assert_eq!(
+        read.actual.get("mode"),
+        Some(&meridian_sdk::Value::from("0600"))
+    );
+    assert!(!read.actual.contains_key("content"));
+    assert_eq!(
+        read.command,
+        "puppet resource file /etc/app.conf --to_yaml; puppet apply --noop"
+    );
+
+    let error = runner(&dir, READ, "exit 9")
+        .inspect(
+            &context(&dir, "localhost"),
+            &declaring(),
+            "nothing",
+            "localhost",
+        )
+        .unwrap_err();
+    assert_eq!(
+        error.msg,
+        "manifests/init.pp declares no resource titled \"nothing\""
+    );
+}
+
+#[test]
+fn inspect_over_bolt_runs_puppet_resource_on_the_node() {
+    let dir = scratch(TMP, "inspect-bolt");
+    let bolt = r#"if [ "$1" = command ]; then
+cat <<'OUT'
+[{"target":"web01","value":{"stdout":"---\npackage:\n  app_pkg:\n    ensure: 1.2.3\n","stderr":"","exit_code":0}}]
+OUT
+else
+echo '[{"target":"web01","value":{"report":{"resource_statuses":{}}}}]'
+fi"#;
+    let read = runner(&dir, "exit 9", bolt)
+        .inspect(&context(&dir, "web01"), &declaring(), "app_pkg", "web01")
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.join("bolt.args")).unwrap().trim(),
+        "command run --targets web01 --format json /opt/puppetlabs/bin/puppet resource package app_pkg --to_yaml"
+    );
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(true));
+    assert_eq!(
+        read.actual.get("ensure"),
+        Some(&meridian_sdk::Value::from("1.2.3"))
+    );
+    assert_eq!(
+        read.command,
+        "bolt command run: puppet resource package app_pkg --to_yaml; puppet apply --noop"
+    );
+}

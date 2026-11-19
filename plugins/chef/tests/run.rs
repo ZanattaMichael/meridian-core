@@ -456,3 +456,56 @@ fn a_debug_level_sets_chef_runs_log_level_and_its_log_reaches_the_step() {
     let args = fs::read_to_string(dir.join("chef-run.args")).unwrap();
     assert!(!args.contains("--config"), "{args}");
 }
+
+#[test]
+fn inspect_on_the_node_is_a_why_run_and_what_it_would_do_to_the_resource() {
+    let dir = scratch(TMP, "inspect");
+    let runner = runner(&dir, REPORT, "exit 9");
+    let read = runner
+        .inspect(
+            &context(&dir, "localhost"),
+            &compiled(),
+            "nginx_pkg",
+            "localhost",
+        )
+        .unwrap();
+    assert_eq!(
+        args(&dir, "chef-client"),
+        "--local-mode --no-color --force-formatter --override-runlist recipe[meridian_web] --why-run"
+    );
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(false));
+    assert_eq!(
+        read.actual.get("wouldChange"),
+        Some(&meridian_sdk::Value::List(vec![meridian_sdk::Value::from(
+            "Would install version 1.24.0 of package nginx"
+        )]))
+    );
+    assert_eq!(
+        read.command,
+        "chef-client --local-mode --why-run, resource nginx_pkg"
+    );
+    let read = runner
+        .inspect(
+            &context(&dir, "localhost"),
+            &compiled(),
+            "nginx_svc",
+            "localhost",
+        )
+        .unwrap();
+    assert_eq!(read.in_desired_state, Some(true));
+    assert!(read.actual.is_empty());
+}
+
+#[test]
+fn inspect_on_another_machine_is_refused_with_the_rule() {
+    let dir = scratch(TMP, "inspect-remote");
+    let error = runner(&dir, "exit 9", "exit 9")
+        .inspect(&context(&dir, "web01"), &compiled(), "nginx_pkg", "web01")
+        .unwrap_err();
+    assert_eq!(
+        error.msg,
+        "chef-run has no why-run mode, so nginx_pkg on web01 cannot be read (unsupported-inspect)"
+    );
+    assert!(!dir.join("chef-run.args").exists());
+}

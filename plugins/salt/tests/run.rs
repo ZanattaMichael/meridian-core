@@ -753,3 +753,37 @@ fn nothing_under_holds(dir: &Path, value: &str) {
         }
     }
 }
+
+#[test]
+fn inspect_runs_one_state_by_its_id_in_test_mode() {
+    let dir = scratch(TMP, "inspect");
+    let result = r#"{"local": {"file_|-app_conf_|-/etc/app.conf_|-managed": {"name": "/etc/app.conf", "changes": {}, "result": true, "comment": "The file /etc/app.conf is in the correct state", "__id__": "app_conf"}}}"#;
+    let read = runner(&dir, &print(result))
+        .inspect(
+            &context(&dir, "localhost"),
+            &compiled(),
+            "app_conf",
+            "localhost",
+        )
+        .unwrap();
+    let work = work(&dir);
+    assert_eq!(
+        args(&dir),
+        format!(
+            "--local --file-root {work}/states --out json --no-color --retcode-passthrough \
+             --log-level quiet state.sls_id app_conf web test=True"
+        )
+    );
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(true));
+    assert_eq!(
+        read.command,
+        "salt-call state.sls_id app_conf web test=True"
+    );
+
+    let failed = r#"{"local": {"pkg_|-p_|-p_|-installed": {"result": false, "comment": "No such package", "__id__": "p"}}}"#;
+    let error = runner(&dir, &format!("{}\nexit 2", print(failed)))
+        .inspect(&context(&dir, "localhost"), &compiled(), "p", "localhost")
+        .unwrap_err();
+    assert_eq!(error.msg, "salt-call could not read p: No such package");
+}

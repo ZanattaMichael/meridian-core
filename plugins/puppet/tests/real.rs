@@ -443,3 +443,52 @@ fn over_bolt_a_debug_level_brings_bolts_log_and_the_report_is_still_read() {
     assert!(text.to_lowercase().contains("debug"), "{text}");
     assert!(!dir.join("app").exists(), "a plan must change nothing");
 }
+
+#[ignore = "needs a real puppet; see docs/contributing/real-tool-tests.md"]
+#[test]
+fn inspect_reads_one_resource_and_a_noop_run_says_whether_it_is_as_declared() {
+    let Some(puppet) = puppet() else { return };
+    let dir = scratch(TMP, "real-inspect");
+    let runner = runner(&puppet, &dir);
+    let artifact = site(&dir, "port = 80\\n", "0640");
+    runner
+        .apply(&context(&dir), &artifact, &KeptLog::default())
+        .unwrap_or_else(|e| panic!("{e}"));
+
+    let read = runner
+        .inspect(&context(&dir), &artifact, "app_conf", "localhost")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(true));
+    assert_eq!(
+        read.actual.get("mode"),
+        Some(&meridian_sdk::Value::from("0640"))
+    );
+    assert!(
+        read.command.starts_with("puppet resource file "),
+        "{}",
+        read.command
+    );
+
+    let conf = dir.join("app/app.conf");
+    fs::write(&conf, "port = 1\n").unwrap();
+    let read = runner
+        .inspect(&context(&dir), &artifact, "app_conf", "localhost")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(read.in_desired_state, Some(false));
+    assert_eq!(
+        fs::read_to_string(&conf).unwrap(),
+        "port = 1\n",
+        "inspect changes nothing"
+    );
+
+    let read = runner
+        .inspect(
+            &context(&dir),
+            &site(&dir.join("gone"), "x", "0600"),
+            "app_conf",
+            "localhost",
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(!read.found);
+}

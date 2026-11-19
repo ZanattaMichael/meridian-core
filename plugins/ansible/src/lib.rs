@@ -17,6 +17,7 @@
 
 mod emit;
 mod import;
+mod inspect;
 mod runner;
 mod schemas;
 mod sort;

@@ -140,6 +140,23 @@ impl SaltRunner {
         log: &dyn Log,
     ) -> Result<Report, RunError> {
         let sls = sls_name(artifact)?;
+        let mut call = vec!["state.apply".to_owned(), sls];
+        if test {
+            call.push("test=True".to_owned());
+        }
+        let (program, finished) = self.call(context, artifact, &call, log)?;
+        read_result(program, finished, test, log)
+    }
+
+    /// Runs one Salt function, `call`, against the artifact's states on the
+    /// document's host, and hands back what it printed.
+    pub(crate) fn call(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        call: &[String],
+        log: &dyn Log,
+    ) -> Result<(&'static str, Finished), RunError> {
         let transport = self.transport_for(&context.host);
         if transport == Transport::Ssh && context.host.is_empty() {
             return Err(RunError::new(
@@ -243,10 +260,7 @@ impl SaltRunner {
                     .arg(&context.host)
             }),
         };
-        let mut tool = tool.args(["state.apply", sls.as_str()]);
-        if test {
-            tool = tool.arg("test=True");
-        }
+        let tool = tool.args(call.iter().cloned());
         // The result is one JSON document printed at the end, so it is data
         // and not something to relay. What it says is relayed afterwards, a
         // line per state.
@@ -254,7 +268,7 @@ impl SaltRunner {
         drop(pillar);
         drop(private_roster);
         drop(agent);
-        read_result(program, finished, test, log)
+        Ok((program, finished))
     }
 }
 
@@ -300,6 +314,43 @@ impl Runner for SaltRunner {
             changes: report.changes,
             outputs: Vec::new(),
         })
+    }
+
+    fn inspects(&self) -> bool {
+        true
+    }
+
+    /// `state.sls_id` with `test=True`: the one state, run in test mode.
+    /// Salt says whether it would change and why, not the properties it
+    /// found.
+    fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        _endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunError> {
+        let sls = sls_name(artifact)?;
+        let call = [
+            "state.sls_id".to_owned(),
+            resource.to_owned(),
+            sls.clone(),
+            "test=True".to_owned(),
+        ];
+        let (program, finished) = self.call(context, artifact, &call, &meridian_sdk::NoLog)?;
+        let command = format!("{program} state.sls_id {resource} {sls} test=True");
+        crate::inspect::read(&finished.stdout, resource)
+            .map(
+                |(found, actual, in_desired_state)| meridian_sdk::Inspection {
+                    found,
+                    actual,
+                    in_desired_state,
+                    command,
+                },
+            )
+            .map_err(|why| {
+                finished.into_error(format!("{program} could not read {resource}: {why}"))
+            })
     }
 }
 

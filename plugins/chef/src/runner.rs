@@ -161,7 +161,7 @@ impl ChefRunner {
         cookbook: &str,
         why_run: bool,
         log: &dyn Log,
-    ) -> Result<Vec<Change>, RunError> {
+    ) -> Result<(Vec<Change>, String), RunError> {
         if let Some(credential) = &context.credential {
             // chef-client configures this machine as the user running it,
             // whoever the document names.
@@ -195,7 +195,7 @@ impl ChefRunner {
         drop(attributes);
         let changes = read_report(&finished.stdout);
         if finished.success() {
-            return Ok(changes);
+            return Ok((changes, finished.stdout));
         }
         let failures = read_failures(&finished.stdout);
         let mut error = finished.into_error("chef-client could not converge the cookbook");
@@ -294,6 +294,27 @@ fn read_report(stdout: &str) -> Vec<Change> {
         }
     }
     changes
+}
+
+/// The lines why-run printed under `resource`: what Chef would do to it.
+fn would_do(stdout: &str, resource: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = false;
+    for line in stdout.lines() {
+        let line = line.trim();
+        if let Some(step) = line.strip_prefix("* ") {
+            if let Some((header, _)) = step.split_once(" action ") {
+                let name = header
+                    .split_once('[')
+                    .and_then(|(_, rest)| rest.strip_suffix(']'))
+                    .unwrap_or("");
+                current = name.split_once(':').map_or(name, |(id, _)| id) == resource;
+            }
+        } else if let Some(said) = line.strip_prefix("- ").filter(|_| current) {
+            lines.push(said.to_owned());
+        }
+    }
+    lines
 }
 
 /// Reads the failures chef-client's formatter prints. A failed resource is
@@ -396,7 +417,7 @@ impl Runner for ChefRunner {
         let cookbook = self.prepare(context, artifact)?;
         match self.transport_for(&context.host) {
             Transport::Local => Ok(Plan {
-                changes: self.converge_here(context, &cookbook, true, log)?,
+                changes: self.converge_here(context, &cookbook, true, log)?.0,
                 unknown: false,
                 saved: None,
             }),
@@ -422,7 +443,7 @@ impl Runner for ChefRunner {
     ) -> Result<Applied, RunError> {
         let cookbook = self.prepare(context, artifact)?;
         let changes = match self.transport_for(&context.host) {
-            Transport::Local => self.converge_here(context, &cookbook, false, log)?,
+            Transport::Local => self.converge_here(context, &cookbook, false, log)?.0,
             Transport::Remote => {
                 if !context.secrets.is_empty() {
                     return Err(RunError::new(format!(
@@ -473,6 +494,47 @@ impl Runner for ChefRunner {
         Ok(Applied {
             changes,
             outputs: Vec::new(),
+        })
+    }
+
+    fn inspects(&self) -> bool {
+        true
+    }
+
+    /// Chef cannot read one resource alone. A why-run of the cookbook on
+    /// this machine says whether it would change the resource, and what.
+    fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        _endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunError> {
+        if self.transport_for(&context.host) == Transport::Remote {
+            return Err(RunError::new(format!(
+                "chef-run has no why-run mode, so {resource} on {} cannot be read ({})",
+                context.host,
+                meridian_sdk::rules::UNSUPPORTED_INSPECT.name
+            )));
+        }
+        let cookbook = self.prepare(context, artifact)?;
+        let (changes, stdout) =
+            self.converge_here(context, &cookbook, true, &meridian_sdk::NoLog)?;
+        let would = would_do(&stdout, resource);
+        let mut actual = meridian_sdk::Data::new();
+        if !would.is_empty() {
+            actual.insert(
+                "wouldChange".to_owned(),
+                meridian_sdk::Value::List(
+                    would.into_iter().map(meridian_sdk::Value::String).collect(),
+                ),
+            );
+        }
+        Ok(meridian_sdk::Inspection {
+            found: true,
+            actual,
+            in_desired_state: Some(!changes.iter().any(|c| c.resource == resource)),
+            command: format!("chef-client --local-mode --why-run, resource {resource}"),
         })
     }
 }
