@@ -256,7 +256,7 @@ fn expand(azure: Azure, r: &Resource, graph: &ResourceGraph) -> Result<Expansion
                      address resource to the vm instead",
                 ));
             }
-            if r.params.contains_key("tags") {
+            if meridian_sdk::infra::authored_tags(r) {
                 return Err(azure.refuse_param(r, "tags", "an Azure subnet carries no tags"));
             }
             if r.params.contains_key("location") {

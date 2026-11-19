@@ -130,6 +130,20 @@ impl Emitter for Fake {
         vec!["mode".to_owned()]
     }
 
+    /// With FAKE_TAGS=on, `file` is described as taking a `tags` mapping,
+    /// as a cloud resource is, and its tags are written beside it.
+    fn resource_schemas(&self) -> Vec<ResourceSchema> {
+        if std::env::var("FAKE_TAGS").as_deref() != Ok("on") {
+            return Vec::new();
+        }
+        let mut file = ResourceSchema::open("file", "A file with the given content.");
+        file.params = vec![
+            ParamSchema::new("content", ParamKind::String, "What the file holds."),
+            ParamSchema::new("tags", ParamKind::Map, "Labels on the file."),
+        ];
+        vec![file]
+    }
+
     fn emit(&self, graph: &ResourceGraph, data: &Data) -> Result<Emitted, CompileError> {
         let mut emitted = Emitted::default();
         // A secret is written as a reference its tool resolves when it runs,
@@ -163,6 +177,12 @@ impl Emitter for Fake {
                 .artifact
                 .files
                 .insert(format!("files/{}", resource.id), content);
+            if let Some(Value::Map(tags)) = resource.params.get("tags") {
+                emitted
+                    .artifact
+                    .files
+                    .insert(format!("tags/{}", resource.id), canonical_map(tags));
+            }
             if !resource.adopt.is_empty() && self.capabilities().adopt == Adoption::Import {
                 emitted.artifact.files.insert(
                     format!("{ADOPT_DIR}{}", resource.id),

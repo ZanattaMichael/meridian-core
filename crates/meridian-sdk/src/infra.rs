@@ -291,6 +291,26 @@ const LOCATION: &str =
 const NAME: &str = "The resource's name in the cloud. The resource's id unless given.";
 const TAGS: &str = "Labels on the resource, as a mapping of text to text.";
 
+/// The tags `meridian lab` puts on every resource a cell makes whose type
+/// takes `tags`: the lab run's id, the cell's number, and when `lab sweep`
+/// may destroy it, in seconds since the Unix epoch. Lowercase letters, digits
+/// and `-`, so AWS tags, Azure tags and Google Cloud labels all take them.
+pub const LAB_TAG_RUN: &str = "meridian-lab-run";
+pub const LAB_TAG_CELL: &str = "meridian-lab-cell";
+pub const LAB_TAG_EXPIRES: &str = "meridian-lab-expires";
+const LAB_TAG_PREFIX: &str = "meridian-lab-";
+
+/// Whether a resource carries tags its author wrote, beside the ones a lab
+/// adds. A mapping for a resource that carries no tags on the chosen cloud
+/// refuses those, and leaves out the lab's.
+pub fn authored_tags(resource: &Resource) -> bool {
+    match resource.params.get("tags") {
+        Some(Value::Map(tags)) => tags.keys().any(|k| !k.starts_with(LAB_TAG_PREFIX)),
+        Some(_) => true,
+        None => false,
+    }
+}
+
 /// The outputs every target promises for a common type: type, output,
 /// description. A document reads them as `${id.output}`; the target rewrites
 /// each to the tool's own expression.

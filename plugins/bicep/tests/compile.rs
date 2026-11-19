@@ -202,3 +202,20 @@ fn an_azure_vm_without_a_key_is_refused() {
     assert_eq!(err.target, "bicep");
     assert_eq!(err.resource, "vm");
 }
+
+#[test]
+fn a_labs_tags_are_left_off_an_azure_subnet_and_an_authors_are_refused() {
+    let net = "    - id: net\n      type: network\n      params: {cidr: 10.0.0.0/16, tags: {meridian-lab-run: l0000abcd}}\n";
+    let text = bicep(&format!(
+        "{TARGET}{net}    - id: s\n      type: subnet\n      params: {{network: \"${{net}}\", cidr: 10.0.1.0/24, tags: {{meridian-lab-run: l0000abcd}}}}\n"
+    ));
+    assert_eq!(
+        text.matches("'meridian-lab-run': 'l0000abcd'").count(),
+        1,
+        "{text}"
+    );
+    let err = refusal(&format!(
+        "{TARGET}{net}    - id: s\n      type: subnet\n      params: {{network: \"${{net}}\", cidr: 10.0.1.0/24, tags: {{team: web}}}}\n"
+    ));
+    assert_eq!(err.rule, "unsupported-param");
+}

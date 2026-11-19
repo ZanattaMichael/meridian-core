@@ -134,7 +134,7 @@ without it. On Azure, reading `publicAddress` of a vm with no `address` is refus
 | `cidr` | text, required | the address range, such as `10.0.0.0/16` |
 | `name` | text | the name in the cloud; the id unless given |
 | `location` | text | an Azure location. Refused on AWS, where the provider's or the stack's region decides |
-| `tags` | mapping of text | labels on the resource |
+| `tags` | mapping of text | labels on the resource. A [lab](../../operations/lab.md#tags) cell adds its own |
 
 | Terraform, AWS | CloudFormation | Terraform, Azure | Bicep |
 |---|---|---|---|
