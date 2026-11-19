@@ -584,3 +584,9 @@ UPDATE_GOLDEN=1 cargo test -p meridian-target-opentofu    # re-record the golden
 ```
 
 The `opentofu` workflow runs the real tests.
+
+## Inspecting one resource
+
+[`meridian inspect`](../reference/cli.md#inspect) works as on
+[Terraform](terraform.md#inspecting-one-resource), with `tofu show -json` and
+`tofu plan -target=ADDR -detailed-exitcode -lock=false`.

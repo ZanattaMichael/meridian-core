@@ -514,3 +514,66 @@ fn a_destroy_preview_plans_with_destroy_and_applies_nothing() {
     assert_eq!(plan.changes[0].to_string(), "delete web_vm: aws_instance");
     assert!(plan.saved.is_none());
 }
+
+const STATE: &str = r#"{"values":{"root_module":{"resources":[{"address":"aws_instance.web","mode":"managed","type":"aws_instance","name":"web","values":{"id":"i-0abc","instance_type":"t3.micro"},"sensitive_values":{}}]}}}"#;
+
+fn inspecting(dir: &Path, plan_exit: u8) -> TerraformRunner {
+    runner(
+        dir,
+        &format!(
+            "init) echo 'Terraform has been successfully initialized!' ;;\nshow) echo '{STATE}' ;;\nplan) exit {plan_exit} ;;"
+        ),
+    )
+}
+
+#[test]
+fn inspect_reads_the_state_and_asks_a_plan_targeted_at_the_resource() {
+    let dir = scratch(TMP, "inspect");
+    let context = context(&dir);
+    fs::create_dir_all(&context.work_dir).unwrap();
+    fs::write(context.work_dir.join("main.tf.json"), "{}\n").unwrap();
+    let read = inspecting(&dir, 2)
+        .inspect(&context, &compiled(), "web", "")
+        .unwrap();
+    assert_eq!(
+        calls(&dir),
+        [
+            "init -input=false -no-color",
+            "show -json -no-color",
+            "plan -input=false -no-color -lock=false -target=aws_instance.web -detailed-exitcode",
+        ]
+    );
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(false));
+    assert_eq!(
+        read.actual.get("instance_type"),
+        Some(&Value::from("t3.micro"))
+    );
+    assert_eq!(
+        read.command,
+        "terraform show -json; terraform plan -target=aws_instance.web -detailed-exitcode"
+    );
+}
+
+#[test]
+fn inspect_before_any_apply_runs_nothing_and_finds_nothing() {
+    let dir = scratch(TMP, "inspect-never");
+    let read = inspecting(&dir, 0)
+        .inspect(&context(&dir), &compiled(), "web", "")
+        .unwrap();
+    assert!(!dir.join("calls").exists());
+    assert!(!read.found);
+    assert_eq!(read.in_desired_state, Some(false));
+}
+
+#[test]
+fn inspect_names_a_failed_plan() {
+    let dir = scratch(TMP, "inspect-fails");
+    let context = context(&dir);
+    fs::create_dir_all(&context.work_dir).unwrap();
+    fs::write(context.work_dir.join("main.tf.json"), "{}\n").unwrap();
+    let err = inspecting(&dir, 1)
+        .inspect(&context, &compiled(), "web", "")
+        .unwrap_err();
+    assert!(err.msg.contains("terraform plan failed"), "{}", err.msg);
+}

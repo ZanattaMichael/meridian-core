@@ -363,3 +363,15 @@ with `${id.arn}`.
 CI runs the runner against `terraform` 1.13 and `tofu`: plan, apply, in-sync, update,
 replace, outputs, a refused configuration and a secret. They use `terraform_data` and local
 state; cloud providers are untested. See [Real-tool tests](../contributing/real-tool-tests.md).
+
+## Inspecting one resource
+
+[`meridian inspect`](../reference/cli.md#inspect) reads the resource named by its id:
+
+| Answer | From |
+|---|---|
+| actual | `terraform show -json`: the recorded values of the root-module resource of that name; a value the state marks sensitive is `(sensitive)` |
+| as declared | `terraform plan -target=ADDR -detailed-exitcode -lock=false` of the compiled configuration: exit 0 yes, 2 no. `-target` includes what the resource depends on |
+
+It writes the configuration as a plan does, and never the state. A resource with `count` or
+`for_each` is not found by its id.

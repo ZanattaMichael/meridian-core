@@ -297,3 +297,45 @@ fn a_destroy_preview_deletes_nothing_and_a_missing_deployment_has_nothing_to_rem
     assert!(removed.is_empty());
     assert_eq!(calls(&dir), ["show --output json"]);
 }
+
+#[test]
+fn inspect_shows_the_resource_and_keeps_what_a_template_sets() {
+    let dir = scratch(TMP, "inspect");
+    fs::create_dir_all(dir.join("work")).unwrap();
+    let runner = runner(
+        &dir,
+        r#"--resource-group) echo '{"id":"/x","name":"web-ip","location":"westeurope","properties":{"publicIPAllocationMethod":"Static"}}' ;;"#,
+    );
+    assert!(runner.inspects());
+    let read = runner
+        .inspect(&context(&dir), &compiled(), "web_ip", "")
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.join("calls")).unwrap().trim(),
+        "resource show --resource-group web-prod --resource-type microsoft.network/publicipaddresses --name web-ip --output json"
+    );
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, None);
+    assert_eq!(
+        read.actual.get("location"),
+        Some(&Value::from("westeurope"))
+    );
+    assert!(!read.actual.contains_key("id"));
+    assert_eq!(
+        read.command,
+        "az resource show --resource-group web-prod --resource-type microsoft.network/publicipaddresses --name web-ip"
+    );
+}
+
+#[test]
+fn inspect_of_a_resource_azure_does_not_have_finds_nothing() {
+    let dir = scratch(TMP, "inspect-missing");
+    fs::create_dir_all(dir.join("work")).unwrap();
+    let read = runner(
+        &dir,
+        r#"--resource-group) echo '(ResourceNotFound) The Resource was not found.' >&2; exit 3 ;;"#,
+    )
+    .inspect(&context(&dir), &compiled(), "web_ip", "")
+    .unwrap();
+    assert!(!read.found);
+}

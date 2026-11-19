@@ -445,6 +445,63 @@ impl Runner for BicepRunner {
         read_outputs(&finished.stdout)
     }
 
+    fn inspects(&self) -> bool {
+        true
+    }
+
+    /// The resource as Azure has it now, from `az resource show`. Bicep
+    /// keeps no record to compare with, so whether it is as declared is
+    /// left to the comparison.
+    fn inspect(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        _endpoint: &str,
+    ) -> Result<meridian_sdk::Inspection, RunError> {
+        let Some(settings) = artifact.files.get(DEPLOYMENT_PATH) else {
+            return Err(RunError::new(format!(
+                "the artifact has no {DEPLOYMENT_PATH}; it was not compiled by this plugin"
+            )));
+        };
+        let deployment = Deployment::read(settings)?;
+        let args = deployment
+            .resources
+            .iter()
+            .find(|(_, id)| *id == resource)
+            .and_then(|(key, _)| {
+                let parts: Vec<&str> = key.split('/').collect();
+                let n = parts.len().checked_sub(1)? / 2;
+                if n == 0 || parts.len() != 1 + 2 * n {
+                    return None;
+                }
+                crate::inspect::show_args(&parts[..=n].join("/"), &parts[n + 1..].join("/"))
+            })
+            .ok_or_else(|| {
+                RunError::new(format!(
+                    "{resource} is not one Azure resource with a plain name ({})",
+                    meridian_sdk::rules::UNSUPPORTED_INSPECT.name
+                ))
+            })?;
+        let mut tool = Tool::new(&self.program)
+            .args([
+                "resource",
+                "show",
+                "--resource-group",
+                &deployment.resource_group,
+            ])
+            .dir(&context.work_dir);
+        if !deployment.subscription.is_empty() {
+            tool = tool.args(["--subscription", &deployment.subscription]);
+        }
+        let shown_as = format!(
+            "az resource show --resource-group {} {}",
+            deployment.resource_group,
+            args.join(" ")
+        );
+        crate::inspect::show(tool, &args, &self.extra_args, shown_as)
+    }
+
     fn destroys(&self) -> bool {
         true
     }

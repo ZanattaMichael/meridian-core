@@ -222,6 +222,19 @@ fn an_encrypted_state_is_planned_applied_and_read_back() {
     );
     assert!(found.values().all(|id| !id.is_empty()), "{found:?}");
 
+    // One resource is read back, and a plan targeted at it agrees it is as declared.
+    let read = client
+        .inspect(&context, &artifact, "release", "")
+        .unwrap_or_else(|e| panic!("{}", explain("inspecting", &e, &[])));
+    assert!(read.found);
+    assert_eq!(read.in_desired_state, Some(true));
+    assert!(
+        read.command
+            .starts_with("tofu show -json; tofu plan -target="),
+        "{}",
+        read.command
+    );
+
     // Nothing has changed, so a second plan is empty.
     let again = plan_ok("the second plan", &client, &context, &artifact);
     assert!(again.changes.is_empty(), "{:?}", again.changes);

@@ -569,3 +569,10 @@ See the [plugin settings reference](../reference/plugin-settings.md#pulumi).
   `MERIDIAN_TEST_REAL_PULUMI=1 cargo test -p meridian-target-pulumi --test real`.
 
 Re-record golden files: `UPDATE_GOLDEN=1 cargo test -p meridian-target-pulumi`.
+
+## Inspecting one resource
+
+[`meridian inspect`](../reference/cli.md#inspect) reads the resource's `outputs` from
+`pulumi stack export`, by the name in its URN. A secret is `(sensitive)`. The export is what
+the last update recorded, so the tool's verdict is left empty and the comparison with the
+document is the answer.

@@ -357,3 +357,11 @@ with `provisioningState: Failed` is a [resource failure](../reference/state.md#r
   settings ([Real-tool tests](../contributing/real-tool-tests.md#azure)). Run with
   `MERIDIAN_TEST_REAL_BICEP=1 cargo test -p meridian-target-bicep --test real -- --ignored`.
   Treat the runner as untested against Azure until that job has run.
+
+## Inspecting one resource
+
+[`meridian inspect`](../reference/cli.md#inspect) runs `az resource show` for the resource's
+type and name in the deployment's resource group (a child resource under `--parent`), and
+keeps `location`, `tags`, `sku`, `kind`, `identity` and `properties`. Azure keeps no record of
+the deployment to compare with, so the tool's verdict is left empty. A name that is an
+expression is refused with `unsupported-inspect`.
