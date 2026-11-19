@@ -238,6 +238,23 @@ fn run() -> ExitCode {
                 all,
             },
         ),
+        Command::Diagnose {
+            run,
+            step,
+            endpoint,
+            cause,
+            state,
+        } => diagnose(
+            &state,
+            &DiagnoseQuery {
+                run: run.as_deref(),
+                filter: meridian_orchestrator::diagnose::Filter {
+                    step: step.as_deref(),
+                    endpoint: endpoint.as_deref(),
+                    cause: cause.as_deref(),
+                },
+            },
+        ),
         Command::BugReport { run, out, state } => {
             bug_report(&state, run.as_deref(), out.as_deref())
         }

@@ -1,6 +1,7 @@
 //! One module per group of subcommands. Each takes what the arguments in
 //! `args` parsed and returns a [`Failure`](super::Failure) or nothing.
 
+pub(crate) mod diagnose;
 pub(crate) mod documents;
 pub(crate) mod logs;
 pub(crate) mod modules;
@@ -12,6 +13,7 @@ pub(crate) mod secrets;
 pub(crate) mod signing;
 pub(crate) mod testing;
 
+pub(crate) use diagnose::*;
 pub(crate) use documents::*;
 pub(crate) use logs::*;
 pub(crate) use modules::*;
