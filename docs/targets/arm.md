@@ -264,6 +264,11 @@ CI parses every template with `az bicep decompile`. The runner has only met a st
 ([Real-tool tests](../contributing/real-tool-tests.md#azure)). Treat it as untested against
 Azure until then.
 
+Meridian takes no [cloud credential](../reference/dsl/credentials.md#reaching-a-cloud-as-a-credential)
+for `arm` yet: `az login --service-principal` takes the secret on its command line, so a
+document that names one is refused before anything runs. Declare it `from: ambient` to name
+the signed-in `az`.
+
 ### Environment
 
 | Variable | Meaning |

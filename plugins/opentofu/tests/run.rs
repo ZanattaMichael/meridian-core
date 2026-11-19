@@ -8,7 +8,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use meridian_plugin_testkit::{artifact, scratch, secrets, stand_in, KeptLog};
+use meridian_plugin_testkit::{
+    artifact, cloud_credential, cloud_env, nothing_under_holds, scratch, secrets, stand_in, KeptLog,
+};
 use meridian_sdk::{Artifact, ChangeAction, RunContext, Runner, SecretRef, Value};
 use meridian_target_opentofu::OpenTofuRunner;
 
@@ -58,9 +60,10 @@ fn runner(dir: &Path, cases: &str) -> OpenTofuRunner {
         &format!(
             "echo \"$@\" >> \"{dir}/calls\"\n\
              echo \"$TF_VAR_region|$TF_VAR_replicas|$TF_VAR_zones|$TF_IN_AUTOMATION|$TF_INPUT\" > \"{dir}/env\"\n\
-             pwd > \"{dir}/pwd\"\n\
+             pwd > \"{dir}/pwd\"\n{record}\
              case \"$1\" in\n{cases}\nesac",
-            dir = dir.display()
+            dir = dir.display(),
+            record = meridian_plugin_testkit::record_cloud_env(dir, "$1"),
         ),
     );
     OpenTofuRunner {
@@ -423,4 +426,63 @@ fn a_destroy_preview_plans_with_destroy_and_applies_nothing() {
     );
     assert_eq!(plan.changes[0].to_string(), "delete web_vm: aws_instance");
     assert!(plan.saved.is_none());
+}
+
+#[test]
+fn an_azure_credential_reaches_every_call_in_its_environment_and_nowhere_else() {
+    let dir = scratch(TMP, "azure-credential");
+    let runner = runner(&dir, &keeping_secrets(&dir));
+    let mut context = context(&dir);
+    context.credential = Some(cloud_credential(
+        "azure",
+        &[
+            ("clientId", "c1"),
+            ("tenantId", "t1"),
+            ("subscriptionId", "s1"),
+        ],
+        &[("clientSecret", "sp-secret-9fXw")],
+    ));
+    let log = KeptLog::default();
+    runner.plan(&context, &compiled(), &log).unwrap();
+    for call in ["init", "plan", "show"] {
+        assert_eq!(
+            cloud_env(&dir, call),
+            [
+                "ARM_CLIENT_ID=c1",
+                "ARM_CLIENT_SECRET=sp-secret-9fXw",
+                "ARM_SUBSCRIPTION_ID=s1",
+                "ARM_TENANT_ID=t1",
+            ],
+            "{call}"
+        );
+        fs::remove_file(dir.join(format!("cloud-env.{call}"))).unwrap();
+    }
+    assert!(!calls(&dir).iter().any(|c| c.contains("9fXw")));
+    assert!(!log.text().iter().any(|l| l.contains("9fXw")));
+    nothing_under_holds(&dir.join("work"), "9fXw");
+    runner.apply(&context, &compiled(), &log).unwrap();
+    assert!(cloud_env(&dir, "apply").contains(&"ARM_CLIENT_SECRET=sp-secret-9fXw".to_owned()));
+}
+
+#[test]
+fn an_azure_certificate_is_a_private_file_the_environment_names() {
+    let dir = scratch(TMP, "azure-certificate");
+    let runner = runner(&dir, &keeping_secrets(&dir));
+    let mut context = context(&dir);
+    context.credential = Some(cloud_credential(
+        "azure",
+        &[("clientId", "c1"), ("tenantId", "t1")],
+        &[("certificate", "-----BEGIN CERTIFICATE-9fXw-----")],
+    ));
+    runner
+        .plan(&context, &compiled(), &KeptLog::default())
+        .unwrap();
+    let env = cloud_env(&dir, "plan");
+    let path = env
+        .iter()
+        .find_map(|l| l.strip_prefix("ARM_CLIENT_CERTIFICATE_PATH="))
+        .unwrap_or_else(|| panic!("the certificate file is not named: {env:?}"));
+    assert!(!Path::new(path).exists(), "{path} was left behind");
+    assert!(!Path::new(path).starts_with(dir.join("work")), "{path}");
+    assert!(!env.iter().any(|l| l.contains("9fXw")), "{env:?}");
 }

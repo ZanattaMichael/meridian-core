@@ -9,7 +9,7 @@ with `terraform`. OpenTofu's `tofu` takes the same commands.
 
 | | |
 |---|---|
-| Resource types | Terraform's own: any `<provider>_<type>`, plus `data.<type>`, `module`, `variable`, `local`, `provider` and `backend`. Also the [common infrastructure types](#common-infrastructure-types), on AWS and Azure |
+| Resource types | Terraform's own: any `<provider>_<type>`, plus `data.<type>`, `module`, `variable`, `local`, `provider` and `backend`. Also the [common infrastructure types](#common-infrastructure-types), on AWS, Azure and Google Cloud |
 | Import | Yes: `*.tf` and `*.tf.json`. See [Importing](#importing) |
 | `dependsOn` | Yes, as `depends_on`, unless a reference already implies the order |
 | `notifies` | Synthetic, and blunt: the action `replace` only. See [Notifications](#notifications) |
@@ -81,7 +81,7 @@ creates a machine with the user-data a cloud-init document compiles to.
 ## Common infrastructure types
 
 `network`, `subnet`, `firewall`, `address` and `vm` are Meridian's own types,
-and this target turns each into the resources of the AWS or the Azure provider
+and this target turns each into the resources of the AWS, Azure or Google provider
 ([the common infrastructure types](../reference/dsl/common-infrastructure-types.md)
 has every param and mapping). They are mixed freely with Terraform's own
 types. The cloud is the one named in `spec.settings`, or the one whose provider
@@ -91,24 +91,24 @@ the document configures:
 spec:
   target: terraform
   settings:
-    cloud: azure            # or aws; optional when only one provider is configured
+    cloud: azure            # or aws, gcp; optional when only one provider is configured
     location: westeurope    # Azure: where a common resource goes unless it says
     resourceGroup: web-prod # Azure: required
 ```
 
-| Common type | AWS | Azure |
-|---|---|---|
-| `network` | `aws_vpc` | `azurerm_virtual_network` |
-| `subnet` | `aws_subnet`; when public, an internet gateway, a route table and a route | `azurerm_subnet` |
-| `firewall` | `aws_security_group` and one rule resource per rule | `azurerm_network_security_group` and one `azurerm_network_security_rule` per rule |
-| `address` | `aws_eip` | `azurerm_public_ip` |
-| `vm` | `aws_instance`, an `aws_key_pair`, a `data.aws_ami` lookup, an `aws_eip_association` | `azurerm_linux_virtual_machine`, an `azurerm_network_interface` and its firewall association |
+| Common type | AWS | Azure | Google Cloud |
+|---|---|---|---|
+| `network` | `aws_vpc` | `azurerm_virtual_network` | `google_compute_network` |
+| `subnet` | `aws_subnet`; when public, an internet gateway, a route table and a route | `azurerm_subnet` | `google_compute_subnetwork` |
+| `firewall` | `aws_security_group` and one rule resource per rule | `azurerm_network_security_group` and one `azurerm_network_security_rule` per rule | one `google_compute_firewall` per rule, plus a deny-all egress rule when there are out rules |
+| `address` | `aws_eip` | `azurerm_public_ip` | `google_compute_address` |
+| `vm` | `aws_instance`, an `aws_key_pair`, a `data.aws_ami` lookup, an `aws_eip_association` | `azurerm_linux_virtual_machine`, an `azurerm_network_interface` and its firewall association | `google_compute_instance`, tagged for its firewalls |
 
 The rules and routes are separate resources rather than the inline
 `ingress`, `route` or `security_rule` blocks. Those are "attributes as blocks"
 in the providers, which Terraform's JSON syntax would need written out in full.
 Examples: [`examples/common/web-aws.yaml`](../../examples/common/web-aws.yaml)
-and [`web-azure.yaml`](../../examples/common/web-azure.yaml). The OpenTofu target
+[`web-azure.yaml`](../../examples/common/web-azure.yaml) and [`web-gcp.yaml`](../../examples/common/web-gcp.yaml). The OpenTofu target
 takes the common types too, with the same mapping and settings.
 
 ## References
@@ -260,6 +260,71 @@ A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) compiles to
 variables file passed as `-var-file`, removed after planning; the plan file is removed after
 use. A [saved plan](../operations/pull-requests.md) keeps no plan file for such a stage, so
 apply plans again. State holds the arguments, so use a `backend` that protects it.
+
+## Credentials
+
+`spec.endpoint` names the [credential](../reference/dsl/credentials.md#reaching-a-cloud-as-a-credential)
+the cloud is reached as. The AWS, Azure and Google providers read their login from the environment, so an `aws`, `azure` or `gcp` credential reaches each of `terraform init`, `plan`, `show`, `apply` and `output` there:
+
+```yaml
+spec:
+  target: terraform
+  endpoint:
+    type: cloud
+    credential: prod
+  secrets:
+    - name: aws_secret_key
+      from: env
+      key: PROD_AWS_SECRET_KEY
+  credentials:
+    - name: prod
+      type: aws
+      accessKeyId: AKIAIOSFODNN7EXAMPLE
+      secretAccessKey: ${{ secret.aws_secret_key }}
+      region: eu-west-1
+  resources:
+    - id: logs
+      type: aws_s3_bucket
+      params:
+        bucket: shop-logs
+```
+
+| Credential | Plain fields, as variables | Secret fields |
+|---|---|---|
+| `aws` | `accessKeyId` as `AWS_ACCESS_KEY_ID`, `profile` as `AWS_PROFILE`, `region` as `AWS_REGION` and `AWS_DEFAULT_REGION` | `secretAccessKey` as `AWS_SECRET_ACCESS_KEY`, `sessionToken` as `AWS_SESSION_TOKEN` |
+| `azure` | `clientId` as `ARM_CLIENT_ID`, `tenantId` as `ARM_TENANT_ID`, `subscriptionId` as `ARM_SUBSCRIPTION_ID`, `managedIdentity: true` as `ARM_USE_MSI=true` | `clientSecret` as `ARM_CLIENT_SECRET`; `certificate` in a private file named by `ARM_CLIENT_CERTIFICATE_PATH` |
+| `gcp` | `project` as `GOOGLE_PROJECT` and `CLOUDSDK_CORE_PROJECT`, `impersonate` as `GOOGLE_IMPERSONATE_SERVICE_ACCOUNT` | `serviceAccountKey` in a private file named by `GOOGLE_APPLICATION_CREDENTIALS` |
+
+- **In the tool's environment, and nowhere else.** The providers take a login from
+  the environment, from their own files under your home directory, or from the
+  machine's metadata service; Meridian holds the credential in protected memory and
+  writes nothing under your home, so the environment is the way: rank 4 of the plan's
+  [channels](../reference/dsl/secrets.md#handing-a-secret-to-a-tool), the last it
+  allows, taken because the providers take a value no other way. The value goes from
+  protected memory into the process's environment as it is spawned, and is copied
+  nowhere else by Meridian. It is never on the command line, in the compiled files or
+  in a file Meridian keeps. The plan line says so: `as prod (aws, region eu-west-1),
+  in the tool's environment`.
+- **What that means.** Another process of yours can read a running tool's environment
+  (`/proc/<pid>/environ`), and everything the tool starts, such as a provider plugin,
+  inherits it. That is the same exposure as exporting the variables in a shell before
+  running the tool by hand, and no more.
+- **A file where a provider reads one.** A `gcp` `serviceAccountKey` and an `azure`
+  `certificate` are written to a file only you can read, held in memory where the
+  system allows, and the environment names its path (`GOOGLE_APPLICATION_CREDENTIALS`,
+  `ARM_CLIENT_CERTIFICATE_PATH`). The file is removed when the stage ends.
+- **`from: ambient`** names the identity without Meridian holding any of it: the
+  tool finds the login as it does today. The plain fields are still told, so an
+  ambient `aws` credential with a `profile` sets `AWS_PROFILE` for the run.
+- **Refused at compile**, rule `unsupported-credential`: a credential of a type the
+  tool does not reach a cloud as, an `aws` `roleArn` (the SDKs assume a role through
+  a profile that names it; declare that profile), and a plain field with a line break
+  in it.
+
+The compiled files hold nothing of the credential, and the plan and the run record
+name it (`prod (aws, region eu-west-1)`) and nothing more. Outputs read on their own
+(`meridian outputs`) are read with no credential; a backend that needs the cloud's
+login to read the state is read right after the apply, inside it.
 
 ## Editor schemas
 

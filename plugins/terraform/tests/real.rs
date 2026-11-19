@@ -487,7 +487,7 @@ fn the_common_types_are_configurations_the_real_providers_validate() {
         eprintln!("skipped: MERIDIAN_TEST_REAL_TERRAFORM_NETWORK is not set");
         return;
     }
-    for name in ["web-aws", "web-azure"] {
+    for name in ["web-aws", "web-azure", "web-gcp"] {
         let dir = scratch(TMP, &format!("real-common-{name}"));
         let graph = graph_from_file(&format!("examples/common/{name}.yaml"), "terraform");
         let emitted = meridian_target_terraform::Terraform

@@ -113,6 +113,10 @@ pub struct Tool {
     shown: Vec<String>,
     dir: Option<PathBuf>,
     env: Vec<(String, String)>,
+    /// Secrets the tool's process is given in its environment, each written
+    /// straight from protected memory at the moment it is spawned. Rank 4 of
+    /// the plan's channels, for a tool that takes a value no other way.
+    secret_env: Vec<(String, Arc<SecretValue>)>,
     stdin: Option<Stdin>,
     relay_stdout: bool,
 }
@@ -135,6 +139,7 @@ impl Tool {
             shown: Vec::new(),
             dir: None,
             env: Vec::new(),
+            secret_env: Vec::new(),
             stdin: None,
             relay_stdout: true,
         }
@@ -183,6 +188,43 @@ impl Tool {
     pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.env.push((key.into(), value.into()));
         self
+    }
+
+    /// A secret the tool's process is given in its environment, which is
+    /// the last channel the plan allows (rank 4): the environment of a
+    /// process can be read by the same user through `/proc/<pid>/environ`,
+    /// and everything the tool starts inherits it. For a tool that takes
+    /// the value no other way, such as a cloud provider's login; the
+    /// plugin's page says which variables it sets, and the plan line names
+    /// the credential that goes this way. The bytes go from protected memory
+    /// into the new process's environment block when it is spawned and are
+    /// copied nowhere else by Meridian. A secret that is not text cannot be
+    /// an environment variable; the run fails, saying so, without starting
+    /// the tool. The tool is given a copy, so make one with
+    /// [`SecretValue::duplicate`] to keep the original.
+    pub fn env_secret(mut self, key: impl Into<String>, secret: SecretValue) -> Self {
+        self.secret_env.push((key.into(), Arc::new(secret)));
+        self
+    }
+
+    /// As [`Tool::env_secret`], for a secret a handover keeps one copy of
+    /// and tells to every call of a stage.
+    pub(crate) fn env_secret_shared(
+        mut self,
+        key: impl Into<String>,
+        secret: Arc<SecretValue>,
+    ) -> Self {
+        self.secret_env.push((key.into(), secret));
+        self
+    }
+
+    /// The names of the environment variables the tool is given a secret
+    /// in, for a test or a report; never a value.
+    pub fn secret_env_names(&self) -> Vec<&str> {
+        self.secret_env
+            .iter()
+            .map(|(key, _)| key.as_str())
+            .collect()
     }
 
     /// Text written to the tool's standard input, which is otherwise closed.
@@ -252,6 +294,30 @@ impl Tool {
         }
         for (key, value) in &self.env {
             command.env(key, value);
+        }
+        for (key, secret) in &self.secret_env {
+            // The value goes into the command's environment block as bytes;
+            // the one copy of it that Meridian makes is the kernel's, at
+            // spawn. An `OsString` built here is a plain allocation, so it
+            // is not made: the bytes are handed over inside the closure.
+            let placed = secret.expose(|bytes| match std::str::from_utf8(bytes) {
+                Ok(text) => {
+                    command.env(key, text);
+                    Ok(())
+                }
+                Err(_) => Err(()),
+            });
+            if placed.is_err() {
+                return Err(RunError {
+                    msg: format!(
+                        "could not run {}: the value for {key} is not text, and an \
+                         environment variable holds text only",
+                        self.program
+                    ),
+                    command: self.command_line(),
+                    ..RunError::default()
+                });
+            }
         }
         own_process_group(&mut command);
 
@@ -686,6 +752,36 @@ mod tests {
         assert!(!format!("{tool:?}").contains("hunter2"));
         let finished = tool.run(&NoLog).unwrap();
         assert_eq!(finished.stdout, "hunter2\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_secret_in_the_environment_reaches_the_tool_and_shows_nowhere_else() {
+        let secret = SecretValue::from_reader(&b"hunter2"[..], 64).unwrap();
+        let tool = Tool::new("sh")
+            .args(["-c", "printf '%s' \"$CLOUD_SECRET\""])
+            .env_secret("CLOUD_SECRET", secret)
+            .capture_stdout();
+        assert_eq!(tool.secret_env_names(), ["CLOUD_SECRET"]);
+        assert_eq!(
+            tool.command_line(),
+            "sh -c 'printf '\\''%s'\\'' \"$CLOUD_SECRET\"'"
+        );
+        assert!(!format!("{tool:?}").contains("hunter2"));
+        let finished = tool.run(&NoLog).unwrap();
+        assert_eq!(finished.stdout, "hunter2");
+
+        let bytes = SecretValue::from_reader(&[0xff, 0xfe][..], 64).unwrap();
+        let err = Tool::new("sh")
+            .args(["-c", "true"])
+            .env_secret("CLOUD_SECRET", bytes)
+            .run(&NoLog)
+            .unwrap_err();
+        assert!(
+            err.msg.contains("the value for CLOUD_SECRET is not text"),
+            "{}",
+            err.msg
+        );
     }
 
     /// A host that asks for the run to stop as soon as the tool has said

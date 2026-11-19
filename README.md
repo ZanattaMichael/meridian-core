@@ -38,7 +38,7 @@ and apply it. If a tool cannot do what a document asks, the compile fails and sa
 - [Capability matrix](docs/reference/capability-matrix.md): what each target can express.
 - [Quickstart](docs/quickstart/install.md), and an example per target in [`examples/`](examples).
 - [Common infrastructure types](docs/reference/dsl/common-infrastructure-types.md): `network`,
-  `subnet`, `firewall`, `address` and `vm` compile for Terraform, OpenTofu and Pulumi (AWS, Azure),
+  `subnet`, `firewall`, `address` and `vm` compile for Terraform and OpenTofu (AWS, Azure, Google Cloud), Pulumi (AWS, Azure),
   CloudFormation, Bicep and ARM.
 - [`meridian import`](docs/operations/importing.md) converts existing Terraform, OpenTofu,
   Ansible, Compose, Kubernetes and DSC configuration.

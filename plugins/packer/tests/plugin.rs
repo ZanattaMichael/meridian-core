@@ -42,6 +42,7 @@ fn the_binary_describes_itself_to_the_host() {
         info.capabilities,
         Capabilities {
             secrets: true,
+            cloud_credentials: true,
             ..Capabilities::default()
         }
     );

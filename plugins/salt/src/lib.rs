@@ -211,6 +211,7 @@ impl Emitter for Salt {
             runtime_condition: true,
             secrets: true,
             credentials: true,
+            cloud_credentials: false,
             adopt: Adoption::Converge,
         }
     }

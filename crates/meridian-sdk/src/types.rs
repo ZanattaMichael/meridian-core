@@ -292,6 +292,13 @@ pub struct Capabilities {
     /// A document that names a credential for a target without this is
     /// refused.
     pub credentials: bool,
+    /// The target takes the credential a document names for its cloud
+    /// endpoint (`spec.endpoint` of type `cloud`: an `aws`, `azure` or `gcp`
+    /// credential). Its runner hands the credential to the tool in the
+    /// tool's own environment, the only way the providers take one, and a
+    /// file only the user can read where a provider reads one. A document
+    /// that names a cloud credential for a target without this is refused.
+    pub cloud_credentials: bool,
     /// What the target does with a resource's `adopt`. A target that says
     /// [`Adoption::None`], which is every plugin built before the field
     /// existed, is never sent one: the host refuses the document first.

@@ -3,7 +3,10 @@
 use std::fs;
 use std::path::Path;
 
-use meridian_plugin_testkit::{artifact, graph_from_file, scratch, secrets, stand_in, KeptLog};
+use meridian_plugin_testkit::{
+    artifact, cloud_credential, cloud_env, graph_from_file, nothing_under_holds, scratch, secrets,
+    stand_in, KeptLog,
+};
 use meridian_sdk::{Artifact, Data, Emitter, RunContext, Runner, SecretRef, Value};
 use meridian_target_packer::{Packer, PackerRunner};
 
@@ -36,8 +39,9 @@ fn runner(dir: &Path, cases: &str) -> PackerRunner {
         dir,
         "packer",
         &format!(
-            "echo \"$@\" >> \"{dir}/calls\"\necho \"$PKR_VAR_region $PKR_VAR_retries $PACKER_NO_COLOR $CHECKPOINT_DISABLE\" > \"{dir}/env\"\ncase \"$1\" in\n{cases}\nesac",
-            dir = dir.display()
+            "echo \"$@\" >> \"{dir}/calls\"\necho \"$PKR_VAR_region $PKR_VAR_retries $PACKER_NO_COLOR $CHECKPOINT_DISABLE\" > \"{dir}/env\"\n{record}case \"$1\" in\n{cases}\nesac",
+            dir = dir.display(),
+            record = meridian_plugin_testkit::record_cloud_env(dir, "$1"),
         ),
     );
     PackerRunner {
@@ -356,4 +360,77 @@ fn a_run_without_secrets_names_no_variables_file() {
         .unwrap();
     assert_eq!(calls(&dir), ["init .", "validate ."]);
     assert!(!dir.join("secrets.json").exists());
+}
+
+#[test]
+fn a_gcp_key_reaches_packer_as_a_private_file_and_an_aws_login_in_its_environment() {
+    let dir = scratch(TMP, "gcp-credential");
+    let mut context = context(&dir);
+    let key = "{\"type\": \"service_account\", \"private_key\": \"-----BEGIN-9fXw\"}";
+    context.credential = Some(cloud_credential(
+        "gcp",
+        &[("project", "shop-prod")],
+        &[("serviceAccountKey", key)],
+    ));
+    let log = KeptLog::default();
+    runner(&dir, HAPPY)
+        .plan(&context, &compiled(), &log)
+        .unwrap();
+    for call in ["init", "validate"] {
+        let env = cloud_env(&dir, call);
+        assert!(
+            env.contains(&"GOOGLE_PROJECT=shop-prod".to_owned()),
+            "{call}: {env:?}"
+        );
+        let path = env
+            .iter()
+            .find_map(|l| l.strip_prefix("GOOGLE_APPLICATION_CREDENTIALS="))
+            .unwrap_or_else(|| panic!("{call}: the key file is not named: {env:?}"));
+        assert!(!Path::new(path).exists(), "{path} was left behind");
+        assert!(!env.iter().any(|l| l.contains("9fXw")), "{env:?}");
+        fs::remove_file(dir.join(format!("cloud-env.{call}"))).unwrap();
+    }
+    assert_eq!(fs::read_to_string(dir.join("gcp-key-seen")).unwrap(), key);
+    fs::remove_file(dir.join("gcp-key-seen")).unwrap();
+    nothing_under_holds(&dir, "9fXw");
+
+    let dir = scratch(TMP, "aws-credential");
+    let mut with_aws = self::context(&dir);
+    with_aws.credential = Some(cloud_credential(
+        "aws",
+        &[("accessKeyId", "AKIA1"), ("region", "eu-west-1")],
+        &[("secretAccessKey", "s3cr3t-9fXw")],
+    ));
+    runner(&dir, HAPPY)
+        .apply(&with_aws, &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        cloud_env(&dir, "build"),
+        [
+            "AWS_ACCESS_KEY_ID=AKIA1",
+            "AWS_DEFAULT_REGION=eu-west-1",
+            "AWS_REGION=eu-west-1",
+            "AWS_SECRET_ACCESS_KEY=s3cr3t-9fXw",
+        ]
+    );
+    assert!(!calls(&dir).iter().any(|c| c.contains("9fXw")));
+}
+
+#[test]
+fn an_azure_credential_is_refused_because_the_plugin_reads_its_login_from_the_template() {
+    let dir = scratch(TMP, "azure-credential");
+    let mut context = context(&dir);
+    context.credential = Some(cloud_credential(
+        "azure",
+        &[("clientId", "c1"), ("tenantId", "t1")],
+        &[("clientSecret", "sp-9fXw")],
+    ));
+    let err = runner(&dir, HAPPY)
+        .plan(&context, &compiled(), &KeptLog::default())
+        .unwrap_err();
+    assert_eq!(
+        err.msg,
+        "the credential \"prod\": packer reaches a cloud, as an aws or gcp credential, not azure"
+    );
+    assert!(!dir.join("calls").exists(), "the tool was started");
 }

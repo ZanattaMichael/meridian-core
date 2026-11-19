@@ -249,6 +249,7 @@ impl Emitter for Docker {
             runtime_condition: false,
             secrets: true,
             credentials: false,
+            cloud_credentials: false,
             adopt: Adoption::None,
         }
     }

@@ -221,6 +221,7 @@ impl Emitter for Puppet {
             runtime_condition: false,
             secrets: true,
             credentials: true,
+            cloud_credentials: false,
             adopt: Adoption::Converge,
         }
     }
