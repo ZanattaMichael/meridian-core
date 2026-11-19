@@ -71,8 +71,11 @@ Proposed, with the owner's direction of 2026-11-19 to be built:
   Meridian reads a credential from its provider when a run needs it and never stores one.
   Reading from those providers is not built yet; today a secret comes from `env` or a file.
 - A credential goes on a tool's command line only when the document asks for that
-  explicitly. With that opt-in, `bicep` and `arm` can run `az login` instead of refusing.
-  The opt-in is not built yet.
+  explicitly. The opt-in is not built yet.
+- `az login` is not used. `bicep` and `arm` will authenticate through a credential
+  provider such as workload identity federation, which hands the tool a short-lived token
+  instead of a secret. Until then they refuse a cloud credential.
+- Passwords are to be excluded entirely, since they cause more problems than they solve.
 - The environment route above stays for the tools that read a login nowhere else.
 
 Still open: which providers come first, and whether the plan line's wording is the right
