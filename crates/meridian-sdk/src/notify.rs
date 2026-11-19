@@ -117,6 +117,173 @@ fn glob(pattern: &str, text: &str) -> bool {
     true
 }
 
+/// Meridian-run notifies on AWS, for every target that deploys there: one
+/// `aws` command per type, as AWS has no generic action call.
+pub mod aws {
+    use super::ActSchema;
+
+    /// Each CloudFormation type and the actions Meridian performs on it.
+    pub const ACTIONS: &[(&str, &[&str])] = &[
+        ("AWS::EC2::Instance", &["restart", "start", "stop"]),
+        ("AWS::ECS::Service", &["redeploy"]),
+        ("AWS::Lambda::Function", &["run"]),
+    ];
+
+    /// What a target acts on: for each `(type as its documents write it,
+    /// CloudFormation type)` in `types`, that type's actions.
+    pub fn acts(types: &[(&str, &str)]) -> Vec<ActSchema> {
+        types
+            .iter()
+            .filter_map(|(written, kind)| {
+                let (_, actions) = ACTIONS.iter().find(|(k, _)| k == kind)?;
+                Some(ActSchema::new(written, actions))
+            })
+            .collect()
+    }
+
+    /// The CloudFormation type a document's type stands for, by `types`.
+    pub fn kind_of<'a>(types: &[(&str, &'a str)], written: &str) -> Option<&'a str> {
+        types
+            .iter()
+            .find(|(w, _)| *w == written)
+            .map(|(_, kind)| *kind)
+    }
+
+    /// The `aws` arguments that perform `action` on the resource of type
+    /// `kind` whose physical id is `id`; `None` for an action not in
+    /// [`ACTIONS`] or an id the call cannot take. A Lambda's result is
+    /// written to `out`.
+    pub fn args(kind: &str, id: &str, action: &str, out: &str) -> Option<Vec<String>> {
+        let v = |items: &[&str]| Some(items.iter().map(|i| (*i).to_owned()).collect());
+        match (kind, action) {
+            ("AWS::EC2::Instance", "restart") => {
+                v(&["ec2", "reboot-instances", "--instance-ids", id])
+            }
+            ("AWS::EC2::Instance", "start") => v(&["ec2", "start-instances", "--instance-ids", id]),
+            ("AWS::EC2::Instance", "stop") => v(&["ec2", "stop-instances", "--instance-ids", id]),
+            ("AWS::ECS::Service", "redeploy") => {
+                let (cluster, service) = ecs_service(id)?;
+                v(&[
+                    "ecs",
+                    "update-service",
+                    "--cluster",
+                    &cluster,
+                    "--service",
+                    &service,
+                    "--force-new-deployment",
+                ])
+            }
+            ("AWS::Lambda::Function", "run") => {
+                v(&["lambda", "invoke", "--function-name", id, out])
+            }
+            _ => None,
+        }
+    }
+
+    /// The cluster and service of an ECS service id: an ARN
+    /// (`arn:aws:ecs:REGION:ACCOUNT:service/CLUSTER/NAME`, or the old
+    /// `service/NAME` in the default cluster) or `CLUSTER/NAME`.
+    fn ecs_service(id: &str) -> Option<(String, String)> {
+        let path = match id.strip_prefix("arn:") {
+            Some(_) => id.splitn(6, ':').nth(5)?.strip_prefix("service/")?,
+            None => id,
+        };
+        match path.split('/').collect::<Vec<_>>().as_slice() {
+            [cluster, name] if !cluster.is_empty() && !name.is_empty() => {
+                Some(((*cluster).to_owned(), (*name).to_owned()))
+            }
+            [name] if !name.is_empty() => Some(("default".to_owned(), (*name).to_owned())),
+            _ => None,
+        }
+    }
+
+    /// Why a call that exited 0 still failed: a Lambda that raised reports
+    /// `FunctionError` in what `aws lambda invoke` prints.
+    pub fn failed(kind: &str, stdout: &str) -> Option<String> {
+        (kind == "AWS::Lambda::Function" && stdout.contains("\"FunctionError\""))
+            .then(|| "the function ran and raised an error".to_owned())
+    }
+
+    /// The region of an ARN, `arn:PARTITION:SERVICE:REGION:...`.
+    pub fn region_of(arn: &str) -> Option<&str> {
+        let region = arn.strip_prefix("arn:")?.split(':').nth(2)?;
+        (!region.is_empty()).then_some(region)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn each_action_is_its_own_aws_call() {
+            assert_eq!(
+                args("AWS::EC2::Instance", "i-0abc", "restart", "out.json").unwrap(),
+                ["ec2", "reboot-instances", "--instance-ids", "i-0abc"]
+            );
+            assert_eq!(
+                args(
+                    "AWS::ECS::Service",
+                    "arn:aws:ecs:eu-west-1:123:service/web/api",
+                    "redeploy",
+                    "out.json"
+                )
+                .unwrap(),
+                [
+                    "ecs",
+                    "update-service",
+                    "--cluster",
+                    "web",
+                    "--service",
+                    "api",
+                    "--force-new-deployment"
+                ]
+            );
+            assert_eq!(
+                args(
+                    "AWS::ECS::Service",
+                    "arn:aws:ecs:eu-west-1:123:service/api",
+                    "redeploy",
+                    "o"
+                )
+                .unwrap()[3],
+                "default"
+            );
+            assert_eq!(
+                args("AWS::Lambda::Function", "migrate", "run", "out.json").unwrap(),
+                ["lambda", "invoke", "--function-name", "migrate", "out.json"]
+            );
+            assert!(args("AWS::EC2::Instance", "i-0abc", "redeploy", "o").is_none());
+            assert!(args("AWS::ECS::Service", "a/b/c", "redeploy", "o").is_none());
+        }
+
+        #[test]
+        fn a_lambda_that_raised_failed_and_an_arn_has_a_region() {
+            assert!(failed(
+                "AWS::Lambda::Function",
+                r#"{"StatusCode":200,"FunctionError":"Unhandled"}"#
+            )
+            .is_some());
+            assert!(failed("AWS::Lambda::Function", r#"{"StatusCode":200}"#).is_none());
+            assert_eq!(
+                region_of("arn:aws:lambda:eu-west-1:123:function:x"),
+                Some("eu-west-1")
+            );
+            assert_eq!(region_of("arn:aws:s3:::bucket"), None);
+            assert_eq!(region_of("i-0abc"), None);
+        }
+
+        #[test]
+        fn acts_list_the_actions_of_each_written_type() {
+            let acts = acts(&[
+                ("AWS::EC2::Instance", "AWS::EC2::Instance"),
+                ("vm", "AWS::EC2::Instance"),
+            ]);
+            assert!(crate::notify::performs(&acts, "vm", "restart"));
+            assert!(!crate::notify::performs(&acts, "vm", "redeploy"));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

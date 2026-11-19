@@ -78,8 +78,10 @@ refused, never substituted:
 - Podman: only `restart`.
 - ARM and Bicep: Meridian-run, for the actions their pages list
   ([arm](../targets/arm.md#notifications), [bicep](../targets/bicep.md#notifications)).
-- CloudFormation, Pulumi and Packer: every notify is refused
-  ([pulumi](../targets/pulumi.md#notifications) says what to write instead).
+- CloudFormation and Pulumi: Meridian-run on AWS, for the actions their pages list
+  ([cloudformation](../targets/cloudformation.md#notifications),
+  [pulumi](../targets/pulumi.md#notifications)).
+- Packer: every notify is refused.
 
 ## Meridian-run notifies
 

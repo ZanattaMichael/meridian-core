@@ -57,6 +57,7 @@ fn runner(dir: &Path, cases: &str) -> PulumiRunner {
     PulumiRunner {
         program: stand_in_for_pulumi(dir, cases),
         extra_args: Vec::new(),
+        aws: "aws".to_owned(),
         backend_chosen: false,
         passphrase_chosen: false,
     }
@@ -162,6 +163,7 @@ fn state_stays_with_the_project_unless_someone_says_otherwise() {
     PulumiRunner {
         program: stand_in_for_pulumi(&dir, HAPPY),
         extra_args: Vec::new(),
+        aws: "aws".to_owned(),
         backend_chosen: true,
         passphrase_chosen: true,
     }
@@ -369,6 +371,7 @@ fn pulumi_not_being_installed_is_said_plainly() {
     let err = PulumiRunner {
         program: "meridian-no-such-pulumi".into(),
         extra_args: Vec::new(),
+        aws: "aws".to_owned(),
         backend_chosen: false,
         passphrase_chosen: false,
     }
@@ -679,4 +682,59 @@ fn inspect_before_any_apply_runs_nothing() {
         .unwrap();
     assert!(!dir.join("calls").exists());
     assert!(!read.found);
+}
+
+const ACTING: &str = r#""stack export") echo '{"version":3,"deployment":{"resources":[
+  {"urn":"urn:pulumi:prod::web-vm::aws:ec2/instance:Instance::web_vm","type":"aws:ec2/instance:Instance","id":"i-1",
+   "outputs":{"arn":"arn:aws:ec2:eu-west-1:123:instance/i-1"}},
+  {"urn":"urn:pulumi:prod::web-vm::aws:s3/bucket:Bucket::logs","type":"aws:s3/bucket:Bucket","id":"logs"}]}}' ;;"#;
+
+#[test]
+fn an_action_reads_the_cloud_id_from_the_export_and_runs_its_own_aws_call() {
+    let dir = scratch(TMP, "act");
+    let context = context(&dir);
+    fs::create_dir_all(&context.work_dir).unwrap();
+    fs::write(
+        context.work_dir.join("stack.json"),
+        r#"{"project":"web-vm","stack":"prod","backend":"","secretsProvider":""}"#,
+    )
+    .unwrap();
+    let aws = stand_in(
+        &dir,
+        "aws",
+        &format!("echo \"$@\" >> \"{}/aws-calls\"", dir.display()),
+    );
+    let runner = PulumiRunner {
+        aws: aws.to_str().unwrap().to_owned(),
+        ..runner(&dir, ACTING)
+    };
+    assert!(meridian_sdk::notify::performs(
+        &runner.acts(),
+        "aws:ec2:Instance",
+        "restart"
+    ));
+    let acted = runner
+        .act(
+            &context,
+            &compiled(),
+            "web_vm",
+            "restart",
+            &KeptLog::default(),
+        )
+        .unwrap();
+    assert_eq!(acted.command, "aws ec2 reboot-instances --instance-ids i-1");
+    assert_eq!(
+        fs::read_to_string(dir.join("aws-calls")).unwrap().trim(),
+        "ec2 reboot-instances --instance-ids i-1 --region eu-west-1"
+    );
+    let err = runner
+        .act(
+            &context,
+            &compiled(),
+            "logs",
+            "restart",
+            &KeptLog::default(),
+        )
+        .unwrap_err();
+    assert!(err.msg.contains("no AWS resource logs"), "{}", err.msg);
 }
