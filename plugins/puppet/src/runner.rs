@@ -539,7 +539,13 @@ fn is_event(property: &str, message: &str) -> bool {
 fn read_bolt(stdout: &str, noop: bool) -> Report {
     let mut report = Report::default();
     let statuses = decode_value(stdout.trim().as_bytes()).ok().and_then(|v| {
-        let item = v.as_map()?.get("items")?.as_list()?.first()?.clone();
+        // `bolt apply` prints a list of results; `bolt task run` and older
+        // releases wrap it as `{"items": [...]}`.
+        let items = match v.as_map() {
+            Some(map) => map.get("items")?.as_list()?.to_vec(),
+            None => v.as_list()?.to_vec(),
+        };
+        let item = items.first()?.clone();
         let value = item.as_map()?.get("value")?.clone();
         let statuses = value
             .as_map()?
@@ -553,7 +559,21 @@ fn read_bolt(stdout: &str, noop: bool) -> Report {
         report.unreadable = true;
         return report;
     };
-    for (name, status) in &statuses {
+    // The report keys statuses by name; the order Puppet evaluated them in
+    // is each one's time, which sorts as text.
+    let mut ordered: Vec<(&str, &String, &Value)> = statuses
+        .iter()
+        .map(|(name, status)| {
+            let time = status
+                .as_map()
+                .and_then(|m| m.get("time"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            (time, name, status)
+        })
+        .collect();
+    ordered.sort_by(|a, b| a.0.cmp(b.0));
+    for (_, name, status) in ordered {
         let Some(status) = status.as_map() else {
             continue;
         };

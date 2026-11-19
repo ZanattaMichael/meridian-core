@@ -527,3 +527,23 @@ fn a_debug_level_reaches_puppet_apply_and_bolt_each_as_its_own_switch() {
         "apply apply.pp --targets web01 --format json"
     );
 }
+
+#[test]
+fn bolt_applys_own_report_is_a_list_of_results_and_is_read_too() {
+    // What `bolt apply --format json` prints: the results, unwrapped.
+    let dir = scratch(TMP, "bolt-list");
+    let list = r#"cat <<'OUT'
+[{"target":"web01","action":"apply","object":null,"status":"success","value":{"report":{"status":"changed","resource_statuses":{"Package[app_pkg]":{"changed":true,"events":[{"property":"ensure","message":"created","status":"success"}]}}}}}]
+OUT"#;
+    let applied = runner(&dir, "exit 9", list)
+        .apply(&context(&dir, "web01"), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        applied
+            .changes
+            .iter()
+            .map(|c| c.to_string())
+            .collect::<Vec<_>>(),
+        ["create app_pkg: ensure: created"]
+    );
+}
