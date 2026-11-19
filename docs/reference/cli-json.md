@@ -473,11 +473,13 @@ binary checked (`binary`, `verified`, `signature`). Schemas:
 ### `test`
 
 One object per test document under `files` (`file`, `name`, `ok` and its
-`cases`), each case with `name`, `run` (`compile` or `plan`), `status`
+`cases`), each case with `name`, `run` (`compile`, `plan` or `lifecycle`), `status`
 (`passed`, `failed`, or `error` when the case could not run), `failures`
 (one line each, empty when it passed), `documents` (each `name`, `target` and
-`outcome`: `compiled`, `refused`, `left-out`, `planned`, `deferred`, `failed`
-or `not-run`) and `millis`; then a `summary` of `files`, `cases`, `passed`,
+`outcome`: `compiled`, `refused`, `left-out`, `planned`, `deferred`, `failed`,
+`not-run` or `applied`), `phases` (a lifecycle case's `provision`, `verify` and `destroy`,
+each with `name`, `status` (`passed`, `failed` or `skipped`), `failures` and `millis`;
+empty otherwise) and `millis`; then a `summary` of `files`, `cases`, `passed`,
 `failed` and `errors`. `ok` is true only when every case passed. Schema: `schemas/output/test.schema.json`.
 
 ```json
@@ -491,10 +493,10 @@ or `not-run`) and `millis`; then a `summary` of `files`, `cases`, `passed`,
       "ok": false,
       "cases": [
         { "name": "dev compiles nginx", "run": "compile", "status": "passed", "failures": [],
-          "documents": [{ "name": "web", "target": "ansible", "outcome": "compiled" }], "millis": 12 },
+          "documents": [{ "name": "web", "target": "ansible", "outcome": "compiled" }], "phases": [], "millis": 12 },
         { "name": "production says so", "run": "compile", "status": "failed",
           "failures": ["assert contains(stages.web.files['playbook.yml'], 'welcome to prod'): false"],
-          "documents": [{ "name": "web", "target": "ansible", "outcome": "compiled" }], "millis": 9 }
+          "documents": [{ "name": "web", "target": "ansible", "outcome": "compiled" }], "phases": [], "millis": 9 }
       ]
     }
   ],

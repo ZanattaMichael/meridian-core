@@ -356,6 +356,10 @@ pub(crate) enum Command {
             default_value = ".meridian"
         )]
         state_dir: PathBuf,
+        /// Leave each lifecycle case's environment in place instead of
+        /// destroying it, to look at
+        #[arg(long)]
+        keep: bool,
     },
     /// Rewrite documents in the one standard layout, changing no value
     Fmt(tools::FmtArgs),
