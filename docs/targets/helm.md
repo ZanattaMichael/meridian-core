@@ -21,6 +21,7 @@ overlay, which is applied to what the chart renders before Helm installs it.
 | Plan | Yes: what would be installed, compared with what Helm last installed. It does not detect changes made to the cluster behind Helm's back |
 | Apply | Yes: `helm upgrade --install`. An unchanged document adds no revision |
 | Outputs | Yes: anything a template can read, and any path into a live object, read with `kubectl` |
+| Destroy | Yes: `helm uninstall`. See [Destroying](../operations/destroying.md) |
 | Subcharts, hand-written hooks, `lookup` | No. The chart holds only what the document declares |
 | Editor schemas | Yes: `meridian schema sync` asks the cluster what each kind's fields are, as the kubernetes target does. See [Editor schemas](#editor-schemas) |
 
@@ -451,6 +452,7 @@ The plugin describes `chart`, `release`, `values` and `kustomization` itself.
 | Read the release | `helm status <release> --output json`, `helm get manifest <release>` |
 | Apply | `helm upgrade --install <release> chart --namespace <ns>` plus the release's settings |
 | Outputs | `kubectl get <kind> <name> --namespace <ns> --output json` |
+| Destroy | `helm status`, `helm get manifest` (what goes), then `helm uninstall <release> --wait`, with the release's `--timeout`. A release that is not installed has nothing to remove. The namespace is kept |
 
 **Plan** compares with the last release's manifest. It does not see out-of-band changes.
 

@@ -17,6 +17,7 @@ with `kubectl`.
 | `state: absent` | No. Applying manifests never deletes an object; delete it with `kubectl` and remove it from the document |
 | Plan | Yes: a server-side dry run |
 | Outputs | Yes: any path into a live object |
+| Destroy | Yes: `kubectl delete` of every object in the manifests. See [Destroying](../operations/destroying.md) |
 
 ## What a document looks like
 
@@ -206,6 +207,7 @@ Undescribed kinds are noted.
 |---|---|
 | Plan | `kubectl apply --dry-run=server --filename manifests.yaml`; with a [secret](#secrets) in the document, `--filename -` with the filled manifests on standard input |
 | Apply | `kubectl apply --filename manifests.yaml`, or `--filename -` the same way, then each output with `kubectl get ... --output jsonpath=...` |
+| Destroy | `kubectl delete --ignore-not-found --wait`, given the manifests as an apply gives them; `plan --destroy` adds `--dry-run=server` instead of `--wait` |
 | `MERIDIAN_KUBECTL` | the program to run, when it is not `kubectl` on `PATH` |
 | `MERIDIAN_KUBECTL_ARGS` | arguments added to every call, split like a shell command line (quotes hold a word together): `--context prod` |
 | `MERIDIAN_KUBECTL_OUTPUT_WAIT` | seconds an apply waits for an output that has no value yet |

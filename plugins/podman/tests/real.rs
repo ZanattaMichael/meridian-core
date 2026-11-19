@@ -424,6 +424,23 @@ fn units_are_really_installed_run_changed_and_removed() {
         .plan(&context, &third, &KeptLog::default())
         .unwrap()
         .in_sync());
+
+    // A destroy stops and removes what is left.
+    let preview = runner
+        .plan_destroy(&context, &third, &KeptLog::default())
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(preview.changes.len(), 1, "{:?}", preview.changes);
+    assert!(Path::new(UNITS).join("meridian-ci-data.volume").exists());
+    let removed = runner
+        .destroy(&context, &third, &KeptLog::default())
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(shown(&removed), shown(&preview.changes));
+    assert!(!Path::new(UNITS).join("meridian-ci-data.volume").exists());
+    assert!(runner
+        .plan_destroy(&context, &third, &KeptLog::default())
+        .unwrap()
+        .changes
+        .is_empty());
 }
 
 #[ignore = "needs a real Podman; see docs/contributing/real-tool-tests.md"]

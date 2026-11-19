@@ -246,7 +246,37 @@ fn a_release_is_planned_installed_read_and_upgraded() {
     let outputs = HelmRunner::from_env().outputs(&context(&dir)).unwrap();
     assert_eq!(outputs.len(), 5);
 
-    uninstall("meridian-helm-test", "meridian-helm-test");
+    // A destroy previews the release's objects, then uninstalls it.
+    let runner = HelmRunner::from_env();
+    let preview = runner
+        .plan_destroy(&context(&dir), &second, &KeptLog::default())
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(
+        shown(&preview.changes),
+        [
+            "delete settings: ConfigMap settings",
+            "delete web: Deployment meridian-helm-test-web",
+        ]
+    );
+    let removed = runner
+        .destroy(&context(&dir), &second, &KeptLog::default())
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(shown(&removed), shown(&preview.changes));
+    let status = Tool::new("helm")
+        .args([
+            "status",
+            "meridian-helm-test",
+            "--namespace",
+            "meridian-helm-test",
+        ])
+        .run(&NoLog)
+        .unwrap();
+    assert!(!status.success(), "the release is gone");
+    // Nothing is left to remove.
+    let again = runner
+        .destroy(&context(&dir), &second, &KeptLog::default())
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(again.is_empty(), "{again:?}");
 }
 
 #[test]
