@@ -37,6 +37,7 @@
 
 pub mod analyze;
 pub mod backend;
+pub mod diagnose;
 pub mod event;
 pub mod history;
 mod journal;

@@ -202,6 +202,19 @@ pub(crate) fn list() -> Vec<Value> {
             }),
             &["file"],
         ),
+        tool(
+            "diagnose",
+            "Why the last failed run failed: each failed step with the machine, the resource, \
+             the cause word and the commands to run next, and the steps not run because of \
+             it. Reads the project's run record; runs no tool and takes no lock.",
+            json!({
+                "run": string("A run id; the last failed run when left out."),
+                "step": string("Only the step of this document."),
+                "endpoint": string("Only the failures on this machine."),
+                "cause": string("Only failures with this cause word, such as `unreachable`."),
+            }),
+            &[],
+        ),
     ]
 }
 
@@ -242,6 +255,7 @@ pub(crate) fn call(server: &Server, params: &Value) -> Result<Value, (i64, Strin
         }
         "import" => import(server, args),
         "plan" => plan(server, args),
+        "diagnose" => diagnose(server, args),
         _ => tool_error(format!(
             "there is no tool called `{name}`; `tools/list` gives the tools"
         )),
@@ -1274,6 +1288,48 @@ fn plan(server: &Server, args: &Value) -> Value {
     }
     body.insert("exitStatus".to_owned(), json!(code));
     tool_result(ok, Value::Object(body))
+}
+
+/// `meridian diagnose --output json`, as the object it prints.
+fn diagnose(server: &Server, args: &Value) -> Value {
+    let Some(command) = server.diagnose_command() else {
+        return tool_error("`diagnose` needs the meridian binary, which this server was not given");
+    };
+    let mut process = std::process::Command::new(&command.program);
+    process
+        .arg("diagnose")
+        .args(&command.args)
+        .arg("--output")
+        .arg("json")
+        .env("MERIDIAN_ANNOTATIONS", "off")
+        .current_dir(server.root());
+    if let Some(run) = arg_str(args, "run") {
+        process.arg(run);
+    }
+    for flag in ["step", "endpoint", "cause"] {
+        if let Some(value) = arg_str(args, flag) {
+            process.arg(format!("--{flag}")).arg(value);
+        }
+    }
+    let output = match process.output() {
+        Ok(o) => o,
+        Err(e) => {
+            return tool_error(format!(
+                "running {} diagnose: {e}",
+                command.program.display()
+            ))
+        }
+    };
+    match serde_json::from_str::<Value>(String::from_utf8_lossy(&output.stdout).trim()) {
+        Ok(body @ Value::Object(_)) => {
+            let ok = body.get("ok").and_then(Value::as_bool).unwrap_or(false);
+            tool_result(ok, body)
+        }
+        _ => tool_error(format!(
+            "meridian diagnose printed no result: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+    }
 }
 
 // ---------------------------------------------------------------------------

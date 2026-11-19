@@ -861,6 +861,53 @@ def retarget_flow() -> str:
     return doc(W, H, "retarget: the old tool reports the identifier of each resource it manages, meridian retarget writes a new file with the new target and an adopt line per resource, and the new tool's first plan adopts each one instead of creating it", "".join(p))
 
 
+def troubleshooting_flow() -> str:
+    """meridian diagnose: from a failed run to the machine, the resource, the cause and the next command."""
+    W, H = 1200, 470
+    p: list[str] = []
+    p.append(heading(40, 48, "What diagnose reads, and what it answers"))
+    sources = [
+        ("run.json", "each step: status, reason"),
+        ("events.jsonl", "skipped because of which step"),
+        ("failures.jsonl", "resource, cause, summary, line"),
+    ]
+    for i, (name, body) in enumerate(sources):
+        y = 66 + i * 70
+        p.append(card(40, y, 300, 56, name, None, LINE, 15))
+        p.append(text(190, y + 47, body, 12, 400, TEXT_SOFT))
+    for i in range(3):
+        y = 94 + i * 70
+        p.append(flow(f"M340 {y}L420 164", WHITE, delay=0.3 * i, seconds=1.8))
+    p.append(card(420, 110, 200, 108, "meridian diagnose", ["no tool, no plugin,", "no lock"], GREEN, 16, 12.5))
+    p.append(flow("M620 164L690 164", WHITE, delay=1.0, seconds=1.8))
+    p.append(rect(690, 66, 470, 196, WELL, RED, 18, 1.4))
+    p.append(f'<rect x="690" y="66" width="470" height="5" rx="2.5" fill="{RED}"/>')
+    p.append(lines(712, 100, [
+        "web  ansible  203.0.113.10  resource-failed",
+        "  nginx_conf  'nginx_port' is undefined",
+        "  next: meridian logs <run> --step web",
+        "web  ansible  37 machines  unreachable",
+        "  next: check the 37 machines can be reached",
+        "",
+        "not run: app, dns (earlier-step-failed: web)",
+    ], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(heading(40, 340, "Then, in the order a person reaches for them"))
+    steps = [
+        ("diagnose", "what broke and where", GREEN),
+        ("logs", "the tool's own words", LINE),
+        ("--tool-debug", "the tool, more verbose", CM),
+        ("apply --resume", "carry on from the failure", IAC),
+    ]
+    for i, (name, body, colour) in enumerate(steps):
+        x = 40 + i * 285
+        p.append(chip(x, 356, 265, name, colour, 28, 13, True))
+        p.append(text(x + 132.5, 404, body, 12.5, 400, TEXT_SOFT))
+        if i:
+            p.append(flow(f"M{x - 20} 370L{x} 370", WHITE, delay=0.4 * i, seconds=1.8))
+    p.append(caption(W, H, "The failed step comes first; the steps it stopped are named under it, and each machine gets the command to run next."))
+    return doc(W, H, "meridian diagnose reads the run record, its events and the failures this machine kept, and prints each failed step with its machine, resource and cause, the steps not run because of it, and the command to run next", "".join(p))
+
+
 GRAPHIC_FILES = {
     "meridian-architecture.svg": architecture,
     "meridian-compile-pipeline.svg": compile_pipeline,
@@ -877,6 +924,7 @@ GRAPHIC_FILES = {
     "meridian-schema-bundles.svg": schema_bundles,
     "meridian-adopt.svg": adopt_flow,
     "meridian-retarget.svg": retarget_flow,
+    "meridian-troubleshooting.svg": troubleshooting_flow,
 }
 
 # ---------------------------------------------------------------------------

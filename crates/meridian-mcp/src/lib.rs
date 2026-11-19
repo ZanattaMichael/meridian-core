@@ -68,6 +68,8 @@ pub struct Server {
     root: PathBuf,
     /// How `plan` runs, when it is allowed at all.
     plan: Option<PlanCommand>,
+    /// How `diagnose` runs: `meridian diagnose`, reading the state.
+    diagnose: Option<PlanCommand>,
     /// Problems found while starting, told to the client once.
     notes: Vec<String>,
 }
@@ -81,6 +83,7 @@ impl Server {
             catalog,
             root: root.into(),
             plan: None,
+            diagnose: None,
             notes: Vec::new(),
         }
     }
@@ -92,6 +95,7 @@ impl Server {
             catalog: Catalog::empty(),
             root: root.into(),
             plan: None,
+            diagnose: None,
             notes: Vec::new(),
         }
     }
@@ -99,6 +103,13 @@ impl Server {
     /// Offers `plan`, run as `command` says.
     pub fn allow_plan(mut self, command: PlanCommand) -> Server {
         self.plan = Some(command);
+        self
+    }
+
+    /// Offers `diagnose`, run as `command` says: the arguments name the
+    /// state directory.
+    pub fn allow_diagnose(mut self, command: PlanCommand) -> Server {
+        self.diagnose = Some(command);
         self
     }
 
@@ -321,6 +332,10 @@ impl Server {
 
     pub(crate) fn plan_command(&self) -> Option<&PlanCommand> {
         self.plan.as_ref()
+    }
+
+    pub(crate) fn diagnose_command(&self) -> Option<&PlanCommand> {
+        self.diagnose.as_ref()
     }
 
     pub(crate) fn root(&self) -> &Path {
