@@ -24,6 +24,7 @@
 // A refusal carries its position and resource by value, as the SDK's does.
 #![allow(clippy::result_large_err)]
 
+pub mod act;
 mod common;
 mod emit;
 pub mod inspect;

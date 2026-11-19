@@ -76,7 +76,9 @@ refused, never substituted:
 - Salt: an action on a `stopped` service is refused.
 - Kubernetes and Helm: only `restart`, on a Deployment, StatefulSet or DaemonSet.
 - Podman: only `restart`.
-- CloudFormation, Bicep, ARM, Pulumi and Packer: every notify is refused
+- ARM and Bicep: Meridian-run, for the actions their pages list
+  ([arm](../targets/arm.md#notifications), [bicep](../targets/bicep.md#notifications)).
+- CloudFormation, Pulumi and Packer: every notify is refused
   ([pulumi](../targets/pulumi.md#notifications) says what to write instead).
 
 ## Meridian-run notifies

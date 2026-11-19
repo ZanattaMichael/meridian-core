@@ -12,7 +12,7 @@ Compiles an Infrastructure document into a Bicep file, deployed to a resource gr
 | Category | Infrastructure as code |
 | Resource types | Azure's own, with the API version: `Namespace/type@api-version`, plus `deployment` for where the file is deployed. Also the [common infrastructure types](#common-infrastructure-types) |
 | `dependsOn` | Yes, as Bicep's `dependsOn`, unless a reference already implies the order |
-| `notifies` | No. An Azure deployment has no way to react to a change in another resource. Refused |
+| `notifies` | Meridian-run: `az resource invoke-action` after the deployment, for the types in [Notifications](#notifications) |
 | `runtimeWhen` | No. Refused |
 | `adopt` | Accepted, and changes nothing: Resource Manager updates a resource of the same name in place. The compile warns |
 | `state: absent` | No. A resource group deployment never deletes a resource; remove it from the document and delete it in Azure |
@@ -184,6 +184,37 @@ Values from data never become expressions
 
 Outputs are `string`, wrapped in `string(...)` when needed.
 
+## Notifications
+
+Resource Manager cannot act on one resource because another changed, so a notify is
+[Meridian-run](../concepts/dependencies.md#meridian-run-notifies): after the deployment,
+Meridian runs `az resource invoke-action` on each notified resource whose notifier the
+what-if reports as created, modified or deployed. The compile warns.
+
+| Type | Actions |
+|---|---|
+| `Microsoft.Web/sites`, `Microsoft.Web/sites/slots` | `restart`, `start`, `stop` |
+| `Microsoft.Compute/virtualMachines`, shared `vm` | `restart`, `start`, `deallocate`, `powerOff` |
+| `Microsoft.ContainerInstance/containerGroups` | `restart`, `start`, `stop` |
+
+A type is matched with any API version (`Microsoft.Web/sites@2023-01-01`).
+Any other action, and a resource whose name is an expression,
+is refused with `unsupported-action` or fails the action. A `Deploy` change (what-if cannot
+tell) counts as changed, so its notify may fire with nothing changed.
+
+```yaml
+- id: app_settings
+  type: Microsoft.Web/sites/config@2023-01-01
+  params: {name: web-app/appsettings, properties: {LOG_LEVEL: info}}
+  notifies:
+    - resource: web_app
+      action: restart
+```
+
+```text
+  ran restart web_app: az resource invoke-action --resource-group web-rg --action restart --resource-type microsoft.web/sites --name web-app
+```
+
 ## Ordering
 
 A `dependsOn` a reference implies is left out. Others become `dependsOn`, as for the lock
@@ -315,7 +346,7 @@ Each names the resource, line and rule:
 | `invalid-reference` | `${id.x}` where `id` is a resource and the path cannot be read | fix the path |
 | `unsupported-state` | `state: absent`, or any state but `present` | remove the resource from the document, and delete it in Azure |
 | `unsupported-runtime-condition` | `runtimeWhen` on any resource | decide with a compile-time `when` instead |
-| `unsupported-action` | `notifies` on any resource | drop it; a deployment has no notifications |
+| `unsupported-action` | a notify whose type and action are not in [Notifications](#notifications) | use a listed action, or drop it |
 | `unsupported-dependency` | a `dependsOn` to or from the `deployment` resource | the deployment is not a resource of the file |
 | `empty-document` | a document with no resources but the deployment | add a resource |
 

@@ -82,6 +82,17 @@ struct Deployment {
 }
 
 impl Deployment {
+    /// The arguments that name the resource the document calls `resource` to
+    /// `az resource`; `None` for a deployment to a subscription, or when it is
+    /// not one resource with a plain name.
+    fn args_of(&self, resource: &str) -> Option<Vec<String>> {
+        if self.subscription_scope {
+            return None;
+        }
+        let ((kind, name), _) = self.resources.iter().find(|(_, id)| *id == resource)?;
+        meridian_target_bicep::inspect::show_args(kind, name)
+    }
+
     fn read(text: &str) -> Result<Deployment, RunError> {
         let bad = || RunError::new(format!("{DEPLOYMENT_PATH} is not one this plugin compiled"));
         let value = decode_value(text.as_bytes()).map_err(|_| bad())?;
@@ -634,24 +645,13 @@ impl Runner for ArmRunner {
             )));
         };
         let deployment = Deployment::read(settings)?;
-        let args = (!deployment.subscription_scope)
-            .then(|| {
-                deployment
-                    .resources
-                    .iter()
-                    .find(|(_, id)| *id == resource)
-                    .and_then(|((kind, name), _)| {
-                        meridian_target_bicep::inspect::show_args(kind, name)
-                    })
-            })
-            .flatten()
-            .ok_or_else(|| {
-                RunError::new(format!(
-                    "{resource} is not one Azure resource of a resource group with a plain \
+        let args = deployment.args_of(resource).ok_or_else(|| {
+            RunError::new(format!(
+                "{resource} is not one Azure resource of a resource group with a plain \
                      name ({})",
-                    meridian_sdk::rules::UNSUPPORTED_INSPECT.name
-                ))
-            })?;
+                meridian_sdk::rules::UNSUPPORTED_INSPECT.name
+            ))
+        })?;
         let mut tool = Tool::new(&self.program)
             .args([
                 "resource",
@@ -669,6 +669,50 @@ impl Runner for ArmRunner {
             args.join(" ")
         );
         meridian_target_bicep::inspect::show(tool, &args, &self.extra_args, shown_as)
+    }
+
+    fn acts(&self) -> Vec<meridian_sdk::ActSchema> {
+        meridian_target_bicep::act::acts("")
+    }
+
+    /// `az resource invoke-action` on the resource, after the deployment.
+    fn act(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        resource: &str,
+        action: &str,
+        log: &dyn Log,
+    ) -> Result<meridian_sdk::Acted, RunError> {
+        let Some(settings) = artifact.files.get(DEPLOYMENT_PATH) else {
+            return Err(RunError::new(format!(
+                "the artifact has no {DEPLOYMENT_PATH}; it was not compiled by this plugin"
+            )));
+        };
+        let deployment = Deployment::read(settings)?;
+        let args = deployment.args_of(resource).ok_or_else(|| {
+            RunError::new(format!(
+                "{resource} is not one Azure resource of a resource group with a plain name, \
+                 so Meridian cannot {action} it"
+            ))
+        })?;
+        let mut tool = Tool::new(&self.program)
+            .args([
+                "resource",
+                "invoke-action",
+                "--resource-group",
+                &deployment.resource_group,
+            ])
+            .dir(&context.work_dir);
+        if !deployment.subscription.is_empty() {
+            tool = tool.args(["--subscription", &deployment.subscription]);
+        }
+        let shown_as = format!(
+            "az resource invoke-action --resource-group {} --action {action} {}",
+            deployment.resource_group,
+            args.join(" ")
+        );
+        meridian_target_bicep::act::invoke(tool, &args, action, &self.extra_args, shown_as, log)
     }
 
     fn destroys(&self) -> bool {
