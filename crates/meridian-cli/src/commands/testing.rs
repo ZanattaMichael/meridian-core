@@ -115,38 +115,43 @@ pub(crate) fn test(
 fn print_file(result: &FileResult) {
     outln!("{} ({})", result.path.display(), result.name);
     for case in &result.cases {
-        let word = match case.status {
-            Status::Passed => "ok  ",
-            Status::Failed => "FAIL",
-            Status::Error => "ERR ",
-            Status::Skipped => "skip",
+        print_case(&case.name, case);
+    }
+}
+
+/// One case, or one lab cell, under its name: the status word, the level
+/// and the documents, then a lifecycle case's phases, then each failure.
+pub(crate) fn print_case(name: &str, case: &CaseResult) {
+    let word = match case.status {
+        Status::Passed => "ok  ",
+        Status::Failed => "FAIL",
+        Status::Error => "ERR ",
+        Status::Skipped => "skip",
+    };
+    outln!(
+        "  {word}  {name} ({}, {})",
+        case.run.as_str(),
+        count(case.stages.len(), "document")
+    );
+    for phase in &case.phases {
+        let word = match phase.status {
+            Status::Passed => "ok",
+            Status::Skipped => "skipped",
+            _ => "FAIL",
         };
-        outln!(
-            "  {word}  {} ({}, {})",
-            case.name,
-            case.run.as_str(),
-            count(case.stages.len(), "document")
-        );
-        for phase in &case.phases {
-            let word = match phase.status {
-                Status::Passed => "ok",
-                Status::Skipped => "skipped",
-                _ => "FAIL",
-            };
-            let why = match phase.status {
-                Status::Skipped => format!(": {}", phase.failures.join("; ")),
-                _ => String::new(),
-            };
-            outln!("        {}: {word}{why}", phase.name);
+        let why = match phase.status {
+            Status::Skipped => format!(": {}", phase.failures.join("; ")),
+            _ => String::new(),
+        };
+        outln!("        {}: {word}{why}", phase.name);
+    }
+    for failure in &case.failures {
+        let mut lines = failure.lines();
+        if let Some(first) = lines.next() {
+            outln!("        - {first}");
         }
-        for failure in &case.failures {
-            let mut lines = failure.lines();
-            if let Some(first) = lines.next() {
-                outln!("        - {first}");
-            }
-            for more in lines {
-                outln!("          {more}");
-            }
+        for more in lines {
+            outln!("          {more}");
         }
     }
 }
@@ -156,24 +161,29 @@ fn file_json(result: &FileResult) -> serde_json::Value {
         "file": result.path.display().to_string(),
         "name": result.name,
         "ok": result.passed(),
-        "cases": result.cases.iter().map(|c| serde_json::json!({
-            "name": c.name,
-            "run": c.run.as_str(),
-            "status": c.status.as_str(),
-            "runId": c.run_id,
-            "failures": c.failures,
-            "documents": c.stages.iter().map(|s| serde_json::json!({
-                "name": s.name,
-                "target": s.target,
-                "outcome": s.outcome,
-            })).collect::<Vec<_>>(),
-            "phases": c.phases.iter().map(|p| serde_json::json!({
-                "name": p.name,
-                "status": p.status.as_str(),
-                "failures": p.failures,
-                "millis": p.millis as u64,
-            })).collect::<Vec<_>>(),
-            "millis": c.millis as u64,
+        "cases": result.cases.iter().map(case_json).collect::<Vec<_>>(),
+    })
+}
+
+/// One case as JSON, as `meridian test` and `meridian lab run` give it.
+pub(crate) fn case_json(c: &CaseResult) -> serde_json::Value {
+    serde_json::json!({
+        "name": c.name,
+        "run": c.run.as_str(),
+        "status": c.status.as_str(),
+        "runId": c.run_id,
+        "failures": c.failures,
+        "documents": c.stages.iter().map(|s| serde_json::json!({
+            "name": s.name,
+            "target": s.target,
+            "outcome": s.outcome,
         })).collect::<Vec<_>>(),
+        "phases": c.phases.iter().map(|p| serde_json::json!({
+            "name": p.name,
+            "status": p.status.as_str(),
+            "failures": p.failures,
+            "millis": p.millis as u64,
+        })).collect::<Vec<_>>(),
+        "millis": c.millis as u64,
     })
 }

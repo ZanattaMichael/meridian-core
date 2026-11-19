@@ -1,0 +1,193 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ZanattaMichael/meridian-core/schemas/output/lab-run.schema.json",
+  "title": "lab run",
+  "description": "Every cell of the lab that ran, with its phases and why it failed, and the totals.",
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "const": "lab run",
+      "description": "The subcommand as it is typed"
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "Whether the command did what was asked: false means it exited 1, or 130 when interrupted"
+    },
+    "lab": {
+      "type": "string",
+      "description": "The lab's metadata.name"
+    },
+    "run": {
+      "type": "string",
+      "description": "This run's id; its cells' state is under lab/<lab>/<run>/"
+    },
+    "cells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "<test>: <case> [axis=value, ...]"
+          },
+          "run": {
+            "type": "string",
+            "enum": [
+              "compile",
+              "plan",
+              "lifecycle"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "failed",
+              "error"
+            ],
+            "description": "passed: every expectation held; failed: one did not; error: the case could not run"
+          },
+          "runId": {
+            "type": "string",
+            "description": "What the cell's documents read as meridian.run.id: <run>-<cell>; empty when the cell could not run"
+          },
+          "failures": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Why it failed or could not run, one line each; empty when it passed"
+          },
+          "documents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "target": {
+                  "type": "string"
+                },
+                "outcome": {
+                  "type": "string",
+                  "description": "compiled, refused, left-out, planned, deferred, failed, not-run or applied"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "target",
+                "outcome"
+              ]
+            }
+          },
+          "phases": {
+            "type": "array",
+            "description": "A lifecycle case's phases in the order they ran; empty for compile and plan",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "enum": [
+                    "provision",
+                    "verify",
+                    "destroy"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "passed",
+                    "failed",
+                    "skipped"
+                  ]
+                },
+                "failures": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Why it failed or was skipped, one line each"
+                },
+                "millis": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "status",
+                "failures",
+                "millis"
+              ]
+            }
+          },
+          "millis": {
+            "type": "integer",
+            "description": "How long the case took"
+          },
+          "cell": {
+            "type": "integer",
+            "description": "The cell's number in the lab, from 1"
+          },
+          "values": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The cell's value for each matrix axis"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "cell",
+          "name",
+          "values",
+          "run",
+          "status",
+          "runId",
+          "failures",
+          "documents",
+          "phases",
+          "millis"
+        ]
+      }
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "cells": {
+          "type": "integer"
+        },
+        "passed": {
+          "type": "integer"
+        },
+        "failed": {
+          "type": "integer"
+        },
+        "errors": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "cells",
+        "passed",
+        "failed",
+        "errors"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "command",
+    "ok",
+    "lab",
+    "run",
+    "cells",
+    "summary"
+  ]
+}

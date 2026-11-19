@@ -18,7 +18,9 @@
 mod assert;
 mod document;
 mod junit;
+mod lab;
 mod run;
+mod sweep;
 
 pub use assert::stage_value;
 pub use document::{
@@ -26,7 +28,12 @@ pub use document::{
     TEST_FILE_SUFFIX, TEST_KIND,
 };
 pub use junit::junit;
+pub use lab::{
+    cells, load_lab, new_lab_run_id, run_lab, Cell, CellResult, LabFile, DEFAULT_EXPIRY, LAB_KIND,
+    LAST_RUN_FILE,
+};
 pub use run::{
     run_file, CaseResult, FileResult, PhaseResult, Resolver, Runner, StageSummary, Status,
     TEST_RUN_ID,
 };
+pub use sweep::{environments, now, sweep, Record, SweepOutcome, Swept, RECORD_FILE};

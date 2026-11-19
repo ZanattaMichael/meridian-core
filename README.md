@@ -57,6 +57,7 @@ meridian plan site.yaml                     # what applying would change
 meridian apply site.yaml                    # apply
 meridian import ./compose.yaml -o imported  # convert existing configuration
 meridian test                               # run the project's tests
+meridian lab run nightly.lab.yaml           # build and tear down a matrix of environments
 meridian fmt . / meridian lint .            # format and lint
 meridian lsp / meridian mcp                 # language server, MCP server
 ```
@@ -64,7 +65,8 @@ meridian lsp / meridian mcp                 # language server, MCP server
 - Runs are locked, recorded, resumable (`apply --resume`) and can roll back. `adopt` takes an
   existing thing under management ([adopting what exists](docs/reference/dsl/resources.md#adopting-what-exists));
   `meridian retarget` moves a document to another tool ([retargeting](docs/operations/retargeting.md));
-  `meridian destroy` removes what was applied, last stage first ([destroying](docs/operations/destroying.md)).
+  `meridian destroy` removes what was applied, last stage first ([destroying](docs/operations/destroying.md));
+  `meridian lab` builds and tears down a matrix of environments side by side ([labs](docs/operations/lab.md)).
   `meridian diagnose` says what broke, where, and what to run next ([troubleshooting](docs/operations/troubleshooting.md));
   `meridian inspect` reads one resource as it is now, beside what the document declares.
   See [running safely](docs/concepts/run-safety.md) and [policy checks](docs/reference/policy.md).

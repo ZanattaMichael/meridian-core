@@ -387,6 +387,12 @@ pub(crate) enum Command {
         #[arg(long)]
         keep: bool,
     },
+    /// Run a matrix of lifecycle environments side by side, list the last
+    /// run, and destroy what expired runs left behind
+    Lab {
+        #[command(subcommand)]
+        command: LabCommand,
+    },
     /// Rewrite documents in the one standard layout, changing no value
     Fmt(tools::FmtArgs),
     /// Report errors, and things that compile but are probably mistakes
@@ -455,6 +461,14 @@ impl Command {
                 command: SecretCommand::Set { .. },
             } => "secret set".to_owned(),
             Command::Test { .. } => "test".to_owned(),
+            Command::Lab { command } => format!(
+                "lab {}",
+                match command {
+                    LabCommand::Run { .. } => "run",
+                    LabCommand::List { .. } => "list",
+                    LabCommand::Sweep { .. } => "sweep",
+                }
+            ),
             Command::Fmt(_) => "fmt".to_owned(),
             Command::Lint(_) => "lint".to_owned(),
             Command::Schema(_) => "schema".to_owned(),
@@ -482,6 +496,66 @@ impl Command {
             ),
         }
     }
+}
+
+#[derive(Subcommand)]
+pub(crate) enum LabCommand {
+    /// Run every cell of a Lab document: each lifecycle case of its Test
+    /// files, under each combination of its matrix
+    Run {
+        /// The lab file (kind: Lab)
+        file: PathBuf,
+        /// Run only the cells whose matrix holds this value, as
+        /// AXIS=VALUE; may be given more than once, and every one must hold
+        #[arg(long, value_name = "AXIS=VALUE")]
+        filter: Vec<String>,
+        /// Also write the results as JUnit XML to this file: a testsuite per
+        /// cell, a testcase per phase
+        #[arg(long, value_name = "FILE")]
+        junit: Option<PathBuf>,
+        #[command(flatten)]
+        plugins: PluginDirs,
+        /// Where each cell's state is kept, under lab/<lab>/<run>/
+        #[arg(
+            long,
+            value_name = "DIR",
+            env = "MERIDIAN_STATE_DIR",
+            default_value = ".meridian"
+        )]
+        state_dir: PathBuf,
+        /// Leave each cell's environment in place instead of destroying it
+        #[arg(long)]
+        keep: bool,
+    },
+    /// List a lab's cells and how each ended in its last run
+    List {
+        /// The lab file (kind: Lab)
+        file: PathBuf,
+        #[arg(
+            long,
+            value_name = "DIR",
+            env = "MERIDIAN_STATE_DIR",
+            default_value = ".meridian"
+        )]
+        state_dir: PathBuf,
+    },
+    /// Destroy every environment a lab or test run left whose expiry has
+    /// passed, and remove its state
+    Sweep {
+        /// Also destroy every environment made at least this long ago, as
+        /// in 30m or 2h; 0s destroys every one
+        #[arg(long, value_name = "DURATION", value_parser = parse_duration)]
+        older_than: Option<Duration>,
+        #[command(flatten)]
+        plugins: PluginDirs,
+        #[arg(
+            long,
+            value_name = "DIR",
+            env = "MERIDIAN_STATE_DIR",
+            default_value = ".meridian"
+        )]
+        state_dir: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]

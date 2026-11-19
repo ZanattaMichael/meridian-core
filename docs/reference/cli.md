@@ -24,6 +24,7 @@ meridian retarget <file> --to TARGET [--out FILE] [--no-adopt] [--state-dir DIR]
 meridian version
 meridian module   install [--locked] | update [NAME]... | verify | list | sign --key FILE | pack [--out FILE] | push REPOSITORY
 meridian secret check <files>... | set NAME <files>...
+meridian lab      run <file> [--filter AXIS=VALUE] [--junit FILE] [--keep] | list <file> | sweep [--older-than DURATION]
 meridian rules check --hierarchy FILE [--rules FILE] [--require-rules] [--data FILE] [--set KEY=VALUE]
 meridian fmt      <paths>... [--check] [--keep-order]
 meridian lint     <paths>... [--data FILE] [--set KEY=VALUE] [--state-dir DIR] [--fix] [--strict] [--json]
@@ -538,6 +539,28 @@ tests/site.test.yaml (site)
 
 Defaults to `tests/*.test.yaml`. `--case TEXT` filters; `--junit FILE` writes JUnit; `--keep`
 leaves each lifecycle case's environment in place. Exit `1` if any case fails or nothing ran.
+
+### `lab`
+
+Runs a [`Lab` document](../operations/lab.md): each lifecycle case of its Test files under
+each combination of its matrix, `concurrency` at a time.
+
+```
+$ meridian lab run nightly.lab.yaml --filter target=terraform
+nightly.lab.yaml (nightly, run l3f9a2c1d)
+  ok    site: web tier [provider=localstack, target=terraform] (lifecycle, 2 documents)
+        provision: ok
+        verify: ok
+        destroy: ok
+1 cell: 1 passed
+```
+
+`lab run` exits `1` if any cell fails. `--filter AXIS=VALUE` (repeatable) picks cells;
+`--junit FILE` writes a testsuite per cell; `--keep` leaves every cell's environment.
+`lab list FILE` shows each cell and how it ended in the last run. `lab sweep` destroys every
+environment under `lab/` and `tests/` in the state directory whose expiry has passed, or, with
+`--older-than DURATION`, that was made that long ago (`0s`: all); it exits `1` if one could
+not be destroyed.
 
 ### `fmt`
 

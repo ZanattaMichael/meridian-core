@@ -175,6 +175,8 @@ cases:
   the case is an error: destroy what it holds with `meridian destroy --yes --state-dir DIR`
   and the same documents and data, then remove it.
 - `--keep` skips destroy and leaves the environment and its directory, to look at.
+  `meridian lab sweep --older-than 0s` destroys it later: the directory's `environment.json`
+  records the documents, data and selector.
 - See [the run id](#the-run-id) for naming what the case makes.
 - `timeout` stops the running tool; destroy then runs with the same limit per tool.
 
@@ -318,6 +320,7 @@ Run before the plan ([pipelines](../operations/running-in-a-pipeline.md)):
 
 ## What is not here yet
 
+- **A matrix of environments**: see [labs](../operations/lab.md).
 - **`break` and `diagnose` phases** ([issue 237](https://github.com/ZanattaMichael/meridian-core/issues/237)).
 - **Disposable machines** ([issue 123](https://github.com/ZanattaMichael/meridian-core/issues/123)).
 - **Expectations on events.**
