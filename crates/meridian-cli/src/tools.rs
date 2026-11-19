@@ -320,6 +320,11 @@ pub struct McpArgs {
     /// lock. Off by default: the server then changes nothing anywhere
     #[arg(long, env = "MERIDIAN_MCP_ALLOW_PLAN")]
     allow_plan: bool,
+    /// Offer the `inspect` tool, which runs the real tool to read one
+    /// resource and may reach the machine. It changes nothing and takes no
+    /// lock. Off by default
+    #[arg(long, env = "MERIDIAN_MCP_ALLOW_INSPECT")]
+    allow_inspect: bool,
     /// The directory file arguments are confined to. Defaults to the
     /// current directory
     #[arg(long, value_name = "DIR")]
@@ -855,37 +860,44 @@ pub fn mcp(args: &McpArgs) -> Result<(), Failure> {
     let program = std::env::current_exe()
         .map_err(|e| Failure::Message(format!("finding the meridian binary: {e}")))?;
     server = server.allow_diagnose(meridian_mcp::PlanCommand {
-        program,
+        program: program.clone(),
         args: vec![
             "--state-dir".to_owned(),
             root.join(&args.state_dir).to_string_lossy().into_owned(),
         ],
     });
+    // `plan` and `inspect` are the commands themselves, with the plugin
+    // options the server was started with, so the result is the object the
+    // command prints with --output json.
+    let mut plugin_args = Vec::new();
+    for dir in &args.plugins.dirs {
+        plugin_args.push("--plugin-dir".to_owned());
+        plugin_args.push(dir.to_string_lossy().into_owned());
+    }
+    if let Some(policy) = args.plugins.signatures {
+        plugin_args.push("--plugin-signatures".to_owned());
+        plugin_args.push(
+            match policy {
+                SignaturePolicy::Off => "off",
+                SignaturePolicy::Warn => "warn",
+                SignaturePolicy::Require => "require",
+            }
+            .to_owned(),
+        );
+    }
+    if args.allow_inspect {
+        let mut inspect_args = plugin_args.clone();
+        inspect_args.push("--state-dir".to_owned());
+        inspect_args.push(root.join(&args.state_dir).to_string_lossy().into_owned());
+        server = server.allow_inspect(meridian_mcp::PlanCommand {
+            program: program.clone(),
+            args: inspect_args,
+        });
+    }
     if args.allow_plan {
-        // `plan` is the command itself, with the plugin options it was
-        // started with, so the result is the object `meridian plan --output
-        // json` prints.
-        let program = std::env::current_exe()
-            .map_err(|e| Failure::Message(format!("finding the meridian binary: {e}")))?;
-        let mut plan_args = Vec::new();
-        for dir in &args.plugins.dirs {
-            plan_args.push("--plugin-dir".to_owned());
-            plan_args.push(dir.to_string_lossy().into_owned());
-        }
-        if let Some(policy) = args.plugins.signatures {
-            plan_args.push("--plugin-signatures".to_owned());
-            plan_args.push(
-                match policy {
-                    SignaturePolicy::Off => "off",
-                    SignaturePolicy::Warn => "warn",
-                    SignaturePolicy::Require => "require",
-                }
-                .to_owned(),
-            );
-        }
         server = server.allow_plan(meridian_mcp::PlanCommand {
             program,
-            args: plan_args,
+            args: plugin_args,
         });
     }
     let registry = meridian_mcp::run_stdio(server).map_err(|e| Failure::Message(e.to_string()))?;

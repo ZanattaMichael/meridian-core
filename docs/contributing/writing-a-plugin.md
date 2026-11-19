@@ -307,6 +307,7 @@ secret.
 | `outputs` | read the values the last apply produced from the tool's own state, without applying |
 | `identifiers` | optional, with `reads_identifiers() -> true`: from the tool's own state, the identifier of each resource it manages, by resource id, in the form the tool's import takes. [`meridian retarget`](../operations/retargeting.md) writes them as `adopt:`. Read only; change nothing |
 | `plan_destroy`, `destroy` | optional, with `destroys() -> true`: preview, then remove, everything the tool made for the artifact, as the tool's own destroy does, for [`meridian destroy`](../operations/destroying.md). A failed `destroy` puts what it removed in `RunError::changes`. Say false when the tool keeps no record of what it made |
+| `inspect` | optional, with `inspects() -> true`: read one resource of the artifact as it is now on the endpoint, for [`meridian inspect`](../reference/cli.md#inspect). Return `Inspection { found, actual, in_desired_state, command }`: `actual` keyed by the document's param names where you can map them, `in_desired_state` only when the tool says, `command` as a person would type it, without secrets. Read only: no apply, no write to the tool's state. A type the tool cannot read alone is a `RunError` naming the rule `unsupported-inspect` |
 
 [`meridian_sdk::tool`](../../crates/meridian-sdk/src/tool.rs): `write_artifact` syncs the
 artifact into the work directory; `Tool` runs a command, relays output and turns failure into

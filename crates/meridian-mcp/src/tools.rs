@@ -215,6 +215,20 @@ pub(crate) fn list() -> Vec<Value> {
             }),
             &[],
         ),
+        tool(
+            "inspect",
+            "One resource as its tool reads it now, beside what the document declares, and \
+             the properties that differ, by running `meridian inspect`. Only offered when \
+             the server was started with `--allow-inspect`: it runs the real tool, which \
+             may reach the machine. Nothing is changed and no lock is taken.",
+            json!({
+                "resource": string("The resource's id, as the document declares it."),
+                "file": string("The document file, under the directory the server was started in."),
+                "step": string("The document that declares the resource, when the file holds more than one that does."),
+                "endpoint": string("The machine to read it on; it must be the one the step configures."),
+            }),
+            &["resource", "file"],
+        ),
     ]
 }
 
@@ -256,6 +270,7 @@ pub(crate) fn call(server: &Server, params: &Value) -> Result<Value, (i64, Strin
         "import" => import(server, args),
         "plan" => plan(server, args),
         "diagnose" => diagnose(server, args),
+        "inspect" => inspect(server, args),
         _ => tool_error(format!(
             "there is no tool called `{name}`; `tools/list` gives the tools"
         )),
@@ -1328,6 +1343,64 @@ fn diagnose(server: &Server, args: &Value) -> Value {
         _ => tool_error(format!(
             "meridian diagnose printed no result: {}",
             String::from_utf8_lossy(&output.stderr).trim()
+        )),
+    }
+}
+
+/// `meridian inspect --output json`, as the object it prints, with what it
+/// said on standard error when it failed.
+fn inspect(server: &Server, args: &Value) -> Value {
+    let Some(command) = server.inspect_command() else {
+        return tool_error(
+            "`inspect` runs the real tool, and this server was not started with --allow-inspect",
+        );
+    };
+    let Some(resource) = arg_str(args, "resource") else {
+        return tool_error("`resource` is required: the id of the resource to read");
+    };
+    let Some(file) = arg_str(args, "file") else {
+        return tool_error("`file` is required: the document file that declares it");
+    };
+    let path = match server.confined(file) {
+        Ok(p) => p,
+        Err(e) => return tool_error(e),
+    };
+    let mut process = std::process::Command::new(&command.program);
+    process
+        .arg("inspect")
+        .args(&command.args)
+        .arg("--output")
+        .arg("json")
+        .env("MERIDIAN_ANNOTATIONS", "off")
+        .current_dir(server.root());
+    for flag in ["step", "endpoint"] {
+        if let Some(value) = arg_str(args, flag) {
+            process.arg(format!("--{flag}")).arg(value);
+        }
+    }
+    process.arg("--").arg(resource).arg(&path);
+    let output = match process.output() {
+        Ok(o) => o,
+        Err(e) => {
+            return tool_error(format!(
+                "running {} inspect: {e}",
+                command.program.display()
+            ))
+        }
+    };
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    match serde_json::from_str::<Value>(String::from_utf8_lossy(&output.stdout).trim()) {
+        Ok(Value::Object(mut body)) => {
+            let ok = body.get("ok").and_then(Value::as_bool).unwrap_or(false);
+            if !ok && !stderr.trim().is_empty() {
+                let (report, _) = cut(stderr.trim(), FILE_CHARS);
+                body.insert("report".to_owned(), report.into());
+            }
+            tool_result(ok, Value::Object(body))
+        }
+        _ => tool_error(format!(
+            "meridian inspect printed no result: {}",
+            stderr.trim()
         )),
     }
 }

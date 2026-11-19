@@ -13,6 +13,7 @@ meridian runs
 meridian events   [RUN] [--type TYPE]
 meridian logs     [RUN] [--step NAME] [--endpoint ENDPOINT] [--stream STREAM] [--grep RE] [--tail N] [--all]
 meridian diagnose [RUN] [--step NAME] [--endpoint ENDPOINT] [--cause WORD]
+meridian inspect  <resource> <files>... [--step NAME] [--endpoint ENDPOINT] [--data FILE] [--set KEY=VALUE]
 meridian bug-report [RUN] [--out FILE]
 meridian report   [RUN] [--format FORMAT] [--out FILE] [--from FILE]
 meridian unlock   <ID>
@@ -31,7 +32,7 @@ meridian schema   sync <paths>... [--target TARGET] [--data FILE] [--set KEY=VAL
 meridian schema   status [--state-dir DIR] [--json]
 meridian schema   clean [TARGET]... [--state-dir DIR]
 meridian lsp
-meridian mcp      [--allow-plan] [--root DIR] [--state-dir DIR]
+meridian mcp      [--allow-plan] [--allow-inspect] [--root DIR] [--state-dir DIR]
 ```
 
 Every command takes `--output text|json` ([objects](cli-json.md)).
@@ -251,6 +252,42 @@ Says which step, machine and resource failed in a run (default: the last that fa
 the cause, the steps not run because of it, and what to run next. Reads the record only:
 no tool, no plugin, no lock. Filters: `--step`, `--endpoint`, `--cause`. See
 [Troubleshooting a failed run](../operations/troubleshooting.md).
+
+### `inspect`
+
+Reads one resource as its tool sees it now and puts it beside what the document
+declares. Compiles only the step that declares the resource, asks its plugin, and
+prints desired, actual and the properties that differ. Changes nothing, takes no lock,
+keeps no record.
+
+```
+$ meridian inspect page site.yaml
+page (file) in web, target fake on web1
+  read with: fake-tool show files/page --on web1
+  found; the tool says it differs from the document
+
+  property  desired                   actual
+  content   "bye"                     "hello"  (differs)
+
+  differs: content
+```
+
+| Flag | Meaning |
+|---|---|
+| `--step NAME` | the document that declares the resource; needed when more than one does |
+| `--endpoint ENDPOINT` | the machine to read it on; must be the one the step configures |
+| `--data`, `--set` | as for `plan` |
+
+- `read with` is the tool's own command, masked.
+- The verdict line is the tool's: as declared, differs, or cannot say.
+- A secret is never compared or shown: desired prints `(sensitive)`, actual is masked,
+  and the property is marked `(sensitive, not compared)`.
+- A property the tool did not report is marked `(not reported)`.
+- Exit 1 when the resource or step is unknown, the endpoint is not the step's, the
+  step waits on an output not yet applied, or the tool fails to read.
+- A target that cannot read one resource is refused with
+  [`unsupported-inspect`](refusal-rules.md); the
+  [capability matrix](capability-matrix.md) has an **inspect** column.
 
 ### `bug-report`
 

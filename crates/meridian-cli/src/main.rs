@@ -238,6 +238,25 @@ fn run() -> ExitCode {
                 all,
             },
         ),
+        Command::Inspect {
+            resource,
+            files,
+            step,
+            endpoint,
+            data,
+            set,
+            state,
+        } => inspect(
+            &state,
+            &InspectQuery {
+                resource: &resource,
+                files: &files,
+                step: step.as_deref(),
+                endpoint: endpoint.as_deref(),
+                data: &data,
+                set: &set,
+            },
+        ),
         Command::Diagnose {
             run,
             step,

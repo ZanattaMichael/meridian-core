@@ -182,6 +182,7 @@ fn every_tool_is_listed_with_a_schema() {
             "import",
             "plan",
             "diagnose",
+            "inspect",
         ]
     );
     for tool in tools {

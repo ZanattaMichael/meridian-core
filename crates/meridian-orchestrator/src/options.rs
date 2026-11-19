@@ -85,6 +85,8 @@ pub struct Options {
     /// Make a plan preview a [`Mode::Destroy`]: stages last first, each
     /// tool asked what its destroy would remove.
     pub destroy: bool,
+    /// The resource [`Mode::Inspect`] reads; only that mode takes one.
+    pub inspect: Option<crate::inspect::Ask>,
 }
 
 /// What an apply does when a stage fails.
@@ -126,6 +128,7 @@ impl Options {
             tool_debug: 0,
             tool_debug_steps: Vec::new(),
             destroy: false,
+            inspect: None,
         }
     }
 

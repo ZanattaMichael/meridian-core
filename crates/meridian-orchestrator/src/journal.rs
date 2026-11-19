@@ -273,7 +273,8 @@ impl Journal {
             );
         }
         match &report.outcome {
-            Outcome::Compiled => {
+            // An inspection keeps no record: the step only ran to read.
+            Outcome::Compiled | Outcome::Inspected(_) => {
                 self.emit(observer, event::STEP_SUCCEEDED, at, vec![hash]);
             }
             Outcome::Planned(plan) => {

@@ -277,6 +277,13 @@ general! {
         "a path this target cannot use: relative where an absolute one is needed, leaving the directory it must stay in, or holding characters the tool cannot take",
         "write the path as the message says"
     );
+    /// `meridian inspect` on a target that cannot read one resource, or a
+    /// resource of a type it cannot read alone.
+    UNSUPPORTED_INSPECT = (
+        "unsupported-inspect",
+        "the target cannot read this resource alone, so `meridian inspect` cannot show it",
+        "run `meridian drift` on the step's document, which says whether the step still matches"
+    );
 }
 
 /// The general rule of this name, if there is one.

@@ -74,3 +74,4 @@ page it affects. The pull request template asks for it.
 | [`destroy` is an optional plugin operation, run last stage first](0048-destroy-is-an-optional-plugin-operation-run-last-stage-first.md) | Orchestrator | proposed |
 | [A failed resource is named with a fixed cause word, and the tool's words stay on the machine that ran](0049-a-failed-resource-is-named-with-a-fixed-cause-and-its-words-stay-local.md) | Runs | proposed |
 | [`meridian diagnose` reads the record and runs nothing](0051-diagnose-reads-the-record-and-runs-nothing.md) | Runs | proposed |
+| [`meridian inspect` reads one resource through an optional plugin call](0052-inspect-reads-one-resource-through-an-optional-plugin-call.md) | Runs | proposed |
