@@ -423,3 +423,36 @@ fn a_credential_for_this_machine_is_refused() {
         "chef-client was started"
     );
 }
+
+#[test]
+fn a_debug_level_sets_chef_runs_log_level_and_its_log_reaches_the_step() {
+    let dir = scratch(TMP, "debug-chef-run");
+    // The stand-in logs where the config it was given says.
+    let run = "config=$2\nloc=$(sed -n 's/^location = \"\\(.*\\)\"$/\\1/p' \"$config\")\ncp \"$config\" \"$(dirname \"$0\")/given.toml\"\necho 'DEBUG: connecting' > \"$loc/default.log\"";
+    let log = KeptLog::default();
+    runner(&dir, "exit 9", run)
+        .apply(
+            &RunContext {
+                debug_level: 3,
+                ..context(&dir, "web01")
+            },
+            &compiled(),
+            &log,
+        )
+        .unwrap();
+    let args = fs::read_to_string(dir.join("chef-run.args")).unwrap();
+    assert!(args.starts_with("--config "), "{args}");
+    let given = fs::read_to_string(dir.join("given.toml")).unwrap();
+    assert!(given.contains("[log]\nlevel = \"debug\""), "{given}");
+    assert!(
+        log.text().iter().any(|l| l == "DEBUG: connecting"),
+        "{:?}",
+        log.text()
+    );
+
+    runner(&dir, "exit 9", "true")
+        .apply(&context(&dir, "web01"), &compiled(), &KeptLog::default())
+        .unwrap();
+    let args = fs::read_to_string(dir.join("chef-run.args")).unwrap();
+    assert!(!args.contains("--config"), "{args}");
+}

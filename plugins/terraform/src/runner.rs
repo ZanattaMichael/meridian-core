@@ -10,6 +10,13 @@ use meridian_sdk::{settings, Setting};
 
 use crate::CONFIG_PATH;
 
+/// What `--tool-debug` adds to the tool, level 1 first. Terraform's log goes to standard error, beside its own output.
+pub const DEBUG: &[meridian_sdk::debug::DebugLevel] = &[
+    meridian_sdk::debug::DebugLevel::env(&[("TF_LOG", "INFO")]),
+    meridian_sdk::debug::DebugLevel::env(&[("TF_LOG", "DEBUG")]),
+    meridian_sdk::debug::DebugLevel::env(&[("TF_LOG", "TRACE")]),
+];
+
 /// Names the program to run, when it is not `terraform` on `PATH`. OpenTofu's
 /// `tofu` takes the same commands.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_TERRAFORM";
@@ -69,7 +76,8 @@ impl TerraformRunner {
         let mut tool = Tool::new(&self.program)
             .dir(&context.work_dir)
             .env("TF_IN_AUTOMATION", "1")
-            .env("TF_INPUT", "0");
+            .env("TF_INPUT", "0")
+            .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level));
         // Values handed over from earlier stages reach the configuration as
         // input variables, for a document that declares them.
         for (name, value) in &context.inputs {
@@ -210,6 +218,10 @@ impl TerraformRunner {
 }
 
 impl Runner for TerraformRunner {
+    fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
+        DEBUG
+    }
+
     fn settings(&self) -> Vec<Setting> {
         settings()
     }

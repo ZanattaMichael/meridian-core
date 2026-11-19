@@ -68,4 +68,5 @@ page it affects. The pull request template asks for it.
 | [`adopt` is a field of the resource, and each target says how it adopts](0042-adopt-is-a-resource-field-and-a-target-says-how-it-adopts.md) | Language | proposed |
 | [`meridian retarget` writes a new file from what the old tool reports](0043-retarget-writes-a-new-file-from-what-the-old-tool-reports.md) | Core | proposed |
 | [Tool output is kept, masked, on the machine that ran it, and never in the record](0044-tool-output-is-kept-masked-on-the-machine-that-ran.md) | Runs | proposed |
+| [A `--tool-debug` level is mapped by each target to its tool's own switch](0046-a-tool-debug-level-is-mapped-by-each-target-to-its-own-switch.md) | Runs | proposed |
 | [Credentials come from providers, and passwords only on request](0047-credentials-come-from-providers-and-passwords-only-on-request.md) | Secrets | accepted |

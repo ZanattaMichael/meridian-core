@@ -795,6 +795,8 @@ The round-trip test uses
 | `service "..." does not publish port N` | Add the port to the service's `ports`. An exposed port (`expose`) is not published |
 | the plan cannot reach the daemon | Run `docker --host ssh://<host> ps` by hand. The SSH user must be able to run `docker` without a password prompt |
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) adds `--log-level debug` to `docker` at every level.
+
 ## How it is tested
 
 Compile, runner and protocol tests, plus end-to-end tests against a real daemon (bring up,

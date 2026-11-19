@@ -259,6 +259,8 @@ variables file passed as `-var-file`, removed after planning; the plan file is r
 use. A [saved plan](../operations/pull-requests.md) keeps no plan file for such a stage, so
 apply plans again. State holds the arguments, so use a `backend` that protects it.
 
+[`--tool-debug`](../reference/cli.md#asking-a-tool-for-more-output) sets `TF_LOG` to `INFO`, `DEBUG` or `TRACE` on every `terraform` call; the log goes to standard error, beside the JSON.
+
 ## Credentials
 
 `spec.endpoint` names the [credential](../reference/dsl/credentials.md#reaching-a-cloud-as-a-credential)
@@ -323,6 +325,7 @@ The compiled files hold nothing of the credential, and the plan and the run reco
 name it (`prod (aws, region eu-west-1)`) and nothing more. Outputs read on their own
 (`meridian outputs`) are read with no credential; a backend that needs the cloud's
 login to read the state is read right after the apply, inside it.
+
 
 ## Editor schemas
 

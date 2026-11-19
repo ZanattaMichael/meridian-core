@@ -665,6 +665,7 @@ pub fn context_to_wire(c: &RunContext) -> pb::RunContext {
         }),
         save_plan: c.save_plan,
         saved_plan: c.saved_plan.as_ref().map(saved_plan_to_wire),
+        debug_level: c.debug_level,
     }
 }
 
@@ -694,6 +695,7 @@ pub fn context_to_wire_without_secrets(c: &RunContext) -> pb::RunContext {
         credential: None,
         save_plan: c.save_plan,
         saved_plan: c.saved_plan.as_ref().map(saved_plan_to_wire),
+        debug_level: c.debug_level,
     }
 }
 
@@ -747,6 +749,7 @@ pub fn context_from_wire(c: Option<pb::RunContext>) -> Result<RunContext, String
             None => None,
             Some(saved) => Some(saved_plan_from_wire(saved)?),
         },
+        debug_level: c.debug_level,
     })
 }
 

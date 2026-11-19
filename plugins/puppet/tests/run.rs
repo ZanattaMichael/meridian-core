@@ -488,3 +488,62 @@ fn a_credential_for_this_machine_is_refused() {
     );
     assert!(!dir.join("puppet.args").exists(), "puppet was started");
 }
+
+#[test]
+fn a_debug_level_reaches_puppet_apply_and_bolt_each_as_its_own_switch() {
+    let dir = scratch(TMP, "debug");
+    let debug = |host: &str, level: u32| RunContext {
+        debug_level: level,
+        ..context(&dir, host)
+    };
+
+    runner(&dir, NOOP, "exit 9")
+        .plan(&debug("localhost", 2), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.join("puppet.args")).unwrap().trim(),
+        "apply --detailed-exitcodes --color=false --debug --noop apply.pp"
+    );
+
+    // Bolt logs to standard error; the report on standard output is read
+    // as before.
+    let bolt = format!("echo 'DEBUG  [Bolt::Executor] Running apply' >&2\n{BOLT_REPORT}");
+    let log = KeptLog::default();
+    let applied = runner(&dir, "exit 9", &bolt)
+        .apply(&debug("web01", 3), &compiled(), &log)
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.join("bolt.args")).unwrap().trim(),
+        "apply apply.pp --targets web01 --format json --log-level trace"
+    );
+    assert_eq!(applied.changes.len(), 1);
+    assert!(log.text().iter().any(|l| l.contains("Bolt::Executor")));
+
+    runner(&dir, "exit 9", BOLT_REPORT)
+        .apply(&debug("web01", 0), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.join("bolt.args")).unwrap().trim(),
+        "apply apply.pp --targets web01 --format json"
+    );
+}
+
+#[test]
+fn bolt_applys_own_report_is_a_list_of_results_and_is_read_too() {
+    // What `bolt apply --format json` prints: the results, unwrapped.
+    let dir = scratch(TMP, "bolt-list");
+    let list = r#"cat <<'OUT'
+[{"target":"web01","action":"apply","object":null,"status":"success","value":{"report":{"status":"changed","resource_statuses":{"Package[app_pkg]":{"changed":true,"events":[{"property":"ensure","message":"created","status":"success"}]}}}}}]
+OUT"#;
+    let applied = runner(&dir, "exit 9", list)
+        .apply(&context(&dir, "web01"), &compiled(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        applied
+            .changes
+            .iter()
+            .map(|c| c.to_string())
+            .collect::<Vec<_>>(),
+        ["create app_pkg: ensure: created"]
+    );
+}

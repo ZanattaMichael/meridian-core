@@ -178,6 +178,12 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
     if how.rollback_on_failure {
         command.push("--on-failure rollback".to_owned());
     }
+    if workflow.tool_debug > 0 {
+        command.push(format!("--tool-debug={}", workflow.tool_debug));
+        for step in &workflow.tool_debug_step {
+            command.push(format!("--tool-debug-step {step}"));
+        }
+    }
     if let Some(limit) = workflow.stage_timeout {
         command.push(format!("--stage-timeout {}", describe_duration(limit)));
     }
@@ -231,6 +237,8 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
         save_plan: how.plan_out.is_some(),
         from_plan: plan_file.as_ref().map(|plan| Arc::new(plan.clone())),
         strict_secrets: workflow.strict_secrets,
+        tool_debug: workflow.tool_debug,
+        tool_debug_steps: workflow.tool_debug_step.clone(),
         // Compiling drives no tool, so there is nothing to interrupt but the
         // process itself, which Ctrl-C does as it always did.
         stop: Stop {

@@ -18,6 +18,13 @@ use meridian_sdk::{settings, Setting};
 
 use crate::{STATES_DIR, TOP_PATH};
 
+/// What `--tool-debug` adds to the tool, level 1 first. Salt logs to standard error; the JSON result on standard output is unchanged.
+pub const DEBUG: &[meridian_sdk::debug::DebugLevel] = &[
+    meridian_sdk::debug::DebugLevel::args(&["-l", "info"]),
+    meridian_sdk::debug::DebugLevel::args(&["-l", "debug"]),
+    meridian_sdk::debug::DebugLevel::args(&["-l", "trace"]),
+];
+
 /// Names the `salt-call` program, when it is not on `PATH`.
 pub const SALT_CALL_VARIABLE: &str = "MERIDIAN_SALT_CALL";
 /// Names the `salt-ssh` program, when it is not on `PATH`.
@@ -216,6 +223,7 @@ impl SaltRunner {
                     tool = tool.arg("--pillar-root").arg(path_text(dir));
                 }
                 tool.args(["--out", "json", "--no-color", "--retcode-passthrough"])
+                    .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level))
                     .args(self.extra_args.iter().cloned())
             }),
             Transport::Ssh => ("salt-ssh", {
@@ -224,7 +232,8 @@ impl SaltRunner {
                     .arg(path_text(&work.join("ssh")))
                     .arg("--roster-file")
                     .arg(path_text(&roster_path))
-                    .args(["--out", "json", "--no-color"]);
+                    .args(["--out", "json", "--no-color"])
+                    .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level));
                 let tool = match &agent {
                     Some(agent) => agent.tell(tool),
                     None => tool,
@@ -249,6 +258,10 @@ impl SaltRunner {
 }
 
 impl Runner for SaltRunner {
+    fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
+        DEBUG
+    }
+
     fn settings(&self) -> Vec<Setting> {
         settings()
     }

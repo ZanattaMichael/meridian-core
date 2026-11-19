@@ -56,6 +56,7 @@ fn context(test: &str) -> RunContext {
         credential: None,
         save_plan: false,
         saved_plan: None,
+        debug_level: 0,
     }
 }
 

@@ -24,6 +24,19 @@ fn secret_token(name: &str) -> String {
 use crate::script::{self, Desired, FileState, Generator, Probe, Settings, Steps};
 use crate::META_PATH;
 
+/// What `--tool-debug` does, level 1 first. The runner drives Podman
+/// through systemd, so each level shows more of what systemd and Quadlet
+/// say rather than adding a flag to `podman`.
+pub const DEBUG: &[meridian_sdk::debug::DebugLevel] = &[
+    meridian_sdk::debug::DebugLevel::does("100 journal lines of a unit that fails"),
+    meridian_sdk::debug::DebugLevel::does(
+        "100 journal lines and systemctl status of a unit that fails",
+    ),
+    meridian_sdk::debug::DebugLevel::does(
+        "100 journal lines and systemctl status of a unit that fails, and every unit Quadlet generates",
+    ),
+];
+
 /// Names the `podman` program on the host, when it is not on its `PATH`.
 pub const PODMAN_VARIABLE: &str = "MERIDIAN_PODMAN";
 /// Names the `systemctl` program on the host.
@@ -190,7 +203,7 @@ impl PodmanRunner {
         runner
     }
 
-    fn settings(&self) -> Settings<'_> {
+    fn settings(&self, debug: u32) -> Settings<'_> {
         Settings {
             scope: self.scope,
             unit_dir: self.unit_dir.as_deref(),
@@ -199,6 +212,7 @@ impl PodmanRunner {
             systemctl: &self.systemctl,
             journalctl: &self.journalctl,
             sudo: &self.sudo,
+            debug,
         }
     }
 
@@ -249,7 +263,7 @@ impl PodmanRunner {
         let script = context
             .secrets
             .filled_text(
-                &self.settings().secrets(&names),
+                &self.settings(context.debug_level).secrets(&names),
                 secret_token,
                 Written::ShellSingleQuoted,
             )
@@ -354,8 +368,12 @@ impl PodmanRunner {
             .map(|old| old.file.clone())
             .collect();
 
-        let finished =
-            self.on_host(context, agent, self.settings().probe(&desired, &stale), log)?;
+        let finished = self.on_host(
+            context,
+            agent,
+            self.settings(context.debug_level).probe(&desired, &stale),
+            log,
+        )?;
         if !finished.success() {
             return Err(finished.into_error(format!(
                 "could not look at the units on {}",
@@ -398,7 +416,12 @@ impl PodmanRunner {
         }
         let mut values = BTreeMap::new();
         if !wanted.is_empty() {
-            let finished = self.on_host(context, agent, self.settings().inspect(&wanted), log)?;
+            let finished = self.on_host(
+                context,
+                agent,
+                self.settings(context.debug_level).inspect(&wanted),
+                log,
+            )?;
             values = script::read_values(&finished.stdout);
             if !finished.success() || values.len() != wanted.len() {
                 let (noun, name, path) = &wanted[values.len().min(wanted.len() - 1)];
@@ -436,6 +459,10 @@ impl PodmanRunner {
 impl Runner for PodmanRunner {
     fn settings(&self) -> Vec<Setting> {
         settings()
+    }
+
+    fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
+        DEBUG
     }
 
     fn operations(&self) -> Operations {
@@ -491,7 +518,12 @@ impl Runner for PodmanRunner {
             write_installed(&context.work_dir, &both)?;
 
             let steps = survey.steps();
-            let finished = self.on_host(context, agent, self.settings().apply(&steps), log)?;
+            let finished = self.on_host(
+                context,
+                agent,
+                self.settings(context.debug_level).apply(&steps),
+                log,
+            )?;
             if !finished.success() {
                 let done = script::read_done(&finished.stdout);
                 let what = match finished.code {

@@ -231,6 +231,7 @@ impl Registry {
             accepts_inputs: false,
             saves_plans: false,
             reads_identifiers: false,
+            debug_levels: Vec::new(),
             path: String::new(),
             signature: crate::Signature::NotChecked,
         };

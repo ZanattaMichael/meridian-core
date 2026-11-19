@@ -236,6 +236,7 @@ impl Client {
             accepts_inputs: reply.accepts_inputs,
             saves_plans: reply.saves_plans,
             reads_identifiers: reply.reads_identifiers,
+            debug_levels: reply.debug_levels,
             import_formats: wire::import_formats_from_wire(reply.import_formats),
             exports_schemas: reply.exports_schemas,
             settings: wire::settings_from_wire(reply.settings),

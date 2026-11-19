@@ -25,6 +25,10 @@ use meridian_sdk::{
 
 use crate::{META_DATA_PATH, USER_DATA_PATH};
 
+/// What `--tool-debug` adds to the tool, level 1 first. Given to the local `cloud-init schema` check; the machine's own boot is unchanged.
+pub const DEBUG: &[meridian_sdk::debug::DebugLevel] =
+    &[meridian_sdk::debug::DebugLevel::args(&["--debug"])];
+
 /// Names the `cloud-init` program to run, when it is not on `PATH`.
 pub const PROGRAM_VARIABLE: &str = "MERIDIAN_CLOUD_INIT";
 /// Set to `off` to skip the schema check, on a machine that has no
@@ -165,6 +169,7 @@ impl CloudInitRunner {
             let dir = context.work_dir.join(CHECK_DIR);
             write_artifact(&dir, artifact)?;
             let finished = Tool::new(&self.program)
+                .debug(meridian_sdk::debug::pick(DEBUG, context.debug_level))
                 .args(["schema", "--config-file", USER_DATA_PATH])
                 .dir(&dir)
                 .run(log)
@@ -275,6 +280,10 @@ fn seed_outputs(seed: &Path) -> Vec<Output> {
 }
 
 impl Runner for CloudInitRunner {
+    fn debug_levels(&self) -> &'static [meridian_sdk::debug::DebugLevel] {
+        DEBUG
+    }
+
     fn settings(&self) -> Vec<Setting> {
         settings()
     }
