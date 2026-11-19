@@ -294,6 +294,7 @@ fn case_picks_by_name_and_json_and_junit_describe_the_run() {
     assert_eq!(files[0]["cases"][0]["name"], "plan creates everything");
     assert_eq!(files[0]["cases"][0]["status"], "passed");
     assert_eq!(files[0]["cases"][0]["documents"][0]["outcome"], "planned");
+    assert_eq!(files[0]["cases"][0]["runId"], "test");
     assert_eq!(files[1]["cases"].as_array().unwrap().len(), 0);
     assert_eq!(files[2]["cases"][0]["status"], "failed");
     assert!(files[2]["cases"][0]["failures"][0]
@@ -379,6 +380,10 @@ fn a_test_file_with_a_mistake_is_refused_before_anything_runs() {
         (
             &format!("{head}  cases:\n    - name: a\n      run: lifecycle\n      timeout: 5 minutes\n"),
             "error: tests/t.test.yaml: spec.cases[0].timeout: \" minutes\" is not a unit of time; use s, m or h\n",
+        ),
+        (
+            &format!("{head}  set: {{meridian: {{run: {{id: x}}}}}}\n  cases:\n    - name: a\n      assert: [\"1 == 1\"]\n"),
+            "error: tests/t.test.yaml: spec.set.meridian: Meridian's own key: meridian test gives each case its run id\n",
         ),
         (
             &format!("{head}  extra: 1\n  cases:\n    - name: a\n      assert: [\"1 == 1\"]\n"),

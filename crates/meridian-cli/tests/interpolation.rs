@@ -522,3 +522,80 @@ fn the_monitoring_example_is_one_document_or_two() {
     assert!(!one.contains("SCRAPE_INTERVAL"), "{one}");
     assert!(one.contains("LOG_LEVEL: debug"), "{one}");
 }
+
+const TAGGED: &str = r#"apiVersion: meridian/v1
+kind: ResourceSet
+metadata: {name: site}
+spec:
+  target: fake
+  targetHost: {from: inline, host: h}
+  resources:
+    - {id: tag, type: file, params: {content: "web-${{ meridian.run.id }}"}}
+"#;
+
+#[test]
+fn the_run_id_is_read_as_meridian_run_id_and_never_reaches_the_plugin_as_data() {
+    let dir = scratch("run-id");
+    fs::write(dir.join("site.yaml"), TAGGED).unwrap();
+    let output = compile(&dir, &["--run-id", "lab-7"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(written(&dir, "tag").as_deref(), Some("web-lab-7"));
+    // The fake plugin writes the data it is handed to data.json, and only
+    // when it is handed some.
+    assert!(!dir.join("build/site/data.json").exists());
+
+    let output = compile(&dir, &[]);
+    assert_eq!(output.status.code(), Some(1));
+    let out = format!("{}{}", stdout(&output), stderr(&output));
+    assert!(
+        out.contains("meridian.run is not set (the run id is given with --run-id"),
+        "{out}"
+    );
+}
+
+#[test]
+fn the_run_id_and_its_key_are_checked() {
+    let dir = scratch("run-id-refused");
+    fs::write(dir.join("site.yaml"), TAGGED).unwrap();
+    fs::write(dir.join("own.yaml"), "meridian: {run: {id: x}}\n").unwrap();
+    for (args, said) in [
+        (
+            vec!["--run-id", "Lab_7"],
+            "--run-id: the run id \"Lab_7\" must be 1 to 32 lowercase letters",
+        ),
+        (
+            vec!["--set", "meridian.run.id=x"],
+            "--set meridian.run.id=x: data.meridian is Meridian's own; give the run id with --run-id",
+        ),
+        (
+            vec!["--data", "own.yaml"],
+            "a --data file sets meridian, which is Meridian's own key",
+        ),
+    ] {
+        let output = compile(&dir, &args);
+        assert_eq!(output.status.code(), Some(1), "{args:?}");
+        assert!(stderr(&output).contains(said), "{args:?}: {}", stderr(&output));
+    }
+}
+
+#[test]
+fn a_saved_plan_keeps_the_run_id() {
+    let dir = scratch("run-id-plan");
+    fs::write(dir.join("site.yaml"), TAGGED).unwrap();
+    let plan = meridian(
+        &dir,
+        &[
+            "plan",
+            "site.yaml",
+            "--run-id",
+            "lab-7",
+            "--out",
+            "site.mplan",
+        ],
+    );
+    assert!(plan.status.success(), "{}", stderr(&plan));
+    let apply = meridian(&dir, &["apply", "--plan", "site.mplan"]);
+    assert!(apply.status.success(), "{}", stderr(&apply));
+    let tag = dir.join(".meridian/resourceset/site/fake/current/files/tag");
+    assert_eq!(fs::read_to_string(tag).unwrap(), "web-lab-7");
+}

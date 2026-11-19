@@ -28,4 +28,5 @@ pub use document::{
 pub use junit::junit;
 pub use run::{
     run_file, CaseResult, FileResult, PhaseResult, Resolver, Runner, StageSummary, Status,
+    TEST_RUN_ID,
 };

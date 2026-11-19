@@ -336,7 +336,7 @@ fn validate_checks_the_language_of_a_condition_and_needs_no_data() {
         ("facts.os.family == 'debian'", "facts are not available"),
         (
             "param.x",
-            "unknown name \"param\" (an expression reads data.<key>, var.<name>, cond.<name> or secret.<name>; text is quoted)",
+            "unknown name \"param\" (an expression reads data.<key>, var.<name>, cond.<name>, secret.<name> or meridian.run.id; text is quoted)",
         ),
         ("nosuch(data.a)", "unknown function \"nosuch\""),
         (

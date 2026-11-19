@@ -22,6 +22,10 @@ spec:
       type: file
       params:
         content: 10.0.0.5
+    - id: tag
+      type: file
+      params:
+        content: "${{ meridian.run.id }}"
   outputs:
     - name: address
       value: "${vm.content}"
@@ -186,6 +190,8 @@ fn phases_run_in_order_and_destroy_removes_everything() {
     assert!(errors.is_empty(), "{errors:?}");
     let case = case(&out);
     assert_eq!(case["run"], "lifecycle");
+    let id = case["runId"].as_str().unwrap();
+    assert!(id.len() == 9 && id.starts_with('t'), "{id}");
     assert_eq!(
         phases(&case),
         pairs(&[
@@ -285,13 +291,23 @@ fn keep_leaves_the_environment_and_the_next_run_will_not_throw_it_away() {
     assert!(kept
         .join("infrastructure/network/fake/current/files/vm")
         .is_file());
+    // The documents named what they made with the case's run id, and the
+    // directory says which it was.
+    let id = fs::read_to_string(kept.join("run-id")).unwrap();
+    let id = id.trim();
+    assert!(id.len() == 9 && id.starts_with('t'), "{id}");
+    assert_eq!(
+        fs::read_to_string(kept.join("infrastructure/network/fake/current/files/tag")).unwrap(),
+        id
+    );
+    assert!(said.contains(&format!("its run id is {id}")), "{said}");
 
     let again = meridian(&dir, &["test", "--output", "json"]);
     assert_eq!(again.status.code(), Some(1), "{}", text(&again));
     let case = case(&again);
     assert_eq!(case["status"], "error");
     assert!(
-        failures(&case).contains("holds an environment an earlier run kept or did not destroy"),
+        failures(&case).contains(&format!("--run-id {id}`")),
         "{}",
         failures(&case)
     );

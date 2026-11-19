@@ -154,6 +154,7 @@ pub(crate) fn names() -> Names {
         .allow("var")
         .allow("cond")
         .allow("secret")
+        .allow(RESERVED_DATA_KEY)
         .refuse(
             "facts",
             "facts are not available: Meridian does not gather facts from a node yet, so a \
@@ -161,18 +162,64 @@ pub(crate) fn names() -> Names {
              runtimeWhen on a target that supports it",
         )
         .hint(
-            "an expression reads data.<key>, var.<name>, cond.<name> or secret.<name>; text is \
-             quoted",
+            "an expression reads data.<key>, var.<name>, cond.<name>, secret.<name> or \
+             meridian.run.id; text is quoted",
         )
+}
+
+/// The data key Meridian keeps for itself. `--run-id` is carried in the data
+/// as `meridian.run.id`, so a saved plan and every resolve see the same
+/// value, and an expression reads it as `meridian.run.id`, never as data.
+pub const RESERVED_DATA_KEY: &str = "meridian";
+
+/// Whether `id` can be a run id: 1 to 32 lowercase letters, digits and
+/// `-`, starting with a letter, so it fits a name or a tag on any target.
+pub fn check_run_id(id: &str) -> Result<(), String> {
+    let fits = !id.is_empty()
+        && id.len() <= 32
+        && id.starts_with(|c: char| c.is_ascii_lowercase())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if fits {
+        Ok(())
+    } else {
+        Err(format!(
+            "the run id {id:?} must be 1 to 32 lowercase letters, digits and -, starting with a \
+             letter"
+        ))
+    }
+}
+
+/// Puts the run id in the data, where expressions read it as
+/// `meridian.run.id`.
+pub fn set_run_id(data: &mut Data, id: &str) {
+    let run: Data = [("id".to_owned(), Value::String(id.to_owned()))]
+        .into_iter()
+        .collect();
+    data.insert(
+        RESERVED_DATA_KEY.to_owned(),
+        Value::Map([("run".to_owned(), Value::Map(run))].into_iter().collect()),
+    );
 }
 
 /// The scope before any variable or condition is known.
 pub(crate) fn scope(data: &Data) -> Scope {
+    let mut data = data.clone();
+    let meridian = data
+        .remove(RESERVED_DATA_KEY)
+        .unwrap_or_else(|| Value::Map(BTreeMap::new()));
     Scope::new()
-        .with("data", Value::Map(data.clone()))
+        .with("data", Value::Map(data))
         .with_unset_hint(
             "data",
             "give it with --data or --set, or test for it with defined({path})",
+        )
+        .with(RESERVED_DATA_KEY, meridian)
+        .with_unset_hint(
+            RESERVED_DATA_KEY,
+            "the run id is given with --run-id or MERIDIAN_RUN_ID, and meridian test gives \
+             each case one; test for it with defined({path})",
         )
 }
 

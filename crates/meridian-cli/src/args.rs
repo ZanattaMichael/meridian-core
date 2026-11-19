@@ -834,6 +834,11 @@ pub(crate) struct Workflow {
     /// YAML would type it: true, 3 and null are not text, "3" is
     #[arg(long, value_name = "KEY=VALUE")]
     pub(crate) set: Vec<String>,
+    /// An id documents read as `${{ meridian.run.id }}`, to name and tag
+    /// what they make: 1 to 32 lowercase letters, digits and -, starting
+    /// with a letter. Give the same id to every command for one environment
+    #[arg(long, value_name = "ID", env = "MERIDIAN_RUN_ID")]
+    pub(crate) run_id: Option<String>,
     /// Refuse to run when a secret cannot be locked in memory, instead of
     /// warning once and going on
     #[arg(long, env = "MERIDIAN_STRICT_SECRETS")]

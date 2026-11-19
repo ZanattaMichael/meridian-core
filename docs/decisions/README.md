@@ -75,3 +75,4 @@ page it affects. The pull request template asks for it.
 | [A failed resource is named with a fixed cause word, and the tool's words stay on the machine that ran](0049-a-failed-resource-is-named-with-a-fixed-cause-and-its-words-stay-local.md) | Runs | proposed |
 | [A lifecycle case provisions, verifies and always destroys](0050-a-lifecycle-case-provisions-verifies-and-always-destroys.md) | Testing | proposed |
 | [`meridian diagnose` reads the record and runs nothing](0051-diagnose-reads-the-record-and-runs-nothing.md) | Runs | proposed |
+| [The run id is carried in the data and read as `meridian.run.id`](0052-the-run-id-is-carried-in-the-data-and-read-as-meridian-run-id.md) | Language | proposed |
