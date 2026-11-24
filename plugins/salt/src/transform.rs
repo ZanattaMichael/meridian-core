@@ -328,11 +328,13 @@ pub fn resource_schemas() -> Vec<ResourceSchema> {
         ))
     }));
     meridian_sdk::schema::insert_repository_schema(&mut schemas);
+    meridian_sdk::schema::insert_cron_schema(&mut schemas);
     schemas
 }
 
 /// The shared types, sorted.
 const SHARED: &[&str] = &[
+    "cron",
     "exec",
     "file",
     "group",
@@ -483,6 +485,40 @@ fn quiet_secrets(
 
 /// `name` leads, as a person would write it; the rest keep their sorted
 /// order, so the same resource always renders to the same bytes.
+/// A `cron` job: `cron.present` or `cron.absent`, found by its identifier.
+fn cron_state(r: &Resource) -> Result<State, CompileError> {
+    let job = meridian_sdk::schema::cron_job(r).map_err(|e| CompileError {
+        target: NAME.to_owned(),
+        ..e
+    })?;
+    let text = |s: &str| Value::String(s.to_owned());
+    let mut args = BTreeMap::from([
+        ("name".to_owned(), text(&job.command)),
+        ("identifier".to_owned(), text(&job.name)),
+        ("user".to_owned(), text(&job.user)),
+    ]);
+    if job.present {
+        args.insert("minute".to_owned(), text(&job.minute));
+        args.insert("hour".to_owned(), text(&job.hour));
+        args.insert("daymonth".to_owned(), text(&job.day));
+        args.insert("month".to_owned(), text(&job.month));
+        args.insert("dayweek".to_owned(), text(&job.weekday));
+    }
+    Ok(State {
+        id: r.id.clone(),
+        module: "cron".to_owned(),
+        function: if job.present { "present" } else { "absent" }.to_owned(),
+        args: name_first(args),
+        require: Vec::new(),
+        watch: Vec::new(),
+        onchanges: Vec::new(),
+        when: r.runtime_when.clone(),
+        native: false,
+        resource_id: r.id.clone(),
+        pos: r.pos.clone(),
+    })
+}
+
 /// A `packageRepository`: `pkgrepo.managed`, or `pkgrepo.absent`. An apt
 /// repository is named by its source line, a yum one by its id.
 fn repository_state(r: &Resource) -> Result<State, CompileError> {
@@ -615,6 +651,9 @@ fn state_for(
     }
     if r.r#type == "packageRepository" {
         return repository_state(r);
+    }
+    if r.r#type == "cron" {
+        return cron_state(r);
     }
     let m = mapping(&r.r#type).ok_or_else(|| unsupported_type(r))?;
     let shape = shape_for(r, state, &m)?;

@@ -155,6 +155,7 @@ fn the_plugin_says_what_it_is() {
         Salt.supported_resource_types(),
         [
             "<module>.<function>",
+            "cron",
             "exec",
             "file",
             "group",
@@ -383,7 +384,7 @@ fn an_unknown_type_names_the_types_that_work_and_the_line() {
     assert_eq!(
         err.msg,
         "unsupported resource type \"firewall_rule\" on this target: it is not one of the \
-         shared types (exec, file, group, package, packageRepository, service, user), and a Salt state is \
+         shared types (cron, exec, file, group, package, packageRepository, service, user), and a Salt state is \
          written by its dotted name, such as pkgrepo.managed"
     );
     assert_eq!((err.pos.file.as_str(), err.pos.line), ("site.yaml", 11));
@@ -1062,6 +1063,19 @@ fn a_link_is_file_symlink() {
         "file.symlink:",
         "name: /etc/nginx/sites-enabled/app",
         "target: /etc/nginx/sites-available/app",
+    ] {
+        assert!(text.contains(line), "{line} in {text}");
+    }
+}
+
+#[test]
+fn a_cron_job_is_cron_present() {
+    let text = sls("    - id: rotate\n      type: cron\n      params:\n        name: logrotate\n        command: /usr/sbin/logrotate /etc/logrotate.conf\n        minute: 0\n        hour: 2\n");
+    for line in [
+        "cron.present:",
+        "name: /usr/sbin/logrotate /etc/logrotate.conf",
+        "identifier: logrotate",
+        "daymonth: '*'",
     ] {
         assert!(text.contains(line), "{line} in {text}");
     }

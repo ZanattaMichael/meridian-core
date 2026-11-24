@@ -9,7 +9,7 @@ boot: the login account, its SSH key, and packages a later stage needs.
 
 | | |
 |---|---|
-| Resource types | `package`, `packageRepository`, `file`, `service`, `user`, `group`, `exec` ([what each takes here](#resource-reference)), and any cloud-config module beside them: `ntp`, `apt`, `timezone`, `bootcmd` ([modules beside the six](#cloud-config-modules-beside-the-six)) |
+| Resource types | `package`, `packageRepository`, `file`, `service`, `user`, `group`, `cron`, `exec` ([what each takes here](#resource-reference)), and any cloud-config module beside them: `ntp`, `apt`, `timezone`, `bootcmd` ([modules beside the six](#cloud-config-modules-beside-the-six)) |
 | `dependsOn` | Yes, within [the order of a first boot](#the-order-of-a-first-boot). cloud-init handles files, accounts, packages and commands at fixed steps, so a dependency that points backwards through those steps is refused. Nothing can depend on a module of cloud-init's own, or be depended on by one |
 | `notifies` | Emulated: each notified action is a command that runs once, after every other command, with a warning. Actions `start`, `stop`, `restart`, `reload` on a service, `run` on an exec ([how](#notifications)) |
 | `runtimeWhen` | No. It is refused: cloud-init evaluates nothing per resource |
@@ -323,6 +323,10 @@ Anything not listed is refused.
 | `version` | optional | A version to pin, as a string. Compiles to a `[name, version]` pair. |
 
 State: `present` (the default) only.
+
+### `cron`
+
+A file `/etc/cron.d/<name>` under `write_files`: `<minute> <hour> <day> <month> <weekday> <user> <command>`. `name` is letters, digits, `-` and `_`. State: `present` only.
 
 ### `packageRepository`
 

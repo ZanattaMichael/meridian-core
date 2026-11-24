@@ -1957,6 +1957,7 @@
               "anyOf": [
                 {
                   "enum": [
+                    "cron",
                     "exec",
                     "file",
                     "group",
@@ -1970,6 +1971,80 @@
                   "pattern": "^.+\\..+\\..+$"
                 }
               ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "cron"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A scheduled command in a user's crontab.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "command": {
+                    "description": "The command to run.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "day": {
+                    "description": "Day of the month, as cron writes it. Default `*`."
+                  },
+                  "hour": {
+                    "description": "Hour, as cron writes it. Default `*`."
+                  },
+                  "minute": {
+                    "description": "Minute, as cron writes it. Default `*`."
+                  },
+                  "month": {
+                    "description": "Month, as cron writes it. Default `*`."
+                  },
+                  "name": {
+                    "description": "The job's name, which identifies it in the crontab.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "user": {
+                    "description": "The user whose crontab holds the job. Default `root`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "weekday": {
+                    "description": "Day of the week, as cron writes it (0 is Sunday). Default `*`."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "command",
+                  "name"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "absent",
+                  "present"
+                ]
+              }
             }
           }
         },
@@ -3860,6 +3935,7 @@
               "anyOf": [
                 {
                   "enum": [
+                    "cron",
                     "exec",
                     "file",
                     "group",
@@ -3873,6 +3949,80 @@
                   "pattern": "^.+$"
                 }
               ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "cron"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A scheduled command in a user's crontab.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "command": {
+                    "description": "The command to run.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "day": {
+                    "description": "Day of the month, as cron writes it. Default `*`."
+                  },
+                  "hour": {
+                    "description": "Hour, as cron writes it. Default `*`."
+                  },
+                  "minute": {
+                    "description": "Minute, as cron writes it. Default `*`."
+                  },
+                  "month": {
+                    "description": "Month, as cron writes it. Default `*`."
+                  },
+                  "name": {
+                    "description": "The job's name, which identifies it in the crontab.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "user": {
+                    "description": "The user whose crontab holds the job. Default `root`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "weekday": {
+                    "description": "Day of the week, as cron writes it (0 is Sunday). Default `*`."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "command",
+                  "name"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "absent",
+                  "present"
+                ]
+              }
             }
           }
         },
@@ -4346,6 +4496,7 @@
               "anyOf": [
                 {
                   "enum": [
+                    "cron",
                     "exec",
                     "file",
                     "group",
@@ -4359,6 +4510,79 @@
                   "pattern": "^.+$"
                 }
               ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "cron"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A scheduled command in a user's crontab.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "command": {
+                    "description": "The command to run.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "day": {
+                    "description": "Day of the month, as cron writes it. Default `*`."
+                  },
+                  "hour": {
+                    "description": "Hour, as cron writes it. Default `*`."
+                  },
+                  "minute": {
+                    "description": "Minute, as cron writes it. Default `*`."
+                  },
+                  "month": {
+                    "description": "Month, as cron writes it. Default `*`."
+                  },
+                  "name": {
+                    "description": "The job's name, which identifies it in the crontab.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "user": {
+                    "description": "The user whose crontab holds the job. Default `root`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "weekday": {
+                    "description": "Day of the week, as cron writes it (0 is Sunday). Default `*`."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "command",
+                  "name"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "present"
+                ]
+              }
             }
           }
         },
@@ -6395,6 +6619,7 @@
               "anyOf": [
                 {
                   "enum": [
+                    "cron",
                     "exec",
                     "file",
                     "group",
@@ -6411,6 +6636,80 @@
                   "pattern": "^.+$"
                 }
               ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "cron"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A scheduled command in a user's crontab.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "command": {
+                    "description": "The command to run.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "day": {
+                    "description": "Day of the month, as cron writes it. Default `*`."
+                  },
+                  "hour": {
+                    "description": "Hour, as cron writes it. Default `*`."
+                  },
+                  "minute": {
+                    "description": "Minute, as cron writes it. Default `*`."
+                  },
+                  "month": {
+                    "description": "Month, as cron writes it. Default `*`."
+                  },
+                  "name": {
+                    "description": "The job's name, which identifies it in the crontab.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "user": {
+                    "description": "The user whose crontab holds the job. Default `root`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "weekday": {
+                    "description": "Day of the week, as cron writes it (0 is Sunday). Default `*`."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "command",
+                  "name"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "absent",
+                  "present"
+                ]
+              }
             }
           }
         },
@@ -7656,6 +7955,7 @@
               "anyOf": [
                 {
                   "enum": [
+                    "cron",
                     "exec",
                     "file",
                     "group",
@@ -7672,6 +7972,80 @@
                   "pattern": "^.+$"
                 }
               ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "cron"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A scheduled command in a user's crontab.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "command": {
+                    "description": "The command to run.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "day": {
+                    "description": "Day of the month, as cron writes it. Default `*`."
+                  },
+                  "hour": {
+                    "description": "Hour, as cron writes it. Default `*`."
+                  },
+                  "minute": {
+                    "description": "Minute, as cron writes it. Default `*`."
+                  },
+                  "month": {
+                    "description": "Month, as cron writes it. Default `*`."
+                  },
+                  "name": {
+                    "description": "The job's name, which identifies it in the crontab.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "user": {
+                    "description": "The user whose crontab holds the job. Default `root`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "weekday": {
+                    "description": "Day of the week, as cron writes it (0 is Sunday). Default `*`."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "command",
+                  "name"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "absent",
+                  "present"
+                ]
+              }
             }
           }
         },
@@ -8145,6 +8519,7 @@
               "anyOf": [
                 {
                   "enum": [
+                    "cron",
                     "exec",
                     "file",
                     "group",
@@ -8158,6 +8533,80 @@
                   "pattern": "^.+\\..+$"
                 }
               ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "cron"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "description": "A scheduled command in a user's crontab.",
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "properties": {
+                  "command": {
+                    "description": "The command to run.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "day": {
+                    "description": "Day of the month, as cron writes it. Default `*`."
+                  },
+                  "hour": {
+                    "description": "Hour, as cron writes it. Default `*`."
+                  },
+                  "minute": {
+                    "description": "Minute, as cron writes it. Default `*`."
+                  },
+                  "month": {
+                    "description": "Month, as cron writes it. Default `*`."
+                  },
+                  "name": {
+                    "description": "The job's name, which identifies it in the crontab.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "user": {
+                    "description": "The user whose crontab holds the job. Default `root`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "weekday": {
+                    "description": "Day of the week, as cron writes it (0 is Sunday). Default `*`."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "command",
+                  "name"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "absent",
+                  "present"
+                ]
+              }
             }
           }
         },

@@ -15,7 +15,7 @@ machine.
 | Target | Types | Page |
 |---|---|---|
 | `ansible` | the shared types, and any module by its full name (`ansible.builtin.lineinfile`) | [ansible](../../targets/ansible.md) |
-| `puppet` | the shared types, and any Puppet type (`cron`, `mysql::db`, `native/file`) | [puppet](../../targets/puppet.md) |
+| `puppet` | the shared types, and any Puppet type (`augeas`, `mysql::db`, `native/file`) | [puppet](../../targets/puppet.md) |
 | `chef` | the shared types, and any Chef resource (`template`, `native/package`) | [chef](../../targets/chef.md) |
 | `salt` | the shared types, and any state function (`pkgrepo.managed`) | [salt](../../targets/salt.md) |
 | `openvox` | the shared types and any Puppet type, compiled the way `puppet` compiles them | [openvox](../../targets/openvox.md) |
@@ -24,9 +24,9 @@ machine.
 
 Two dialects. Shared-dialect targets also take [native types](#native-types-beside-the-six).
 
-## The shared dialect: seven types
+## The shared dialect: eight types
 
-`ansible`, `puppet`, `openvox`, `chef`, `salt` and `cloud-init` take the same seven types.
+`ansible`, `puppet`, `openvox`, `chef`, `salt` and `cloud-init` take the same eight types.
 Changing `spec.target` moves a document between them, within each tool's limits.
 
 | `type` | Manages | `state` | Required params |
@@ -37,6 +37,7 @@ Changing `spec.target` moves a document between them, within each tool's limits.
 | `file` | a file, directory or link | `present` (default) or `file`, `directory`, `link`, `absent` | `path`; `target` with `link` |
 | `user` | a user account | `present` (default), `absent` | `name` |
 | `group` | a group | `present` (default), `absent` | `name` |
+| `cron` | a scheduled command | `present` (default), `absent` | `name`, `command` |
 | `exec` | a command to run | none | `command` |
 
 Params, states and actions: [resource types](../resource-types.md).
@@ -111,7 +112,7 @@ unchanged. The tool refuses unknown arguments when it runs; with a
 | Target | The native `type` is | Example | `state` | When notified |
 |---|---|---|---|---|
 | `ansible` | the module's fully qualified collection name | `ansible.builtin.lineinfile`, `community.general.ufw` | the module's `state` argument | runs the task again (`run`) |
-| `puppet`, `openvox` | the type as a declaration names it, `native/<name>` for the six | `cron`, `mysql::db`, `native/file` | the type's `ensure` | refreshed (`refresh`) |
+| `puppet`, `openvox` | the type as a declaration names it, `native/<name>` for the six | `augeas`, `mysql::db`, `native/cron` | the type's `ensure` | refreshed (`refresh`) |
 | `chef` | the resource as a recipe names it, `native/<name>` for five (`execute` has no prefix) | `template`, `apt_update`, `native/package` | the resource's `action` | takes the action word as written |
 | `salt` | the state function, dotted; `native/<name>` refused with the dotted name | `pkgrepo.managed`, `file.symlink` | refused: the function is the state | watches the notifier (`watch`) |
 | `cloud-init` | the cloud-config key; `native/<name>` refused, as are the five keys the six write | `ntp`, `timezone`, `bootcmd` | refused: the module's keys say what it does | refused: applied once |

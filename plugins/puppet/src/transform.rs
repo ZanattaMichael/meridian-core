@@ -202,11 +202,13 @@ pub fn resource_schemas() -> Vec<ResourceSchema> {
         ))
     }));
     meridian_sdk::schema::insert_repository_schema(&mut schemas);
+    meridian_sdk::schema::insert_cron_schema(&mut schemas);
     schemas
 }
 
 /// The shared types, sorted.
 const SHARED: &[&str] = &[
+    "cron",
     "exec",
     "file",
     "group",
@@ -347,6 +349,9 @@ fn declaration_for(
     if native.is_none() && r.r#type == "packageRepository" {
         return repository_declaration(r);
     }
+    if native.is_none() && r.r#type == "cron" {
+        return cron_declaration(r);
+    }
     let m = match native {
         Some(_) => None,
         None => Some(mapping(&r.r#type).ok_or_else(|| unsupported_type(r))?),
@@ -468,6 +473,48 @@ fn declaration_for(
 
     Ok(Declaration {
         r#type: m.puppet_type.to_owned(),
+        title: r.id.clone(),
+        attrs,
+        require: Vec::new(),
+        notify: Vec::new(),
+        native: false,
+        resource_id: r.id.clone(),
+        pos: r.pos.clone(),
+    })
+}
+
+/// A `cron` job: Puppet's `cron` type.
+fn cron_declaration(r: &Resource) -> Result<Declaration, CompileError> {
+    let job = meridian_sdk::schema::cron_job(r).map_err(|e| CompileError {
+        target: NAME.to_owned(),
+        ..e
+    })?;
+    if !r.runtime_when.is_empty() {
+        return Err(refuse(
+            r,
+            &rules::UNSUPPORTED_RUNTIME_CONDITION,
+            "a Puppet catalog is compiled before it reaches the node, so runtimeWhen has no \
+             apply-time conditional to compile into"
+                .to_owned(),
+        ));
+    }
+    let text = |s: &str| Attr::Value(Value::String(s.to_owned()));
+    let attrs = BTreeMap::from([
+        (
+            "ensure".to_owned(),
+            Attr::Bare(if job.present { "present" } else { "absent" }),
+        ),
+        ("name".to_owned(), text(&job.name)),
+        ("command".to_owned(), text(&job.command)),
+        ("user".to_owned(), text(&job.user)),
+        ("minute".to_owned(), text(&job.minute)),
+        ("hour".to_owned(), text(&job.hour)),
+        ("monthday".to_owned(), text(&job.day)),
+        ("month".to_owned(), text(&job.month)),
+        ("weekday".to_owned(), text(&job.weekday)),
+    ]);
+    Ok(Declaration {
+        r#type: "cron".to_owned(),
         title: r.id.clone(),
         attrs,
         require: Vec::new(),

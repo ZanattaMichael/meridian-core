@@ -47,7 +47,7 @@ Required. Its meaning depends on the target's segment:
 
 | Segment | `type` is | Reference |
 |---|---|---|
-| Configuration management, shared dialect (`ansible`, `puppet`, `openvox`, `chef`, `salt`, `cloud-init`) | one of six words: `package`, `file`, `service`, `user`, `group`, `exec`; or the tool's own type beside them, such as `ansible.builtin.lineinfile` | [flavour](configuration-management.md), [types](../resource-types.md), [native types](configuration-management.md#native-types-beside-the-six) |
+| Configuration management, shared dialect (`ansible`, `puppet`, `openvox`, `chef`, `salt`, `cloud-init`) | one of the shared types: `package`, `packageRepository`, `file`, `service`, `user`, `group`, `cron`, `exec`; or the tool's own type beside them, such as `ansible.builtin.lineinfile` | [flavour](configuration-management.md), [types](../resource-types.md), [native types](configuration-management.md#native-types-beside-the-six) |
 | Configuration management, DSC | `Module/Resource` | [flavour](configuration-management.md#the-native-dialect-dsc) |
 | Infrastructure as code | the tool's own type: `aws_instance`, `AWS::EC2::Instance`, `Microsoft.Network/publicIPAddresses@2023-09-01` | [flavour](infrastructure-as-code.md) |
 | Containerization | an element of the project: `service`, `network`, `volume`, `config`, `secret` | [flavour](containerization.md) |
@@ -57,7 +57,7 @@ Required. Its meaning depends on the target's segment:
 refused with the list of known ones:
 
 ```
-type.yaml:8:7: ansible: resource "a" [unsupported-resource-type]: unsupported resource type "cron" on this target (supported: exec, file, group, package, service, user)
+type.yaml:8:7: ansible: resource "a" [unsupported-resource-type]: unsupported resource type "firewall" on this target (supported: cron, exec, file, group, package, packageRepository, service, user)
 ```
 
 Most targets pass the tool's own types through. They check a type's *shape*

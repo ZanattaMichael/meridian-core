@@ -282,6 +282,7 @@ fn the_target_declares_what_it_is_and_can_express() {
         CloudInit.supported_resource_types(),
         [
             "<module>",
+            "cron",
             "exec",
             "file",
             "group",
@@ -1032,7 +1033,7 @@ fn an_unknown_type_names_the_types_that_work_and_the_line() {
     assert_eq!(
         err.msg,
         "unsupported resource type \"Firewall.Rule\" on this target: it is not one of the \
-         shared types (exec, file, group, package, packageRepository, service, user), and a cloud-config module \
+         shared types (cron, exec, file, group, package, packageRepository, service, user), and a cloud-config module \
          is written by its key, such as ntp or apt"
     );
     assert_eq!((err.pos.file.as_str(), err.pos.line), ("site.yaml", 11));
@@ -1266,4 +1267,14 @@ fn a_repository_cloud_init_cannot_write_is_refused() {
         "{APT_REPO}    - id: proxy\n      type: apt\n      params:\n        http_proxy: http://proxy:3128\n"
     ));
     assert_eq!(err.rule, "duplicate-resource");
+}
+
+#[test]
+fn a_cron_job_is_a_file_in_cron_d() {
+    let text = user_data("    - id: rotate\n      type: cron\n      params:\n        name: logrotate\n        command: /usr/sbin/logrotate /etc/logrotate.conf\n        minute: 0\n        hour: 2\n");
+    assert!(text.contains("/etc/cron.d/logrotate"), "{text}");
+    assert!(
+        text.contains("0 2 * * * root /usr/sbin/logrotate /etc/logrotate.conf"),
+        "{text}"
+    );
 }

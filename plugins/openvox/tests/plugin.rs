@@ -99,6 +99,7 @@ fn the_binary_is_discovered_by_name_and_says_what_it_is() {
         [
             "<module>::<type>",
             "<type>",
+            "cron",
             "exec",
             "file",
             "group",

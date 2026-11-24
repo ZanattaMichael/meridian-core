@@ -68,6 +68,7 @@ fn the_plugin_describes_itself_as_openvox() {
         [
             "<module>::<type>",
             "<type>",
+            "cron",
             "exec",
             "file",
             "group",

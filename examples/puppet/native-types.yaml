@@ -1,7 +1,7 @@
 # A web server configured with Puppet, reaching past the six shared types.
 #
 # `package` and `service` are the abstract types every configuration
-# management target takes. `cron` and `mysql::db` are Puppet's own types,
+# management target takes. `native/cron` and `mysql::db` are Puppet's own types,
 # written as a declaration names them, and `native/file` is Puppet's own
 # `file`, with the attributes the shared `file` does not take: their params
 # are the type's attributes, passed through as written. From the first such
@@ -31,7 +31,7 @@ spec:
       dependsOn:
         - resource: nginx_pkg
     - id: logrotate
-      type: cron
+      type: native/cron
       state: present
       params:
         command: /usr/sbin/logrotate /etc/logrotate.conf

@@ -126,6 +126,7 @@ pub(crate) fn mapping(resource_type: &str) -> Option<Mapping> {
 
 /// The shared types, sorted.
 const SHARED: &[&str] = &[
+    "cron",
     "exec",
     "file",
     "group",
@@ -164,6 +165,7 @@ pub fn resource_schemas() -> Vec<ResourceSchema> {
         ))
     }));
     meridian_sdk::schema::insert_repository_schema(&mut schemas);
+    meridian_sdk::schema::insert_cron_schema(&mut schemas);
     schemas
 }
 
@@ -291,6 +293,34 @@ fn native_block(r: &Resource, resource: &str) -> Result<Block, CompileError> {
     })
 }
 
+/// A `cron` job: Chef's `cron`.
+fn cron_block(r: &Resource) -> Result<Block, CompileError> {
+    let job = meridian_sdk::schema::cron_job(r).map_err(|e| CompileError {
+        target: NAME.to_owned(),
+        ..e
+    })?;
+    let text = |s: &str| Value::String(s.to_owned());
+    let properties = BTreeMap::from([
+        ("command".to_owned(), text(&job.command)),
+        ("user".to_owned(), text(&job.user)),
+        ("minute".to_owned(), text(&job.minute)),
+        ("hour".to_owned(), text(&job.hour)),
+        ("day".to_owned(), text(&job.day)),
+        ("month".to_owned(), text(&job.month)),
+        ("weekday".to_owned(), text(&job.weekday)),
+    ]);
+    Ok(Block {
+        resource: "cron".to_owned(),
+        name: job.name,
+        properties,
+        actions: vec![if job.present { "create" } else { "delete" }.to_owned()],
+        only_if: r.runtime_when.clone(),
+        notifies: Vec::new(),
+        resource_id: r.id.clone(),
+        pos: r.pos.clone(),
+    })
+}
+
 /// A `packageRepository`: `apt_repository` or `yum_repository`.
 fn repository_block(r: &Resource) -> Result<Block, CompileError> {
     use meridian_sdk::schema::RepositoryFormat;
@@ -382,6 +412,9 @@ fn blocks_for(r: &Resource) -> Result<Vec<Block>, CompileError> {
     }
     if r.r#type == "packageRepository" {
         return Ok(vec![repository_block(r)?]);
+    }
+    if r.r#type == "cron" {
+        return Ok(vec![cron_block(r)?]);
     }
     let m = mapping(&r.r#type).ok_or_else(|| unsupported_type(r))?;
 

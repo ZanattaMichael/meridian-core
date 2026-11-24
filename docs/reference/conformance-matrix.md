@@ -112,6 +112,15 @@ where the tools themselves differ; the cells say how, and the
 | state `absent` | no | ok | ok | `unsupported-state` | ok | ok | ok |
 | no `name` | yes | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` |
 
+## `cron`
+
+| Document | same | ansible | chef | cloud-init | openvox | puppet | salt |
+|---|---|---|---|---|---|---|---|
+| `name`, `command` and a schedule | yes | ok | ok | ok | ok | ok | ok |
+| state `absent` | no | ok | ok | `unsupported-state` | ok | ok | ok |
+| no `command` | yes | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` |
+| a field with a space | yes | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` | `invalid-param` |
+
 ## `exec`
 
 | Document | same | ansible | chef | cloud-init | openvox | puppet | salt |
@@ -148,7 +157,7 @@ where the tools themselves differ; the cells say how, and the
 | a Chef resource (`template`), notified with `create` | no | `unsupported-resource-type` | ok | `unsupported-action` | `unsupported-action` | `unsupported-action` | `unsupported-resource-type` |
 | a cloud-config module (`ntp`) | no | `unsupported-resource-type` | ok | ok | ok | ok | `unsupported-resource-type` |
 | the tool's own `package` under the prefix, with a state (`native/package`) | no | `unsupported-resource-type` | ok | `unsupported-resource-type` | ok | ok | `unsupported-resource-type` |
-| a Puppet type notified with `refresh` | no | `unsupported-resource-type` | ok | `unsupported-action` | ok | ok | `unsupported-resource-type` |
+| a Puppet type notified with `refresh` | no | `unsupported-resource-type` | ok | `unsupported-resource-type` | ok | ok | `unsupported-resource-type` |
 | a Salt state function notified with `watch` | no | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | `unsupported-resource-type` | ok |
 | a native type that depends on a shared one | no | `unsupported-resource-type` | ok | `unsupported-resource-type` | ok | ok | `unsupported-resource-type` |
 

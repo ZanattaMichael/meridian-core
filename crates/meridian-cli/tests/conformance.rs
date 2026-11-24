@@ -418,6 +418,31 @@ const CASES: &[Case] = &[
         Same,
         "    - id: a\n      type: group\n      params: {}\n",
     ),
+    // ---- cron ----------------------------------------------------------
+    case(
+        "cron",
+        "`name`, `command` and a schedule",
+        Same,
+        "    - id: a\n      type: cron\n      params:\n        name: logrotate\n        command: /usr/sbin/logrotate /etc/logrotate.conf\n        minute: 0\n        hour: 2\n",
+    ),
+    case(
+        "cron",
+        "state `absent`",
+        Varies,
+        "    - id: a\n      type: cron\n      state: absent\n      params:\n        name: logrotate\n        command: /usr/sbin/logrotate /etc/logrotate.conf\n",
+    ),
+    case(
+        "cron",
+        "no `command`",
+        Same,
+        "    - id: a\n      type: cron\n      params:\n        name: logrotate\n",
+    ),
+    case(
+        "cron",
+        "a field with a space",
+        Same,
+        "    - id: a\n      type: cron\n      params:\n        name: logrotate\n        command: /bin/true\n        hour: \"1 2\"\n",
+    ),
     // ---- exec ----------------------------------------------------------
     case(
         "exec",
@@ -551,7 +576,7 @@ const CASES: &[Case] = &[
         "native types",
         "a Puppet type notified with `refresh`",
         Varies,
-        "    - id: conf\n      type: file\n      params:\n        path: /etc/app.conf\n        content: \"x\\n\"\n      notifies:\n        - resource: a\n          action: refresh\n    - id: a\n      type: cron\n      params:\n        command: /bin/true\n",
+        "    - id: conf\n      type: file\n      params:\n        path: /etc/app.conf\n        content: \"x\\n\"\n      notifies:\n        - resource: a\n          action: refresh\n    - id: a\n      type: native/cron\n      params:\n        command: /bin/true\n",
     ),
     case(
         "native types",
@@ -1201,6 +1226,7 @@ fn every_target_declares_its_segment_and_its_types() {
         assert_eq!(
             shared,
             [
+                "cron",
                 "exec",
                 "file",
                 "group",

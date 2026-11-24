@@ -221,6 +221,7 @@ fn types_states_and_params_come_from_the_target_plugin() {
         labels(&format!("{HEAD}    - id: x\n      type: |")),
         [
             "<namespace>.<collection>.<module>",
+            "cron",
             "exec",
             "file",
             "group",

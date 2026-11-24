@@ -11,7 +11,7 @@ of Puppet: `puppet apply` on the machine itself, or OpenBolt for another machine
 | | |
 |---|---|
 | Category | configuration management |
-| Resource types | `package`, `packageRepository`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md), and [below](#resource-reference) for what each becomes), and any Puppet type beside them: `cron`, `mysql::db`, `native/file` ([below](#puppet-types-beside-the-six)) |
+| Resource types | `package`, `packageRepository`, `file`, `service`, `user`, `group`, `cron`, `exec` ([reference](../reference/resource-types.md), and [below](#resource-reference) for what each becomes), and any Puppet type beside them: `augeas`, `mysql::db`, `native/file` ([below](#puppet-types-beside-the-six)) |
 | `dependsOn` | Yes, as `require`. OpenVox orders by declared relationships, so the dependency graph survives into the manifest intact |
 | `notifies` | Native: `notify`. A service can be restarted (`restart` or `refresh`); an exec can be `run`; a Puppet type of its own can be refreshed (`refresh`) |
 | Not supported | `action: reload`, `start` or `stop` on a service, and notifying a `package`, `file`, `user` or `group`. A refresh restarts a service and takes no argument, and the other types do nothing on one. The compile refuses these and says why; it does not turn a reload into a restart |
@@ -286,6 +286,10 @@ No `state` means the default.
 
 Cannot be notified.
 
+### cron
+
+Puppet's `cron`, as on the [Puppet target](puppet.md): `day` is `monthday`. Cannot be notified.
+
 ### packageRepository
 
 | In the document | In the manifest |
@@ -366,7 +370,7 @@ with `run`.
 ### Puppet types beside the six
 
 As on the [Puppet target](puppet.md#puppet-types-beside-the-six): any loadable Puppet type
-(`cron`, `mysql::db`), params unchecked, `state` as `ensure`, `refresh` notifies, and
+(`augeas`, `mysql::db`), params unchecked, `state` as `ensure`, `refresh` notifies, and
 `native/file` for Puppet's own `file`.
 [`examples/puppet/native-types.yaml`](../../examples/puppet/native-types.yaml) works with
 `spec.target: openvox`. Such documents compile for Puppet and OpenVox only; the

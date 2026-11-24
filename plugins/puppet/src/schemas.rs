@@ -397,7 +397,8 @@ Providers
         assert_eq!(types[1].1, "Installs and manages cron jobs");
         assert_eq!(types[0].1, "Apply a change or an array of changes to the");
         assert_eq!(written_name("file"), "native/file");
-        assert_eq!(written_name("cron"), "cron");
+        assert_eq!(written_name("cron"), "native/cron");
+        assert_eq!(written_name("augeas"), "augeas");
     }
 
     #[test]

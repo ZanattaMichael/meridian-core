@@ -471,6 +471,7 @@ fn json_param<'a>(
 
 /// What each of the shared configuration management types is.
 const SHARED_TYPES: &[(&str, &str)] = &[
+    ("cron", "A scheduled command in a user's crontab."),
     (
         "exec",
         "A command to run. The escape hatch for what no other type covers.",
@@ -499,6 +500,49 @@ const SHARED_TYPES: &[(&str, &str)] = &[
 /// kind, description. One table, so every target that takes these types
 /// describes a param in the same words.
 const SHARED_PARAMS: &[(&str, &str, ParamKind, &str)] = &[
+    ("cron", "command", ParamKind::String, "The command to run."),
+    (
+        "cron",
+        "day",
+        ParamKind::Any,
+        "Day of the month, as cron writes it. Default `*`.",
+    ),
+    (
+        "cron",
+        "hour",
+        ParamKind::Any,
+        "Hour, as cron writes it. Default `*`.",
+    ),
+    (
+        "cron",
+        "minute",
+        ParamKind::Any,
+        "Minute, as cron writes it. Default `*`.",
+    ),
+    (
+        "cron",
+        "month",
+        ParamKind::Any,
+        "Month, as cron writes it. Default `*`.",
+    ),
+    (
+        "cron",
+        "name",
+        ParamKind::String,
+        "The job's name, which identifies it in the crontab.",
+    ),
+    (
+        "cron",
+        "user",
+        ParamKind::String,
+        "The user whose crontab holds the job. Default `root`.",
+    ),
+    (
+        "cron",
+        "weekday",
+        ParamKind::Any,
+        "Day of the week, as cron writes it (0 is Sunday). Default `*`.",
+    ),
     (
         "exec",
         "chdir",
@@ -913,6 +957,130 @@ impl Repository {
             RepositoryFormat::Yum => None,
         }
     }
+}
+
+/// The params a `cron` job takes.
+pub const CRON_PARAMS: &[&str] = &[
+    "command", "day", "hour", "minute", "month", "name", "user", "weekday",
+];
+
+/// A `cron` job read once, so every target refuses the same documents.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CronJob {
+    pub name: String,
+    pub command: String,
+    pub user: String,
+    pub minute: String,
+    pub hour: String,
+    pub day: String,
+    pub month: String,
+    pub weekday: String,
+    /// `present` or `absent`.
+    pub present: bool,
+}
+
+/// What a `cron` job takes, for a target's editor schemas.
+pub fn cron_schema() -> ResourceSchema {
+    shared(
+        "cron",
+        CRON_PARAMS,
+        &["command", "name"],
+        REPOSITORY_STATES,
+        "present",
+        &[],
+    )
+}
+
+/// Puts [`cron_schema`] first among the shared types in a target's list.
+pub fn insert_cron_schema(schemas: &mut Vec<ResourceSchema>) {
+    let at = schemas
+        .iter()
+        .position(|s| s.r#type.as_str() > "cron" && !s.r#type.contains('<'))
+        .unwrap_or(schemas.len());
+    schemas.insert(at, cron_schema());
+}
+
+/// Reads a `cron` job: kinds, required params, each schedule field one word.
+pub fn cron_job(resource: &Resource) -> Result<CronJob, CompileError> {
+    check_shared(resource)?;
+    let fail = |rule: &rules::Rule, msg: String| CompileError::for_resource(resource, rule, msg);
+    for name in resource.params.keys() {
+        if !CRON_PARAMS.contains(&name.as_str()) {
+            return Err(fail(
+                &rules::UNSUPPORTED_PARAM,
+                format!(
+                    "resource type \"cron\" does not accept param {name:?} (accepted: {})",
+                    CRON_PARAMS.join(", ")
+                ),
+            ));
+        }
+    }
+    let text = |name: &str, default: Option<&str>| -> Result<String, CompileError> {
+        match resource.params.get(name) {
+            None => default.map(str::to_owned).ok_or_else(|| {
+                fail(
+                    &rules::MISSING_PARAM,
+                    format!("resource type \"cron\" requires param {name:?}"),
+                )
+            }),
+            Some(Value::String(s)) if !s.is_empty() => Ok(s.clone()),
+            Some(Value::Int(i)) => Ok(i.to_string()),
+            Some(Value::Uint(u)) => Ok(u.to_string()),
+            Some(Value::Secret(_)) => Err(fail(
+                &rules::UNSUPPORTED_SECRET_PLACE,
+                format!("param {name:?} of a cron job is written into the crontab, where a secret would be in the open"),
+            )),
+            Some(_) => Err(fail(
+                &rules::EMPTY_PARAM,
+                format!("param {name:?} on resource type \"cron\" has no value"),
+            )),
+        }
+    };
+    let field = |name: &str| -> Result<String, CompileError> {
+        let value = text(name, Some("*"))?;
+        if value.contains(char::is_whitespace) {
+            return Err(fail(
+                &rules::INVALID_PARAM,
+                format!("param {name:?} is one cron field, such as */5 or 1-5, not {value:?}"),
+            ));
+        }
+        Ok(value)
+    };
+    let name = text("name", None)?;
+    if name.contains('\n') {
+        return Err(fail(
+            &rules::INVALID_PARAM,
+            "a cron job's name is one line".to_owned(),
+        ));
+    }
+    let command = text("command", None)?;
+    if command.contains('\n') {
+        return Err(fail(
+            &rules::INVALID_PARAM,
+            "a cron command is one line".to_owned(),
+        ));
+    }
+    let present = match resource.state.as_str() {
+        "" | "present" => true,
+        "absent" => false,
+        other => {
+            return Err(fail(
+                &rules::UNSUPPORTED_STATE,
+                format!("a cron job takes state present or absent, not {other:?}"),
+            ))
+        }
+    };
+    Ok(CronJob {
+        name,
+        command,
+        user: text("user", Some("root"))?,
+        minute: field("minute")?,
+        hour: field("hour")?,
+        day: field("day")?,
+        month: field("month")?,
+        weekday: field("weekday")?,
+        present,
+    })
 }
 
 /// What a `packageRepository` takes, for a target's editor schemas.
@@ -1429,6 +1597,7 @@ mod tests {
         assert_eq!(
             shared_type_names(),
             [
+                "cron",
                 "exec",
                 "file",
                 "group",

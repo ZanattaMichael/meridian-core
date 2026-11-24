@@ -281,6 +281,7 @@ fn schema_is_generated_from_the_language_and_the_loaded_plugins() {
     assert_eq!(
         resource["allOf"][1]["properties"]["type"]["anyOf"][0]["enum"],
         json!([
+            "cron",
             "exec",
             "file",
             "group",
@@ -508,6 +509,7 @@ fn lsp_serves_an_editor_over_standard_io_with_a_real_plugin() {
         labels,
         [
             "<namespace>.<collection>.<module>",
+            "cron",
             "exec",
             "file",
             "group",

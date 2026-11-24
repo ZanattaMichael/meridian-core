@@ -372,7 +372,7 @@ fn a_name_that_is_not_a_chef_resource_is_refused() {
         "Template",
         "ansible.builtin.cron",
         "mysql::db",
-        "native/cron",
+        "native/augeas",
     ] {
         let err = refusal(&format!(
             "    - id: a\n      type: '{type}'\n      params:\n        path: /x\n"
@@ -425,6 +425,7 @@ fn the_schemas_offer_any_chef_resource_as_an_open_pattern() {
         Chef.supported_resource_types(),
         [
             "<resource>",
+            "cron",
             "exec",
             "file",
             "group",
@@ -461,6 +462,19 @@ fn a_link_is_a_link_resource() {
         "link 'ln' do",
         "target_file '/etc/nginx/sites-enabled/app'",
         "to '/etc/nginx/sites-available/app'",
+        "action :create",
+    ] {
+        assert!(text.contains(line), "{line} in {text}");
+    }
+}
+
+#[test]
+fn a_cron_job_is_chefs_cron() {
+    let text = recipe("    - id: rotate\n      type: cron\n      params:\n        name: logrotate\n        command: /usr/sbin/logrotate /etc/logrotate.conf\n        minute: 0\n        hour: 2\n");
+    for line in [
+        "cron 'logrotate' do",
+        "command '/usr/sbin/logrotate /etc/logrotate.conf'",
+        "hour '2'",
         "action :create",
     ] {
         assert!(text.contains(line), "{line} in {text}");
