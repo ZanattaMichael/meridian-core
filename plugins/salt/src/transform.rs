@@ -188,6 +188,20 @@ fn mapping(resource_type: &str) -> Option<Mapping> {
                     },
                 ),
                 ("file", FILE_MANAGED),
+                (
+                    "link",
+                    Shape {
+                        function: "symlink",
+                        params: &[
+                            ("group", "group"),
+                            ("owner", "user"),
+                            ("path", "name"),
+                            ("target", "target"),
+                        ],
+                        moot: &[],
+                        fixed: &[],
+                    },
+                ),
                 ("present", FILE_MANAGED),
             ],
             default_state: "present",

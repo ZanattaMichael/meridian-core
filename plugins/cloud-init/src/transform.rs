@@ -406,6 +406,13 @@ fn repository(r: &Resource) -> Result<Item, CompileError> {
 }
 
 fn file(r: &Resource) -> Result<Item, CompileError> {
+    if r.state == "link" {
+        return Err(refuse(
+            r,
+            &rules::UNSUPPORTED_STATE,
+            "cloud-init has no module for links; write an exec resource that runs ln -s".to_owned(),
+        ));
+    }
     accept(
         r,
         &[

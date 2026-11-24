@@ -314,6 +314,7 @@ Can be notified with `restart` or `refresh`.
 |---|---|
 | `state: present` (default), `state: file` | `ensure => file` |
 | `state: directory` | `ensure => directory` |
+| `state: link` | `ensure => link`, with `target` |
 | `state: absent` | `ensure => absent` |
 | `path` (required) | `path` |
 | `content` | `content` |

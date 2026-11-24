@@ -350,6 +350,7 @@ State: `present` (the default) only. Added before packages are installed.
 | `present` or `file` (the default) | an entry under `write_files` |
 | `directory` | `install -d -m <mode> -o <owner> -g <group> <path>` under `runcmd` |
 | `absent` | `rm -rf -- <path>` under `runcmd` |
+| `link` | refused: write an `exec` that runs `ln -s` |
 
 - A file with no content is refused.
 - `directory` takes no `content`, `encoding` or `append`; `absent` takes `path` only.

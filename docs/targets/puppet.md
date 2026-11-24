@@ -129,7 +129,7 @@ Unlisted params (`unsupported-param`) and states (`unsupported-state`) are refus
 | `package` | `package` | `present` (default), `absent`, `latest` | `name` | `name` |
 | `packageRepository` | `yumrepo`; `format: apt` refused (use `apt::source`) | `present` (default), `absent` | `name`, `format`, `url` (`baseurl`), `key` (`gpgkey`) | `name`, `format`, `url` |
 | `service` | `service` | `running` (default), `started` (the same), `stopped` | `name`, `enabled` (`enable`) | `name` |
-| `file` | `file` | `file` (default), `present` (the same), `directory`, `absent` | `path`, `content`, `owner`, `group`, `mode` | `path` |
+| `file` | `file` | `file` (default), `present` (the same), `directory`, `link`, `absent` | `path`, `content`, `owner`, `group`, `mode`, `target` | `path`; `target` with `link` |
 | `user` | `user` | `present` (default), `absent` | `name`, `uid`, `home`, `shell`, `system`, `groups` | `name` |
 | `group` | `group` | `present` (default), `absent` | `name`, `gid`, `system` | `name` |
 | `exec` | `exec` | none; an exec has no state | `command`, `chdir` (`cwd`), `creates`, `shell` | `command` |

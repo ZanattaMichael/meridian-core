@@ -65,6 +65,7 @@ pub(crate) fn mapping(resource_type: &str) -> Option<Mapping> {
                 ("absent", "delete"),
                 ("directory", "create"),
                 ("file", "create"),
+                ("link", "create"),
                 ("present", "create"),
             ],
             default_state: "present",
@@ -74,6 +75,7 @@ pub(crate) fn mapping(resource_type: &str) -> Option<Mapping> {
                 ("mode", "mode"),
                 ("owner", "owner"),
                 ("path", "path"),
+                ("target", "to"),
             ],
             required: &["path"],
             actions: &[],
@@ -481,6 +483,13 @@ fn blocks_for(r: &Resource) -> Result<Vec<Block>, CompileError> {
                 ));
             }
             chef = "directory";
+        }
+        // A link is a resource of its own in Chef, named by the link's path.
+        "file" if state == "link" => {
+            if let Some(path) = properties.remove("path") {
+                properties.insert("target_file".to_owned(), path);
+            }
+            chef = "link";
         }
         // A document declares a group, not its whole membership. Without
         // `append`, Chef takes the missing member list for an empty one and

@@ -87,6 +87,10 @@ where the tools themselves differ; the cells say how, and the
 | no `path` | yes | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` |
 | a state no tool has (`touched`) | yes | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` | `unsupported-state` |
 | a param outside the dialect (`source`) | yes | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` | `unsupported-param` |
+| state `link` with `target` | no | ok | ok | `unsupported-state` | ok | ok | ok |
+| state `link` without `target` | yes | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` | `missing-param` |
+| state `link` with `content` | yes | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` |
+| `target` without state `link` | yes | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` | `param-conflicts-with-state` |
 
 ## `user`
 

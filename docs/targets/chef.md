@@ -122,7 +122,7 @@ Unlisted params (`unsupported-param`) and states (`unsupported-state`) are refus
 | `package` | `package` | `present` (`:install`, default), `absent` (`:remove`), `latest` (`:upgrade`) | `name` (`package_name`) | `name` |
 | `packageRepository` | `apt_repository` (apt), `yum_repository` (yum) | `present` (`:add` / `:create`, default), `absent` (`:remove`) | `name` (`repo_name` / `repositoryid`), `format`, `url`, `key`; apt: `distribution`, `components` | `name`, `format`, `url` |
 | `service` | `service` | `running` (`:start`, default), `started` (the same), `stopped` (`:stop`) | `name` (`service_name`), `enabled` | `name` |
-| `file` | `file`, or `directory` for `state: directory` | `present` (`:create`, default), `file` (the same), `directory` (`:create`), `absent` (`:delete`) | `path`, `content`, `owner`, `group`, `mode` | `path` |
+| `file` | `file`; `directory` for `state: directory`; `link` for `state: link` | `present` (`:create`, default), `file` (the same), `directory` (`:create`), `link` (`:create`), `absent` (`:delete`) | `path` (`target_file` on a link), `content`, `owner`, `group`, `mode`, `target` (`to`) | `path`; `target` with `link` |
 | `user` | `user` | `present` (`:create`, default), `absent` (`:remove`) | `name` (`username`), `uid`, `home`, `shell`, `system`, `groups` | `name` |
 | `group` | `group` | `present` (`:create`, default), `absent` (`:remove`) | `name` (`group_name`), `gid`, `system` | `name` |
 | `exec` | `execute` | none; an exec has no state and always has `action :run` | `command`, `chdir` (`cwd`), `creates`, `shell` | `command` |
