@@ -202,7 +202,8 @@ user never has to look it up to know what they are relying on.
 
 ### 5.2 Channels
 
-**Decision: two channels, `stable` and `beta`. No nightly.**
+**Decision: two channels, `stable` and `beta`.** Superseded in part: the owner asked for a
+nightly build ([decision 0055](../decisions/0055-a-nightly-is-a-rolling-pre-release-of-main.md)).
 
 `stable` is the default: every Supported plugin green across Tiers 1–4, release notes,
 migration guides where needed. `beta` is a pre-release of the next `stable`, for people

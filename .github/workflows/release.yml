@@ -19,6 +19,9 @@ name: release
 #   and opens a DRAFT GitHub release holding every file. A tag pushed by
 #   hand without the variable is only another rehearsal.
 #
+#   A nightly: `nightly.yml` calls this workflow with a `version` input. It
+#   is a rehearsal built at that version; nightly.yml publishes the result.
+#
 # docs/contributing/releasing.md is the maintainer's guide to all of it.
 
 on:
@@ -31,12 +34,20 @@ on:
       - tools/release/**
       - Cargo.toml
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: Build at this version in place of Cargo.toml's (a nightly). Nothing is published.
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  # The calling workflow's name keeps a nightly's call apart from this
+  # workflow's own run on the same ref.
+  group: release-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
@@ -50,6 +61,7 @@ jobs:
     outputs:
       version: ${{ steps.plan.outputs.version }}
       publish: ${{ steps.plan.outputs.publish }}
+      stamp: ${{ inputs.version != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -58,9 +70,12 @@ jobs:
           PUBLISH_ENABLED: ${{ vars.MERIDIAN_RELEASE_PUBLISH }}
           REF: ${{ github.ref }}
           EVENT: ${{ github.event_name }}
+          CALLED_VERSION: ${{ inputs.version }}
         run: |
           version="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
           publish=false
+          # Called by nightly.yml: its version, and it publishes, not this run.
+          [ -n "$CALLED_VERSION" ] && REF=called version="$CALLED_VERSION"
           case "$REF" in
             refs/tags/v*)
               # The tag and the workspace version are one fact, stated twice.
@@ -106,6 +121,13 @@ jobs:
       PYTHON: ${{ startsWith(matrix.os, 'windows') && 'python' || 'python3' }}
     steps:
       - uses: actions/checkout@v7
+
+      # A nightly's version is written into the workspace, so `meridian
+      # --version` and every plugin report it.
+      - name: Set the nightly version
+        if: needs.plan.outputs.stamp == 'true'
+        run: |
+          "$PYTHON" tools/release/set_version.py "$VERSION"
 
       - name: Install the stable toolchain
         run: |

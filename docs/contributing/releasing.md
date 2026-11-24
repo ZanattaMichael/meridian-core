@@ -4,7 +4,7 @@ How to cut a release. Policy: [release and versioning plan](../plans/release-and
 Workflow: [`.github/workflows/release.yml`](../../.github/workflows/release.yml); scripts in
 [`tools/release/`](../../tools/release); packaging in [`packaging/`](../../packaging).
 
-## Two kinds of run
+## Three kinds of run
 
 **A rehearsal** builds and tests, publishing nothing (artifacts kept 7 days). It runs on pull
 requests touching the workflow, `packaging/`, `tools/release/` or root `Cargo.toml`, and on
@@ -18,6 +18,9 @@ demand.
 
 A tag not matching `Cargo.toml` fails. A release opens a **draft**; nothing is public until
 you publish it.
+
+**A nightly** is a rehearsal at a nightly version, published as the `nightly` pre-release
+([below](#nightly)).
 
 ## What is built
 
@@ -99,6 +102,26 @@ a published tag.
 
 A push with a run's own token starts no workflow, so `cut release` dispatches `release` at
 the tag. See [decision 21](../decisions/0021-a-dispatch-at-a-tag-is-a-release.md).
+
+## Nightly
+
+[`nightly.yml`](../../.github/workflows/nightly.yml) runs at 03:17 UTC and on demand (input
+`force` rebuilds an unchanged `main`). It must run on `main`. A pull request changing it or
+`set_version.py` runs `plan` and `build` only.
+
+| Step | What happens |
+|---|---|
+| `plan` | stops if `main` is the commit the `nightly` tag points at; else sets the version `<next patch>-nightly.<YYYYMMDD>.g<sha7>`, as in `0.1.1-nightly.20261119.g1a2b3c4` |
+| `build` | calls `release.yml` with that version: every job above, `publish` skipped. `tools/release/set_version.py` writes the version into `Cargo.toml` and `Cargo.lock` first, so `meridian --version` prints it |
+| `publish` | attests build provenance for the archives, deletes the `nightly` release and tag, and creates them again at the built commit with every file of `release-files` |
+
+The `nightly` release is a **pre-release**: `releases/latest` and the install scripts' default
+do not move. It has no Sigstore bundle (install scripts accept only a `v*` tag's signature),
+no image and no package-manager listings. It needs no settings. To stop it, disable the
+workflow in the Actions tab.
+
+Real-tool tests are not repeated nightly: they run on every push to `main` that touches what
+they test ([testing](testing.md)).
 
 ## Package managers
 

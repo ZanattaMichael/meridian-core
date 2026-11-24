@@ -658,7 +658,11 @@ fn check_core(who: &str, manifest: &Manifest, core_version: &str) -> Result<(), 
     let (Some(req), Ok(core)) = (&manifest.meridian, Version::parse(core_version)) else {
         return Ok(());
     };
-    if req.matches(&core) {
+    // A pre-release (a nightly or a beta) is checked as the release it leads
+    // to: `>=0.1` admits 0.1.1-nightly.20261119, which semver alone would not.
+    let mut release = core.clone();
+    release.pre = semver::Prerelease::EMPTY;
+    if req.matches(&core) || req.matches(&release) {
         return Ok(());
     }
     Err(Error::new(
@@ -1043,6 +1047,19 @@ impl Modules {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pre_release_core_is_checked_as_its_release() {
+        let manifest = |req: &str| {
+            let yaml = format!(
+                "apiVersion: meridian/v1\nkind: Module\nmetadata:\n  name: m\nspec:\n  meridian: \"{req}\"\n"
+            );
+            Manifest::parse("meridian.yaml", yaml.as_bytes()).unwrap()
+        };
+        assert!(check_core("m", &manifest(">=0.1"), "0.1.1-nightly.20261119.gabc1234").is_ok());
+        assert!(check_core("m", &manifest("^0.1"), "0.2.0-beta.1").is_err());
+        assert!(check_core("m", &manifest(">=0.2"), "0.1.1-nightly.20261119.gabc1234").is_err());
+    }
 
     #[test]
     fn paths_are_normalised_without_touching_the_disk() {
