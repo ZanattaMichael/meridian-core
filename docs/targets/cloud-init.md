@@ -355,6 +355,7 @@ State: `present` (the default) only. Added before packages are installed.
 | `directory` | `install -d -m <mode> -o <owner> -g <group> <path>` under `runcmd` |
 | `absent` | `rm -rf -- <path>` under `runcmd` |
 | `link` | refused: write an `exec` that runs `ln -s` |
+| `source` | refused: write an `exec` that runs `curl` |
 
 - A file with no content is refused.
 - `directory` takes no `content`, `encoding` or `append`; `absent` takes `path` only.

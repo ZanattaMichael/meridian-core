@@ -1080,3 +1080,15 @@ fn a_cron_job_is_cron_present() {
         assert!(text.contains(line), "{line} in {text}");
     }
 }
+
+#[test]
+fn a_download_is_file_managed_with_a_source_hash() {
+    let text = sls("    - id: tool\n      type: file\n      params:\n        path: /usr/local/bin/tool\n        source: https://example.com/tool\n        checksum: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n        mode: \"0755\"\n");
+    for line in [
+        "file.managed:",
+        "source: https://example.com/tool",
+        "source_hash: sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ] {
+        assert!(text.contains(line), "{line} in {text}");
+    }
+}

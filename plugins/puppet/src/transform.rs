@@ -107,11 +107,13 @@ pub(crate) fn mapping(resource_type: &str) -> Option<Mapping> {
             ],
             default_state: "present",
             params: &[
+                ("checksum", "checksum_value"),
                 ("content", "content"),
                 ("group", "group"),
                 ("mode", "mode"),
                 ("owner", "owner"),
                 ("path", "path"),
+                ("source", "source"),
                 ("target", "target"),
             ],
             required: &["path"],
@@ -424,6 +426,14 @@ fn declaration_for(
             continue;
         }
         attrs.insert(native.to_owned(), attribute(r, name, value, secrets)?);
+    }
+    // A download: Puppet takes the algorithm and the digest apart.
+    if let Some(Value::String(sum)) = r.params.get("checksum") {
+        if let Some(hex) = meridian_sdk::schema::file_checksum_hex(sum) {
+            let text = |v: &str| attribute(r, "checksum", &Value::String(v.to_owned()), secrets);
+            attrs.insert("checksum".to_owned(), text("sha256")?);
+            attrs.insert("checksum_value".to_owned(), text(&hex)?);
+        }
     }
 
     for need in m.required {

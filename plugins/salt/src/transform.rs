@@ -77,11 +77,13 @@ const SERVICE_RUNNING: Shape = Shape {
 const FILE_MANAGED: Shape = Shape {
     function: "managed",
     params: &[
+        ("checksum", "source_hash"),
         ("content", "contents"),
         ("group", "group"),
         ("mode", "mode"),
         ("owner", "user"),
         ("path", "name"),
+        ("source", "source"),
     ],
     moot: &[],
     fixed: &[],
@@ -717,6 +719,17 @@ fn state_for(
         // With no content to write, only the file's existence and attributes
         // are managed. Saying so keeps Salt from ever touching what an
         // existing file holds.
+        // A download: Salt takes the digest as `sha256=<hex>`.
+        "file" if args.contains_key("source") => {
+            if let Some(Value::String(sum)) = r.params.get("checksum") {
+                if let Some(hex) = meridian_sdk::schema::file_checksum_hex(sum) {
+                    args.insert(
+                        "source_hash".to_owned(),
+                        Value::String(format!("sha256={hex}")),
+                    );
+                }
+            }
+        }
         "file" if shape.function == "managed" && !args.contains_key("contents") => {
             args.insert("replace".to_owned(), Value::Bool(false));
         }

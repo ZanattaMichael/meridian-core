@@ -581,6 +581,12 @@ const SHARED_PARAMS: &[(&str, &str, ParamKind, &str)] = &[
     ),
     (
         "file",
+        "checksum",
+        ParamKind::String,
+        "With `source`: the download's expected digest, written `sha256:<hex>`.",
+    ),
+    (
+        "file",
         "content",
         ParamKind::String,
         "The file's whole content.",
@@ -615,6 +621,12 @@ const SHARED_PARAMS: &[(&str, &str, ParamKind, &str)] = &[
         "path",
         ParamKind::String,
         "Where the file or directory is.",
+    ),
+    (
+        "file",
+        "source",
+        ParamKind::String,
+        "An `https://` or `http://` URL the file is downloaded from; requires `checksum`.",
     ),
     (
         "file",
@@ -833,6 +845,7 @@ pub fn check_shared(resource: &Resource) -> Result<(), CompileError> {
     }
     if r#type == "file" {
         check_link(resource)?;
+        check_source(resource)?;
     }
     for (name, value) in &resource.params {
         let Some((_, _, kind, _)) = SHARED_PARAMS
@@ -1271,6 +1284,84 @@ fn check_link(resource: &Resource) -> Result<(), CompileError> {
     Ok(())
 }
 
+/// A `file` downloaded from `source` needs a `sha256:` `checksum`, takes no
+/// `content`, and is a plain file; `checksum` means nothing without `source`.
+fn check_source(resource: &Resource) -> Result<(), CompileError> {
+    let text = |p: &str| match resource.params.get(p) {
+        Some(Value::String(s)) => Some(s.as_str()),
+        _ => None,
+    };
+    let has = |p: &str| resource.params.contains_key(p);
+    let refuse = |rule: &'static rules::Rule, msg: String| {
+        Err(CompileError::for_resource(resource, rule, msg))
+    };
+    if !has("source") {
+        if has("checksum") {
+            return refuse(
+                &rules::PARAM_CONFLICTS_WITH_STATE,
+                "param \"checksum\" is for a file downloaded from \"source\"; add source or \
+                 remove the param"
+                    .to_owned(),
+            );
+        }
+        return Ok(());
+    }
+    if !matches!(resource.state.as_str(), "" | "present" | "file") {
+        return refuse(
+            &rules::PARAM_CONFLICTS_WITH_STATE,
+            format!(
+                "param \"source\" cannot be used with state {:?}: a download is a plain \
+                 file; remove the param or the state",
+                resource.state
+            ),
+        );
+    }
+    for param in ["append", "content", "encoding"] {
+        if has(param) {
+            return refuse(
+                &rules::PARAM_CONFLICTS_WITH_STATE,
+                format!(
+                    "param {param:?} cannot be used with \"source\": the download is the \
+                     content; remove one of them"
+                ),
+            );
+        }
+    }
+    if let Some(url) = text("source") {
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return refuse(
+                &rules::INVALID_PARAM,
+                format!("param \"source\" must be an https:// or http:// URL, not {url:?}"),
+            );
+        }
+    }
+    let Some(sum) = resource.params.get("checksum") else {
+        return refuse(
+            &rules::MISSING_PARAM,
+            "a file with \"source\" requires param \"checksum\": sha256:<hex> of the \
+             download"
+                .to_owned(),
+        );
+    };
+    if let Value::String(sum) = sum {
+        if file_checksum_hex(sum).is_none() {
+            return refuse(
+                &rules::INVALID_PARAM,
+                format!("param \"checksum\" must be sha256: and 64 hex digits, not {sum:?}"),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The hex digest of a `file`'s `checksum`, lowercased, when it is
+/// `sha256:` and 64 hex digits.
+pub fn file_checksum_hex(checksum: &str) -> Option<String> {
+    let hex = checksum.strip_prefix("sha256:")?;
+    (hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then(|| hex.to_ascii_lowercase())
+}
+
 /// Whether a secret sits somewhere inside a list or a map.
 fn holds_secret(value: &Value) -> bool {
     match value {
@@ -1340,6 +1431,58 @@ mod tests {
                 .map(|(k, v)| ((*k).to_owned(), v.clone()))
                 .collect(),
             ..Resource::default()
+        }
+    }
+
+    #[test]
+    fn a_download_needs_a_sha256_checksum_and_nothing_that_contradicts_it() {
+        let text = |s: &str| Value::String(s.to_owned());
+        let sum = format!("sha256:{}", "A".repeat(64));
+        let rule = |state: &str, params: &[(&str, Value)]| {
+            let mut r = resource("file", params);
+            r.state = state.to_owned();
+            check_shared(&r).err().map(|e| e.rule)
+        };
+        let url = ("source", text("https://example.com/tool"));
+        assert_eq!(rule("", &[url.clone(), ("checksum", text(&sum))]), None);
+        assert_eq!(file_checksum_hex(&sum), Some("a".repeat(64)));
+        for (state, params, want) in [
+            ("", vec![url.clone()], "missing-param"),
+            (
+                "",
+                vec![("checksum", text(&sum))],
+                "param-conflicts-with-state",
+            ),
+            (
+                "directory",
+                vec![url.clone(), ("checksum", text(&sum))],
+                "param-conflicts-with-state",
+            ),
+            (
+                "",
+                vec![
+                    url.clone(),
+                    ("checksum", text(&sum)),
+                    ("content", text("x")),
+                ],
+                "param-conflicts-with-state",
+            ),
+            (
+                "",
+                vec![("source", text("ftp://x")), ("checksum", text(&sum))],
+                "invalid-param",
+            ),
+            (
+                "",
+                vec![url.clone(), ("checksum", text("md5:00"))],
+                "invalid-param",
+            ),
+        ] {
+            assert_eq!(
+                rule(state, &params).as_deref(),
+                Some(want),
+                "{state} {params:?}"
+            );
         }
     }
 

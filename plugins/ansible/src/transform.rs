@@ -10,6 +10,7 @@ use meridian_sdk::{
 use crate::{refuse, Playbook, Task, NAME};
 
 const COPY: &str = "ansible.builtin.copy";
+const GET_URL: &str = "ansible.builtin.get_url";
 
 /// How one IR resource type becomes a native module call.
 ///
@@ -90,6 +91,8 @@ fn mapping(resource_type: &str) -> Option<Mapping> {
             module: |r| {
                 if r.params.contains_key("content") {
                     COPY
+                } else if r.params.contains_key("source") {
+                    GET_URL
                 } else {
                     "ansible.builtin.file"
                 }
@@ -97,7 +100,7 @@ fn mapping(resource_type: &str) -> Option<Mapping> {
             // The copy module writes a file by definition and rejects a state
             // argument, so "file" is implied there and any other state
             // contradicts literal content.
-            state_arg: |module| (module != COPY).then_some("state"),
+            state_arg: |module| (module != COPY && module != GET_URL).then_some("state"),
             states: &[
                 ("absent", "absent"),
                 ("directory", "directory"),
@@ -115,6 +118,15 @@ fn mapping(resource_type: &str) -> Option<Mapping> {
                         ("mode", "mode"),
                         ("owner", "owner"),
                         ("path", "dest"),
+                    ]
+                } else if module == GET_URL {
+                    &[
+                        ("checksum", "checksum"),
+                        ("group", "group"),
+                        ("mode", "mode"),
+                        ("owner", "owner"),
+                        ("path", "dest"),
+                        ("source", "url"),
                     ]
                 } else {
                     &[
@@ -265,7 +277,7 @@ pub fn resource_schemas() -> Vec<ResourceSchema> {
         // A type's params can depend on the module its params select;
         // an editor is offered every param some module takes.
         let mut params = Vec::new();
-        for module in [COPY, ""] {
+        for module in [COPY, GET_URL, ""] {
             params.extend((m.params)(module).iter().map(|(param, _)| *param));
         }
         let states: Vec<&str> = m.states.iter().map(|(state, _)| *state).collect();

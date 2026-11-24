@@ -2135,6 +2135,14 @@
             "properties": {
               "params": {
                 "properties": {
+                  "checksum": {
+                    "description": "With `source`: the download's expected digest, written `sha256:<hex>`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
                   "content": {
                     "description": "The file's whole content.",
                     "type": [
@@ -2169,6 +2177,14 @@
                   },
                   "path": {
                     "description": "Where the file or directory is.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "source": {
+                    "description": "An `https://` or `http://` URL the file is downloaded from; requires `checksum`.",
                     "type": [
                       "string",
                       "number",
@@ -4105,6 +4121,14 @@
             "properties": {
               "params": {
                 "properties": {
+                  "checksum": {
+                    "description": "With `source`: the download's expected digest, written `sha256:<hex>`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
                   "content": {
                     "description": "The file's whole content.",
                     "type": [
@@ -4139,6 +4163,14 @@
                   },
                   "path": {
                     "description": "Where the file or directory is.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "source": {
+                    "description": "An `https://` or `http://` URL the file is downloaded from; requires `checksum`.",
                     "type": [
                       "string",
                       "number",
@@ -6792,6 +6824,14 @@
             "properties": {
               "params": {
                 "properties": {
+                  "checksum": {
+                    "description": "With `source`: the download's expected digest, written `sha256:<hex>`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
                   "content": {
                     "description": "The file's whole content.",
                     "type": [
@@ -6826,6 +6866,14 @@
                   },
                   "path": {
                     "description": "Where the file or directory is.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "source": {
+                    "description": "An `https://` or `http://` URL the file is downloaded from; requires `checksum`.",
                     "type": [
                       "string",
                       "number",
@@ -8128,6 +8176,14 @@
             "properties": {
               "params": {
                 "properties": {
+                  "checksum": {
+                    "description": "With `source`: the download's expected digest, written `sha256:<hex>`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
                   "content": {
                     "description": "The file's whole content.",
                     "type": [
@@ -8162,6 +8218,14 @@
                   },
                   "path": {
                     "description": "Where the file or directory is.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "source": {
+                    "description": "An `https://` or `http://` URL the file is downloaded from; requires `checksum`.",
                     "type": [
                       "string",
                       "number",
@@ -8697,6 +8761,14 @@
             "properties": {
               "params": {
                 "properties": {
+                  "checksum": {
+                    "description": "With `source`: the download's expected digest, written `sha256:<hex>`.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
                   "content": {
                     "description": "The file's whole content.",
                     "type": [
@@ -8731,6 +8803,14 @@
                   },
                   "path": {
                     "description": "Where the file or directory is.",
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "source": {
+                    "description": "An `https://` or `http://` URL the file is downloaded from; requires `checksum`.",
                     "type": [
                       "string",
                       "number",

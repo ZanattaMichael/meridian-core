@@ -554,3 +554,16 @@ fn a_cron_job_is_puppets_cron() {
         assert!(site.contains(line), "{line} in {site}");
     }
 }
+
+#[test]
+fn a_download_is_a_file_with_a_source() {
+    let site = manifest("    - id: tool\n      type: file\n      params:\n        path: /usr/local/bin/tool\n        source: https://example.com/tool\n        checksum: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n        mode: \"0755\"\n");
+    for line in [
+        "source => 'https://example.com/tool'",
+        "checksum => 'sha256'",
+        "checksum_value => 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'",
+    ] {
+        let squeezed = site.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(squeezed.contains(line), "{line} in {site}");
+    }
+}
