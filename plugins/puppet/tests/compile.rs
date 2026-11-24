@@ -382,7 +382,7 @@ fn what_bolt_cannot_take_of_a_credential_is_refused_with_the_reason() {
 /// The document behind the `native_types` golden files: Puppet's own types
 /// beside the shared ones, a core type, a defined type, the native `file`
 /// reached through `native/`, with a state, notified and notifying.
-const NATIVE_TYPES: &str = "    - id: nginx_pkg\n      type: package\n      params:\n        name: nginx\n    - id: html\n      type: native/file\n      state: directory\n      params:\n        path: /var/www/html\n        source: puppet:///modules/web/html\n        recurse: true\n      dependsOn:\n        - resource: nginx_pkg\n    - id: logrotate\n      type: cron\n      state: present\n      params:\n        command: /usr/sbin/logrotate /etc/logrotate.conf\n        user: root\n        hour: 2\n        minute: 0\n      notifies:\n        - resource: nginx_svc\n          action: restart\n        - resource: app_db\n          action: refresh\n    - id: nginx_svc\n      type: service\n      params:\n        name: nginx\n    - id: app_db\n      type: mysql::db\n      params:\n        user: app\n        password: placeholder\n        host: localhost\n        grant: [SELECT, INSERT]\n    - id: tag\n      type: mysql::server::tag\n";
+const NATIVE_TYPES: &str = "    - id: nginx_pkg\n      type: package\n      params:\n        name: nginx\n    - id: html\n      type: native/file\n      state: directory\n      params:\n        path: /var/www/html\n        source: puppet:///modules/web/html\n        recurse: true\n      dependsOn:\n        - resource: nginx_pkg\n    - id: logrotate\n      type: native/cron\n      state: present\n      params:\n        command: /usr/sbin/logrotate /etc/logrotate.conf\n        user: root\n        hour: 2\n        minute: 0\n      notifies:\n        - resource: nginx_svc\n          action: restart\n        - resource: app_db\n          action: refresh\n    - id: nginx_svc\n      type: service\n      params:\n        name: nginx\n    - id: app_db\n      type: mysql::db\n      params:\n        user: app\n        password: placeholder\n        host: localhost\n        grant: [SELECT, INSERT]\n    - id: tag\n      type: mysql::server::tag\n";
 
 #[test]
 fn a_puppet_type_is_declared_with_its_attributes_as_written() {
@@ -410,11 +410,11 @@ fn a_puppet_type_is_declared_with_its_attributes_as_written() {
 #[test]
 fn a_puppet_type_takes_its_ensure_once_and_a_value_that_is_not_a_word_is_quoted() {
     let err = refusal(
-        "    - id: a\n      type: cron\n      state: absent\n      params:\n        command: /bin/true\n        ensure: present\n",
+        "    - id: a\n      type: native/cron\n      state: absent\n      params:\n        command: /bin/true\n        ensure: present\n",
     );
     assert_eq!(err.rule, "param-conflicts-with-state");
 
-    let err = refusal("    - id: a\n      type: cron\n      params:\n        command: ~\n");
+    let err = refusal("    - id: a\n      type: native/cron\n      params:\n        command: ~\n");
     assert_eq!(err.rule, "empty-param");
 
     let manifest = manifest(
@@ -436,7 +436,7 @@ fn a_name_that_is_not_a_puppet_type_is_refused() {
         "Cron",
         "mysql::",
         "ansible.builtin.cron",
-        "native/cron",
+        "native/augeas",
         "native/File",
     ] {
         let err = refusal(&format!(
@@ -454,7 +454,7 @@ fn a_name_that_is_not_a_puppet_type_is_refused() {
 #[test]
 fn a_puppet_type_can_only_be_refreshed_when_notified() {
     let err = refusal(
-        "    - id: conf\n      type: file\n      params: {path: /a, content: a}\n      notifies:\n        - resource: job\n          action: restart\n    - id: job\n      type: cron\n      params: {command: /bin/true}\n",
+        "    - id: conf\n      type: file\n      params: {path: /a, content: a}\n      notifies:\n        - resource: job\n          action: restart\n    - id: job\n      type: native/cron\n      params: {command: /bin/true}\n",
     );
     assert_eq!(err.rule, "unsupported-action");
     assert_eq!(err.resource, "conf");
@@ -503,6 +503,7 @@ fn the_schemas_offer_any_puppet_type_as_an_open_pattern() {
         [
             "<module>::<type>",
             "<type>",
+            "cron",
             "exec",
             "file",
             "group",
@@ -536,6 +537,19 @@ fn a_link_is_a_file_with_ensure_link() {
     for line in [
         "ensure => link",
         "target => '/etc/nginx/sites-available/app'",
+    ] {
+        assert!(site.contains(line), "{line} in {site}");
+    }
+}
+
+#[test]
+fn a_cron_job_is_puppets_cron() {
+    let site = manifest("    - id: rotate\n      type: cron\n      params:\n        name: logrotate\n        command: /usr/sbin/logrotate /etc/logrotate.conf\n        minute: 0\n        hour: 2\n");
+    for line in [
+        "cron { 'rotate':",
+        "command  => '/usr/sbin/logrotate /etc/logrotate.conf'",
+        "monthday => '*'",
+        "hour     => '2'",
     ] {
         assert!(site.contains(line), "{line} in {site}");
     }

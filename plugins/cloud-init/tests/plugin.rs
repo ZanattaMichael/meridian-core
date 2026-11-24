@@ -117,6 +117,7 @@ fn the_host_learns_what_the_plugin_is_from_the_plugin() {
         info.resource_types,
         [
             "<module>",
+            "cron",
             "exec",
             "file",
             "group",

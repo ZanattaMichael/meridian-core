@@ -62,7 +62,7 @@ fn an_unknown_type_names_the_types_that_work_and_the_line() {
     assert_eq!(
         err.msg,
         "unsupported resource type \"firewall_rule\" on this target: it is not one of the \
-         shared types (exec, file, group, package, packageRepository, service, user), and an Ansible module is \
+         shared types (cron, exec, file, group, package, packageRepository, service, user), and an Ansible module is \
          written by its full name, such as ansible.builtin.lineinfile"
     );
     assert_eq!((err.pos.file.as_str(), err.pos.line), ("site.yaml", 11));
@@ -168,6 +168,7 @@ fn the_schemas_offer_any_module_as_an_open_pattern() {
         Ansible.supported_resource_types(),
         [
             "<namespace>.<collection>.<module>",
+            "cron",
             "exec",
             "file",
             "group",
@@ -568,6 +569,21 @@ fn a_link_is_the_file_module_in_state_link() {
         "state: link",
         "src: /etc/nginx/sites-available/app",
         "path: /etc/nginx/sites-enabled/app",
+    ] {
+        assert!(playbook.contains(line), "{line} in {playbook}");
+    }
+}
+
+#[test]
+fn a_cron_job_is_the_cron_module() {
+    let emitted = compile("    - id: rotate\n      type: cron\n      params:\n        name: logrotate\n        command: /usr/sbin/logrotate /etc/logrotate.conf\n        minute: 0\n        hour: 2\n").unwrap();
+    let playbook = &emitted.artifact.files["playbook.yml"];
+    for line in [
+        "ansible.builtin.cron:",
+        "name: logrotate",
+        "job: /usr/sbin/logrotate /etc/logrotate.conf",
+        "hour: \"2\"",
+        "user: root",
     ] {
         assert!(playbook.contains(line), "{line} in {playbook}");
     }

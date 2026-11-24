@@ -1,6 +1,6 @@
 # The configuration management resource types
 
-`ansible`, `puppet`, `openvox`, `chef`, `salt` and `cloud-init` share seven types. Puppet notes
+`ansible`, `puppet`, `openvox`, `chef`, `salt` and `cloud-init` share eight types. Puppet notes
 hold for `openvox`. Anything outside the tables is refused. For more, use the
 tool's own type ([native types](dsl/configuration-management.md#native-types-beside-the-six)).
 
@@ -135,6 +135,35 @@ complete.
 | Params | `name` (required), `gid`, `system`. cloud-init takes `name` and `members` only: it cannot choose a group's id |
 | States | `present` (default), `absent`. cloud-init: `present` only |
 | Can be notified | no |
+
+## `cron`
+
+| | |
+|---|---|
+| Params | `name`, `command` (required); `minute`, `hour`, `day`, `month`, `weekday` (default `*`, one cron field each, number or text); `user` (default `root`) |
+| States | `present` (default), `absent`. cloud-init: `present` only |
+| Can be notified | no |
+
+| Target | Compiles to |
+|---|---|
+| ansible | `ansible.builtin.cron` (`job`, `name`) |
+| puppet, openvox | `cron` (`monthday` for `day`) |
+| chef | `cron` named by `name` |
+| salt | `cron.present` / `cron.absent`, `identifier` from `name` (`daymonth`, `dayweek`) |
+| cloud-init | a file `/etc/cron.d/<name>`; `name` is letters, digits, `-`, `_` |
+
+`name` identifies the job, so changing the schedule updates it in place. The tool's own
+cron type is `native/cron`.
+
+```yaml
+- id: rotate
+  type: cron
+  params:
+    name: logrotate
+    command: /usr/sbin/logrotate /etc/logrotate.conf
+    minute: 0
+    hour: 2
+```
 
 ## `exec`
 

@@ -457,14 +457,20 @@ fn the_resources_schemas_are_exported_for_an_editor() {
     assert!(!repo.actions.contains(&"nothing".to_owned()));
     assert!(repo.source.starts_with("chef "), "{}", repo.source);
     // The shared names are only ever under `native/`; the rest by name, open.
-    assert!(export.schemas.iter().all(|s| s.r#type != "file"));
+    assert!(export
+        .schemas
+        .iter()
+        .all(|s| s.r#type != "file" && s.r#type != "cron"));
     let package = export
         .schemas
         .iter()
         .find(|s| s.r#type == "native/package")
         .expect("package is listed under native/");
     assert!(package.open && package.params.is_empty());
-    assert!(export.schemas.iter().any(|s| s.r#type == "cron" && s.open));
+    assert!(export
+        .schemas
+        .iter()
+        .any(|s| s.r#type == "native/cron" && s.open));
     assert!(
         export
             .notes

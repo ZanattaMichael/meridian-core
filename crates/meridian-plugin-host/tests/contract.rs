@@ -37,6 +37,7 @@ const TARGETS: &[Target] = &[
         refused: &[],
         resource_types: &[
             "<namespace>.<collection>.<module>",
+            "cron",
             "exec",
             "file",
             "group",
@@ -61,6 +62,7 @@ const TARGETS: &[Target] = &[
         resource_types: &[
             "<module>::<type>",
             "<type>",
+            "cron",
             "exec",
             "file",
             "group",

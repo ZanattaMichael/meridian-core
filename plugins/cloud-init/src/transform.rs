@@ -27,6 +27,7 @@ pub(crate) struct Transformed {
 
 /// The shared types, sorted.
 const SHARED: &[&str] = &[
+    "cron",
     "exec",
     "file",
     "group",
@@ -71,6 +72,14 @@ pub fn resource_schemas() -> Vec<ResourceSchema> {
              module whose value is not a mapping takes the one param value. It runs at the \
              point of the first boot cloud-init gives it, so nothing can depend on it or be \
              ordered before it. The document then compiles for cloud-init only.",
+        ),
+        shared(
+            "cron",
+            meridian_sdk::schema::CRON_PARAMS,
+            &["command", "name"],
+            &["present"],
+            "present",
+            &[],
         ),
         shared(
             "exec",
@@ -345,6 +354,7 @@ fn item_for(r: &Resource) -> Result<Item, CompileError> {
     match r.r#type.as_str() {
         "package" => package(r),
         "packageRepository" => repository(r),
+        "cron" => cron(r),
         "file" => file(r),
         "user" => user(r),
         "group" => group(r),
@@ -369,6 +379,44 @@ fn package(r: &Resource) -> Result<Item, CompileError> {
     Ok(Item::Package(Package {
         name: required(r, "name")?.to_owned(),
         version: text(r, "version")?.unwrap_or_default().to_owned(),
+    }))
+}
+
+/// A `cron` job: a file under `/etc/cron.d`, which cloud-init writes once.
+fn cron(r: &Resource) -> Result<Item, CompileError> {
+    let job = meridian_sdk::schema::cron_job(r).map_err(|e| CompileError {
+        target: NAME.to_owned(),
+        ..e
+    })?;
+    if !job.present {
+        return Err(refuse(
+            r,
+            &rules::UNSUPPORTED_STATE,
+            "cloud-init writes a cron job on a first boot; it cannot remove one".to_owned(),
+        ));
+    }
+    if !job
+        .name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(refuse(
+            r,
+            &rules::INVALID_PARAM,
+            format!(
+                "the name {:?} becomes a file in /etc/cron.d: use letters, digits, `-` and `_`",
+                job.name
+            ),
+        ));
+    }
+    Ok(Item::File(WriteFile {
+        path: format!("/etc/cron.d/{}", job.name),
+        content: format!(
+            "# Meridian: {}\n{} {} {} {} {} {} {}\n",
+            job.name, job.minute, job.hour, job.day, job.month, job.weekday, job.user, job.command
+        ),
+        permissions: "0644".to_owned(),
+        ..WriteFile::default()
     }))
 }
 

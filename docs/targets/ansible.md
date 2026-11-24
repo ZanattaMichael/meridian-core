@@ -10,7 +10,7 @@ the machine Meridian runs on.
 | | |
 |---|---|
 | Category | Configuration management |
-| Resource types | `package`, `packageRepository`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)), and any module by its full name, such as `ansible.builtin.lineinfile` ([modules beside the six](#modules-beside-the-six)) |
+| Resource types | `package`, `packageRepository`, `file`, `service`, `user`, `group`, `cron`, `exec` ([reference](../reference/resource-types.md)), and any module by its full name, such as `ansible.builtin.lineinfile` ([modules beside the six](#modules-beside-the-six)) |
 | `dependsOn` | Yes, as task order. A play runs top to bottom, so independent resources still run in sequence; a warning says which |
 | `notifies` | Native: handlers. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec or on a module. The action is kept: a reload stays a reload |
 | `runtimeWhen` | Yes: a task's `when:`, as an Ansible expression |
@@ -142,6 +142,7 @@ Unlisted params (`unsupported-param`) and states (`unsupported-state`) are refus
 | `file` | `ansible.builtin.copy` when there is `content`, `ansible.builtin.file` otherwise | `present` (`file`, default), `file`, `directory`, `link`, `absent` | `path` (`dest` or `path`), `content`, `owner`, `group`, `mode`, `target` (`src`) | `path`; `target` with `link` |
 | `user` | `ansible.builtin.user` | `present` (default), `absent` | `name`, `uid`, `home`, `shell`, `system`, `groups` | `name` |
 | `group` | `ansible.builtin.group` | `present` (default), `absent` | `name`, `gid`, `system` | `name` |
+| `cron` | `ansible.builtin.cron` | `present` (default), `absent` | `name`, `command` (`job`), `user`, `minute`, `hour`, `day`, `month`, `weekday` | `name`, `command` |
 | `exec` | `ansible.builtin.command`, or `ansible.builtin.shell` with `shell: true` | none; an exec has no state | `command` (`cmd`), `chdir`, `creates`, `removes`, `shell` | `command` |
 
 - The **id is the task name** (one line, not empty); changes are read back by it.

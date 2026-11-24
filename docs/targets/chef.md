@@ -10,7 +10,7 @@ or `chef-run` for another machine.
 | | |
 |---|---|
 | Category | Configuration management |
-| Resource types | `package`, `packageRepository`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)), and any Chef resource beside them: `template`, `cron`, `native/package` ([Chef resources beside the six](#chef-resources-beside-the-six)) |
+| Resource types | `package`, `packageRepository`, `file`, `service`, `user`, `group`, `cron`, `exec` ([reference](../reference/resource-types.md)), and any Chef resource beside them: `template`, `remote_file`, `native/package` ([Chef resources beside the six](#chef-resources-beside-the-six)) |
 | `dependsOn` | Yes, as recipe order. A recipe runs top to bottom, so the dependency graph is flattened into one sequence |
 | `notifies` | Native: `notifies`, delayed to the end of the run. Actions `restart`, `reload`, `start`, `stop` on a service, `run` on an exec, any action word on a Chef resource of its own. The action is kept: a reload stays a reload |
 | `runtimeWhen` | Yes: one line of Ruby in an `only_if` guard |
@@ -125,6 +125,7 @@ Unlisted params (`unsupported-param`) and states (`unsupported-state`) are refus
 | `file` | `file`; `directory` for `state: directory`; `link` for `state: link` | `present` (`:create`, default), `file` (the same), `directory` (`:create`), `link` (`:create`), `absent` (`:delete`) | `path` (`target_file` on a link), `content`, `owner`, `group`, `mode`, `target` (`to`) | `path`; `target` with `link` |
 | `user` | `user` | `present` (`:create`, default), `absent` (`:remove`) | `name` (`username`), `uid`, `home`, `shell`, `system`, `groups` | `name` |
 | `group` | `group` | `present` (`:create`, default), `absent` (`:remove`) | `name` (`group_name`), `gid`, `system` | `name` |
+| `cron` | `cron`, named by `name` | `present` (`:create`, default), `absent` (`:delete`) | `name`, `command`, `user`, `minute`, `hour`, `day`, `month`, `weekday` | `name`, `command` |
 | `exec` | `execute` | none; an exec has no state and always has `action :run` | `command`, `chdir` (`cwd`), `creates`, `shell` | `command` |
 
 - The **id is the Chef resource name**; the managed thing comes from `name` or `path`. Two
@@ -138,12 +139,11 @@ Unlisted params (`unsupported-param`) and states (`unsupported-state`) are refus
 
 ## Chef resources beside the six
 
-Any Chef resource is a type: `template`, `cron`, `remote_file`, `apt_repository`, or your
+Any Chef resource is a type: `template`, `remote_file`, `apt_repository`, or your
 cookbook's own. `params` are its properties, written as given; Chef checks them.
 
-The shared names `package`, `service`, `file`, `user` and `group` mean the shared types;
-Chef's own are `native/package` and so on. Use `execute` as is; `native/exec` and
-`native/cron` are refused.
+The shared names mean the shared types; Chef's own are `native/package`, `native/cron`
+and so on. Use `execute` as is; `native/exec` and `native/template` are refused.
 
 ```yaml
 resources:

@@ -10,7 +10,7 @@ Compiles a ResourceSet into a Puppet class and node statement, applied with
 | | |
 |---|---|
 | Category | Configuration management |
-| Resource types | `package`, `packageRepository`, `file`, `service`, `user`, `group`, `exec` ([reference](../reference/resource-types.md)), and any Puppet type beside them: `cron`, `mysql::db`, `native/file` ([Puppet types beside the six](#puppet-types-beside-the-six)) |
+| Resource types | `package`, `packageRepository`, `file`, `service`, `user`, `group`, `cron`, `exec` ([reference](../reference/resource-types.md)), and any Puppet type beside them: `augeas`, `mysql::db`, `native/file` ([Puppet types beside the six](#puppet-types-beside-the-six)) |
 | `dependsOn` | Yes, as `require`. Puppet orders by declared relationships, so the dependency graph survives into the manifest intact |
 | `notifies` | Native: `notify`. A service can be restarted (`restart` or `refresh`); an exec can be `run`; a Puppet type of its own can be refreshed (`refresh`) |
 | `runtimeWhen` | No. A catalog is compiled before it reaches the node, so there is nothing left to evaluate at apply time. Refused |
@@ -132,6 +132,7 @@ Unlisted params (`unsupported-param`) and states (`unsupported-state`) are refus
 | `file` | `file` | `file` (default), `present` (the same), `directory`, `link`, `absent` | `path`, `content`, `owner`, `group`, `mode`, `target` | `path`; `target` with `link` |
 | `user` | `user` | `present` (default), `absent` | `name`, `uid`, `home`, `shell`, `system`, `groups` | `name` |
 | `group` | `group` | `present` (default), `absent` | `name`, `gid`, `system` | `name` |
+| `cron` | `cron` | `present` (default), `absent` | `name`, `command`, `user`, `minute`, `hour`, `day` (`monthday`), `month`, `weekday` | `name`, `command` |
 | `exec` | `exec` | none; an exec has no state | `command`, `chdir` (`cwd`), `creates`, `shell` | `command` |
 
 - The **id is the Puppet title**; the managed name comes from `name` or `path`. Two
@@ -144,12 +145,12 @@ Unlisted params (`unsupported-param`) and states (`unsupported-state`) are refus
 
 ## Puppet types beside the six
 
-Any Puppet type is a resource type: `cron`, `mount`, `mysql::db`, `apache::vhost`. Its
+Any Puppet type is a resource type: `augeas`, `mount`, `mysql::db`, `apache::vhost`. Its
 `params` are its attributes, written as given; Puppet checks them when it compiles the
 catalog.
 
-The six shared names always mean the shared types. Puppet's own are `native/file`,
-`native/package` and so on. `native/cron` is refused.
+The shared names always mean the shared types. Puppet's own are `native/file`,
+`native/cron` and so on. `native/augeas` is refused.
 
 ```yaml
 resources:
@@ -161,7 +162,7 @@ resources:
       source: puppet:///modules/web/html
       recurse: true
   - id: logrotate
-    type: cron
+    type: native/cron
     params:
       command: /usr/sbin/logrotate /etc/logrotate.conf
       user: root
@@ -392,7 +393,7 @@ and `MERIDIAN_SSH_ADD`. Tested against stand-ins; real `bolt` is not run in CI.
 
 | | |
 |---|---|
-| Described in full | each Puppet type the documents use, under the name the document writes (`cron`, or `native/file` for one of the six names): every parameter and property with its description, the values it lists (`Valid values are ...`) as the param's values. The `Providers` and `Features` sections end the attributes: a provider's own attributes are not listed, and Puppet refuses one the type lacks at apply time. Read from `puppet describe <type>`, one run a type, with the target's own settings (`MERIDIAN_PUPPET`, `MERIDIAN_PUPPET_ARGS`). A defined type from a module (`mysql::db`) has no description `describe` can read, so it is a note and not the end of the sync |
+| Described in full | each Puppet type the documents use, under the name the document writes (`augeas`, or `native/file` for a shared name): every parameter and property with its description, the values it lists (`Valid values are ...`) as the param's values. The `Providers` and `Features` sections end the attributes: a provider's own attributes are not listed, and Puppet refuses one the type lacks at apply time. Read from `puppet describe <type>`, one run a type, with the target's own settings (`MERIDIAN_PUPPET`, `MERIDIAN_PUPPET_ARGS`). A defined type from a module (`mysql::db`) has no description `describe` can read, so it is a note and not the end of the sync |
 | Listed by name | every other type `puppet describe --list` knows, with its short description; the six shared names under `native/`, since the bare words are the shared types |
 | Pinned | Puppet's version, from `puppet --version` |
 

@@ -190,6 +190,7 @@ fn mapping(resource_type: &str) -> Option<Mapping> {
 
 /// The six shared types, sorted.
 const SHARED: &[&str] = &[
+    "cron",
     "exec",
     "file",
     "group",
@@ -279,6 +280,7 @@ pub fn resource_schemas() -> Vec<ResourceSchema> {
         ))
     }));
     meridian_sdk::schema::insert_repository_schema(&mut schemas);
+    meridian_sdk::schema::insert_cron_schema(&mut schemas);
     schemas
 }
 
@@ -420,6 +422,9 @@ fn task_for(r: &Resource, state: &str) -> Result<Task, CompileError> {
     if r.r#type == "packageRepository" {
         return repository_task(r);
     }
+    if r.r#type == "cron" {
+        return cron_task(r);
+    }
     let m = mapping(&r.r#type).ok_or_else(|| unsupported_type(r))?;
     let module = (m.module)(r);
     let allowed = (m.params)(module);
@@ -472,6 +477,39 @@ fn task_for(r: &Resource, state: &str) -> Result<Task, CompileError> {
     Ok(Task {
         name: r.id.clone(),
         module: module.to_owned(),
+        args,
+        notify: Vec::new(),
+        when: r.runtime_when.clone(),
+        native: false,
+        resource_id: r.id.clone(),
+        pos: r.pos.clone(),
+    })
+}
+
+/// A `cron` job: `ansible.builtin.cron`.
+fn cron_task(r: &Resource) -> Result<Task, CompileError> {
+    let job = meridian_sdk::schema::cron_job(r).map_err(|e| CompileError {
+        target: NAME.to_owned(),
+        ..e
+    })?;
+    let text = |s: &str| Value::String(s.to_owned());
+    let args = BTreeMap::from([
+        ("name".to_owned(), text(&job.name)),
+        ("job".to_owned(), text(&job.command)),
+        ("user".to_owned(), text(&job.user)),
+        ("minute".to_owned(), text(&job.minute)),
+        ("hour".to_owned(), text(&job.hour)),
+        ("day".to_owned(), text(&job.day)),
+        ("month".to_owned(), text(&job.month)),
+        ("weekday".to_owned(), text(&job.weekday)),
+        (
+            "state".to_owned(),
+            text(if job.present { "present" } else { "absent" }),
+        ),
+    ]);
+    Ok(Task {
+        name: r.id.clone(),
+        module: "ansible.builtin.cron".to_owned(),
         args,
         notify: Vec::new(),
         when: r.runtime_when.clone(),

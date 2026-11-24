@@ -56,6 +56,7 @@ fn the_plugin_describes_itself() {
         info.resource_types,
         [
             "<module>.<function>",
+            "cron",
             "exec",
             "file",
             "group",
