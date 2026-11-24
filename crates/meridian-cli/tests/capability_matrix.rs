@@ -29,10 +29,11 @@ compiled, with the reason. Each target's own page says how it does what it can.
 - **runtimeWhen** is a condition the tool checks on the node at the moment it
   applies a resource.
 - **plan** asks the tool what an apply would change, without changing it.
-- **saved plan** says the tool saves its plan when `meridian plan --out` is
-  run, and applies exactly that plan on `meridian apply --plan`. Every target
-  is checked by its artifact hash; this column says which also hand the tool
-  its own plan back. See [a saved plan](../operations/pull-requests.md).
+- **saved plan** is how `meridian apply --plan` holds the target to its
+  plan, after checking the artifact hash: *yes*, the tool saves its own plan
+  and applies exactly that; *guarded* (Meridian-run), the target is planned
+  again and the apply refused when the changes differ. See
+  [a saved plan](../operations/pull-requests.md).
 - **outputs** are values a later stage of a workflow can read.
 - **inspect** says `meridian inspect` can read one resource of the target as
   it is now, without changing it. See [`meridian inspect`](cli.md#inspect).
@@ -108,7 +109,13 @@ fn row(
     format!(
         "| [{name}](../targets/{name}.md) | {category} | {types} | {notifies} | {runtime} | {plan} | {saved} | {apply} | {outputs} | {inspect} | {inputs} | {secrets} | {credentials} | {cloud} | {adopt} | {import} | {schemas} |\n",
         schemas = yes(schemas.is_some()),
-        saved = yes(runner.saves_plans()),
+        saved = if runner.saves_plans() {
+            "yes"
+        } else if operations.plan && operations.apply {
+            "guarded"
+        } else {
+            "no"
+        },
         credentials = yes(capabilities.credentials),
         cloud = yes(capabilities.cloud_credentials),
         name = emitter.name(),

@@ -547,6 +547,7 @@ pub(crate) fn plugin(name: &str, info: &meridian_plugin_host::Info, can: &[&str]
         "name": name,
         "category": info.category.as_str(),
         "can": can,
+        "savedPlan": crate::commands::plugins::saved_plan(info),
         "resources": info.resource_types,
         "versions": info.target_versions,
         "imports": info.import_formats.iter().map(|format| json!({

@@ -1,6 +1,6 @@
 # A saved plan, and applying it from a pull request
 
-<p align="center"><img src="../graphics/meridian-saved-plan.svg" alt="A saved plan: meridian plan --out writes a plan file holding each stage's artifact hash, its changes and the tool's own saved plan; the reviewer reads it on the pull request; meridian apply --plan compiles again, refuses when a hash or the state has moved, and hands each tool the plan it saved" width="100%"></p>
+<p align="center"><img src="../graphics/meridian-saved-plan.svg" alt="A saved plan: meridian plan --out writes a plan file holding each stage's artifact hash, its changes and the tool's own saved plan; the reviewer reads it on the pull request; meridian apply --plan compiles again, refuses when a hash or the state has moved, hands each tool the plan it saved, and plans the others again, refusing other changes" width="100%"></p>
 
 `plan --out` writes what was planned; `apply --plan` applies exactly that, or refuses.
 Pull request automation uses it: a plan on every push, posted as one comment and saved as
@@ -43,7 +43,17 @@ Then per stage:
   `plan-differs` and later stages do not run. A stage now excluded by `spec.when` fails
   too. A changed `--data` file is named in the failure but is not a refusal by itself.
 - **The tool's plan**, where saved, is applied as is (Terraform and OpenTofu plan files,
-  Pulumi update plans, CloudFormation change sets). Otherwise the apply plans again.
+  Pulumi update plans, CloudFormation change sets).
+- **Otherwise the same changes** (*guarded*). The stage is planned again just before its
+  apply, and the changes compared by resource and action (not by summary: ARM's `what-if`
+  words the same change differently). Any difference fails the stage with `plan-differs`,
+  listing each change the tool would now make that the plan did not show, and each it
+  showed that it would no longer make. Something changed between that plan and the apply
+  is not caught.
+- **A tool that cannot say** what it would change (a plan marked `unknown`, such as
+  `chef` on another machine through `chef-run`) cannot be guarded: the
+  stage fails with `plan-differs` unless `--accept-unknown` is given, which applies it with
+  a warning.
 
 A `deferred` stage (waiting on an output) is applied normally with a warning that it was
 not checked.
@@ -52,10 +62,10 @@ not checked.
 
 | Target | Saved plan | Not saved when |
 |---|---|---|
-| `terraform`, `opentofu` | the `-out` plan file, applied with `terraform apply <file>` | the run handed over a secret: a Terraform plan file holds every variable's value, so it is scrubbed instead, and the apply plans again |
-| `pulumi` | the update plan of `preview --save-plan`, applied with `up --plan` | the run handed over a secret, for the same reason |
+| `terraform`, `opentofu` | the `-out` plan file, applied with `terraform apply <file>` | the run handed over a secret: a Terraform plan file holds every variable's value, so it is scrubbed instead, and the stage is guarded |
+| `pulumi` | the update plan of `preview --save-plan`, applied with `up --plan` | the run handed over a secret, for the same reason; guarded instead |
 | `cloudformation` | the change set, which is not discarded; the file holds its name | never: the change set's values stay with CloudFormation |
-| every other target | none | the apply checks the artifact hash and plans again |
+| every other target | none (*guarded*) | the apply checks the artifact hash, plans again and refuses other changes |
 
 See the [capability matrix](../reference/capability-matrix.md) and `Runner::saves_plans`
 ([writing a plugin](../contributing/writing-a-plugin.md#saved-plans)).

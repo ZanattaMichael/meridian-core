@@ -76,6 +76,10 @@ pub struct Options {
     /// compiles to what was planned, or was applied since, and hand each
     /// tool the plan it saved. Only an apply takes one.
     pub from_plan: Option<Arc<crate::PlanFile>>,
+    /// Apply a stage of [`Options::from_plan`] whose tool cannot say what it
+    /// would change, with a warning, instead of refusing it. A stage whose
+    /// tool saves no plan is otherwise planned again and must match.
+    pub accept_unknown: bool,
     /// How much of its own debug output each tool is asked for: 0 for none,
     /// up to [`meridian_sdk::debug::MAX_LEVEL`]. The run's `run.started`
     /// event records it.
@@ -125,6 +129,7 @@ impl Options {
             stop: Stop::default(),
             save_plan: false,
             from_plan: None,
+            accept_unknown: false,
             tool_debug: 0,
             tool_debug_steps: Vec::new(),
             destroy: false,

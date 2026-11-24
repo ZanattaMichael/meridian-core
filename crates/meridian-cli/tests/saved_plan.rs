@@ -373,6 +373,94 @@ fn a_tool_that_saves_no_plan_or_would_save_a_secret_is_planned_again_at_apply() 
     assert!(handed(&dir, "resourceset", "web").is_none());
 }
 
+/// The fake target's own record of what it applied to a stage.
+fn tool_state(dir: &Path, kind: &str, name: &str) -> PathBuf {
+    dir.join(".meridian")
+        .join(kind)
+        .join(name)
+        .join("fake")
+        .join("state.json")
+}
+
+#[test]
+fn a_tool_that_saves_no_plan_is_refused_when_it_would_now_do_something_else() {
+    let dir = scratch("guarded", "welcome");
+    ok(
+        &command(&dir, &["plan", "site.yaml", "--out", "plan.mplan"])
+            .env("FAKE_SAVES_PLANS", "none")
+            .output()
+            .unwrap(),
+    );
+    // Someone changes the live system after the plan: the file the plan
+    // would create is already there, so the tool would now do less.
+    let state = tool_state(&dir, "infrastructure", "network");
+    fs::create_dir_all(state.parent().unwrap()).unwrap();
+    fs::write(&state, r#"{"files/vm":"10.0.0.5"}"#).unwrap();
+
+    let applied = command(&dir, &["apply", "--plan", "plan.mplan"])
+        .env("FAKE_SAVES_PLANS", "none")
+        .output()
+        .unwrap();
+    assert_eq!(applied.status.code(), Some(1));
+    let text = stdout(&applied);
+    assert!(
+        text.contains("the tool would not do what was planned: no longer create files/vm, which the plan showed; take a new plan"),
+        "{text}"
+    );
+    assert!(!text.contains("applied 2 changes"), "{text}");
+    assert!(!dir.join(".meridian/resourceset/web/fake/current").exists());
+    let status = meridian(&dir, &["status"]);
+    assert!(
+        stdout(&status).contains("network (Infrastructure, target fake): failed (plan-differs)"),
+        "{}",
+        stdout(&status)
+    );
+}
+
+#[test]
+fn a_tool_that_cannot_say_what_it_would_change_needs_accept_unknown() {
+    let dir = scratch("unknown", "UNKNOWN");
+    let planned = command(
+        &dir,
+        &["plan", "site.yaml", "-l", "tier=app", "--out", "plan.mplan"],
+    )
+    .env("FAKE_SAVES_PLANS", "none")
+    .output()
+    .unwrap();
+    ok(&planned);
+    assert_eq!(stage(&plan_file(&dir), "web")["unknown"], true);
+
+    let refused = command(&dir, &["apply", "--plan", "plan.mplan"])
+        .env("FAKE_SAVES_PLANS", "none")
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(1));
+    let text = stdout(&refused);
+    assert!(
+        text.contains("target \"fake\" cannot say what an apply would change, so it cannot be checked against the plan; --accept-unknown applies it unchecked"),
+        "{text}"
+    );
+
+    // The refused stage, the plan's only one, applied nothing, so the plan
+    // still holds.
+    let accepted = command(&dir, &["apply", "--plan", "plan.mplan", "--accept-unknown"])
+        .env("FAKE_SAVES_PLANS", "none")
+        .output()
+        .unwrap();
+    ok(&accepted);
+    let text = stdout(&accepted);
+    assert!(text.contains("applied 1 change"), "{text}");
+    assert!(
+        format!("{text}{}", stderr(&accepted))
+            .contains("was applied without being checked against the plan (--accept-unknown)"),
+        "{text}{}",
+        stderr(&accepted)
+    );
+
+    let usage = meridian(&dir, &["apply", "site.yaml", "--accept-unknown"]);
+    assert_eq!(usage.status.code(), Some(2));
+}
+
 #[test]
 fn the_json_output_names_the_plan() {
     let dir = scratch("json", "welcome");

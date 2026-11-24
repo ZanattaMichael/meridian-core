@@ -96,6 +96,11 @@ pub(crate) enum Command {
         /// from the plan; those given must match it
         #[arg(long, value_name = "FILE", conflicts_with = "resume")]
         plan: Option<PathBuf>,
+        /// With --plan: apply a stage whose tool cannot say what it would
+        /// change, with a warning, instead of refusing it. Such a stage
+        /// cannot be checked against the plan
+        #[arg(long, requires = "plan")]
+        accept_unknown: bool,
     },
     /// Check whether what was applied is still what is there, changing
     /// nothing; exits 2 when something has drifted

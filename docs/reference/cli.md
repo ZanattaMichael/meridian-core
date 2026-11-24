@@ -129,7 +129,8 @@ declared, `-` for what the tool did not say. They are
 
 `--plan FILE` applies only a saved plan; see
 [what `apply --plan` checks](../operations/pull-requests.md#what-apply---plan-checks). Not with
-`--resume`.
+`--resume`. `--accept-unknown` (only with `--plan`) applies, with a warning, a stage whose tool
+cannot say what it would change; without it such a stage fails with `plan-differs`.
 
 `--policy` checks every stage first; any denial applies nothing:
 
@@ -325,7 +326,9 @@ Removes a stale lock by its id (from `status`). Make sure the run is really gone
 
 ### `plugins`
 
-Lists plugins: category, capabilities, resource types, tool versions, `spec.settings` keys,
+Lists plugins: category, capabilities, resource types, how `apply --plan` holds the target
+to its plan (`plan file`: `yes`, `guarded` or `no`, as the
+[capability matrix](capability-matrix.md) says), tool versions, `spec.settings` keys,
 [refusal rules](refusal-rules.md), binary and signature.
 
 ```
@@ -333,6 +336,7 @@ dsc
   category:  configuration-management
   can:       compile, plan, apply, import
   resources: <Module>/<Resource>, runner
+  plan file: guarded
   versions:  2, 3
   settings:  credential, engine, target
   debug:     1: $VerbosePreference = 'Continue', 2: $VerbosePreference = 'Continue' $DebugPreference = 'Continue'
