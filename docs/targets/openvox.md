@@ -57,6 +57,7 @@ openvox
   category:  configuration-management
   can:       compile, plan, apply
   resources: exec, file, group, package, service, user
+  plan file: guarded
 ```
 
 ## Try it on your own machine

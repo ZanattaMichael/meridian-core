@@ -42,6 +42,11 @@
               ]
             }
           },
+          "savedPlan": {
+            "type": "string",
+            "enum": ["yes", "guarded", "no"],
+            "description": "How apply --plan holds the target to its plan: yes, the tool saves its own; guarded, Meridian plans again and refuses a difference; no, the target cannot apply"
+          },
           "resources": {
             "type": "array",
             "items": {
@@ -166,6 +171,7 @@
           "name",
           "category",
           "can",
+          "savedPlan",
           "resources",
           "versions",
           "imports",

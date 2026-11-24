@@ -108,6 +108,19 @@ pub(crate) fn abilities(info: &meridian_plugin_host::Info) -> Vec<&'static str> 
     can
 }
 
+/// How `apply --plan` holds a target to its plan, as the capability matrix
+/// says it: `yes` when the tool saves its own plan, `guarded` when Meridian
+/// plans again and refuses a difference, `no` when the target cannot apply.
+pub(crate) fn saved_plan(info: &meridian_plugin_host::Info) -> &'static str {
+    if info.saves_plans {
+        "yes"
+    } else if info.operations.plan && info.operations.apply {
+        "guarded"
+    } else {
+        "no"
+    }
+}
+
 /// What each `--tool-debug` level does, as `1: -v, 2: -vvv, 3: -vvvv`.
 pub(crate) fn debug_levels(levels: &[String]) -> String {
     levels
@@ -144,6 +157,7 @@ pub(crate) fn list_plugins(
         outln!("  category:  {}", info.category);
         outln!("  can:       {}", can.join(", "));
         outln!("  resources: {}", info.resource_types.join(", "));
+        outln!("  plan file: {}", saved_plan(info));
         if !info.target_versions.is_empty() {
             outln!("  versions:  {}", info.target_versions.join(", "));
         }

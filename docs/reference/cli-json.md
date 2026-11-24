@@ -399,6 +399,7 @@ when invalid.
     {
       "name": "dsc", "category": "configuration-management",
       "can": ["compile", "plan", "apply", "import"],
+      "savedPlan": "guarded",
       "resources": ["<Module>/<Resource>", "runner"], "versions": ["2", "3"],
       "imports": [ { "name": "ps1", "description": "PowerShell DSC configurations", "patterns": ["*.ps1"] } ],
       "sdk": "0.1.0", "protocol": 2,

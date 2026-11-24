@@ -111,6 +111,42 @@ pub struct PlannedStage {
     pub actions: Vec<ActionReport>,
 }
 
+/// What an apply would do now that the plan did not show, and what the plan
+/// showed that it would no longer do, compared by resource and action only:
+/// a tool's summary of the same change can differ between two plans (ARM's
+/// `what-if`), and saying so would refuse what was planned. Empty when they
+/// match.
+pub(crate) fn differences(planned: &[Change], now: &[Change]) -> Vec<String> {
+    fn counted(changes: &[Change]) -> BTreeMap<(String, &'static str), usize> {
+        let mut counts = BTreeMap::new();
+        for change in changes {
+            *counts
+                .entry((change.resource.clone(), change.action.as_str()))
+                .or_insert(0) += 1;
+        }
+        counts
+    }
+    let (planned, now) = (counted(planned), counted(now));
+    let mut out = Vec::new();
+    for (key, n) in &now {
+        if planned.get(key).copied().unwrap_or(0) < *n {
+            out.push(format!(
+                "now {} {}, which the plan did not show",
+                key.1, key.0
+            ));
+        }
+    }
+    for (key, n) in &planned {
+        if now.get(key).copied().unwrap_or(0) < *n {
+            out.push(format!(
+                "no longer {} {}, which the plan showed",
+                key.1, key.0
+            ));
+        }
+    }
+    out
+}
+
 /// A saved plan: every stage of one `meridian plan`, with what it takes to
 /// apply exactly that.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -580,6 +616,37 @@ fn change_from_value(value: &Value) -> Result<Change, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn changes_differ_by_resource_and_action_and_not_by_summary() {
+        let change = |resource: &str, action, summary: &str| Change {
+            resource: resource.to_owned(),
+            action,
+            summary: summary.to_owned(),
+        };
+        let planned = [
+            change("vm", ChangeAction::Update, "size"),
+            change("disk", ChangeAction::Create, ""),
+        ];
+        let reworded = [
+            change("disk", ChangeAction::Create, "new"),
+            change("vm", ChangeAction::Update, "size, tags"),
+        ];
+        assert!(differences(&planned, &reworded).is_empty());
+        let moved = [
+            change("vm", ChangeAction::Replace, ""),
+            change("disk", ChangeAction::Create, ""),
+            change("disk", ChangeAction::Create, ""),
+        ];
+        assert_eq!(
+            differences(&planned, &moved),
+            [
+                "now create disk, which the plan did not show",
+                "now replace vm, which the plan did not show",
+                "no longer update vm, which the plan showed",
+            ]
+        );
+    }
     use crate::StageRecord;
 
     fn id(name: &str) -> StageId {

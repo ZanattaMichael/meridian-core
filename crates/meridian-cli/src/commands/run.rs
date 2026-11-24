@@ -20,6 +20,8 @@ pub(crate) struct How<'a> {
     pub(crate) plan_out: Option<&'a Path>,
     /// `apply --plan`
     pub(crate) from_plan: Option<&'a Path>,
+    /// `apply --plan --accept-unknown`
+    pub(crate) accept_unknown: bool,
     /// `plan --destroy`
     pub(crate) destroy: bool,
     /// `destroy --yes`
@@ -196,6 +198,9 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
     if let Some(path) = how.from_plan {
         command.push(format!("--plan {}", path.display()));
     }
+    if how.accept_unknown {
+        command.push("--accept-unknown".to_owned());
+    }
     match resume {
         None => {}
         Some("last") => command.push("--resume".to_owned()),
@@ -273,6 +278,7 @@ pub(crate) fn orchestrate(workflow: &Workflow, mode: Mode, how: &How<'_>) -> Res
         policy,
         save_plan: how.plan_out.is_some(),
         from_plan: plan_file.as_ref().map(|plan| Arc::new(plan.clone())),
+        accept_unknown: how.accept_unknown,
         destroy: how.destroy,
         strict_secrets: workflow.strict_secrets,
         tool_debug: workflow.tool_debug,

@@ -195,6 +195,7 @@ fn run() -> ExitCode {
             resume,
             on_failure,
             plan,
+            accept_unknown,
         } => orchestrate(
             &workflow,
             Mode::Apply,
@@ -202,6 +203,7 @@ fn run() -> ExitCode {
                 resume: resume.as_deref(),
                 rollback_on_failure: on_failure == FailureAction::Rollback,
                 from_plan: plan.as_deref(),
+                accept_unknown,
                 ..How::default()
             },
         ),

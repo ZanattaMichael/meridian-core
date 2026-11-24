@@ -389,6 +389,27 @@ impl Run<'_> {
                 saved_plan = planned.saved_for_apply();
             }
         }
+        // A tool that saved no plan applies whatever the live system now
+        // needs, which may be more than was planned: it is planned again
+        // just before the apply, and must show the same changes (decision
+        // 0059). One that cannot say what it would change cannot be checked.
+        let guard = match self.planned(&id) {
+            Some(planned)
+                if self.mode == Mode::Apply
+                    && !self.destroying()
+                    && saved_plan.is_none()
+                    && matches!(
+                        planned.status,
+                        PlannedStatus::Planned | PlannedStatus::Compiled
+                    ) =>
+            {
+                Some((
+                    planned.unknown || planned.status == PlannedStatus::Compiled,
+                    planned.changes.clone(),
+                ))
+            }
+            _ => None,
+        };
         // What was last applied here, if anything was.
         let last = self.state.get(&id).cloned();
         if self.mode == Mode::Drift {
@@ -640,6 +661,59 @@ impl Run<'_> {
                 }
             },
             Mode::Apply => {
+                if let Some((unknown_then, changes_then)) = guard {
+                    let mut unknown = unknown_then || !operations.plan;
+                    if !unknown {
+                        let now = match planned.take() {
+                            Some(plan) => plan,
+                            None => {
+                                match target.plan_with(&context, &emitted.artifact, &mut log, stop)
+                                {
+                                    Ok(plan) => plan,
+                                    Err(e) => {
+                                        report.failures = self.failures(&e, &document);
+                                        return fail(report, reason_of(&e), self.describe(e));
+                                    }
+                                }
+                            }
+                        };
+                        unknown = now.unknown;
+                        let differs = plan::differences(&changes_then, &now.changes);
+                        if !unknown && !differs.is_empty() {
+                            return fail(
+                                report,
+                                Reason::PlanDiffers,
+                                format!(
+                                    "the tool would not do what was planned: {}; take a new \
+                                     plan",
+                                    differs.join("; ")
+                                ),
+                            );
+                        }
+                    }
+                    if unknown && !self.options.accept_unknown {
+                        return fail(
+                            report,
+                            Reason::PlanDiffers,
+                            format!(
+                                "target {:?} cannot say what an apply would change, so it \
+                                 cannot be checked against the plan; --accept-unknown \
+                                 applies it unchecked",
+                                stage.target()
+                            ),
+                        );
+                    }
+                    if unknown {
+                        report.warnings.push(Warning {
+                            target: "plan".to_owned(),
+                            resource: String::new(),
+                            msg: "the tool cannot say what it would change, so this stage \
+                                  was applied without being checked against the plan \
+                                  (--accept-unknown)"
+                                .to_owned(),
+                        });
+                    }
+                }
                 report.previous_good = last.map(|l| l.last_good).unwrap_or_default();
                 // Kept without the stage's secrets, which are wiped when the
                 // stage ends; a rollback fetches them again at its turn.

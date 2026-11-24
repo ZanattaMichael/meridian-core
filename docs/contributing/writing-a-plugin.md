@@ -323,8 +323,10 @@ Name the program with `MERIDIAN_<TOOL>`, as the template does.
 
 ### Saved plans
 
-The host checks [saved plans](../operations/pull-requests.md) by artifact hash. Opt in only if
-the tool saves its own plan (Terraform's `-out`):
+The host checks [saved plans](../operations/pull-requests.md) by artifact hash, and for a runner
+that saves none, plans again before the apply and refuses other changes, compared by `resource`
+and `action`: report the same ids in `plan` as in `apply`. Opt in only if the tool saves its own
+plan (Terraform's `-out`):
 
 ```rust
 fn saves_plans(&self) -> bool {
