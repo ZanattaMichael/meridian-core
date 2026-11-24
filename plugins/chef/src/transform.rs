@@ -70,11 +70,13 @@ pub(crate) fn mapping(resource_type: &str) -> Option<Mapping> {
             ],
             default_state: "present",
             params: &[
+                ("checksum", "checksum"),
                 ("content", "content"),
                 ("group", "group"),
                 ("mode", "mode"),
                 ("owner", "owner"),
                 ("path", "path"),
+                ("source", "source"),
                 ("target", "to"),
             ],
             required: &["path"],
@@ -523,6 +525,15 @@ fn blocks_for(r: &Resource) -> Result<Vec<Block>, CompileError> {
                 properties.insert("target_file".to_owned(), path);
             }
             chef = "link";
+        }
+        // A download is a remote_file; Chef takes the bare sha256 digest.
+        "file" if r.params.contains_key("source") => {
+            if let Some(Value::String(sum)) = properties.get("checksum") {
+                if let Some(hex) = meridian_sdk::schema::file_checksum_hex(sum) {
+                    properties.insert("checksum".to_owned(), Value::String(hex));
+                }
+            }
+            chef = "remote_file";
         }
         // A document declares a group, not its whole membership. Without
         // `append`, Chef takes the missing member list for an empty one and

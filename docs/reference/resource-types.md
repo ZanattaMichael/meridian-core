@@ -87,7 +87,7 @@ with a warning.
 
 | | |
 |---|---|
-| Params | `path` (required), `content`, `owner`, `group`, `mode`, `target` (with `link`, required). cloud-init also takes `encoding` and `append` |
+| Params | `path` (required), `content`, `owner`, `group`, `mode`, `target` (with `link`, required), `source` and `checksum` (a download). cloud-init also takes `encoding` and `append` |
 | States | `present` (default) or `file`, `directory`, `link`, `absent`. cloud-init: no `link` |
 | Can be notified | no |
 
@@ -106,6 +106,28 @@ become `install -d` and `rm -rf`.
 | chef | `link`: `target_file`, `to` |
 | salt | `file.symlink` |
 | cloud-init | refused: use an `exec` running `ln -s` |
+
+`source` downloads the file from an `https://` or `http://` URL. It requires
+`checksum`, written `sha256:<64 hex digits>`, and takes `owner`, `group` and `mode`,
+not `content`, `append` or `encoding`; only state `present` or `file`.
+
+| Target | `source` |
+|---|---|
+| ansible | `ansible.builtin.get_url`: `url`, `dest`, `checksum` |
+| puppet, openvox | `file` with `source`, `checksum => 'sha256'`, `checksum_value` |
+| chef | `remote_file`: `source`, `checksum` (the hex digest) |
+| salt | `file.managed` with `source`, `source_hash: sha256=<hex>` |
+| cloud-init | refused (`unsupported-param`): use an `exec` running `curl` |
+
+```yaml
+- id: tool
+  type: file
+  params:
+    path: /usr/local/bin/tool
+    source: https://example.com/tool-1.4
+    checksum: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+    mode: "0755"
+```
 
 ```yaml
 - id: app_conf

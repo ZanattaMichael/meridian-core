@@ -129,7 +129,7 @@ Unlisted params (`unsupported-param`) and states (`unsupported-state`) are refus
 | `package` | `package` | `present` (default), `absent`, `latest` | `name` | `name` |
 | `packageRepository` | `yumrepo`; `format: apt` refused (use `apt::source`) | `present` (default), `absent` | `name`, `format`, `url` (`baseurl`), `key` (`gpgkey`) | `name`, `format`, `url` |
 | `service` | `service` | `running` (default), `started` (the same), `stopped` | `name`, `enabled` (`enable`) | `name` |
-| `file` | `file` | `file` (default), `present` (the same), `directory`, `link`, `absent` | `path`, `content`, `owner`, `group`, `mode`, `target` | `path`; `target` with `link` |
+| `file` | `file` | `file` (default), `present` (the same), `directory`, `link`, `absent` | `path`, `content`, `owner`, `group`, `mode`, `target`, `source`, `checksum` (`checksum => 'sha256'`, `checksum_value`) | `path`; `target` with `link`; `checksum` with `source` |
 | `user` | `user` | `present` (default), `absent` | `name`, `uid`, `home`, `shell`, `system`, `groups` | `name` |
 | `group` | `group` | `present` (default), `absent` | `name`, `gid`, `system` | `name` |
 | `cron` | `cron` | `present` (default), `absent` | `name`, `command`, `user`, `minute`, `hour`, `day` (`monthday`), `month`, `weekday` | `name`, `command` |

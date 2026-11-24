@@ -358,7 +358,7 @@ A service can be notified with `restart`, `reload`, `start` and `stop`; see
 
 | `state` | Compiles to | Params |
 |---|---|---|
-| `present` (default), `file` | `file.managed` | `path` → `name` (required), `content` → `contents`, `owner` → `user`, `group`, `mode` |
+| `present` (default), `file` | `file.managed` | `path` → `name` (required), `content` → `contents`, `source`, `checksum` → `source_hash` (`sha256=<hex>`), `owner` → `user`, `group`, `mode` |
 | `directory` | `file.directory`, with `makedirs: true` | `path`, `owner` → `user`, `group`, `mode` |
 | `link` | `file.symlink` | `path` → `name`, `target`, `owner` → `user`, `group` |
 | `absent` | `file.absent` | `path` |

@@ -188,7 +188,7 @@ fn lint_reports_what_the_compiler_the_plugin_and_the_rules_say() {
         stdout(&out),
         "web.yaml:20:9: error: param \"mode\" of a file must be text, not a number; write it quoted, so it is not read as a number: \"420\" [invalid-param]\n\
          web.yaml:20:15: warning: mode 0644 is read as a number, not as permissions; write it as a quoted string [unquoted-mode]\n\
-         web.yaml:21:9: error: resource type \"file\" does not take param \"colour\" on target \"ansible\" (it takes: content, group, mode, owner, path, target) [unsupported-param]\n\
+         web.yaml:21:9: error: resource type \"file\" does not take param \"colour\" on target \"ansible\" (it takes: checksum, content, group, mode, owner, path, source, target) [unsupported-param]\n\
          web.yaml:24:21: info: \"nginx_pkg\" is already listed [redundant-dependency]\n\
          2 errors, 1 warning, 1 note\n"
     );

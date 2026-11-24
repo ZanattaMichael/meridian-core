@@ -588,3 +588,18 @@ fn a_cron_job_is_the_cron_module() {
         assert!(playbook.contains(line), "{line} in {playbook}");
     }
 }
+
+#[test]
+fn a_download_is_get_url() {
+    let emitted = compile("    - id: tool\n      type: file\n      params:\n        path: /usr/local/bin/tool\n        source: https://example.com/tool\n        checksum: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n        mode: \"0755\"\n").unwrap();
+    let playbook = &emitted.artifact.files["playbook.yml"];
+    for line in [
+        "ansible.builtin.get_url:",
+        "url: https://example.com/tool",
+        "dest: /usr/local/bin/tool",
+        "checksum: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ] {
+        assert!(playbook.contains(line), "{line} in {playbook}");
+    }
+    assert!(!playbook.contains("state:"), "{playbook}");
+}

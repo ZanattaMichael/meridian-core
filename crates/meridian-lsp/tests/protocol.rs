@@ -216,8 +216,8 @@ fn an_editing_session() {
         .iter()
         .map(|i| i["label"].as_str().unwrap())
         .collect();
-    assert_eq!(labels, ["group", "owner", "target"]);
-    assert_eq!(items[0]["textEdit"]["newText"], "group: $0");
+    assert_eq!(labels, ["checksum", "group", "owner", "source", "target"]);
+    assert_eq!(items[1]["textEdit"]["newText"], "group: $0");
     assert_eq!(items[0]["insertTextFormat"], 2);
 
     // Hover on the type documents it.

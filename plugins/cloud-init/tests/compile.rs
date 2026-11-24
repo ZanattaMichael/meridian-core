@@ -1278,3 +1278,9 @@ fn a_cron_job_is_a_file_in_cron_d() {
         "{text}"
     );
 }
+
+#[test]
+fn a_download_is_refused() {
+    let err = refusal("    - id: tool\n      type: file\n      params:\n        path: /usr/local/bin/tool\n        source: https://example.com/tool\n        checksum: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n");
+    assert_eq!(err.rule, "unsupported-param", "{}", err.msg);
+}

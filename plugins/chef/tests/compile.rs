@@ -480,3 +480,17 @@ fn a_cron_job_is_chefs_cron() {
         assert!(text.contains(line), "{line} in {text}");
     }
 }
+
+#[test]
+fn a_download_is_a_remote_file() {
+    let text = recipe("    - id: tool\n      type: file\n      params:\n        path: /usr/local/bin/tool\n        source: https://example.com/tool\n        checksum: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n        mode: \"0755\"\n");
+    for line in [
+        "remote_file 'tool' do",
+        "path '/usr/local/bin/tool'",
+        "source 'https://example.com/tool'",
+        "checksum 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'",
+        "action :create",
+    ] {
+        assert!(text.contains(line), "{line} in {text}");
+    }
+}
