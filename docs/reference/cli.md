@@ -130,7 +130,7 @@ declared, `-` for what the tool did not say. They are
 `--plan FILE` applies only a saved plan; see
 [what `apply --plan` checks](../operations/pull-requests.md#what-apply---plan-checks). Not with
 `--resume`. `--accept-unknown` (only with `--plan`) applies, with a warning, a stage whose tool
-cannot say what it would change; without it such a stage fails with `plan-differs`.
+cannot say what it would change; without it such a stage fails with `plan-unchecked`.
 
 `--policy` checks every stage first; any denial applies nothing:
 

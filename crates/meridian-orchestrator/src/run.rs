@@ -694,7 +694,7 @@ impl Run<'_> {
                     if unknown && !self.options.accept_unknown {
                         return fail(
                             report,
-                            Reason::PlanDiffers,
+                            Reason::PlanUnchecked,
                             format!(
                                 "target {:?} cannot say what an apply would change, so it \
                                  cannot be checked against the plan; --accept-unknown \
