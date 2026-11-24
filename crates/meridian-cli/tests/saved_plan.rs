@@ -441,6 +441,15 @@ fn a_tool_that_cannot_say_what_it_would_change_needs_accept_unknown() {
         "{text}"
     );
 
+    let status = meridian(&dir, &["status"]);
+    assert!(
+        stdout(&status).contains(
+            "web (ResourceSet, target fake on web01.example.com): failed (plan-unchecked)"
+        ),
+        "{}",
+        stdout(&status)
+    );
+
     // The refused stage, the plan's only one, applied nothing, so the plan
     // still holds.
     let accepted = command(&dir, &["apply", "--plan", "plan.mplan", "--accept-unknown"])

@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | Area | Runs |
-| Status | **proposed**: made during the work, not yet accepted or changed by the owner |
-| Made in | the pull request for issue 268 |
+| Status | **accepted**: the owner, 2026-11-24, with `plan-unchecked` split from `plan-differs` |
+| Made in | the pull requests for issue 268 (PR 291, then the `plan-unchecked` follow-up) |
 | Where it shows | [A saved plan](../operations/pull-requests.md#what-apply---plan-checks), [capability matrix](../reference/capability-matrix.md), [errors](../reference/errors.md), [`meridian plugins`](../reference/cli.md#plugins) |
 
 - **When**: on `apply --plan`, for a stage handed no saved tool plan: a target whose
@@ -16,7 +16,8 @@
 - **A difference fails the stage** with `plan-differs`, listing what the tool would now do
   that the plan did not show and what it would no longer do. Later stages do not run.
 - **Unknown cannot be guarded**: a plan or re-plan marked `unknown`, or a target that cannot
-  plan, fails with `plan-differs` unless `apply --plan --accept-unknown`, which applies it
+  plan, fails with `plan-unchecked` (not `plan-differs`: a pipeline must tell "take a new
+  plan" from "this tool can never be checked") unless `apply --plan --accept-unknown`, which applies it
   with a warning. `--accept-unknown` needs `--plan`.
 - **Shown as `guarded`**: the matrix's `saved plan` column, `meridian plugins`
   (`plan file:`) and its JSON (`savedPlan`) read `yes`, `guarded` or `no`.

@@ -42,11 +42,15 @@ pub enum Reason {
     /// to what was planned, or that its condition no longer keeps it, so the
     /// plan does not say what would happen.
     PlanDiffers,
+    /// An apply from a saved plan reached a stage whose tool saved no plan
+    /// and cannot say what it would change, so it cannot be checked against
+    /// the plan; `--accept-unknown` applies it anyway (decision 0059).
+    PlanUnchecked,
 }
 
 impl Reason {
     /// Every reason, in the order the reference lists them.
-    pub const ALL: [Reason; 12] = [
+    pub const ALL: [Reason; 13] = [
         Reason::NoPlugin,
         Reason::CompileRefused,
         Reason::NotSupported,
@@ -59,6 +63,7 @@ impl Reason {
         Reason::AnalysisFailed,
         Reason::AnalyzerFailed,
         Reason::PlanDiffers,
+        Reason::PlanUnchecked,
     ];
 
     /// The word the record keeps.
@@ -76,6 +81,7 @@ impl Reason {
             Reason::AnalysisFailed => "analysis-failed",
             Reason::AnalyzerFailed => "analyzer-failed",
             Reason::PlanDiffers => "plan-differs",
+            Reason::PlanUnchecked => "plan-unchecked",
         }
     }
 

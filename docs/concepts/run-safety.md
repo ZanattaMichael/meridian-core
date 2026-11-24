@@ -105,8 +105,8 @@ applies it or nothing:
 - it fails a stage with `plan-differs` if the document no longer compiles to the recorded
   artifact
 - a tool that saves its own plan is handed that plan back; any other is planned again and
-  the stage fails with `plan-differs` if the changes differ (`--accept-unknown` for a tool
-  that cannot say)
+  the stage fails with `plan-differs` if the changes differ (a tool that cannot say fails
+  with `plan-unchecked` unless `--accept-unknown`)
 
  [A saved plan, and applying it from a pull
 request](../operations/pull-requests.md) has the details.

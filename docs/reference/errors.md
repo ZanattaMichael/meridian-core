@@ -44,7 +44,8 @@ for a failed stage.
 | `timed-out` | the step's tool ran past `--stage-timeout` and was stopped |
 | `analysis-failed` | an [analyzer](analyzers.md) found something at or above the severity the run fails on (`--fail-on`) |
 | `analyzer-failed` | an analyzer could not be run, or did not answer, so the step was not analyzed |
-| `plan-differs` | an `apply --plan` compiled the stage to an artifact other than the one the saved plan recorded, the plan previewed a stage the document now leaves out, the tool (saving no plan) would now make other changes than the plan showed, or it cannot say what it would change and `--accept-unknown` was not given; the stages after it are not run |
+| `plan-differs` | an `apply --plan` compiled the stage to an artifact other than the one the saved plan recorded, the plan previewed a stage the document now leaves out, or the tool (saving no plan) would now make other changes than the plan showed; the stages after it are not run |
+| `plan-unchecked` | an `apply --plan` reached a stage whose tool saved no plan and cannot say what it would change, and `--accept-unknown` was not given; the stages after it are not run |
 
 Also: `earlier-step-failed` for skipped steps, and rollback reasons under
 [events](state.md#events).

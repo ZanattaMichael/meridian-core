@@ -480,6 +480,8 @@ pub fn explain(reason: &str) -> &str {
             "an analyzer found something at or above the severity the run fails on"
         }
         "analyzer-failed" => "an analyzer could not be run, so the step was not analyzed",
+        "plan-differs" => "the saved plan no longer says what an apply would do",
+        "plan-unchecked" => "the tool cannot say what it would change, so it cannot be checked against the saved plan",
         "state-failed" => "the step's working directory could not be prepared",
         "already-applied" => "already applied from the same compiled content",
         "when-false" => "left out: its `when` condition is false",

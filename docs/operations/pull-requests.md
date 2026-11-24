@@ -52,7 +52,7 @@ Then per stage:
   is not caught.
 - **A tool that cannot say** what it would change (a plan marked `unknown`, such as
   `chef` on another machine through `chef-run`) cannot be guarded: the
-  stage fails with `plan-differs` unless `--accept-unknown` is given, which applies it with
+  stage fails with `plan-unchecked` unless `--accept-unknown` is given, which applies it with
   a warning.
 
 A `deferred` stage (waiting on an output) is applied normally with a warning that it was
