@@ -1,0 +1,23 @@
+apiVersion: meridian/v1
+kind: Fault
+metadata:
+  name: bad-input-reaches-the-tool
+  description: >-
+    A value the documents read changes outside the run to something the tool
+    refuses, and the run must name it: cause word resource-failed on the tool's
+    inputs. On the fake target the inputs are its data.json artifact, which is
+    where the canned failure lands; on a real target the same fault is whatever
+    makes the tool reject its input, such as a package repository file that no
+    longer parses.
+spec:
+  applies: { category: infrastructure }
+  inject:
+    command:
+      - sh
+      - -c
+      - "printf 'text: FAIL\\n' > site.data.yaml"
+  expect:
+    run: failed
+    cause: resource-failed
+    resource: data.json
+    diagnose: { first: data.json }

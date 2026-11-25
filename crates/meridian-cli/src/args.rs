@@ -472,6 +472,7 @@ impl Command {
                     LabCommand::Run { .. } => "run",
                     LabCommand::List { .. } => "list",
                     LabCommand::Sweep { .. } => "sweep",
+                    LabCommand::Fault { .. } => "fault",
                 }
             ),
             Command::Fmt(_) => "fmt".to_owned(),
@@ -560,6 +561,33 @@ pub(crate) enum LabCommand {
             default_value = ".meridian"
         )]
         state_dir: PathBuf,
+    },
+    /// Prove one fault against a lifecycle environment: provision it, break
+    /// it the way the fault says, check the run then fails as the fault
+    /// expects, and destroy it
+    Fault {
+        /// The fault file (kind: Fault)
+        file: PathBuf,
+        /// The Test file whose lifecycle case provisions the environment the
+        /// fault breaks
+        #[arg(long, value_name = "FILE")]
+        environment: PathBuf,
+        /// Which lifecycle case to break: its name, or its 1-based place
+        /// among the file's lifecycle cases; the first when not given
+        #[arg(long, value_name = "NAME")]
+        case: Option<String>,
+        #[command(flatten)]
+        plugins: PluginDirs,
+        #[arg(
+            long,
+            value_name = "DIR",
+            env = "MERIDIAN_STATE_DIR",
+            default_value = ".meridian"
+        )]
+        state_dir: PathBuf,
+        /// Leave the environment in place instead of destroying it
+        #[arg(long)]
+        keep: bool,
     },
 }
 
