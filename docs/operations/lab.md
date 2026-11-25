@@ -159,13 +159,41 @@ cargo test --release -p meridian-cli --test scale -- --ignored --nocapture
 
 See [decision 0058](../decisions/0058-a-run-appends-its-events-and-is-held-to-scale-budgets.md).
 
+## Faults
+
+A [`Fault`](../reference/fault-catalogue.md) document says how to break a provisioned
+environment and what Meridian must then report: the cause word, the resource,
+and the `diagnose` answer that must find it. The catalogue lives in
+[`lab/faults/`](../../lab/faults):
+
+```
+$ meridian lab fault lab/faults/bad-input-reaches-the-tool.yaml --environment env.test.yaml
+lab/faults/bad-input-reaches-the-tool.yaml (bad-input-reaches-the-tool)
+  ok     (lifecycle, 0 documents)
+        provision: ok
+        inject: ok
+        check: ok
+        diagnose: ok
+        destroy: ok
+```
+
+The proof provisions the lifecycle case, injects the fault, checks that the
+run fails the way the fault expects, and destroys the environment whatever
+came before — as [decision 0060](../decisions/0060-a-fault-is-a-document-the-lab-proves.md)
+describes. `--case NAME` picks the lifecycle case when the file holds more
+than one. `expect.probe` and `expect.knownFailure` are parsed but not asserted
+until the probes ([issue 223](https://github.com/ZanattaMichael/meridian-core/issues/223))
+and the known-failure registry ([issue 225](https://github.com/ZanattaMichael/meridian-core/issues/225))
+land.
+
 ## What is not here yet
 
 - **A sweep that finds resources by their tags** when the state directory is gone.
 - **Scale tiers 2 and 3**: a simulated fleet on the lab runner, and real clouds
   ([issue 240](https://github.com/ZanattaMichael/meridian-core/issues/240)).
-- **Faults** to break an environment and the diagnosis each must produce
-  ([issue 237](https://github.com/ZanattaMichael/meridian-core/issues/237)).
+- **Faults on real targets**: the catalogue proves each fault on the fake
+  target today; the lab runner brings the real machines
+  ([issue 238](https://github.com/ZanattaMichael/meridian-core/issues/238)).
 - **The self-hosted runner and workflow** ([issue 238](https://github.com/ZanattaMichael/meridian-core/issues/238)).
 
 See [decision 0054](../decisions/0054-a-lab-is-a-matrix-over-lifecycle-cases-and-sweep-reads-the-state.md).

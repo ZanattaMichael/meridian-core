@@ -167,3 +167,25 @@ fn scratch_dir(test: &str) -> PathBuf {
         .join("faults")
         .join(test)
 }
+
+#[test]
+fn the_catalogue_parses_and_every_fault_names_a_finder() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lab/faults");
+    let entries =
+        fs::read_dir(&dir).unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
+    let mut count = 0;
+    for entry in entries {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|ext| ext != "yaml") {
+            continue;
+        }
+        count += 1;
+        let fault = meridian_test::load_fault(&path).unwrap_or_else(|e| panic!("{e}"));
+        assert!(
+            fault.expect.diagnose_first.is_some() || fault.expect.probe.is_some(),
+            "{} names neither a diagnose expectation nor a probe: a fault no command finds is a gap",
+            path.display()
+        );
+    }
+    assert!(count > 0, "the catalogue holds no faults");
+}

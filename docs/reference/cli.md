@@ -566,6 +566,16 @@ environment under `lab/` and `tests/` in the state directory whose expiry has pa
 `--older-than DURATION`, that was made that long ago (`0s`: all); it exits `1` if one could
 not be destroyed.
 
+#### `lab fault`
+
+`lab fault FILE --environment TEST` proves one
+[`Fault`](../operations/lab.md#faults) against a lifecycle case: it provisions
+the environment, injects the fault, checks the run then fails with the
+expected cause word and resource, checks `diagnose` names the resource first
+when the fault says so, and destroys the environment. `--case NAME` picks the
+lifecycle case (name or 1-based place; the first when not given). Exits `1`
+unless the proof passes.
+
 ### `fmt`
 
 Rewrites documents in the standard layout, never changing meaning. `--check` exits `1` if
