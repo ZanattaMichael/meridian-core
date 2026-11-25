@@ -3,7 +3,9 @@
 
 use crate::*;
 
-use meridian_test::{CellResult, FileResult, LabFile, Runner, Status, SweepOutcome, TestFile};
+use meridian_test::{
+    CaseResult, CellResult, FileResult, LabFile, Runner, Run, Status, SweepOutcome, TestFile,
+};
 
 use super::testing::{case_json, print_case};
 
@@ -23,6 +25,118 @@ pub(crate) fn lab(command: LabCommand) -> Result<(), Failure> {
             plugins,
             state_dir,
         } => sweep(older_than, &plugins, &state_dir),
+        LabCommand::Fault {
+            file,
+            environment,
+            case,
+            plugins,
+            state_dir,
+            keep,
+        } => fault(&file, &environment, case.as_deref(), &plugins, &state_dir, keep),
+    }
+}
+
+/// The lifecycle case `case` names: its name, or its 1-based place among
+/// the file's lifecycle cases. The first when `case` is none.
+fn locate(tests: &[TestFile], case: Option<&str>) -> Result<(usize, usize), Failure> {
+    let mut matches = Vec::new();
+    for (t, file) in tests.iter().enumerate() {
+        let lifecycle: Vec<usize> = file
+            .cases
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.run == Run::Lifecycle)
+            .map(|(i, _)| i)
+            .collect();
+        for (place, &index) in lifecycle.iter().enumerate() {
+            let wanted = match case {
+                None => place == 0,
+                Some(name) => {
+                    name == file.cases[index].name
+                        || name.parse::<usize>().ok() == Some(place + 1)
+                }
+            };
+            if wanted {
+                matches.push((t, index));
+            }
+        }
+    }
+    match (case, matches.len()) {
+        (None, 1) => Ok(matches[0]),
+        (None, 0) => Err(Failure::Message(
+            "the Test file holds no lifecycle case; a fault needs an environment a run \
+             provisions and destroys"
+                .to_owned(),
+        )),
+        (None, _) => Err(Failure::Message(format!(
+            "the Test files hold {} lifecycle cases; name one with --case",
+            matches.len()
+        ))),
+        (Some(_), 1) => Ok(matches[0]),
+        (Some(name), 0) => Err(Failure::Message(format!(
+            "--case {name}: no lifecycle case of that name or place"
+        ))),
+        (Some(name), _) => Err(Failure::Message(format!(
+            "--case {name}: more than one lifecycle case matches; name it exactly"
+        ))),
+    }
+}
+
+fn fault(
+    file: &Path,
+    environment: &Path,
+    case: Option<&str>,
+    plugins: &PluginDirs,
+    state_dir: &Path,
+    keep: bool,
+) -> Result<(), Failure> {
+    let fault = meridian_test::load_fault(file).map_err(Failure::Message)?;
+    let tests = meridian_test::load(environment).map_err(Failure::Message)?;
+    let (t, index) = locate(&tests, case)?;
+    let registry = registry(plugins)?;
+    let resolve = |paths: &[PathBuf]| -> Result<Vec<PathBuf>, String> {
+        in_modules(paths, state_dir).map_err(|e| match e {
+            Failure::Message(text) => text,
+            _ => "a module could not be resolved".to_owned(),
+        })
+    };
+    let runner = Runner {
+        registry: &registry,
+        state_dir: state_dir.to_path_buf(),
+        resolve: &resolve,
+        keep,
+    };
+    let result = meridian_test::run_fault(&fault, &tests[t], index, &runner);
+    if let Err(e) = registry.close() {
+        eprintln!("warning: {e}");
+    }
+    let as_case = CaseResult {
+        name: result.name.clone(),
+        run: Run::Lifecycle,
+        status: result.status,
+        failures: result.failures.clone(),
+        stages: Vec::new(),
+        run_id: result.run_id.clone(),
+        phases: result.phases.clone(),
+        millis: result.millis,
+    };
+    if json_output() {
+        emit(
+            result.status == Status::Passed,
+            body([
+                ("fault", result.name.clone().into()),
+                ("environment", tests[t].name.clone().into()),
+                ("run", result.run_id.clone().into()),
+                ("result", case_json(&as_case)),
+            ]),
+        );
+    } else {
+        outln!("{} ({})", file.display(), result.name);
+        print_case("", &as_case);
+    }
+    match result.status {
+        Status::Passed => Ok(()),
+        _ => Err(Failure::Reported),
     }
 }
 

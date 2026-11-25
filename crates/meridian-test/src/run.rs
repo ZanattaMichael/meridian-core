@@ -803,18 +803,10 @@ fn fault_error(name: &str, why: String, started: Instant) -> FaultResult {
     }
 }
 
-fn fault_run(
-    fault: &crate::fault::FaultFile,
-    file: &TestFile,
-    case: &Case,
-    runner: &Runner<'_>,
-) -> Result<Ran, String> {
-    let documents = (runner.resolve)(&file.documents)?;
-    let bundle =
-        meridian_ir::load(&documents).map_err(|e| format!("the documents do not load: {e}"))?;
-    bundle
-        .validate()
-        .map_err(|e| format!("the documents are not valid: {e}"))?;
+/// The data a fault's phases run with: the file's and the case's data files
+/// read and merged over the sets, with the run id set. Re-read after the
+/// injection, which may have changed the files.
+fn case_data(file: &TestFile, case: &Case, runner: &Runner<'_>, run_id: &str) -> Result<Data, String> {
     let mut data = Data::new();
     let mut data_files = file.data.clone();
     data_files.extend(case.data.iter().cloned());
@@ -843,6 +835,22 @@ fn fault_run(
     }
     merge_into(&mut data, &file.set);
     merge_into(&mut data, &case.set);
+    meridian_ir::set_run_id(&mut data, run_id);
+    Ok(data)
+}
+
+fn fault_run(
+    fault: &crate::fault::FaultFile,
+    file: &TestFile,
+    case: &Case,
+    runner: &Runner<'_>,
+) -> Result<Ran, String> {
+    let documents = (runner.resolve)(&file.documents)?;
+    let bundle =
+        meridian_ir::load(&documents).map_err(|e| format!("the documents do not load: {e}"))?;
+    bundle
+        .validate()
+        .map_err(|e| format!("the documents are not valid: {e}"))?;
     let selector = match case.select.as_deref().or(file.select.as_deref()) {
         Some(text) => Selector::parse(text).map_err(|e| format!("select: {e}"))?,
         None => Selector::all(),
@@ -854,7 +862,13 @@ fn fault_run(
         .join(slug(&file.name))
         .join(slug(&case.name));
     let run_id = new_run_id(&scratch);
-    meridian_ir::set_run_id(&mut data, &run_id);
+    // Read fresh for every run after the injection: a fault may break the
+    // world by changing what the documents read, and the check must see it.
+    let mut data = case_data(file, case, runner, &run_id)?;
+    let reload = |data: &mut Data| -> Result<(), String> {
+        *data = case_data(file, case, runner, &run_id)?;
+        Ok(())
+    };
     // What an earlier proof left behind is not thrown away unseen.
     if scratch.exists() {
         let earlier = std::fs::read_to_string(scratch.join(RUN_ID_FILE))
@@ -907,19 +921,21 @@ fn fault_run(
         name: format!("fault {}: {}: {}", fault.name, file.name, case.name),
     };
     record.write(&scratch)?;
-    let options = Options {
+    let options = |data: &Data| Options {
         data: data.clone(),
         backend: Some(Arc::new(LocalBackend::new(&scratch)) as Arc<_>),
         command: format!("fault {} ({})", fault.name, case.name),
         keep_runs: 1,
         ..Options::new(&scratch)
     };
-    let run = |mode: Mode| run_selected(&bundle, runner.registry, mode, &options, &selector, &mut Quiet);
+    let run = |mode: Mode, data: &Data| {
+        run_selected(&bundle, runner.registry, mode, &options(data), &selector, &mut Quiet)
+    };
     let mut ran = Ran::default();
 
     // Provision: the environment the fault is about to break.
     let started = Instant::now();
-    let applied = run(Mode::Apply);
+    let applied = run(Mode::Apply, &data);
     let mut failures = Vec::new();
     if let Some(refusal) = &applied.refused {
         failures.push(format!("the apply was refused: {refusal}"));
@@ -961,7 +977,7 @@ fn fault_run(
                                 &injected,
                                 runner.registry,
                                 Mode::Apply,
-                                &options,
+                                &options(&data),
                                 &Selector::all(),
                                 &mut Quiet,
                             );
@@ -992,7 +1008,8 @@ fn fault_run(
     let mut failures = Vec::new();
     let mut check_id = String::new();
     if injected {
-        let checked = run(Mode::Apply);
+        reload(&mut data)?;
+        let checked = run(Mode::Apply, &data);
         if let Some(refusal) = &checked.refused {
             failures.push(format!("the check apply was refused: {refusal}"));
         } else if checked
@@ -1015,21 +1032,58 @@ fn fault_run(
                     _ => "",
                 }
             }
-            let matched = kept.iter().any(|f| {
-                text(f, "cause") == fault.expect.cause
-                    && text(f, "resource") == fault.expect.resource
-                    && fault
-                        .expect
-                        .endpoint
-                        .as_deref()
-                        .is_none_or(|endpoint| text(f, "endpoint") == endpoint)
-            });
+            // Test runs keep no logs (Quiet), so the failures a machine
+            // would keep are absent: fall back to the run's events, which
+            // hold the resource and the cause of every failure.
+            let from_events: Vec<(String, String, String)> = if kept.is_empty() {
+                let backend = LocalBackend::new(&scratch);
+                meridian_orchestrator::record::load_events(&backend, &check_id)?
+                    .into_iter()
+                    .filter(|e| e.kind == meridian_orchestrator::event::RESOURCE_FAILED)
+                    .map(|e| {
+                        (
+                            text(&e.detail, "cause").to_owned(),
+                            text(&e.detail, "resource").to_owned(),
+                            e.endpoint,
+                        )
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let matched = if !kept.is_empty() {
+                kept.iter().any(|f| {
+                    text(f, "cause") == fault.expect.cause
+                        && text(f, "resource") == fault.expect.resource
+                        && fault
+                            .expect
+                            .endpoint
+                            .as_deref()
+                            .is_none_or(|endpoint| text(f, "endpoint") == endpoint)
+                })
+            } else {
+                from_events.iter().any(|(cause, resource, endpoint)| {
+                    cause == &fault.expect.cause
+                        && resource == &fault.expect.resource
+                        && fault
+                            .expect
+                            .endpoint
+                            .as_deref()
+                            .is_none_or(|wanted| endpoint == wanted)
+                })
+            };
             if !matched {
-                let seen = kept
-                    .iter()
-                    .map(|f| format!("{}/{}/{}", text(f, "cause"), text(f, "resource"), text(f, "endpoint")))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let seen: Vec<String> = if !kept.is_empty() {
+                    kept.iter()
+                        .map(|f| format!("{}/{}/{}", text(f, "cause"), text(f, "resource"), text(f, "endpoint")))
+                        .collect()
+                } else {
+                    from_events
+                        .iter()
+                        .map(|(cause, resource, endpoint)| format!("{cause}/{resource}/{endpoint}"))
+                        .collect()
+                };
+                let seen = seen.join(", ");
                 failures.push(format!(
                     "the run failed, but not the way the fault expects: wanted cause {:?} \
                      on resource {:?}{}, and the failures name: {}",
@@ -1096,7 +1150,7 @@ fn fault_run(
         );
         return Ok(ran);
     }
-    let destroyed = run(Mode::Destroy);
+    let destroyed = run(Mode::Destroy, &data);
     let mut failures = Vec::new();
     if let Some(refusal) = &destroyed.refused {
         failures.push(format!("the destroy was refused: {refusal}"));
