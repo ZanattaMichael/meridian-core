@@ -35,7 +35,7 @@ pub use lab::{
     LAST_RUN_FILE,
 };
 pub use run::{
-    run_file, CaseResult, FileResult, PhaseResult, Resolver, Runner, StageSummary, Status,
-    TEST_RUN_ID,
+    run_fault, run_file, CaseResult, FaultResult, FileResult, PhaseResult, Resolver, Runner,
+    StageSummary, Status, TEST_RUN_ID,
 };
 pub use sweep::{environments, now, sweep, Record, SweepOutcome, Swept, RECORD_FILE};
