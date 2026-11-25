@@ -111,8 +111,7 @@ fn a_proven_fault_passes_and_leaves_nothing() {
     assert!(!shown.contains("FAIL "), "{shown}");
     // The proof destroyed its environment: the case's state is gone.
     assert!(
-        !dir
-            .join(".meridian/faults/content-turns-fail/env/fresh")
+        !dir.join(".meridian/faults/content-turns-fail/env/fresh")
             .exists(),
         "{shown}"
     );
@@ -139,7 +138,11 @@ fn a_fault_that_does_not_surface_fails_the_proof() {
 #[test]
 fn a_wrong_expectation_names_what_the_run_reported() {
     let dir_str = scratch_dir("wrong-cause").display().to_string();
-    let dir = scratch("wrong-cause", &format!("sh, -c, \"printf 'text: FAIL\\\\n' > {dir_str}/site.data.yaml\""), "unavailable");
+    let dir = scratch(
+        "wrong-cause",
+        &format!("sh, -c, \"printf 'text: FAIL\\\\n' > {dir_str}/site.data.yaml\""),
+        "unavailable",
+    );
     let out = meridian(
         &dir,
         &[
@@ -160,5 +163,7 @@ fn a_wrong_expectation_names_what_the_run_reported() {
 // path: the injection command runs against the proof's state directory, and
 // the data file lives beside the documents.
 fn scratch_dir(test: &str) -> PathBuf {
-    Path::new(env!("CARGO_TARGET_TMPDIR")).join("faults").join(test)
+    Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("faults")
+        .join(test)
 }

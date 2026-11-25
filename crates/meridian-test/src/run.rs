@@ -756,7 +756,11 @@ pub fn run_fault(
 ) -> FaultResult {
     let started = Instant::now();
     let Some(case) = file.cases.get(case_index) else {
-        return fault_error(&fault.name, format!("no case at index {}", case_index + 1), started);
+        return fault_error(
+            &fault.name,
+            format!("no case at index {}", case_index + 1),
+            started,
+        );
     };
     if case.run != Run::Lifecycle {
         return fault_error(
@@ -771,10 +775,14 @@ pub fn run_fault(
     }
     let (status, failures, phases, run_id) = match fault_run(fault, file, case, runner) {
         Ok(ran) => {
-            let failed = !ran.failures.is_empty()
-                || ran.phases.iter().any(|p| p.status == Status::Failed);
+            let failed =
+                !ran.failures.is_empty() || ran.phases.iter().any(|p| p.status == Status::Failed);
             (
-                if failed { Status::Failed } else { Status::Passed },
+                if failed {
+                    Status::Failed
+                } else {
+                    Status::Passed
+                },
                 ran.failures,
                 ran.phases,
                 ran.run_id,
@@ -806,7 +814,12 @@ fn fault_error(name: &str, why: String, started: Instant) -> FaultResult {
 /// The data a fault's phases run with: the file's and the case's data files
 /// read and merged over the sets, with the run id set. Re-read after the
 /// injection, which may have changed the files.
-fn case_data(file: &TestFile, case: &Case, runner: &Runner<'_>, run_id: &str) -> Result<Data, String> {
+fn case_data(
+    file: &TestFile,
+    case: &Case,
+    runner: &Runner<'_>,
+    run_id: &str,
+) -> Result<Data, String> {
     let mut data = Data::new();
     let mut data_files = file.data.clone();
     data_files.extend(case.data.iter().cloned());
@@ -883,7 +896,11 @@ fn fault_run(
         ));
     }
     let mut cannot: Vec<String> = Vec::new();
-    for document in bundle.documents.iter().filter(|d| runs(d, &selector, &data)) {
+    for document in bundle
+        .documents
+        .iter()
+        .filter(|d| runs(d, &selector, &data))
+    {
         let target = document.target();
         match runner.registry.target(target) {
             Some(t) if t.info().destroys => {}
@@ -914,7 +931,11 @@ fn fault_run(
             .map(|p| std::path::absolute(p).unwrap_or_else(|_| p.clone()))
             .collect(),
         data: data.clone(),
-        select: case.select.as_deref().or(file.select.as_deref()).map(str::to_owned),
+        select: case
+            .select
+            .as_deref()
+            .or(file.select.as_deref())
+            .map(str::to_owned),
         run_id: run_id.clone(),
         started: crate::sweep::now(),
         expires: None,
@@ -929,7 +950,14 @@ fn fault_run(
         ..Options::new(&scratch)
     };
     let run = |mode: Mode, data: &Data| {
-        run_selected(&bundle, runner.registry, mode, &options(data), &selector, &mut Quiet)
+        run_selected(
+            &bundle,
+            runner.registry,
+            mode,
+            &options(data),
+            &selector,
+            &mut Quiet,
+        )
     };
     let mut ran = Ran::default();
 
@@ -986,9 +1014,8 @@ fn fault_run(
                                     .push(format!("the injection document was refused: {refusal}"));
                             }
                         }
-                        Err(e) => {
-                            failures.push(format!("the injection document {shown} is not valid: {e}"))
-                        }
+                        Err(e) => failures
+                            .push(format!("the injection document {shown} is not valid: {e}")),
                     },
                     Err(e) => {
                         failures.push(format!("the injection document {shown} does not load: {e}"))
@@ -1075,7 +1102,14 @@ fn fault_run(
             if !matched {
                 let seen: Vec<String> = if !kept.is_empty() {
                     kept.iter()
-                        .map(|f| format!("{}/{}/{}", text(f, "cause"), text(f, "resource"), text(f, "endpoint")))
+                        .map(|f| {
+                            format!(
+                                "{}/{}/{}",
+                                text(f, "cause"),
+                                text(f, "resource"),
+                                text(f, "endpoint")
+                            )
+                        })
                         .collect()
                 } else {
                     from_events
@@ -1109,31 +1143,33 @@ fn fault_run(
     let mut failures = Vec::new();
     if checked_ok {
         if let Some(first) = &fault.expect.diagnose_first {
-        let backend = LocalBackend::new(&scratch);
-        match meridian_orchestrator::record::load_run(&backend, &check_id)? {
-            Some(run) => {
-                let events = meridian_orchestrator::record::load_events(&backend, &check_id)?;
-                let kept = meridian_orchestrator::logs::read_failures(&scratch, &check_id);
-                let found = meridian_orchestrator::diagnose::diagnose(
-                    &run,
-                    &events,
-                    &kept,
-                    meridian_orchestrator::diagnose::Filter::default(),
-                );
-                match found
-                    .failed
-                    .first()
-                    .and_then(|step| step.entries.first())
-                    .and_then(|entry| entry.failures.first())
-                {
-                    Some(failure) if &failure.resource == first => {}
-                    _ => failures.push(format!(
-                        "diagnose did not name {first:?} first over the check run"
-                    )),
+            let backend = LocalBackend::new(&scratch);
+            match meridian_orchestrator::record::load_run(&backend, &check_id)? {
+                Some(run) => {
+                    let events = meridian_orchestrator::record::load_events(&backend, &check_id)?;
+                    let kept = meridian_orchestrator::logs::read_failures(&scratch, &check_id);
+                    let found = meridian_orchestrator::diagnose::diagnose(
+                        &run,
+                        &events,
+                        &kept,
+                        meridian_orchestrator::diagnose::Filter::default(),
+                    );
+                    match found
+                        .failed
+                        .first()
+                        .and_then(|step| step.entries.first())
+                        .and_then(|entry| entry.failures.first())
+                    {
+                        Some(failure) if &failure.resource == first => {}
+                        _ => failures.push(format!(
+                            "diagnose did not name {first:?} first over the check run"
+                        )),
+                    }
                 }
+                None => failures.push(format!(
+                    "the check run {check_id} left no record to diagnose"
+                )),
             }
-            None => failures.push(format!("the check run {check_id} left no record to diagnose")),
-        }
         }
     }
     ran.phase("diagnose", started, failures);

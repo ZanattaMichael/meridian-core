@@ -82,7 +82,9 @@ pub fn load_fault(path: &Path) -> Result<FaultFile, String> {
 fn parse_fault(shown: &str, bytes: &[u8], base: &Path) -> Result<FaultFile, String> {
     let roots = meridian_ir::parse_stream(shown, bytes).map_err(|e| e.to_string())?;
     let [root] = roots.as_slice() else {
-        return Err(format!("{shown}: a fault file holds exactly one Fault document"));
+        return Err(format!(
+            "{shown}: a fault file holds exactly one Fault document"
+        ));
     };
     let r = Reader { at: shown, base };
     let top = r.map(root, "")?;
@@ -149,11 +151,10 @@ fn parse_fault(shown: &str, bytes: &[u8], base: &Path) -> Result<FaultFile, Stri
 }
 
 fn parse_inject(r: &Reader<'_>, value: Option<&Value>) -> Result<Inject, String> {
-    let value = r
-        .map(
-            value.ok_or_else(|| r.refuse("spec.inject", "missing required field"))?,
-            "spec.inject",
-        )?;
+    let value = r.map(
+        value.ok_or_else(|| r.refuse("spec.inject", "missing required field"))?,
+        "spec.inject",
+    )?;
     r.only(value, "spec.inject", &["command", "document"])?;
     let command = value.get("command");
     let document = value.get("document");
@@ -192,11 +193,10 @@ fn parse_inject(r: &Reader<'_>, value: Option<&Value>) -> Result<Inject, String>
 }
 
 fn parse_expect(r: &Reader<'_>, value: Option<&Value>) -> Result<FaultExpect, String> {
-    let value = r
-        .map(
-            value.ok_or_else(|| r.refuse("spec.expect", "missing required field"))?,
-            "spec.expect",
-        )?;
+    let value = r.map(
+        value.ok_or_else(|| r.refuse("spec.expect", "missing required field"))?,
+        "spec.expect",
+    )?;
     r.only(
         value,
         "spec.expect",
@@ -222,9 +222,9 @@ fn parse_expect(r: &Reader<'_>, value: Option<&Value>) -> Result<FaultExpect, St
     }
     let text = |r: &Reader<'_>, field: &str| -> Result<String, String> {
         r.text(
-            value
-                .get(field)
-                .ok_or_else(|| r.refuse(&format!("spec.expect.{field}"), "missing required field"))?,
+            value.get(field).ok_or_else(|| {
+                r.refuse(&format!("spec.expect.{field}"), "missing required field")
+            })?,
             &format!("spec.expect.{field}"),
         )
     };
@@ -242,9 +242,9 @@ fn parse_expect(r: &Reader<'_>, value: Option<&Value>) -> Result<FaultExpect, St
             let diagnose = r.map(diagnose, "spec.expect.diagnose")?;
             r.only(diagnose, "spec.expect.diagnose", &["first"])?;
             Some(r.text(
-                diagnose
-                    .get("first")
-                    .ok_or_else(|| r.refuse("spec.expect.diagnose.first", "missing required field"))?,
+                diagnose.get("first").ok_or_else(|| {
+                    r.refuse("spec.expect.diagnose.first", "missing required field")
+                })?,
                 "spec.expect.diagnose.first",
             )?)
         }

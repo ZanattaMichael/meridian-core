@@ -4,7 +4,7 @@
 use crate::*;
 
 use meridian_test::{
-    CaseResult, CellResult, FileResult, LabFile, Runner, Run, Status, SweepOutcome, TestFile,
+    CaseResult, CellResult, FileResult, LabFile, Run, Runner, Status, SweepOutcome, TestFile,
 };
 
 use super::testing::{case_json, print_case};
@@ -32,7 +32,14 @@ pub(crate) fn lab(command: LabCommand) -> Result<(), Failure> {
             plugins,
             state_dir,
             keep,
-        } => fault(&file, &environment, case.as_deref(), &plugins, &state_dir, keep),
+        } => fault(
+            &file,
+            &environment,
+            case.as_deref(),
+            &plugins,
+            &state_dir,
+            keep,
+        ),
     }
 }
 
@@ -52,8 +59,7 @@ fn locate(tests: &[TestFile], case: Option<&str>) -> Result<(usize, usize), Fail
             let wanted = match case {
                 None => place == 0,
                 Some(name) => {
-                    name == file.cases[index].name
-                        || name.parse::<usize>().ok() == Some(place + 1)
+                    name == file.cases[index].name || name.parse::<usize>().ok() == Some(place + 1)
                 }
             };
             if wanted {
