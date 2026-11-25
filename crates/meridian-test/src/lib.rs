@@ -17,6 +17,7 @@
 
 mod assert;
 mod document;
+mod fault;
 mod junit;
 mod lab;
 mod run;
@@ -27,6 +28,7 @@ pub use document::{
     discover, load, Assertion, Case, ChangeExpect, Expect, FileExpect, Phases, Run, TestFile,
     TEST_FILE_SUFFIX, TEST_KIND,
 };
+pub use fault::{load_fault, Applies, ExpectRun, FaultExpect, FaultFile, Inject, FAULT_KIND};
 pub use junit::junit;
 pub use lab::{
     cells, load_lab, new_lab_run_id, run_lab, Cell, CellResult, LabFile, DEFAULT_EXPIRY, LAB_KIND,
