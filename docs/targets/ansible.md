@@ -20,6 +20,7 @@ the machine Meridian runs on.
 | References | `${id.param}` is settled from the document when it is compiled; anything else in `${...}` is refused, and `$${` is a literal `${` ([rules](../reference/resource-types.md#references)) |
 | Plan | Yes: `--check --diff`. A task Ansible skips in check mode cannot be previewed, and makes the plan unknown |
 | Apply | Yes |
+| Destroy | Yes: the document's inverse, compiled into a play at destroy time and applied. A resource with no absent state is left in place and named. See [Destroy](#destroy) |
 | Outputs | No. A play produces no values for a later stage to read |
 | Import | Yes: playbooks and task files. See [Importing](#importing) |
 | Editor schemas | Yes: `meridian schema sync` asks `ansible-doc` what each module takes. See [Editor schemas](#editor-schemas) |
@@ -248,6 +249,27 @@ A host that is not a name is refused (`invalid-host`;
 A [secret](../reference/dsl/secrets.md#handing-a-secret-to-a-tool) compiles to
 `{{ meridian_secret_<name> }}` in a task marked `no_log: true`. The value goes in a private
 extra-vars file, passed as `--extra-vars @<path>` and removed after the run.
+
+## Destroy
+
+Ansible keeps no state, but a play names every resource it changes, so Meridian compiles the
+document's **inverse** into a play at destroy time and applies it
+([decision 0061](../decisions/0061-a-configuration-management-target-destroys-by-applying-the-inverse.md)).
+`meridian destroy` runs it; `meridian plan --destroy` runs it with `--check --diff`.
+
+| Resource | Its inverse |
+|---|---|
+| `package`, `user`, `group`, `packageRepository` | that module's `state: absent` |
+| `file` | `file` with `state: absent` on the `path` |
+| a `file` with literal `content` (a `copy`) | `file` with `state: absent` on the `dest` |
+| `service` | `service` with `state: stopped` and `enabled: false` |
+| `cron` | `cron` with `state: absent` |
+| `exec`, or a module with no absent state | left in place, and named in the output with `unsupported-destroy` |
+
+The inverse runs in the reverse of the play's order, so a service is stopped before the package
+it needs is removed. The compiled artifact is unchanged: the inverse is not part of
+`playbook.yml`, it is written beside it (`playbook.destroy.yml`) only when a destroy runs. A
+resource the inverse cannot express is removed by hand; the message names it and the rule.
 
 ## Importing
 

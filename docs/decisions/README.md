@@ -85,3 +85,4 @@ page it affects. The pull request template asks for it.
 | [A run appends its events, and is held to scale budgets](0058-a-run-appends-its-events-and-is-held-to-scale-budgets.md) | Runs | proposed |
 | [A tool that saves no plan is planned again and must match](0059-a-tool-that-saves-no-plan-is-planned-again-and-must-match.md) | Runs | accepted |
 | [An `adopt: replace` removes what exists and makes it again from the document](0060-an-adopt-replace-removes-what-exists-and-makes-it-again.md) | Targets | proposed |
+| [A configuration management target destroys by applying the document's inverse](0061-a-configuration-management-target-destroys-by-applying-the-inverse.md) | Targets | proposed |

@@ -65,6 +65,7 @@ it. A plugin uses one of these wherever it fits.
 | `missing-resource` | a resource this target needs in every document is not there, such as a `deployment` | add the resource the message names; the target's page says what it takes |
 | `invalid-path` | a path this target cannot use: relative where an absolute one is needed, leaving the directory it must stay in, or holding characters the tool cannot take | write the path as the message says |
 | `unsupported-inspect` | the target cannot read this resource alone, so `meridian inspect` cannot show it | run `meridian drift` on the step's document, which says whether the step still matches |
+| `unsupported-destroy` | the target cannot compile a destroy for this resource, so `meridian destroy` leaves it in place | remove it with the tool itself, or give the resource a `destroy:` command |
 
 ## Rules of one target
 

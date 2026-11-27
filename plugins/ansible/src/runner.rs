@@ -9,7 +9,8 @@ use meridian_sdk::{
 };
 use meridian_sdk::{settings, Setting};
 
-use crate::{INVENTORY_PATH, PLAYBOOK_PATH};
+use crate::inverse::{self, Kept};
+use crate::{DESTROY_PLAYBOOK_PATH, INVENTORY_PATH, PLAYBOOK_PATH};
 
 /// What `--tool-debug` adds to the tool, level 1 first. The verbose lines are interleaved with the play's own output.
 pub const DEBUG: &[meridian_sdk::debug::DebugLevel] = &[
@@ -130,19 +131,23 @@ impl AnsibleRunner {
         &self,
         context: &RunContext,
         artifact: &Artifact,
+        playbook: &str,
         check: bool,
         log: &dyn Log,
     ) -> Result<Report, RunError> {
-        for needed in [PLAYBOOK_PATH, INVENTORY_PATH] {
-            if !artifact.files.contains_key(needed) {
+        write_artifact(&context.work_dir, artifact)?;
+        // The play named must be in the work directory: the forward play and
+        // the inventory come from the artifact, the destroy play the runner
+        // writes beside them.
+        for needed in [playbook, INVENTORY_PATH] {
+            if !context.work_dir.join(needed).is_file() {
                 return Err(RunError::new(format!(
                     "the artifact has no {needed}; it was not compiled by this plugin"
                 )));
             }
         }
-        write_artifact(&context.work_dir, artifact)?;
         let (tool, secrets, key) = self.tool(context, check)?;
-        let tool = tool.arg(PLAYBOOK_PATH);
+        let tool = tool.arg(playbook);
 
         let reader = Reader {
             inner: log,
@@ -170,6 +175,36 @@ impl AnsibleRunner {
             error.changes = report.changes;
         }
         Err(error)
+    }
+
+    /// Runs the inverse of the artifact's play, written beside it first.
+    /// Returns the report and the resources the inverse could not remove.
+    fn run_destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        check: bool,
+        log: &dyn Log,
+    ) -> Result<(Report, Vec<Kept>), RunError> {
+        let source = artifact.files.get(PLAYBOOK_PATH).ok_or_else(|| {
+            RunError::new(format!(
+                "the artifact has no {PLAYBOOK_PATH}; it was not compiled by this plugin"
+            ))
+        })?;
+        let (destroy, kept) = inverse::destroy_playbook(source).map_err(RunError::new)?;
+        write_artifact(&context.work_dir, artifact)?;
+        let path = context.work_dir.join(DESTROY_PLAYBOOK_PATH);
+        std::fs::write(&path, destroy)
+            .map_err(|e| RunError::new(format!("writing {}: {e}", path.display())))?;
+        let mut report = self.run(context, artifact, DESTROY_PLAYBOOK_PATH, check, log)?;
+        // What a destroy removed is a `delete`, not the `update` Ansible's
+        // `changed:` line reads as.
+        let summary = if check { "would remove" } else { "removed" };
+        for change in &mut report.changes {
+            change.action = ChangeAction::Delete;
+            change.summary = summary.to_owned();
+        }
+        Ok((report, kept))
     }
 }
 
@@ -255,7 +290,7 @@ impl Runner for AnsibleRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Plan, RunError> {
-        let report = self.run(context, artifact, true, log)?;
+        let report = self.run(context, artifact, PLAYBOOK_PATH, true, log)?;
         Ok(Plan {
             changes: report.changes,
             // A task Ansible skips in check mode is one it cannot preview: a
@@ -272,11 +307,50 @@ impl Runner for AnsibleRunner {
         artifact: &Artifact,
         log: &dyn Log,
     ) -> Result<Applied, RunError> {
-        let report = self.run(context, artifact, false, log)?;
+        let report = self.run(context, artifact, PLAYBOOK_PATH, false, log)?;
         Ok(Applied {
             changes: report.changes,
             outputs: Vec::new(),
         })
+    }
+
+    /// Ansible keeps no state, so `destroy` is Meridian's: it compiles the
+    /// document's inverse into the tool's own play and applies it. A task
+    /// whose module has no absent state is left in place and reported.
+    fn destroys(&self) -> bool {
+        true
+    }
+
+    fn plan_destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Plan, RunError> {
+        let (report, _) = self.run_destroy(context, artifact, true, log)?;
+        Ok(Plan {
+            changes: report.changes,
+            unknown: report.skipped,
+            saved: None,
+        })
+    }
+
+    fn destroy(
+        &self,
+        context: &RunContext,
+        artifact: &Artifact,
+        log: &dyn Log,
+    ) -> Result<Vec<Change>, RunError> {
+        let (report, kept) = self.run_destroy(context, artifact, false, log)?;
+        for k in &kept {
+            log.err(&format!(
+                "meridian: [{}]: {} was not removed: {}",
+                meridian_sdk::rules::UNSUPPORTED_DESTROY.name,
+                k.resource,
+                k.reason
+            ));
+        }
+        Ok(report.changes)
     }
 
     fn inspects(&self) -> bool {
