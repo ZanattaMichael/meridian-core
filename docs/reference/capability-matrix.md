@@ -46,7 +46,9 @@ compiled, with the reason. Each target's own page says how it does what it can.
   compiles it into the tool's own import, so the tool takes the existing
   thing into its state; *converge* means the tool keeps no state and makes
   the thing what the document says whether it existed or not, so `adopt`
-  changes nothing; *no* refuses it. See
+  changes nothing; *replace* (the author writes `adopt: replace`) means the
+  tool cannot take the existing thing as it is, so Meridian removes it and
+  makes it again from the document; *no* refuses it. See
   [Adopting what exists](dsl/resources.md#adopting-what-exists).
 - **import** is what `meridian import` can read of the tool's existing
   configuration and turn into a document for the target. See
@@ -63,7 +65,7 @@ compiled, with the reason. Each target's own page says how it does what it can.
 | [chef](../targets/chef.md) | configuration-management | `‹resource›`, `cron`, `exec`, `file`, `group`, `package`, `packageRepository`, `service`, `user` | native | yes | yes | guarded | yes | no | yes | no | yes | yes | no | converge | no | yes |
 | [cloud-init](../targets/cloud-init.md) | configuration-management | `‹module›`, `cron`, `exec`, `file`, `group`, `package`, `packageRepository`, `service`, `user` | synthetic | no | yes | guarded | yes | yes | no | no | no | no | no | no | no | yes |
 | [cloudformation](../targets/cloudformation.md) | infrastructure-as-code | `‹Vendor›::‹Service›::‹Type›`, `address`, `disk`, `dnsRecord`, `firewall`, `network`, `objectStore`, `stack`, `subnet`, `vm` | Meridian-run | no | yes | yes | yes | yes | yes | no | yes | no | yes | no | no | yes |
-| [docker](../targets/docker.md) | containerization | `config`, `network`, `project`, `secret`, `service`, `volume` | native and synthetic | no | yes | guarded | yes | yes | yes | no | yes | no | no | no | Compose files | yes |
+| [docker](../targets/docker.md) | containerization | `config`, `network`, `project`, `secret`, `service`, `volume` | native and synthetic | no | yes | guarded | yes | yes | yes | no | yes | no | no | replace | Compose files | yes |
 | [dsc](../targets/dsc.md) | configuration-management | `‹Module›/‹Resource›`, `runner` | native | yes | yes | guarded | yes | no | yes | no | no | no | no | converge | PowerShell DSC configurations; DSC v3 configuration documents and DscPipelineRunner projects | yes |
 | [helm](../targets/helm.md) | container-orchestration | `‹apiVersion›/‹Kind›`, `chart`, `kustomization`, `release`, `values` | synthetic | no | yes | guarded | yes | yes | yes | no | yes | no | no | no | no | yes |
 | [kubernetes](../targets/kubernetes.md) | container-orchestration | `‹apiVersion›/‹Kind›`, `cluster` | synthetic | no | yes | guarded | yes | yes | yes | no | yes | no | no | converge | Kubernetes manifests | yes |

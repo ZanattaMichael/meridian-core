@@ -61,6 +61,37 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Composition, CompileErr
                 ),
             ));
         };
+        // `adopt: replace` is the only adoption this target takes: Docker
+        // keeps no record of what it manages and cannot import an existing
+        // container by an identifier, so a run may only replace it.
+        let adopt = if r.adopt.is_empty() {
+            false
+        } else {
+            if r.adopt != "replace" {
+                return Err(refuse(
+                    r,
+                    &rules::INVALID_ADOPT,
+                    format!(
+                        "adopt {:?}: docker takes only `adopt: replace`; it keeps no record of \
+                         what it manages and cannot import a container by an id",
+                        r.adopt
+                    ),
+                ));
+            }
+            if section != Section::Service {
+                return Err(refuse(
+                    r,
+                    &rules::INVALID_ADOPT,
+                    format!(
+                        "adopt: replace on {:?} is a {}; only a service (a container) can be \
+                         taken over by replacing it",
+                        r.id,
+                        section.type_name()
+                    ),
+                ));
+            }
+            true
+        };
         let mut body = BTreeMap::new();
         for (key, value) in &r.params {
             // A secret element's `value` is the secret itself: Compose reads
@@ -97,6 +128,7 @@ pub(crate) fn transform(graph: &ResourceGraph) -> Result<Composition, CompileErr
             section,
             body,
             pos: r.pos.clone(),
+            adopt,
         });
     }
 

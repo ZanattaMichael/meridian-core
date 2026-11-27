@@ -130,6 +130,17 @@ pub(crate) fn serialise(composition: &Composition) -> BTreeMap<String, String> {
             Value::Uint(composition.project.wait_timeout),
         ),
         ("services", named(Section::Service)),
+        (
+            "adopt",
+            Value::List(
+                composition
+                    .elements
+                    .iter()
+                    .filter(|e| e.adopt)
+                    .map(|e| string(&e.id))
+                    .collect(),
+            ),
+        ),
         ("outputs", Value::List(outputs)),
     ]);
 

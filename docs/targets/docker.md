@@ -18,7 +18,7 @@ There is no separate `compose` target.
 | `dependsOn` | Between two services, Compose's own `depends_on`, waiting for the other service to be healthy when it declares a healthcheck. Anything else Compose already creates before it starts a service |
 | `notifies` | The action `restart`, aimed at a service. Native from a service, synthetic from anything else. See [Notifications](#notifications) |
 | `runtimeWhen` | No. Refused |
-| `adopt` | No. Refused: Compose refuses a container it did not create |
+| `adopt` | Only `adopt: replace`. The existing container of that service is stopped and removed, then made again from the document. A plain `adopt` (an identifier) is refused: Compose refuses a container it did not create. See [Adopting what exists](#adopting-what-exists) |
 | `state: absent` | No. Remove the resource from the document; bringing the project up removes services the document no longer declares |
 | Plan | Yes: the file is compared with what Docker is running. See [Running](#running) |
 | Outputs | Yes: a published port, or a path into `docker inspect` |
@@ -385,8 +385,41 @@ Tested against a stand-in `docker` (`plugins/docker/tests/run.rs`) and real Comp
 | `dependsOn` | see [Dependencies](#dependencies) |
 | `notifies` | see [Notifications](#notifications) |
 | `runtimeWhen` | refused (`unsupported-runtime-condition`): a Compose file is declared state, with no condition for Docker to evaluate |
+| `adopt` | only `adopt: replace`, on a service. Any other value is refused (`invalid-adopt`). See [Adopting what exists](#adopting-what-exists) |
 
 A document needs at least one service (`empty-document`).
+
+## Adopting what exists
+
+Docker keeps no record of what it manages, and Compose will not take over a
+container it did not create, so Meridian cannot import an existing container by
+an identifier. It can take one over by replacing it: `adopt: replace` on a
+service stops and removes the existing container of that service's name, then
+makes it again from the document.
+
+```yaml
+- id: web
+  type: service
+  adopt: replace
+  params:
+    image: nginx:1.27
+```
+
+- Only `replace` is accepted on this target; any other `adopt` value is refused
+  (`invalid-adopt`), because Docker has no identifier to import.
+- `adopt: replace` is only meaningful on a `service`. On a network, volume,
+  config or secret it is refused (`invalid-adopt`).
+- The plan reports the service as `adopt` and names the container that will be
+  removed, before anything runs.
+- What runs is `docker compose rm --stop --force <service>`, before
+  `docker compose up`. What was in the container is lost; a volume it used is
+  not.
+- A first `adopt: replace` removes a container Meridian did not make, so read the
+  plan. An explicit confirmation, as `destroy` has, is part of the remaining work
+  on [issue 269](https://github.com/ZanattaMichael/meridian-core/issues/269).
+
+[Podman](podman.md) takes `adopt: replace` the same way in a following part of
+that issue.
 
 ## What is checked at compile time
 
@@ -415,6 +448,7 @@ Refused at compile, against your line:
 | has a `dependsOn` or `notifies` on a service whose `depends_on` is neither a list of names nor a map, or a synthetic notify on a service whose `labels` is neither a map nor a list | `invalid-param` |
 | uses `state: absent`, or a state other than `present` and `running` | `unsupported-state` |
 | uses `runtimeWhen` | `unsupported-runtime-condition` |
+| uses `adopt` with a value other than `replace`, or `adopt: replace` on something that is not a service | `invalid-adopt` |
 | has an output that names something that is not a service, or is not a port or an inspect path | `invalid-reference` |
 
 ```yaml
@@ -735,6 +769,11 @@ an application and a proxy on one network, and compiles to
   dependsOn:
     - resource: app
 ```
+
+[`examples/docker/adopt.yaml`](../../examples/docker/adopt.yaml) is taken over
+rather than made: `web` carries `adopt: replace`, so an existing container of
+that name is removed and made again. See
+[Adopting what exists](#adopting-what-exists).
 
 ```yaml
 proxy:
