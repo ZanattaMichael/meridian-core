@@ -239,6 +239,7 @@ impl Client {
             debug_levels: reply.debug_levels,
             destroys: reply.destroys,
             inspects: reply.inspects,
+            gathers_facts: reply.gathers_facts,
             acts: wire::acts_from_wire(reply.acts),
             import_formats: wire::import_formats_from_wire(reply.import_formats),
             exports_schemas: reply.exports_schemas,
@@ -826,6 +827,29 @@ impl Client {
         let result = self.finished("inspecting", result)?;
         wire::inspect_response_from_wire(result)
             .map_err(|e| self.unreadable("inspecting", e))?
+            .map_err(RunFailure::Tool)
+    }
+
+    /// Reads a fixed set of facts about `endpoint` over the endpoint's own
+    /// connection, changing nothing. Asked only of a plugin that declared it
+    /// gathers facts.
+    pub fn facts(
+        &self,
+        context: &RunContext,
+        endpoint: &str,
+    ) -> Result<meridian_sdk::Facts, RunFailure> {
+        let mut runner = self.runner("gather facts", self.info.gathers_facts)?;
+        let request = pb::FactsRequest {
+            context: Some(wire::context_to_wire(context)),
+            endpoint: endpoint.to_owned(),
+        };
+        let result = self
+            .runtime
+            .block_on(runner.facts(request))
+            .map(|r| Some(r.into_inner()));
+        let result = self.finished("gathering facts", result)?;
+        wire::facts_response_from_wire(result)
+            .map_err(|e| self.unreadable("gathering facts", e))?
             .map_err(RunFailure::Tool)
     }
 

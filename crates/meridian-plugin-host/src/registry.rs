@@ -301,6 +301,7 @@ impl Registry {
             debug_levels: Vec::new(),
             destroys: false,
             inspects: false,
+            gathers_facts: false,
             acts: Vec::new(),
             path: String::new(),
             signature: crate::Signature::NotChecked,

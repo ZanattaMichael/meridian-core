@@ -28,6 +28,10 @@
 //! secret reference resolved as its tool would show it. `FAKE_INSPECT=off`
 //! makes it a target that cannot.
 //!
+//! It gathers facts: a fixed set (`facts.os.family`, `facts.kernel`,
+//! `facts.hostname`, ...) for the endpoint. `FAKE_FACTS=off` makes it a target
+//! that cannot.
+//!
 //! It acts: a notify with action `touch` on a `file` is Meridian-run, and
 //! acting appends `touch <id>` to `acts.log` in the work directory. An
 //! applied file holding `NOACT` fails it. `FAKE_CHANGES=ids` names each
@@ -555,6 +559,29 @@ impl Runner for FakeRunner {
 
     fn saves_plans(&self) -> bool {
         self.saves_plans
+    }
+
+    /// `FAKE_FACTS=off` stands it in for a plugin that cannot gather facts.
+    fn gathers_facts(&self) -> bool {
+        std::env::var("FAKE_FACTS").as_deref() != Ok("off")
+    }
+
+    fn facts(&self, context: &RunContext, endpoint: &str) -> Result<meridian_sdk::Facts, RunError> {
+        let host = if endpoint.is_empty() {
+            context.host.clone()
+        } else {
+            endpoint.to_owned()
+        };
+        let mut values = Data::new();
+        values.insert("facts.os.family".to_owned(), Value::from("Linux"));
+        values.insert("facts.os.name".to_owned(), Value::from("fake"));
+        values.insert("facts.os.version".to_owned(), Value::from("1.0"));
+        values.insert("facts.kernel".to_owned(), Value::from("6.0.0-fake"));
+        values.insert("facts.hostname".to_owned(), Value::String(host.clone()));
+        values.insert("facts.fqdn".to_owned(), Value::String(host));
+        values.insert("facts.cpu.count".to_owned(), Value::Int(2));
+        values.insert("facts.memory.totalMb".to_owned(), Value::Int(1024));
+        Ok(meridian_sdk::Facts { values })
     }
 
     fn plan(

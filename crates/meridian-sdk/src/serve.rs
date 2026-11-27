@@ -150,6 +150,7 @@ async fn serve_async(plugin: Plugin) -> Result<(), ServeError> {
             .unwrap_or_default(),
         destroys: plugin.runner.as_ref().is_some_and(|r| r.destroys()),
         inspects: plugin.runner.as_ref().is_some_and(|r| r.inspects()),
+        gathers_facts: plugin.runner.as_ref().is_some_and(|r| r.gathers_facts()),
         acts: plugin.runner.as_ref().map(|r| r.acts()).unwrap_or_default(),
         settings: plugin
             .runner
@@ -234,6 +235,8 @@ struct EmitterHandler {
     destroys: bool,
     /// Whether the runner reads one resource as it is now.
     inspects: bool,
+    /// Whether the runner reads a fixed set of facts about an endpoint.
+    gathers_facts: bool,
     /// The notify actions the runner performs itself.
     acts: Vec<crate::ActSchema>,
     /// What the runner can be configured with, for the host to list.
@@ -276,6 +279,7 @@ impl EmitterService for EmitterHandler {
             debug_levels: self.debug_levels.clone(),
             destroys: self.destroys,
             inspects: self.inspects,
+            gathers_facts: self.gathers_facts,
             acts: self.acts.iter().map(wire::act_schema_to_wire).collect(),
             import_formats: wire::import_formats_to_wire(
                 self.importer
@@ -667,5 +671,22 @@ impl RunnerService for RunnerHandler {
         .await
         .map_err(|e| Status::internal(format!("the runner panicked: {e}")))?;
         Ok(Response::new(wire::inspect_response(outcome)))
+    }
+
+    async fn facts(
+        &self,
+        request: Request<pb::FactsRequest>,
+    ) -> Result<Response<pb::FactsResponse>, Status> {
+        if !self.runner.gathers_facts() {
+            return Err(Status::unimplemented("this plugin does not gather facts"));
+        }
+        let request = request.into_inner();
+        let context = wire::context_from_wire(request.context).map_err(Status::invalid_argument)?;
+        let runner = Arc::clone(&self.runner);
+        let endpoint = request.endpoint;
+        let outcome = tokio::task::spawn_blocking(move || runner.facts(&context, &endpoint))
+            .await
+            .map_err(|e| Status::internal(format!("the runner panicked: {e}")))?;
+        Ok(Response::new(wire::facts_response(outcome)))
     }
 }

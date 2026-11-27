@@ -83,6 +83,9 @@ pub struct Info {
     /// Whether the target reads one resource as it is now, for `meridian
     /// inspect`. A plugin built before the field says no.
     pub inspects: bool,
+    /// Whether the target reads a fixed set of facts about an endpoint, for
+    /// `when` over `facts.*`. A plugin built before the field says no.
+    pub gathers_facts: bool,
     /// The notify actions the runner performs itself, by resource type. A
     /// plugin built before the field acts on nothing.
     pub acts: Vec<meridian_sdk::ActSchema>,
