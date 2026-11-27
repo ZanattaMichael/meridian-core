@@ -96,6 +96,9 @@ struct Project {
     wait: bool,
     wait_timeout: u64,
     outputs: Vec<(String, Vec<Part>)>,
+    /// Services declared with `adopt: replace`: the runner removes an
+    /// existing container of each name before it brings the project up.
+    adopt: Vec<String>,
 }
 
 /// The label Compose puts on everything that belongs to a project.
@@ -156,6 +159,13 @@ impl Project {
             wait: map.get("wait") == Some(&Value::Bool(true)),
             wait_timeout: map.get("wait_timeout").and_then(whole).unwrap_or(0),
             outputs,
+            adopt: map
+                .get("adopt")
+                .and_then(Value::as_list)
+                .unwrap_or(&[])
+                .iter()
+                .filter_map(|s| Some(s.as_str()?.to_owned()))
+                .collect(),
         };
         if project.name.is_empty() {
             return Err(bad());
@@ -297,6 +307,8 @@ impl DockerRunner {
                 "what docker compose said about the file could not be read: {e}"
             ))
         })?;
+        let mut desired = desired;
+        desired.adopt = project.adopt.clone();
 
         let lines = |text: String| text.lines().map(|l| l.trim().to_owned()).collect();
         let actual = Actual {
@@ -467,6 +479,9 @@ pub(crate) struct Desired {
     /// network Compose would create.
     pub networks: Vec<(String, String)>,
     pub volumes: Vec<(String, String)>,
+    /// Services declared with `adopt: replace`, filled in from `project.json`
+    /// rather than from the Compose file, which does not carry it.
+    pub adopt: Vec<String>,
 }
 
 /// One container of the project that exists now.
@@ -591,6 +606,14 @@ pub(crate) fn diff(desired: &Desired, actual: &Actual) -> Plan {
             format!("image {}", service.image)
         };
         let stopped = containers.iter().find(|c| c.state != "running");
+        if existing > 0 && desired.adopt.iter().any(|a| a == &service.name) {
+            changes.push(change(
+                &service.name,
+                ChangeAction::Adopt,
+                format!("its existing container is replaced, taking it over ({from})"),
+            ));
+            continue;
+        }
         if existing == 0 {
             if service.scale > 0 {
                 let summary = match service.scale {
@@ -896,6 +919,27 @@ impl Runner for DockerRunner {
         let project = self.prepare(context, artifact)?;
         let secrets = secrets_file(context)?;
         let (desired, plan) = self.survey(context, &project, secrets.as_ref(), log)?;
+        // `adopt: replace`: the existing container of each adopted service is
+        // stopped and removed first, so `up` makes it again from the document
+        // rather than Compose deciding it matches and leaving it.
+        let to_replace: Vec<String> = plan
+            .changes
+            .iter()
+            .filter(|c| c.action == ChangeAction::Adopt)
+            .map(|c| c.resource.clone())
+            .collect();
+        if !to_replace.is_empty() {
+            let mut rm = self
+                .compose(context, &project, secrets.as_ref())
+                .args(["rm", "--stop", "--force"]);
+            for name in &to_replace {
+                rm = rm.arg(name);
+            }
+            rm.run_ok(
+                "docker compose could not remove the containers this document adopts by replacing",
+                log,
+            )?;
+        }
         let mut up = self.compose(context, &project, secrets.as_ref()).args([
             "up",
             "--detach",
@@ -1170,6 +1214,7 @@ mod tests {
             services: vec![service("db", "ccc"), service("web", "aaa")],
             networks: vec![("default".into(), "shop_default".into())],
             volumes: vec![("data".into(), "shop_data".into())],
+            adopt: Vec::new(),
         };
         let plan = diff(&desired, &Actual::default());
         assert_eq!(
@@ -1190,6 +1235,7 @@ mod tests {
             services: vec![service("db", "ccc"), service("web", "aaa")],
             networks: vec![("default".into(), "shop_default".into())],
             volumes: vec![("data".into(), "shop_data".into())],
+            adopt: Vec::new(),
         };
         let actual = Actual {
             containers: vec![

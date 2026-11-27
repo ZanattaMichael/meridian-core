@@ -1,4 +1,5 @@
 {
+  "adopt": [],
   "context": "",
   "directory": "",
   "host": "ssh://metrics01.example.com",

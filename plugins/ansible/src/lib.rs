@@ -18,6 +18,7 @@
 mod emit;
 mod import;
 mod inspect;
+mod inverse;
 mod runner;
 mod schemas;
 mod sort;
@@ -34,6 +35,7 @@ use meridian_sdk::{
 
 pub use emit::{INVENTORY_PATH, PLAYBOOK_PATH};
 pub use import::AnsibleImporter;
+pub use inverse::DESTROY_PLAYBOOK_PATH;
 pub use runner::{AnsibleRunner, DOC_VARIABLE, GALAXY_VARIABLE};
 pub use schemas::AnsibleSchemas;
 pub use transform::{supported_resource_types, NATIVE_PATTERN};

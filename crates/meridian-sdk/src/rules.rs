@@ -284,6 +284,14 @@ general! {
         "the target cannot read this resource alone, so `meridian inspect` cannot show it",
         "run `meridian drift` on the step's document, which says whether the step still matches"
     );
+    /// `meridian destroy` on a resource whose tool has no absent state for it:
+    /// the target cannot compile an inverse for the resource, so it is left in
+    /// place.
+    UNSUPPORTED_DESTROY = (
+        "unsupported-destroy",
+        "the target cannot compile a destroy for this resource, so `meridian destroy` leaves it in place",
+        "remove it with the tool itself, or give the resource a `destroy:` command"
+    );
 }
 
 /// The general rule of this name, if there is one.

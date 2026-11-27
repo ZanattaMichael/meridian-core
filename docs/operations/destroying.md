@@ -30,10 +30,15 @@ Infrastructure output still finds that output, because the Infrastructure is not
 | `docker` | `docker compose down --volumes --remove-orphans`; images are kept |
 | `podman` | stops and removes the units it installed; volumes, images and secrets are kept |
 | `bicep`, `arm` | each resource in the deployment record's `outputResources` deleted, children first, then the record |
-| configuration management, `packer`, `cloud-init` | none: the stage is `kept` |
+| `ansible` | the document's inverse, compiled into a play at destroy time and applied; `--check --diff` for the preview (part 1 of issue 270) |
+| `chef`, `puppet`, `openvox`, `salt`, `dsc`, `cloud-init`, `packer` | none: the stage is `kept` |
 
-A configuration management target keeps no record of what it made, so it cannot destroy.
-Destroy the host it configured instead, with the Infrastructure document that made it.
+Chef, Puppet, OpenVox, Salt, DSC, cloud-init and Packer keep no record of what they made, so
+they cannot destroy. Destroy the host or image they configured, with the Infrastructure
+document that made it. Ansible is the exception: a play names every resource it changes, so
+Meridian compiles the document's inverse and applies it (see [the Ansible target](../targets/ansible.md#destroy)).
+A resource with no absent state — an `exec`, or a native module with none — is left in place
+and named in the output with the rule `unsupported-destroy`.
 
 ## What a stage can end as
 

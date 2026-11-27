@@ -134,8 +134,13 @@ Refused.
 
 ## `adopt`
 
-Refused. Compose and Quadlet units both refuse a container of the same name
-that they did not create.
+Docker takes `adopt: replace` only: it stops and removes the existing container
+of that service's name, then makes it again from the document, because Compose
+will not take over a container it did not create. A plain `adopt` (an
+identifier) is refused. Podman still refuses `adopt` — a Quadlet unit refuses a
+container of the same name it did not create — and takes `adopt: replace` in a
+following part of
+[issue 269](https://github.com/ZanattaMichael/meridian-core/issues/269).
 
 ## Plan and apply
 

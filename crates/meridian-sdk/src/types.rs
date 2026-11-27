@@ -322,6 +322,12 @@ pub enum Adoption {
     /// nothing to import. The identifier is accepted and not used, and the
     /// compile warns that it changes nothing.
     Converge,
+    /// The tool keeps no record of what it manages and cannot take a thing
+    /// that already exists under management as it is, so Meridian replaces
+    /// it: the existing thing is removed and made again from the document.
+    /// An author writes `adopt: replace`, and the target refuses any other
+    /// `adopt` value. Docker and Podman take an existing container this way.
+    Replace,
 }
 
 impl Adoption {
@@ -330,6 +336,7 @@ impl Adoption {
             Adoption::None => "none",
             Adoption::Import => "import",
             Adoption::Converge => "converge",
+            Adoption::Replace => "replace",
         }
     }
 }
@@ -493,6 +500,10 @@ pub fn check_adopt(
                 ),
             }),
             Adoption::Import => {}
+            // A replace target takes `adopt: replace` itself and enforces the
+            // value: it removes the existing thing and makes it again, so
+            // there is nothing to warn about and nothing to refuse here.
+            Adoption::Replace => {}
         }
     }
     Ok(warnings)

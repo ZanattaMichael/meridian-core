@@ -546,3 +546,89 @@ exit 2";
         .unwrap_err();
     assert_eq!(error.msg, "playbook.yml has no task \"nothing\"");
 }
+
+/// A compiled play with a package, a copy and a service, so its inverse can
+/// be exercised.
+fn destroyable() -> Artifact {
+    artifact(&[
+        (
+            "playbook.yml",
+            "---\n\
+             - name: web\n  \
+             hosts: web01\n  \
+             tasks:\n    \
+             - name: nginx_pkg\n      \
+             ansible.builtin.package:\n        \
+             name: nginx\n        \
+             state: present\n    \
+             - name: nginx_conf\n      \
+             ansible.builtin.copy:\n        \
+             content: server {}\n        \
+             dest: /etc/nginx/nginx.conf\n    \
+             - name: nginx_svc\n      \
+             ansible.builtin.service:\n        \
+             name: nginx\n        \
+             state: started\n",
+        ),
+        ("inventory.ini", "[meridian]\nweb01\n"),
+    ])
+}
+
+#[test]
+fn a_destroy_runs_the_inverse_play_beside_the_forward_one() {
+    let dir = scratch(TMP, "destroy");
+    let log = KeptLog::default();
+    let changes = runner(&dir, TWO_CHANGES)
+        .destroy(&context(&dir), &destroyable(), &log)
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.join("args")).unwrap().trim(),
+        "--inventory inventory.ini --user deploy playbook.destroy.yml"
+    );
+    // The inverse was written beside the forward play, in reverse order, with
+    // each resource's absent (or stopped) state.
+    let cwd = fs::read_to_string(dir.join("cwd")).unwrap();
+    let work = Path::new(cwd.trim());
+    let destroy = fs::read_to_string(work.join("playbook.destroy.yml")).unwrap();
+    let service = destroy
+        .find("state: stopped")
+        .expect("the service is stopped");
+    let absent = destroy.find("state: absent").expect("the rest go absent");
+    let package = destroy.rfind("ansible.builtin.package").unwrap();
+    assert!(service < absent && absent < package, "{destroy}");
+    assert!(destroy.contains("enabled: false"), "{destroy}");
+    assert!(!destroy.contains("notify"), "{destroy}");
+    assert_eq!(changes.len(), 2);
+}
+
+#[test]
+fn a_plan_destroy_is_a_check_run_of_the_inverse() {
+    let dir = scratch(TMP, "plan-destroy");
+    let plan = runner(&dir, TWO_CHANGES)
+        .plan_destroy(&context(&dir), &destroyable(), &KeptLog::default())
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.join("args")).unwrap().trim(),
+        "--inventory inventory.ini --check --diff --user deploy playbook.destroy.yml"
+    );
+    assert!(!plan.in_sync());
+}
+
+#[test]
+fn a_resource_with_no_absent_state_is_left_in_place_and_reported() {
+    let dir = scratch(TMP, "destroy-kept");
+    let log = KeptLog::default();
+    let unremovable = artifact(&[
+        (
+            "playbook.yml",
+            "---\n- name: web\n  hosts: web01\n  tasks:\n    - name: migrate\n      ansible.builtin.command:\n        cmd: /usr/local/bin/migrate\n",
+        ),
+        ("inventory.ini", "[meridian]\nweb01\n"),
+    ]);
+    runner(&dir, TWO_CHANGES)
+        .destroy(&context(&dir), &unremovable, &log)
+        .unwrap();
+    let text = log.text().join("\n");
+    assert!(text.contains("unsupported-destroy"), "{text}");
+    assert!(text.contains("migrate"), "{text}");
+}

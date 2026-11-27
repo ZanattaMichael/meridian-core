@@ -96,6 +96,7 @@ mod tests {
                 line: 15,
                 ..Position::default()
             },
+            adopt: false,
         }
     }
 

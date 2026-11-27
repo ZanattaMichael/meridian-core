@@ -120,6 +120,10 @@ pub(crate) struct Element {
     pub section: Section,
     pub body: BTreeMap<String, Value>,
     pub pos: Position,
+    /// The resource carried `adopt: replace`: the runner removes an existing
+    /// container of this name before it brings the project up, so the
+    /// document takes over what already exists.
+    pub adopt: bool,
 }
 
 /// What the project is called and where it runs, from the document's
@@ -250,7 +254,7 @@ impl Emitter for Docker {
             secrets: true,
             credentials: false,
             cloud_credentials: false,
-            adopt: Adoption::None,
+            adopt: Adoption::Replace,
         }
     }
 
