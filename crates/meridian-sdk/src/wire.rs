@@ -290,6 +290,7 @@ fn adoption_to_wire(a: Adoption) -> pb::Adoption {
         Adoption::None => pb::Adoption::None,
         Adoption::Import => pb::Adoption::Import,
         Adoption::Converge => pb::Adoption::Converge,
+        Adoption::Replace => pb::Adoption::Replace,
     }
 }
 
@@ -299,6 +300,7 @@ fn adoption_from_wire(a: i32) -> Adoption {
     match pb::Adoption::try_from(a) {
         Ok(pb::Adoption::Import) => Adoption::Import,
         Ok(pb::Adoption::Converge) => Adoption::Converge,
+        Ok(pb::Adoption::Replace) => Adoption::Replace,
         _ => Adoption::None,
     }
 }
@@ -1550,7 +1552,12 @@ mod tests {
 
     #[test]
     fn adoption_crosses_the_wire_and_an_unknown_value_is_none() {
-        for adopt in [Adoption::None, Adoption::Import, Adoption::Converge] {
+        for adopt in [
+            Adoption::None,
+            Adoption::Import,
+            Adoption::Converge,
+            Adoption::Replace,
+        ] {
             let c = Capabilities {
                 adopt,
                 ..Capabilities::default()

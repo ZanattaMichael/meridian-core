@@ -616,3 +616,43 @@ fn inspect_of_a_service_with_no_container_is_not_found() {
         "compose.yaml has no service, network or volume \"nothing\""
     );
 }
+
+/// The same project, with one service adopted by replacing it.
+fn compiled_adopting(service: &str) -> Artifact {
+    let project = format!(
+        r#"{{"name":"shop","host":"","context":"","services":["app","db"],"adopt":["{service}"],"outputs":[]}}"#
+    );
+    artifact(&[("compose.yaml", "name: shop\n"), ("project.json", &project)])
+}
+
+#[test]
+fn an_adopted_service_is_removed_before_the_project_comes_up() {
+    let dir = scratch(TMP, "adopt");
+    let log = KeptLog::default();
+    let applied = runner(&dir, &format!("{CONFIG}\n{RUNNING}\n{UP}\n{READS}"))
+        .apply(&context(&dir), &compiled_adopting("app"), &log)
+        .unwrap();
+    // The plan reports the adoption, not a plain recreate.
+    assert_eq!(
+        shown(&applied.changes),
+        ["adopt app: its existing container is replaced, taking it over (image app:1)"]
+    );
+    let all = calls(&dir);
+    assert_eq!(all[..SURVEY.len()], SURVEY);
+    let rm = all
+        .iter()
+        .position(|c| c == "compose rm --stop --force app")
+        .unwrap_or_else(|| panic!("no removal of the adopted container: {all:#?}"));
+    let up = all
+        .iter()
+        .position(|c| c.starts_with("compose up"))
+        .expect("an up");
+    assert!(
+        rm < up,
+        "the existing container is removed before the project comes up: {all:#?}"
+    );
+    assert!(
+        !all.iter().any(|c| c.contains(" rm ") && c.contains("db")),
+        "only the adopted service is removed: {all:#?}"
+    );
+}

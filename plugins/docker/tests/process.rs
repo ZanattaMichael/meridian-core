@@ -67,7 +67,7 @@ fn the_plugin_describes_itself_over_the_protocol() {
             secrets: true,
             credentials: false,
             cloud_credentials: false,
-            adopt: meridian_sdk::Adoption::None,
+            adopt: meridian_sdk::Adoption::Replace,
         }
     );
     assert_eq!(

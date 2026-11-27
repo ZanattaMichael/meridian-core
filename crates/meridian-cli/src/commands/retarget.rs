@@ -97,6 +97,10 @@ pub(crate) fn retarget(
         }
         Adoption::Import => None,
         Adoption::Converge => None,
+        Adoption::Replace => Some(format!(
+            "{to} takes over only by replacing: its first apply removes and makes each resource \
+             again"
+        )),
         Adoption::None => Some(format!(
             "{to} cannot adopt what exists: its first apply creates every resource again"
         )),
@@ -134,6 +138,7 @@ pub(crate) fn retarget(
                 format!(", {} adopted", count(m.adopted.len(), "resource"))
             }
             Adoption::Converge => ", which converges on what exists".to_owned(),
+            Adoption::Replace => ", which replaces what exists".to_owned(),
             _ => String::new(),
         };
         outln!("{}: {} -> {to}{adopted}", m.name, m.from);

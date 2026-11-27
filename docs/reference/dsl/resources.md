@@ -131,7 +131,7 @@ On passthrough targets, names are the tool's: `instance_type` for Terraform,
 
 ## Adopting what exists
 
-<p align="center"><img src="../../graphics/meridian-adopt.svg" alt="adopt: a resource names the tool's identifier of a thing that exists; a stateful target compiles it into the tool's import and the plan reports adopt, a converging target accepts it and changes nothing, and any other target is refused before its plugin is asked" width="100%"></p>
+<p align="center"><img src="../../graphics/meridian-adopt.svg" alt="adopt: a resource names the tool's identifier of a thing that exists; a stateful target compiles it into the tool's import and the plan reports adopt, a converging target accepts it and changes nothing, a replacing target removes the existing thing and makes it again from the document, and any other target is refused before its plugin is asked" width="100%"></p>
 
 `adopt` gives the tool's identifier of something that already exists, so the tool
 manages it instead of creating another:
@@ -150,12 +150,16 @@ By target (the `adopt` column of the [capability matrix](../capability-matrix.md
 |---|---|---|
 | `import` | Compiled into the tool's import; the first plan reports `adopt` and the apply records it in state | Terraform, OpenTofu, Pulumi |
 | `converge` | Accepted with a warning and changes nothing: the tool converges either way | Ansible, Puppet, OpenVox, Chef, Salt, DSC, Kubernetes, Bicep, ARM |
+| `replace` | Removed and made again from the document; the plan reports `adopt`. The author writes `adopt: replace` | Docker (Podman next) |
 | no | Refused before the plugin is asked | the rest |
 
 - `adopt` is text, and may be placed from data: `adopt: "${{ data.vpc_id }}"`.
   It cannot hold a secret.
 - `adopt` with `state: absent` is refused.
 - `adopt` on something the tool cannot import, such as a Terraform data source, is
+  refused as `invalid-adopt`.
+- On a target that says `replace`, the value must be the word `replace`; any
+  other value, or `adopt: replace` on something that is not a container, is
   refused as `invalid-adopt`.
 - `adopt` can stay after the import; it then does nothing.
 - [`meridian retarget`](../../operations/retargeting.md) writes `adopt` lines when a

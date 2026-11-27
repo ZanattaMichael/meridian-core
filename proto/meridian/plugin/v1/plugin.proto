@@ -231,6 +231,12 @@ enum Adoption {
   // The tool keeps no record and makes each thing what the document says
   // whether it existed or not: the identifier is accepted and not used.
   ADOPTION_CONVERGE = 2;
+  // The tool keeps no record of what it manages and cannot take a thing
+  // that already exists under management as it is, so Meridian replaces it:
+  // the existing thing is removed and made again from the document. An
+  // author writes `adopt: replace`, and the target refuses any other value.
+  // Docker and Podman take an existing container this way.
+  ADOPTION_REPLACE = 3;
 }
 
 // Artifact is the complete output of a compile: relative path to file content.

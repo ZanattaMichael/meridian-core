@@ -832,7 +832,7 @@ def schema_bundles() -> str:
 
 def adopt_flow() -> str:
     """adopt: one field on a resource, and what each kind of target makes of it."""
-    W, H = 1200, 470
+    W, H = 1440, 470
     p: list[str] = []
     p.append(card(40, 60, 300, 150, "a resource", None, WHITE, 17))
     p.append(lines(80, 112, ["- id: logs", "  type: aws_s3_bucket", "  adopt: example-logs", "  params:", "    bucket: example-logs"], 12.5, TEXT_SOFT, "start", mono=True))
@@ -840,10 +840,11 @@ def adopt_flow() -> str:
     kinds = [
         ("import", ["compiled into the tool's own import:", "an import block, Pulumi's import", "option. The first plan says adopt,", "the apply puts it in the state"], IAC, "Terraform · OpenTofu · Pulumi"),
         ("converge", ["accepted with a warning, and", "changes nothing: the tool keeps", "no state and makes the thing what", "the document says either way"], CM, "Ansible · Puppet · Chef · Salt · DSC · Kubernetes · Bicep · ARM"),
+        ("replace", ["the tool cannot take the thing", "as it is, so Meridian removes it", "and makes it again from the", "document; the plan reports adopt"], CON, "Docker, and Podman next; the author writes adopt: replace"),
         ("none", ["refused by the core before the", "plugin is asked, so no tool", "creates a second thing beside", "the one that exists"], RED, "every other target, and any plugin built before adopt"),
     ]
     for i, (name, body, colour, who) in enumerate(kinds):
-        x = 400 + i * 265
+        x = 400 + i * 255
         p.append(card(x, 60, 245, 150, name, body, colour, 16, 12.5))
     p.append(flow("M340 135L400 135", WHITE, delay=0.2, seconds=1.6))
     # Who is which, below.
@@ -852,11 +853,11 @@ def adopt_flow() -> str:
     for i, (name, _, colour, who) in enumerate(kinds):
         p.append(chip(40, y + i * 40, 110, name, colour, 28, 13, True))
         p.append(text(165, y + i * 40 + 19, who, 13, 400, TEXT_SOFT, "start"))
-    p.append(card(760, 250, 400, 108, "meridian plan", None, GREEN, 16))
-    p.append(lines(790, 302, ["= adopt logs: aws_s3_bucket", "~ update app: aws_subnet, adopted"], 12.5, TEXT_SOFT, "start", mono=True))
-    p.append(text(960, 346, "an import that also changes the thing is reported as the change", 11.5, 400, TEXT_SOFT))
-    p.append(caption(W, H, "One field moves between tools: a stateful tool imports the thing, a converging tool already takes it as it finds it."))
-    return doc(W, H, "adopt: a resource names the tool's identifier of a thing that exists; a stateful target compiles it into the tool's import and the plan reports adopt, a converging target accepts it and changes nothing, and any other target is refused before its plugin is asked", "".join(p))
+    p.append(card(1000, 250, 400, 108, "meridian plan", None, GREEN, 16))
+    p.append(lines(1030, 302, ["= adopt logs: aws_s3_bucket", "~ update app: aws_subnet, adopted"], 12.5, TEXT_SOFT, "start", mono=True))
+    p.append(text(1200, 346, "an import that also changes the thing is reported as the change", 11.5, 400, TEXT_SOFT))
+    p.append(caption(W, H, "One field moves between tools: a stateful tool imports the thing, a converging tool already takes it as it finds it, a replacing tool remakes it."))
+    return doc(W, H, "adopt: a resource names the tool's identifier of a thing that exists; a stateful target compiles it into the tool's import and the plan reports adopt, a converging target accepts it and changes nothing, a replacing target removes the existing thing and makes it again from the document, and any other target is refused before its plugin is asked", "".join(p))
 
 
 def retarget_flow() -> str:

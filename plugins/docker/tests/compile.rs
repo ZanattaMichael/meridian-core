@@ -296,3 +296,48 @@ fn a_secret_in_the_projects_settings_is_refused_because_they_are_the_command_lin
     assert!(err.msg.contains("command line docker is given"), "{err}");
     assert!(!err.msg.contains("(secret "), "{err}");
 }
+
+#[test]
+fn adopt_replace_is_kept_for_the_runner_and_only_for_the_adopted_service() {
+    let emitted = compile(&format!(
+        "    - id: app\n      type: service\n      adopt: replace\n      params:\n        image: app:1\n{DB}"
+    ))
+    .unwrap();
+    let project = &emitted.artifact.files["project.json"];
+    let value = meridian_sdk::decode_value(project.as_bytes()).expect("project.json is JSON");
+    let adopt = value
+        .as_map()
+        .and_then(|m| m.get("adopt"))
+        .and_then(meridian_sdk::Value::as_list)
+        .unwrap_or(&[]);
+    assert_eq!(
+        adopt
+            .iter()
+            .filter_map(meridian_sdk::Value::as_str)
+            .collect::<Vec<_>>(),
+        ["app"],
+        "{project}"
+    );
+    // The Compose file itself is unchanged: adoption is Meridian's, not
+    // Compose's.
+    assert_eq!(
+        emitted.artifact.files["compose.yaml"],
+        "name: shop\nservices:\n  app:\n    image: app:1\n  db:\n    image: postgres:16\n"
+    );
+}
+
+#[test]
+fn adopt_with_an_identifier_is_refused_because_docker_cannot_import_a_container() {
+    let err = refusal(&format!(
+        "    - id: app\n      type: service\n      adopt: shop-app-1\n      params:\n        image: app:1\n{DB}"
+    ));
+    assert_eq!(err.rule, "invalid-adopt");
+    assert!(err.msg.contains("only `adopt: replace`"), "{err}");
+}
+
+#[test]
+fn adopt_replace_on_something_that_is_not_a_service_is_refused() {
+    let err =
+        refusal("    - id: data\n      type: volume\n      adopt: replace\n      params: {}\n");
+    assert_eq!(err.rule, "invalid-adopt");
+}

@@ -58,7 +58,9 @@ compiled, with the reason. Each target's own page says how it does what it can.
   compiles it into the tool's own import, so the tool takes the existing
   thing into its state; *converge* means the tool keeps no state and makes
   the thing what the document says whether it existed or not, so `adopt`
-  changes nothing; *no* refuses it. See
+  changes nothing; *replace* (the author writes `adopt: replace`) means the
+  tool cannot take the existing thing as it is, so Meridian removes it and
+  makes it again from the document; *no* refuses it. See
   [Adopting what exists](dsl/resources.md#adopting-what-exists).
 - **import** is what `meridian import` can read of the tool's existing
   configuration and turn into a document for the target. See
