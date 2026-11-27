@@ -25,7 +25,7 @@ ed25519-dalek = "3"
 flate2 = "1"
 getrandom = "0.4.3"
 hyper-util = { version = "0.1", features = ["tokio"] }
-jsonschema = { version = "0.61", default-features = false }
+jsonschema = { version = "0.63", default-features = false }
 libc = "0.2"
 lsp-server = "0.10"
 lsp-types = "0.97"
@@ -33,7 +33,7 @@ proptest = { version = "1", default-features = false, features = ["std"] }
 prost = "0.14"
 protox = "0.10"
 regex = "1"
-saphyr-parser = "0.3"
+saphyr-parser = "0.4"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
