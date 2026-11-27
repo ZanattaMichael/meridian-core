@@ -577,6 +577,42 @@ fn a_plugin_is_never_asked_for_an_operation_it_did_not_declare() {
         .expect("it still compiles");
 }
 
+#[test]
+fn facts_are_read_from_the_target_and_a_plugin_without_them_says_so() {
+    let client = start();
+    assert!(client.info().gathers_facts, "the fake target gathers facts");
+    let context = context("facts");
+    let facts = client.facts(&context, "web-1").expect("it gathers facts");
+    assert_eq!(
+        facts.values.get("facts.hostname"),
+        Some(&Value::from("web-1"))
+    );
+    assert_eq!(
+        facts.values.get("facts.os.family"),
+        Some(&Value::from("Linux"))
+    );
+    // With no endpoint named, the facts are read for the context's own host.
+    let own = client.facts(&context, "").expect("it gathers facts");
+    assert_eq!(
+        own.values.get("facts.hostname"),
+        Some(&Value::String(context.host.clone()))
+    );
+
+    let mut env: Vec<(String, String)> = std::env::vars().collect();
+    env.push(("FAKE_FACTS".to_owned(), "off".to_owned()));
+    let options = StartOptions {
+        env: Some(env),
+        ..StartOptions::default()
+    };
+    let without = Client::start(&fake(), &options).expect("the fake plugin starts");
+    assert!(!without.info().gathers_facts);
+    let err = plugin_error(without.facts(&context, "web-1").unwrap_err());
+    assert_eq!(
+        err.to_string(),
+        "plugin \"fake\": this target does not gather facts"
+    );
+}
+
 // Unix only: on Windows a plugin listens on a named pipe, which is not a file
 // and is gone when the plugin is, so there is nothing it could leave behind.
 #[cfg(unix)]

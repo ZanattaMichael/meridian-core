@@ -92,8 +92,8 @@ pub use meridian_value::{
 pub use notify::{ActSchema, MeridianRun};
 pub use rules::{DescribedRule, Rule};
 pub use run::{
-    Acted, Applied, Category, Change, ChangeAction, Inspection, Log, LogLine, LogStream, NoLog,
-    Operations, Output, Plan, RunContext, RunError, Runner, SavedPlan,
+    Acted, Applied, Category, Change, ChangeAction, Facts, Inspection, Log, LogLine, LogStream,
+    NoLog, Operations, Output, Plan, RunContext, RunError, Runner, SavedPlan,
 };
 pub use schema::{is_shared_type, ParamKind, ParamSchema, ResourceSchema, TypeName, NATIVE_PREFIX};
 pub use schemas::{version_in, SchemaExport, SchemaRequest, SchemaSource};

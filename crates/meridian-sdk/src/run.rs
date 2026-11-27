@@ -581,4 +581,29 @@ pub trait Runner: Send + Sync {
         let _ = (context, artifact, resource, action, log);
         Err(RunError::new("this plugin does not act"))
     }
+
+    /// Whether [`Runner::facts`] is answered. Say true only when the plugin
+    /// reads a fixed set of facts about an endpoint over the endpoint's own
+    /// connection, changing nothing.
+    fn gathers_facts(&self) -> bool {
+        false
+    }
+
+    /// Reads a fixed set of facts about `endpoint` over the endpoint's own
+    /// connection, changing nothing. The host maps them to the language's
+    /// fixed names (`facts.os.family`, `facts.kernel`, ...) and evaluates
+    /// `when` over `facts.*` per endpoint before compiling its artifact.
+    fn facts(&self, context: &RunContext, endpoint: &str) -> Result<Facts, RunError> {
+        let _ = (context, endpoint);
+        Err(RunError::new("this plugin does not gather facts"))
+    }
+}
+
+/// A fixed set of facts about one endpoint, as [`Runner::facts`] reads them:
+/// the language's own names (`facts.os.family`, `facts.kernel`, ...) mapped to
+/// their values.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Facts {
+    /// Named facts, keyed by the fixed names the language uses under `facts.*`.
+    pub values: Data,
 }

@@ -1106,6 +1106,34 @@ pub fn inspect_response_from_wire(
     }))
 }
 
+pub fn facts_response(outcome: Result<crate::Facts, RunError>) -> pb::FactsResponse {
+    match outcome {
+        Ok(f) => pb::FactsResponse {
+            facts_json: canonical_map(&f.values).into_bytes(),
+            error: None,
+        },
+        Err(e) => pb::FactsResponse {
+            error: Some(run_error_to_wire(e)),
+            ..Default::default()
+        },
+    }
+}
+
+/// The outer error is a malformed message; the inner one is the tool failing.
+pub fn facts_response_from_wire(
+    r: pb::FactsResponse,
+) -> Result<Result<crate::Facts, RunError>, String> {
+    if let Some(e) = r.error {
+        return Ok(Err(run_error_from_wire(e, Vec::new())));
+    }
+    let values = if r.facts_json.is_empty() {
+        Data::new()
+    } else {
+        decode_map(&r.facts_json).map_err(|e| format!("reading the facts: {e}"))?
+    };
+    Ok(Ok(crate::Facts { values }))
+}
+
 pub fn settings_to_wire(settings: Vec<Setting>) -> Vec<pb::Setting> {
     settings
         .into_iter()

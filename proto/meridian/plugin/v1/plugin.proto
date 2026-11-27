@@ -403,6 +403,12 @@ message DescribeResponse {
   // before Emit, and asks Act for it after the stage applies, when the
   // notifier changed. A plugin built before this field acts on nothing.
   repeated ActSchema acts = 31;
+  // gathers_facts is true when the plugin's Runner answers Facts: it reads a
+  // fixed set of facts about one endpoint over the endpoint's own connection,
+  // changing nothing, so Meridian can evaluate `when` over facts.* for that
+  // endpoint. A plugin built before this field gathers none, and `when` over
+  // facts.* is refused for its target.
+  bool gathers_facts = 32;
 }
 
 // ActSchema is the notify actions a Runner performs on one resource type.
@@ -865,6 +871,21 @@ message InspectResponse {
   RunError error = 5;
 }
 
+message FactsRequest {
+  RunContext context = 1;
+  // endpoint is the machine to read the facts on: the context's host unless
+  // the operator named another one.
+  string endpoint = 2;
+}
+
+message FactsResponse {
+  // facts_json is a JSON object of the fixed fact names (facts.os.family,
+  // facts.kernel, facts.hostname, ...) and their values, as the plugin mapped
+  // them from its tool's own gatherer.
+  bytes facts_json = 1;
+  RunError error = 2;
+}
+
 // Runner hands an artifact to the real tool. Unlike Emitter it has side
 // effects, takes as long as the tool takes, and can fail for reasons that have
 // nothing to do with the document. Plan and Apply stream, so an operator sees
@@ -900,6 +921,11 @@ service Runner {
   // for a notify the tool cannot express. Asked only for a type and action
   // the plugin listed in Describe.acts; Cancel stops it as it stops Apply.
   rpc Act(ActRequest) returns (stream ActEvent);
+  // Facts reads a fixed set of facts about one endpoint over the endpoint's
+  // own connection, changing nothing: the values Meridian evaluates `when`
+  // over facts.* with. Asked only of a plugin whose Describe says
+  // gathers_facts.
+  rpc Facts(FactsRequest) returns (FactsResponse);
 }
 
 message CancelRequest {}
