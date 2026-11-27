@@ -49,7 +49,7 @@ it. A plugin uses one of these wherever it fits.
 | `unsupported-action` | a `notifies` action this target cannot run | use an action the message lists |
 | `unsupported-runtime-condition` | a `runtimeWhen` on a target whose tool checks no condition on the node | use a compile-time `when`, or remove the condition; see the capability matrix |
 | `unsupported-adopt` | an `adopt` on a target that cannot take a thing that already exists under management | remove `adopt`, or use a target that adopts; see the capability matrix |
-| `invalid-adopt` | an `adopt` on a resource that its tool cannot import, such as a data source or a provider; or, on a target that replaces, an `adopt` value other than `replace`, or `adopt: replace` on something that is not a container | put `adopt` on a resource the tool manages, as the target's page describes |
+| `invalid-adopt` | an `adopt` on a resource that its tool cannot import, such as a data source or a provider | put `adopt` on a resource the tool manages, as the target's page describes |
 | `invalid-runtime-condition` | a `runtimeWhen` this target cannot turn into its tool's own test | write the condition as the target's page describes |
 | `duplicate-output` | two outputs of the document have one name | give each output its own name |
 | `unsupported-output` | an output this target cannot report, or a value it cannot read into one | remove the output, or read a value the message says the tool reports |
